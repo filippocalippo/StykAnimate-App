@@ -26,14 +26,14 @@ pub const NEXT: u64 = 13;
 /// The levels the filter offers, in the facade's order: 0 is every line, then error to trace.
 const LEVELS: [&str; 6] = ["dev.level.all", "dev.level.error", "dev.level.warn", "dev.level.info", "dev.level.debug", "dev.level.trace"];
 
-/// The same filter with one field changed, as the typed event that reaches the host. A new filter starts at the first page.
+/// The same criteria with one field changed, as the typed event that reaches the host (which returns to the first page).
 fn filter(model: &LogsModel, change: impl FnOnce(&mut Event)) -> Message {
     let mut event = Event::Filter { level: model.filter.level, module: model.filter.module.clone(), text: model.filter.text.clone() };
     change(&mut event);
     send(event)
 }
 
-fn page(_model: &LogsModel, offset: usize) -> Message {
+fn page(offset: usize) -> Message {
     send(Event::LogsPage(offset))
 }
 
@@ -138,8 +138,8 @@ fn footer<'a>(context: &Context<'_>) -> Element<'a, Message> {
     let next = model.next();
     Row::with_children(vec![
         container(quiet(palette, note)).width(Length::Fill).boxed(),
-        icon_button(context, PREVIOUS, Panel::Logs, "chevron-left", context.word("dev.page.previous"), previous.is_some(), page(model, previous.unwrap_or(0))),
-        icon_button(context, NEXT, Panel::Logs, "chevron-right", context.word("dev.page.next"), next.is_some(), page(model, next.unwrap_or(0))),
+        icon_button(context, PREVIOUS, Panel::Logs, "chevron-left", context.word("dev.page.previous"), previous.is_some(), page(previous.unwrap_or(0))),
+        icon_button(context, NEXT, Panel::Logs, "chevron-right", context.word("dev.page.next"), next.is_some(), page(next.unwrap_or(0))),
     ])
     .spacing(scale::SPACE_1)
     .align_y(Alignment::Center)

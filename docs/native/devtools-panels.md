@@ -179,11 +179,13 @@ is the layer the application stacks above the dock and below menus and messages.
   asks for its file through the host's argument request: a field showing `Host.draft`, typed through `Event::Draft`, Enter or
   Export sends `Event::Export(FileTarget)`, Cancel or Escape `Event::Input(None)`. Below: the status line, bytes and drops,
   and the summary statistics of `ProfilerModel.summary`.
-- **Logs.** Level chips and the module and text fields send `Event::Filter` (every change starts at offset 0; the host
-  clears the page and resamples); the page's rows, `LogsModel::next`/`previous` for the pager, the counts and the ring's drops.
+- **Logs.** Level chips and the module and text fields send `Event::Filter` (criteria only: the host returns to the first page);
+  the pager sends `Event::LogsPage` with the host's own `next`/`previous` cursors, never an offset the view computed; the page's
+  rows, the counts and the ring's drops.
 - **Parameters.** One block per row: integers and floats a stepper (one press, one `Event::Step`; Host derives the value and
   the registry clamps), bools send `Event::Toggle`, enum chips send `Event::Choose`, a reset is enabled only for a modified value, the default,
-  a pending value and a restart note. Controls disable while the host is busy.
+  a pending value (the controls show it where there is one) and a restart note. Each choice and each reset has its own focus id
+  (`parameters::control(row, choice)`, `reset(row)`: up to 64 choices and 256 rows are drawn, so the id ranges cannot overlap). Controls disable while the host is busy.
 - **Overlay.** A passive `Layer` child at the host's `bounds` (inset 12 px) while `visible`: the frame sparkline with the
   16.7 ms line (late frames, over 1.5 budgets, in the danger colour), the quantiles of each timing stream (a stream with no
   records says "Unavailable", never zero), stalls, drops, truncation, private memory and each video segment. It takes no

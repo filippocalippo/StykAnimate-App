@@ -6,7 +6,7 @@ use crate::params::{Kind, Parameter};
 use iced::widget::{Column, Row, container};
 use iced::{Widget as _, Alignment, Element, Length};
 use styk_core::dev_extension::{Event, Panel};
-use styk_core::focus::{FocusArea, FocusId};
+use styk_core::focus::FocusArea;
 use styk_core::i18n::Msg;
 use styk_design::tokens::scale;
 use styk_design::typography::TextStyle;
@@ -17,16 +17,22 @@ use styk_design::widgets::toggle::Switch;
 
 pub const PREVIOUS: u64 = 1;
 pub const NEXT: u64 = 2;
-/// A row's controls take ids from here, `ROW` apart: the control, then the reset.
-pub const ROWS: u64 = 16;
-const ROW: u64 = 64;
+/// The most choices an enum shows: the registry's own limit (`styk_devtools_engine::params`, 64 choices per enum).
+pub const CHOICES: usize = 64;
+/// The most rows a page draws. Rows past it are not drawn, so the id spaces below cannot overlap by construction.
+pub const ROWS: usize = 256;
+/// A row's control (and, for an enum, each of its choices) takes consecutive ids from here, `CHOICES` apart per row...
+const CONTROLS: u64 = 16;
+/// ...and every reset has its own id in a range after all the controls'.
+const RESETS: u64 = CONTROLS + (ROWS * CHOICES) as u64;
 
-/// The id of the control of row `index` of the page, and of its reset.
-pub fn control(index: usize) -> u64 {
-    ROWS + index as u64 * ROW
+/// The id of control `choice` of row `index` of the page (a stepper's two ends are choices 0 and 1).
+pub fn control(index: usize, choice: usize) -> u64 {
+    CONTROLS + (index.min(ROWS - 1) * CHOICES + choice.min(CHOICES - 1)) as u64
 }
+/// The id of the reset of row `index`.
 pub fn reset(index: usize) -> u64 {
-    control(index) + ROW - 1
+    RESETS + index.min(ROWS - 1) as u64
 }
 
 fn page(offset: usize) -> Message {
@@ -39,7 +45,7 @@ pub fn view<'a>(context: &Context<'_>) -> Element<'a, Message> {
     let rows: Element<'a, Message> = if model.rows.is_empty() {
         empty_state(palette, Some(Panel::Parameters.icon()), context.word("dev.params.empty"), None, None, false)
     } else {
-        Column::with_children(model.rows.iter().enumerate().map(|(index, row)| parameter(context, index, row)).collect::<Vec<_>>()).spacing(scale::SPACE_3).width(Length::Fill).boxed()
+        Column::with_children(model.rows.iter().take(ROWS).enumerate().map(|(index, row)| parameter(context, index, row)).collect::<Vec<_>>()).spacing(scale::SPACE_3).width(Length::Fill).boxed()
     };
     let shown = model.rows.len();
     let counts = context.say(
@@ -75,7 +81,9 @@ fn parameter<'a>(context: &Context<'_>, index: usize, row: &Parameter) -> Elemen
     let palette = context.palette();
     let name = row.descriptor.name.clone();
     let enabled = context.availability.parameters;
-    let first = id(Panel::Parameters, control(index));
+    let first = id(Panel::Parameters, control(index, 0));
+    // What the host holds for the value: the pending one where an edit waits for a restart, else the acknowledged one.
+    let current = row.pending.as_ref().unwrap_or(&row.effective);
     let area = FocusArea::Panels;
     let set = {
         let name = name.clone();
@@ -84,23 +92,24 @@ fn parameter<'a>(context: &Context<'_>, index: usize, row: &Parameter) -> Elemen
     let control: Element<'a, Message> = match &row.descriptor.kind {
         // One press is one request: a drag would send a request per move, and the host refuses while one is pending.
         Kind::Float { min, .. } => {
-            let value = row.effective.as_f64().unwrap_or(*min);
+            let value = current.as_f64().unwrap_or(*min);
             stepper(palette, first, area, context.presentation.number((value * 1000.0).round() / 1000.0), !enabled, false, move |direction| set(Some(direction), None))
         }
         Kind::Integer { min, max } => {
-            let value = row.effective.as_i64().unwrap_or(*min).clamp(*min, *max);
+            let value = current.as_i64().unwrap_or(*min).clamp(*min, *max);
             stepper(palette, first, area, context.presentation.number(value as f64), !enabled, false, move |direction| set(Some(direction), None))
         }
-        Kind::Bool => Switch::new(first, area, palette, row.effective.as_bool().unwrap_or(false), move |_| set(None, None)).disabled(!enabled).into_element(),
+        Kind::Bool => Switch::new(first, area, palette, current.as_bool().unwrap_or(false), move |_| set(None, None)).disabled(!enabled).into_element(),
         Kind::Enum(options) => {
-            let chosen = row.effective.as_str().and_then(|current| options.iter().position(|option| option == current));
+            let chosen = current.as_str().and_then(|current| options.iter().position(|option| option == current));
             Row::with_children(
                 options
                     .iter()
+                    .take(CHOICES)
                     .enumerate()
                     .map(|(position, option)| {
                         let set = set.clone();
-                        Chip::new(FocusId(first.0 + position as u64), area, palette, option.clone(), set(None, Some(position))).on(chosen == Some(position)).disabled(!enabled).into_element()
+                        Chip::new(id(Panel::Parameters, control(index, position)), area, palette, option.clone(), set(None, Some(position))).on(chosen == Some(position)).disabled(!enabled).into_element()
                     })
                     .collect::<Vec<_>>(),
             )

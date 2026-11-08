@@ -20,9 +20,13 @@ use styk_devtools::{
 mod views;
 struct Memory;
 fn registered() -> (TopBand, FixedClock, Runtime, Driver<'static, Message>) {
-    use styk_devtools::params::{Descriptor, Kind, Registry};
+    use styk_devtools::params::Registry;
+    registered_with(Registry::default())
+}
+/// The harness with the owner's explicit registrations (and the standard test parameters added to `registry`).
+fn registered_with(mut registry: styk_devtools::params::Registry) -> (TopBand, FixedClock, Runtime, Driver<'static, Message>) {
+    use styk_devtools::params::{Descriptor, Kind};
     let (mut top, clock, _, driver) = setup();
-    let mut registry = Registry::default();
     for (name, kind, default) in [
         (
             "a.integer",
