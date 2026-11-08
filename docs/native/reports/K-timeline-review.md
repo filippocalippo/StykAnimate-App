@@ -55,6 +55,21 @@ While the required recovery merge was still absent from origin, the completed ch
 These checks cover the independent fixes and Settings' maintenance API. They do not claim
 that the recovery integration or the drafted real-quit regression has run yet.
 
+## Integration prerequisite still absent
+
+The final fetch still resolves `origin/native-app` to `2e63867812761407fdc8b2d5c5ae80b5957b9792`.
+`git log origin/native-app --oneline --grep='Merge K-rec views'` returns no match. Its handoff
+records that the recovery merge was withdrawn before push. No withdrawn or unpublished recovery
+commit was merged into this branch. Finding 2 therefore remains open: the Settings maintenance
+API is tested, but the shared quit fence and real Discard/Settings/layout regression still need
+the specified published recovery merge. The draft regression is retained in the ignored
+`artifacts/timeline_quit_tests.rs` for that integration; it is not claimed as compiled or passing.
+
+Self-check: done for the committed diff. The additional beyond-end global-navigation case was
+found and fixed; regression subscriptions now inspect actual emitted messages. Existing session
+queues, input routing and Settings ownership remain shared; frozen fixtures and thresholds are
+unchanged. The unresolved quit-order finding above is not presented as complete.
+
 ## Decisions
 
 - Retain stop cleanup on the existing session call queue. This avoids a second settlement
