@@ -145,8 +145,8 @@ The CPU rasterizer (`styk-raster`, [rendering.md](rendering.md#cpu-styk-raster))
 ### Memory
 
 - **No effects**: no slot, no pass, no executor; draw lists have no layers. Group records are 96 bytes per isolation group instead of 32.
-- **Slots**: up to eight `Rgba8Unorm` textures of one size (only those a stack uses are created), grown in 256-pixel steps to the largest filtered layer, kept across frames, shrunk after 240 frames that need under a quarter of their area, released after 240 frames without effects. The uniform buffer (768 bytes per pass) and bind groups (by slot triple) are reused.
-- **Atlases**: pages grow for layers larger than the frame and return to the frame's size when it changes, or after 240 frames whose layers all fit it.
+- **Slots**: up to eight `Rgba8Unorm` textures of one size (only those a stack uses are created), grown in 256-pixel steps, kept across unused frames and released with their owner. Exact renderers (exports and the native stage) preserve frame-dependent texture dimensions for sampling parity. Non-exact renderers keep high-water dimensions until close. The uniform buffer (768 bytes per pass) and bind groups (by slot triple) are reused.
+- **Atlases**: page counts retain their high-water capacity until close. Non-exact page dimensions grow for layers larger than the frame and reset when the view size changes; exact dimensions remain frame-dependent. Frame counts do not act as idle deadlines.
 - `Renderer::stats` reports `effect_layers`, `effect_passes`, `effect_bytes` (slots) and `layer_bytes` (atlases); `styk gpubench <file> <tick> [--no-effects]` times a frame with and without effects.
 
 ### Differences from the JavaScript, on purpose or known

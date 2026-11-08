@@ -36,25 +36,25 @@ fn make_renderer() -> Renderer {
     renderer
 }
 #[test]
-fn exact_layers_release_pages_no_longer_used() {
+fn exact_layers_keep_capacity_for_the_document_lifetime() {
     let mut renderer = make_renderer();
     let pixels = draw(&mut renderer, &scene(8));
     assert!(pixels.iter().any(|&b| b != 0), "real isolated artwork was rendered");
     assert!(renderer.stats.layer_bytes >= 8 * 256 * 256 * 4);
+    let held = renderer.stats.layer_bytes;
     let one = draw(&mut renderer, &scene(1));
-    assert_eq!(renderer.stats.layer_bytes, 2 * 256 * 256 * 4 + 8,
-        "one active parity needs two array layers; the other is a placeholder");
+    assert_eq!(renderer.stats.layer_bytes, held, "smaller frames reuse capacity");
     assert_eq!(one, draw(&mut make_renderer(), &scene(1)));
 }
 #[test]
-fn a_plain_frame_releases_isolation_and_its_multisampled_target() {
+fn a_plain_frame_keeps_isolation_and_its_multisampled_target() {
     let mut renderer = make_renderer();
     draw(&mut renderer, &scene(8));
+    let held = (renderer.stats.layer_bytes, renderer.target_bytes());
     let empty = draw(&mut renderer, &scene(0));
     assert!(empty.iter().all(|&b| b == 0));
-    assert_eq!(renderer.stats.layer_bytes, 16, "only two placeholder arrays remain");
-    assert_eq!(renderer.target_bytes(), 256 * 256 * 4 * 5,
-        "only output and main MSAA remain");
+    assert_eq!((renderer.stats.layer_bytes, renderer.target_bytes()), held,
+        "unused capacity stays available to the next frame");
 }
 
 #[test]
@@ -112,32 +112,36 @@ fn small_native_owners_do_not_grow_large_allocator_blocks() {
 }
 
 #[test]
-fn exact_primitive_capacity_follows_the_current_frame() {
+fn exact_primitive_capacity_keeps_the_high_water_mark() {
     let mut renderer = make_renderer();
     let bytes = |r: &Renderer| r.device().generate_allocator_report().unwrap().allocations.iter()
         .filter(|a| a.name == "styk prims").map(|a| a.size).sum::<u64>();
-    // Reports include backend allocation alignment (DX12 adds padding). Compare
-    // the real empty owner's allocation, rather than assuming zero padding.
-    let empty_bytes = bytes(&renderer);
     let mut large = (*scene(1)).clone();
     large.prims = vec![large.prims[1]; 131_073];
     renderer.set_list(&Arc::new(large));
     renderer.queue().submit([]);
     renderer.device().poll(wgpu::PollType::wait_indefinitely()).unwrap();
     assert!(bytes(&renderer) >= 8 << 20);
+    let held = bytes(&renderer);
     assert!(draw(&mut renderer, &scene(0)).iter().all(|&b| b == 0));
-    assert_eq!(bytes(&renderer), empty_bytes, "empty artwork must return to a fresh owner's capacity");
+    assert_eq!(bytes(&renderer), held, "empty artwork keeps capacity until close");
 }
 
 #[test]
-fn exact_effect_slots_leave_with_the_last_filtered_frame() {
+fn exact_effect_slots_reuse_after_quiet_frames_and_release_at_close() {
     let renderer = make_renderer();
     let mut effects = styk_render::effects::executor::Executor::new(renderer.device());
     effects.set_exact(true);
     effects.prepare(renderer.device(), renderer.queue(), [256, 256]);
-    effects.slot_texture(renderer.device(), 0);
+    let slot = effects.slot_texture(renderer.device(), 0).clone();
     assert_eq!(effects.stats.slot_bytes, 256 * 256 * 4);
-    effects.begin();
-    effects.prepare(renderer.device(), renderer.queue(), [0, 0]);
-    assert_eq!(effects.stats.slot_bytes, 0, "an exact frame without effects retains no working slots");
+    for size in [[256,256],[0,0],[256,256]] {
+        effects.begin();
+        effects.prepare(renderer.device(), renderer.queue(), size);
+        assert_eq!(effects.stats.slot_bytes, 256 * 256 * 4);
+        assert_eq!(effects.slot_texture(renderer.device(), 0), &slot);
+    }
+    drop((slot,effects));
+    renderer.device().poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(!renderer.device().generate_allocator_report().unwrap().allocations.iter().any(|a| a.name == "styk effect slot"));
 }

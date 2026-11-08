@@ -412,6 +412,47 @@ fn picture_list(assets: &styk_eval::assets::Assets, picture: usize) -> std::sync
     std::sync::Arc::new(list)
 }
 
+#[test]
+fn native_adjacent_frames_keep_their_sprite_pages_until_export_end() {
+    let gpu = gpu().expect("GPU required");
+    let engine = Engine::for_export(clock,Budgets::for_device(None));
+    engine.open(&cel_document(3),"json","adjacent pages").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    let settings = Settings::new(64,64,Smoothing::Edges,MAX_PIXELS).unwrap();
+    let mut source = styk_export::FrameRenderer::Gpu(GpuExport::new(&gpu.device,&gpu.queue,settings,64),None);
+    source.load_images(&engine,&frames).unwrap();
+    let lists: Vec<_> = [[0,1],[1,2]].into_iter().map(|indices| {
+        let mut list = (*picture_list(&frames.generation().assets,indices[0])).clone();
+        list.prims.extend_from_slice(&picture_list(&frames.generation().assets,indices[1]).prims);
+        list.passes[0].end = list.prims.len() as u32;
+        std::sync::Arc::new(list)
+    }).collect();
+    for list in &lists { source.prepare_frame(&engine,&frames,list).unwrap(); }
+    let stats = |source: &styk_export::FrameRenderer| {
+        let styk_export::FrameRenderer::Gpu(gpu,Some(resident)) = source else { panic!("default native residency") };
+        (gpu.sprite_layers(),resident.stats())
+    };
+    let held = stats(&source);
+    assert_eq!(held.1.2,3);
+    assert_eq!(held.1.3,0,"the previous completed frame stays resident");
+    let mut pixels = Vec::new();
+    for i in [0,1,0,1] {
+        source.prepare_frame(&engine,&frames,&lists[i]).unwrap();
+        assert_eq!(stats(&source),held,"no page allocation or re-upload for the adjacent working set");
+        assert_eq!(frames.pictures_in_flight(),0);
+        source.frame_into(&frames.generation().prepared.doc,&lists[i],None,true,&mut pixels).unwrap();
+    }
+    struct Finished(std::sync::mpsc::Sender<()>);
+    impl Drop for Finished { fn drop(&mut self) { let _ = self.0.send(()); } }
+    let (tx,rx) = std::sync::mpsc::channel();
+    let styk_export::FrameRenderer::Gpu(export,_) = &mut source else { unreachable!() };
+    export.retain(Box::new(Finished(tx)));
+    drop(source);
+    rx.recv_timeout(std::time::Duration::from_secs(30)).expect("disposal completed");
+    gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(!gpu.device.generate_allocator_report().unwrap().allocations.iter().any(|a| a.name == "styk sprites"));
+}
+
 /// An export of the cel document in two layers, with the pictures and the cel it is driven by.
 struct CelScene {
     engine: Engine,

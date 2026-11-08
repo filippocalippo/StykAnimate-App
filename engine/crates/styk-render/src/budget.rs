@@ -51,7 +51,7 @@ impl Renderer {
             .saturating_add(self.target_bytes())
             .saturating_add(self.stats.depth_bytes)
             .saturating_add(self.executor.as_ref().map_or(0, |e| e.retained_bytes()));
-        let mut pages = if self.exact_sizes { [0; 2] } else { [self.layers[0].pages, self.layers[1].pages] };
+        let mut pages = [0; 2];
         let mut passes = 1u64;
         for round in &frame.rounds {
             for (depth, &count) in round.pages_per_depth.iter().enumerate().skip(1) {
@@ -61,12 +61,12 @@ impl Renderer {
         }
         let records = &frame.records;
         let effect_size = frame.biggest;
-        // Match render_planned: inactive exact parities are 1x1 placeholders,
-        // not full-size pages. Keep the old owners above for replacement overlap.
-        let mut prospective = pages.iter().map(|&count| {
-            if self.exact_sizes && count == 0 { 8 } else { pixels(page).saturating_mul(u64::from(count.max(2))) }
+        // Inactive owners are already counted in retained. Active replacements
+        // keep their page-count high-water mark, with old/new overlap admitted.
+        let mut prospective = pages.iter().enumerate().map(|(parity,&count)| {
+            if count == 0 { 0 } else { pixels(page).saturating_mul(u64::from(count.max(self.layers[parity].pages).max(2))) }
         }).sum::<u64>();
-        let layer_target = if self.exact_sizes && pages == [0; 2] { 0 } else { pixels(page) };
+        let layer_target = if pages == [0; 2] { 0 } else { pixels(page) };
         if self.samples > 1 {
             prospective = prospective.saturating_add(
                 pixels(size)
@@ -99,6 +99,7 @@ impl Renderer {
             .saturating_add(power(passes.max(8)).saturating_mul(UNIFORM_STRIDE));
         if !records.is_empty() {
             let bucket = effect_size.map(|n| n.saturating_add(255) / 256 * 256);
+            let bucket = self.executor.as_ref().map_or(bucket, |e| e.required_size(effect_size));
             prospective = prospective
                 .saturating_add(pixels(bucket).saturating_mul(recipe::SLOTS as u64))
                 .saturating_add(power((records.len() as u64).max(64)).saturating_mul(768));

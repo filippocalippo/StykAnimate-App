@@ -36,8 +36,6 @@ pub struct Executor {
     binds: HashMap<(u8, u8, u8), wgpu::BindGroup>,
     /// Uniform records of the frame being recorded.
     records: Vec<Uniform>,
-    /// Frames since one needed slots of the current size (shrinks after a while).
-    idle: u32,
     /// Slots are sized by the frame alone, never by the largest seen before ([`Executor::set_exact`]).
     exact: bool,
     pub stats: Stats,
@@ -123,7 +121,6 @@ impl Executor {
             slot_size: [0, 0],
             binds: HashMap::new(),
             records: Vec::new(),
-            idle: 0,
             exact: false,
             stats: Stats::default(),
         }
@@ -158,33 +155,14 @@ impl Executor {
     /// Prepares the frame's recorded runs: slots of at least `largest`, uniforms written.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, largest: [u32; 2]) {
         if largest[0] == 0 || largest[1] == 0 {
-            // Exact frames own only their own working slots. Interactive caches
-            // keep their existing quiet-period policy.
-            self.idle += 1;
-            if (self.exact || self.idle > 240) && self.slots.iter().any(Option::is_some) {
-                self.release();
-            }
+            // A quiet frame does not close the document/export. Retain the
+            // exact-size slots until another active size replaces them or Drop.
             return;
         }
-        let bucket = |n: u32| n.div_ceil(256) * 256;
-        if self.exact {
-            let size = [bucket(largest[0]), bucket(largest[1])];
-            if size != self.slot_size {
-                self.release();
-                self.slot_size = size;
-            }
-            self.idle = 0;
-        } else {
-        let fits = self.slot_size[0] >= largest[0] && self.slot_size[1] >= largest[1];
-        // Shrink when this frame needs less than a quarter of the area for a while.
-        let small = (largest[0] as u64 * largest[1] as u64) * 4 < self.slot_size[0] as u64 * self.slot_size[1] as u64;
-        self.idle = if fits && small { self.idle + 1 } else { 0 };
-        if !fits || self.idle > 240 {
-            let size = if fits { [bucket(largest[0]), bucket(largest[1])] } else { [bucket(largest[0]).max(self.slot_size[0]), bucket(largest[1]).max(self.slot_size[1])] };
+        let size = self.required_size(largest);
+        if size != self.slot_size {
             self.release();
             self.slot_size = size;
-            self.idle = 0;
-        }
         }
         let texel = [1.0 / self.slot_size[0].max(1) as f32, 1.0 / self.slot_size[1].max(1) as f32];
         for record in &mut self.records {
@@ -209,6 +187,11 @@ impl Executor {
             }
             queue.write_buffer(&self.uniforms, 0, &bytes);
         }
+    }
+
+    pub(crate) fn required_size(&self, largest: [u32; 2]) -> [u32; 2] {
+        let bucket = largest.map(|n| n.saturating_add(255) / 256 * 256);
+        if self.exact { bucket } else { [bucket[0].max(self.slot_size[0]), bucket[1].max(self.slot_size[1])] }
     }
 
     fn release(&mut self) {

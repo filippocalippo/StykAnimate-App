@@ -13,7 +13,11 @@ dropped after opening.
 
 For more than two sprite pages, native frame sources use the existing `Resident`
 exporter. Two pages are a soft working-set budget; all pages a frame draws are held
-and grow the atlas when necessary. Unused pictures are not decoded. Drawing cels
+and grow the atlas when necessary. Native exports also protect the previous
+complete frame while loading the next: capacity is bounded by the largest union
+of two adjacent working sets (or the initial two pages), not by export length.
+Older pages remain eligible for eviction; an unchanged working set is not uploaded
+again. Unused pictures are not decoded. Drawing cels
 are first decoded for their bounds, then their visible tiles are requested and
 uploaded under the same readiness/refusal protocol as other resident exports.
 Uploads wait on the exporter's interruptible GPU poller, so cancellation or device
@@ -28,14 +32,18 @@ Native exports keep at most one frame's tiles in flight, within the existing
 in paired measurements; the tiles remain pipelined. Browser hosts still pipeline
 tiles and frames to hide mapping latency across processes.
 
-Exact-size renderers size isolation arrays once for the maximum of all depths of
-each parity in the current frame. Unused parities return to 1x1 placeholders and an
-unused isolation MSAA target is released. Array textures retain the two-layer
-minimum required by D11. Stage admission counts those current requirements plus the
-old owners during replacement, without changing its memory limit.
-Exact primitive buffers follow the current frame's power-of-two capacity (64 KiB
-minimum); unchanged capacities are reused. Exact effect slots leave when a frame
-has no filtered layers. Pipelines and effect uniforms remain reusable.
+Isolation page counts and power-of-two primitive capacities retain their high-water
+marks while the renderer is alive. Unused isolation, MSAA and effect slots remain
+available to the next frame. Readbacks retain one frame's tile capacity for the
+export. The existing disposal path releases these owners at export end or document
+close; no frame-count timer stands in for stage idle time.
+Exact page/effect dimensions still follow the frame because normalized sampling
+depends on them; changing those dimensions still replaces the texture. Array
+textures retain D11's two-layer minimum. Stage admission includes retained capacity
+and actual replacement dimensions, including both owners during replacement, without
+raising its byte limit. Non-exact callers retain dimensions until view
+reconfiguration or owner close; the native stage uses exact dimensions for parity.
+Pipelines and effect uniforms remain reusable.
 
 `styk video --memory-report <report.jsonl>` records process private bytes, counted
 Rust heap bytes and peak, and wgpu allocator totals and allocation labels. It also

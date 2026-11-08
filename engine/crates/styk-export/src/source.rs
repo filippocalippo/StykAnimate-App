@@ -28,9 +28,9 @@ impl FrameRenderer {
         if let Self::Gpu(gpu, resident) = self
             && generation.assets.pages > 2
         {
-            // Keep two pages until the frame itself requires more. Residency
-            // grows for every visible page above this soft budget; none is lost.
-            *resident = Some(crate::resident::Resident::begin_with_layers(gpu, frames, 2));
+            // Begin with two pages, retaining the union of adjacent complete
+            // frames when it needs more. No visible page is lost to this budget.
+            *resident = Some(crate::resident::Resident::begin_native(gpu, frames));
             while frames.images_left() != 0 {
                 if !engine.step() { return Err("export cel bounds are pending without runnable decoding work".into()); }
             }

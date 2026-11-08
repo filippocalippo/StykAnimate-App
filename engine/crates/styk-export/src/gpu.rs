@@ -11,6 +11,9 @@
 //! slot keeps the tile copied into it whatever is drawn afterwards.
 
 use std::mem::ManuallyDrop;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "lifetime_tests.rs"]
+mod lifetime_tests;
 use std::sync::Arc;
 
 use styk_draw::DrawList;

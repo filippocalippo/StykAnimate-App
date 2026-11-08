@@ -175,7 +175,9 @@ impl Renderer {
 
     pub(crate) fn ensure_layers(&mut self, parity: usize, size: [u32; 2], pages: u32) {
         let atlas = &self.layers[parity];
-        let pages = if self.exact_sizes { pages } else { pages.max(atlas.pages) }.clamp(2, MAX_LAYER_PAGES);
+        // Page count does not change sampling coordinates. Keep its high-water
+        // capacity until the renderer closes; exact page dimensions still do.
+        let pages = pages.max(atlas.pages).clamp(2, MAX_LAYER_PAGES);
         if atlas.size == size && atlas.pages.max(2) == pages {
             return;
         }
