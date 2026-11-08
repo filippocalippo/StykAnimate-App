@@ -287,8 +287,13 @@ fn rect(bounds: Rectangle) -> Rect {
 /// The layer holding every open menu of `host`, each at the place `Menu::place` gives it, and every tree in its own focus
 /// scope. `top_inset` is the lowest top a menu may take (the title band and a margin).
 pub fn layer<'a, Message: Clone + 'a>(palette: &'static Palette, host: &'a Host, ring: bool, top_inset: f32, extra: Vec<Placed<'a, Message>>, send: impl Fn(Event) -> Message + 'a) -> Element<'a, Message> {
+    layer_over(palette, host, ring, top_inset, Vec::new(), extra, send)
+}
+
+/// [`layer`] with boxes that sit under the menus: a dialog's select opens its list over the dialog, not under its veil.
+pub fn layer_over<'a, Message: Clone + 'a>(palette: &'static Palette, host: &'a Host, ring: bool, top_inset: f32, below: Vec<Placed<'a, Message>>, extra: Vec<Placed<'a, Message>>, send: impl Fn(Event) -> Message + 'a) -> Element<'a, Message> {
     let send: Rc<dyn Fn(Event) -> Message + 'a> = Rc::new(send);
-    let mut placed: Vec<Placed<'a, Message>> = Vec::new();
+    let mut placed: Vec<Placed<'a, Message>> = below;
     for open in host.menus() {
         let root = {
             let mut at = open;

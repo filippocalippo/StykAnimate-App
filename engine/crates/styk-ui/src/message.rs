@@ -20,6 +20,10 @@ use styk_design::widgets::focus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
+    PollDocuments,
+    QuitReady,
+    SessionCheckpointFinished,
+    Notice(styk_core::commands::Notice),
     /// A command for the core.
     Command(Command),
     /// Focus a number field's input (a click on its scrub label).
@@ -79,10 +83,12 @@ impl From<Command> for Message {
 pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     match message {
         Message::Command(command) => {
-            let effects = core.dispatch(command);
-            core.refresh();
-            Task::batch(effects.into_iter().map(effect))
+            let mut effects = core.dispatch(command);
+            // The views the command changed are brought in line; their effects (the recovery offer's message, a dialog that closed) go with it.
+            effects.extend(core.refresh());
+            run(effects)
         }
+        Message::Notice(notice) => run(core.show_notice(notice)),
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
         Message::Focusing(inner, id) => Task::batch([update(core, *inner), operate(focus::focus(id)).discard()]),
         Message::Idle => Task::none(),
@@ -125,7 +131,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             use styk_core::overlay::host::Event;
             overlay(core, match event { View::Show { target, content, touch, keyboard } => Event::TooltipShow { target, content, touch, keyboard }, View::Hide => Event::TooltipHide })
         }
-        Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
+        Message::PollDocuments | Message::QuitReady | Message::SessionCheckpointFinished | Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
         Message::Snapshot(mut snapshot) => {
             for (scope, targets) in &mut snapshot.scopes {
                 if *scope != styk_core::focus::ScopeId::ROOT { continue; }
@@ -145,11 +151,21 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     }
 }
 
+/// The tasks of the effects the core answered with: the application hands the ones it takes from the core outside a message
+/// (the documents host's effects, `Core::document_effect`) here too.
+#[cfg(feature = "engine")]
+pub fn run(effects: Vec<Effect>) -> Task<Message> {
+    Task::batch(effects.into_iter().map(effect))
+}
+
 /// One effect as a task. Notices, frame requests and the colour picker belong to the shell, the stage and the picker
 /// chunks: until they land they have no task here.
 #[cfg(feature = "engine")]
 fn effect(effect: Effect) -> Task<Message> {
     match effect {
+        Effect::PollDocuments => Task::done(Message::PollDocuments),
+        Effect::QuitReady => Task::done(Message::QuitReady),
+        Effect::SessionCheckpointFinished => Task::done(Message::SessionCheckpointFinished),
         Effect::Overlay(styk_core::overlay::Effect::Focus(id)) => match id { Some(id) => operate(focus::focus(id)).discard(), None => operate(focus::unfocus()).discard() },
         Effect::Overlay(effect) => Task::done(Message::OverlayEffect(effect)),
         Effect::OverlayChoice { invoker, index } => Task::done(Message::OverlayChoice { invoker, index }),
@@ -163,7 +179,8 @@ fn effect(effect: Effect) -> Task<Message> {
         }))
         .discard(),
         Effect::NotAvailable(id) => Task::done(Message::NotAvailable(id)),
-        Effect::Notice(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
+        Effect::Notice(notice) => Task::done(Message::Notice(notice)),
+        Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
 }
 

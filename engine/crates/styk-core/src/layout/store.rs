@@ -746,13 +746,14 @@ pub struct SaveQueue {
     pending: Option<(u64, Vec<u8>)>,
     in_flight: Option<Vec<u8>>,
     retry_ms: u64,
+    closing: bool,
 }
 impl SaveQueue {
     pub fn changed(&mut self, now: u64, bytes: Vec<u8>) -> Result<(), LayoutError> {
         if bytes.len() > MAX_BYTES {
             return Err(LayoutError::Limit);
         }
-        self.pending = Some((now.saturating_add(SAVE_DELAY_MS), bytes));
+        self.pending = Some((if self.closing { now } else { now.saturating_add(SAVE_DELAY_MS) }, bytes));
         self.retry_ms = 0;
         Ok(())
     }
@@ -761,6 +762,13 @@ impl SaveQueue {
     pub fn deadline(&self) -> Option<u64> {
         self.in_flight.is_none().then(|| self.pending.as_ref().map(|(due, _)| *due)).flatten()
     }
+    /// A final attempt, after document clearance; no debounce delays closing.
+    pub fn flush(&mut self, now: u64) {
+        self.closing = true;
+        if let Some((due, _)) = &mut self.pending { *due = now; }
+    }
+    pub fn has_work(&self) -> bool { self.pending.is_some() || self.in_flight.is_some() }
+    pub fn abandon(&mut self) { self.pending = None; self.in_flight = None; }
     pub fn take_due(&mut self, now: u64) -> Option<Vec<u8>> {
         if self.in_flight.is_some() || self.pending.as_ref().is_none_or(|(due, _)| *due > now) {
             return None;
@@ -775,6 +783,10 @@ impl SaveQueue {
         };
         if success {
             self.retry_ms = 0;
+        } else if self.closing {
+            // Atomic storage kept the last complete file. A final refusal must
+            // not retry forever or erase the layouts a later launch can read.
+            self.pending = None;
         } else if self.pending.is_none() {
             let delay = self.retry_ms.max(SAVE_DELAY_MS);
             self.pending = Some((now.saturating_add(delay), bytes));

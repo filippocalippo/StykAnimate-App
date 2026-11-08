@@ -46,10 +46,9 @@ pub struct Core {
     shortcuts: crate::shortcuts::Shortcuts,
     select_commands: Option<(crate::focus::FocusId, Vec<Option<Command>>)>,
     presentation: Presentation,
+    recovery: crate::recovery::Panel,
     /// The docked window's arrangement, gestures and saves (`docs/native/docking-views.md`).
     dock: crate::dock::Dock,
-    /// Numbers the dock's notices so each is its own message.
-    dock_notices: u64,
 }
 
 impl Default for Core {
@@ -67,8 +66,8 @@ impl Default for Core {
             shortcuts: crate::shortcuts::Shortcuts::new(crate::shortcuts::Platform::Control, true),
             select_commands: None,
             presentation: Presentation::english(),
+            recovery: crate::recovery::Panel::default(),
             dock: crate::dock::Dock::new(crate::layout::Size { w: 1560.0, h: 1000.0 }, 1.0, "unhosted"),
-            dock_notices: 0,
         }
     }
 }
@@ -176,11 +175,71 @@ impl Core {
         &self.session
     }
 
-    /// Rebuilds the view models whose inputs changed since the last call, and places pending fact requests.
-    pub fn refresh(&mut self) {
+    /// The recovery views: the offer, the chooser and the close prompt.
+    pub fn recovery(&self) -> &crate::recovery::Panel {
+        &self.recovery
+    }
+
+    /// The chooser dialog's overlay and model, while it is open.
+    pub fn recovery_chooser(&self) -> Option<(u64, crate::recovery::model::Chooser)> {
+        self.recovery.chooser(&self.documents)
+    }
+
+    /// The person's UTC offset in minutes (the platform reads it): recovery copies are listed in local time.
+    pub fn set_utc_offset(&mut self, minutes: i32) {
+        self.recovery.set_utc_offset(minutes);
+    }
+
+    /// An effect of the documents host that needs an answer from a person (a close or quit with unsaved work) or shows
+    /// something (the recovery lane): the application hands every effect it takes from `Documents::poll` or
+    /// `Documents::dispatch` here. What the core does with it comes back as effects, like a command's.
+    pub fn document_effect(&mut self, effect: &crate::documents::Effect) -> Vec<Effect> {
+        if self.session_end_expired() { return Vec::new(); }
+        let effects = self.recovery.effect(effect, &self.documents, &mut self.overlays, &mut self.focus);
+        effects.into_iter().chain(self.refresh()).collect()
+    }
+
+    pub fn request_quit(&mut self) -> Vec<Effect> {
+        self.recovery.quit(&mut self.documents, &mut self.overlays, &mut self.focus)
+    }
+
+    /// A bounded OS checkpoint. Time comes from the application's injected clock;
+    /// the platform supplies its shutdown budget. Repeated requests coalesce.
+    pub fn request_session_end(&mut self, now: std::time::Duration, timeout: std::time::Duration) -> Vec<Effect> {
+        self.recovery.session_end(now, timeout);
+        self.request_quit()
+    }
+
+    pub fn session_end_deadline(&self) -> Option<std::time::Duration> { self.recovery.session_end_deadline() }
+    pub fn session_end_expired(&self) -> bool { self.recovery.session_end_expired() }
+    pub fn session_end_requested(&self) -> bool { self.recovery.session_end_requested() }
+
+    /// Run before polling worker replies, including replies queued at the deadline.
+    pub fn session_end_tick(&mut self, now: std::time::Duration) -> Vec<Effect> {
+        self.recovery.session_end_tick(now, &mut self.documents)
+    }
+
+    /// Called once on a host wake, after its bounded poll, never from refresh or view.
+    pub fn documents_progress(&mut self) -> Vec<Effect> {
+        self.recovery.progress(&mut self.documents, &mut self.overlays, &mut self.focus)
+    }
+
+    /// The shared notice effect reaches the existing bounded stage-message owner.
+    pub fn show_notice(&mut self, notice: Notice) -> Vec<Effect> {
+        use crate::overlay::messages::{Message, Tone};
+        let tone = match notice.severity { Severity::Warning => Tone::Warning, Severity::Error => Tone::Error };
+        let mut message = Message::new(self.overlays.fresh_id(), "notice", tone, false, Vec::new());
+        message.text = self.presentation.text(&notice.message);
+        self.overlay_event(crate::overlay::host::Event::ShowMessage(message), self.overlays.now())
+    }
+
+    /// Rebuilds the view models whose inputs changed since the last call, and places pending fact requests. The effects
+    /// are the recovery views' (the offer's message, a dialog closing); the application carries them out like a command's.
+    pub fn refresh(&mut self) -> Vec<Effect> {
         self.prune_stages();
         let source = self.documents.active().and_then(|document| self.sources.get(&document.id())).cloned();
         self.inspector.refresh(&mut self.documents, &self.view, self.facts.as_mut(), source, &mut self.session);
+        self.recovery.refresh(&mut self.documents, &mut self.overlays, &mut self.focus, &self.presentation)
     }
 
     /// Toolkit adapters bind command choices; arbitrary owners receive `OverlayChoice` effects.
@@ -194,6 +253,14 @@ impl Core {
     /// Replace the window's single wake with this deadline, or cancel it for `None`.
     /// At that wake dispatch `Command::Overlay { event: Event::Tick, now }`.
     pub fn overlay_deadline(&self) -> Option<u64> { self.overlays.next_deadline() }
+
+    /// One window wake for recovery, session end, overlays and an available layout lane.
+    /// An occupied lane resumes from its worker receipt, not repeated expired deadlines.
+    pub fn wake_deadline(&self, layouts_ready: bool) -> Option<u64> {
+        self.documents.recovery_deadline().into_iter().chain(self.session_end_deadline())
+            .map(|due| due.as_millis().min(u128::from(u64::MAX)) as u64)
+            .chain(self.overlay_deadline()).chain(layouts_ready.then(|| self.dock.deadline()).flatten()).min()
+    }
 
     fn overlay_event(&mut self, event: crate::overlay::host::Event, now: u64) -> Vec<Effect> {
         use crate::overlay::host::Purpose;
@@ -217,7 +284,8 @@ impl Core {
         }
         effects.extend(update.effects.into_iter().map(Effect::Overlay));
         if let Some(id) = update.dismissed { effects.push(Effect::MessageDismissed(id)); }
-        if let Some(command) = update.run { effects.extend(self.run(command)); }
+        if let Some(command) = update.run { effects.extend(self.dispatch(Command::Run(command))); }
+        if let Some(event) = update.act { effects.extend(self.dispatch(Command::Recovery(event))); }
         if let Some(command) = command { effects.extend(self.dispatch(command)); }
         effects
     }
@@ -225,10 +293,15 @@ impl Core {
     /// Runs one command.
     pub fn dispatch(&mut self, command: Command) -> Vec<Effect> {
         self.session = Session::default();
+        // Freeze every input owner, including stage gestures, drawing and text drafts, as soon as
+        // the documents host accepts quit. Overlay housekeeping must still drive the shared wake;
+        // its command/action callbacks re-enter this gate. Progress and save replies have separate APIs.
+        if (self.documents.edits_locked() || self.session_end_expired()) && !matches!(command, Command::Overlay { .. }) { return Vec::new(); }
         match command {
             Command::Overlay { event, now } => self.overlay_event(event, now),
             Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event),
             Command::Run(id) => self.run(id),
+            Command::Recovery(event) => self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus),
             Command::Activate(id) => self.activate(id),
             Command::Stage(event) => self.stage_event(event),
             Command::Dock(event) => {
@@ -267,8 +340,7 @@ impl Core {
             match ask {
                 Asked::Message(msg) => {
                     let text = self.presentation.text(&msg);
-                    self.dock_notices += 1;
-                    let mut message = crate::overlay::messages::Message::new(self.dock_notices, format!("dock:{}", msg.key), crate::overlay::messages::Tone::Warning, false, Vec::new());
+                    let mut message = crate::overlay::messages::Message::new(self.overlays.fresh_id(), format!("dock:{}", msg.key), crate::overlay::messages::Tone::Warning, false, Vec::new());
                     message.text = text;
                     let now = self.overlays.now();
                     effects.extend(self.overlay_event(crate::overlay::host::Event::ShowMessage(message), now));
@@ -363,5 +435,30 @@ impl Core {
             crate::shortcuts::Press::Consumed => Some(Vec::new()),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod merged_notice_tests {
+    use super::*;
+    #[test]
+    fn session_quit_clearance_survives_an_unrelated_late_failure() {
+        let mut core = Core::new(Documents::new());
+        core.recovery.session_end(std::time::Duration::ZERO, std::time::Duration::from_secs(5));
+        let effects = core.document_effect(&crate::documents::Effect::QuitReady);
+        assert!(effects.contains(&Effect::QuitReady));
+        assert!(core.session_end_requested());
+        core.document_effect(&crate::documents::Effect::Recovery(crate::documents::recovery::Event::Failed(styk_services::recovery::RecoveryError::Missing)));
+        assert!(core.session_end_requested(), "a late failure cannot turn OS quit into an unbounded preferences flush");
+    }
+    #[test]
+    fn dock_and_recovery_notices_share_the_overlay_identity_owner() {
+        let mut core = Core::new(Documents::new());
+        core.show_notice(Notice { message: Msg::new("privacyUi.operationFailedPleaseTryAgain"), severity: Severity::Error });
+        let first = core.overlays().messages().current().unwrap().id;
+        core.dispatch(Command::Dock(crate::dock::Event::Close(crate::layout::PanelId::new("stage"))));
+        core.dispatch(Command::Overlay { event: crate::overlay::host::Event::MessageDismiss(first), now: 0 });
+        let next = core.overlays().messages().current().expect("the queued dock refusal");
+        assert_ne!(next.id, first, "a stale recovery action must not address a dock notice");
     }
 }

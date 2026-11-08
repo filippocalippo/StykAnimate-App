@@ -14,7 +14,7 @@ UI (the Layout and Window menus) are part 2.
 | The gesture in progress (a press that becomes a drag past 4 px, a held divider, a keyboard move), double clicks, the open flyout or sheet, saves, loading, the first-launch import (layout owns transactions/history and default sizes) | `styk_core::dock` (`Dock`, `Event`, `Effect`, `Stored`), held by `Core`, reached as `Command::Dock(Event)` through `Core::dispatch` |
 | The islands, tab headers, strips, flyouts, splitters, the tool rail's place, the drop overlay | `styk_ui::dock` (`view.rs`; `probe.rs` is the one small widget) on `styk-design` parts: `Card`, `Tabs`, `splitter`, `IconButton`, `empty_state`, `Layer` |
 | The pointer, Escape and Shift | `styk_ui::dock::{track, key}` through `TopBand`; layout shortcuts resolve through `Shortcuts` and `Core::dispatch` |
-| Loading, the debounced write, the wake | `TopBand` (`load_layouts`, `save_layouts`, `dock_wake`) on the application's injected clock; the write is `LayoutStore::save`, a task on the storage worker, never a wait |
+| Loading, the debounced write, the wake | `TopBand` (`load_layouts`, `save_layouts`, `wake_widget`) on the application's injected clock; one bounded worker runs `LayoutStore`, receipts use `Wake::Layouts` in the shared window stream, never a wait |
 | Where each rectangle is | `styk_core::layout::solve`; the dock only offsets it by the band's height |
 
 ## What the person sees and does
@@ -45,7 +45,10 @@ UI (the Layout and Window menus) are part 2.
 - **Persistence**: `LayoutStore::load` at start; no stored file means today's `workspace-preferences.json` is imported once
   (`import_v2`, the saved layouts included) with today's default timeline height where the profile has none; a newer file is
   read-only; a layout changed before the file arrived keeps the person's change. Each change queues one write 200 ms later
-  (`SaveQueue`, retried with backoff); loading writes nothing and fitting never writes.
+  (`SaveQueue`, retried with backoff); loading writes nothing and fitting never writes. The shared scheduled wake takes the earliest
+  overlay, recovery, session-end or runnable layout deadline. While a load occupies the layout lane, its receipt resumes
+  a queued edit; an expired save deadline cannot spin while that load is pending. Screens and unattended runs do not load or save the person's layouts.
+  Quit follows [the documents-first order](recovery.md): one final flush or safe abandonment, with no preference wait at session end.
 
 ## Decisions
 

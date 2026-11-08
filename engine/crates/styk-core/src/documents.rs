@@ -279,6 +279,7 @@ impl Documents {
     /// Install a worker's ready session beside the active tab. On refusal return it to the caller:
     /// it can retry or dispose of it on a worker, without dropping a large project on the interface thread.
     pub fn open(&mut self, prepared: PreparedDocument) -> Result<DocumentId, (DocumentsError, PreparedDocument)> {
+        if self.edits_locked() { return Err((DocumentsError::Busy, prepared)); }
         if let Err(error) = self.can_switch() { return Err((error, prepared)); }
         if self.tabs.len() >= MAX_OPEN_PROJECTS { return Err((DocumentsError::TabLimit, prepared)); }
         let Some(serial) = self.serial.checked_add(1) else {
@@ -297,6 +298,7 @@ impl Documents {
 
     /// Switch by stable identity; history, selection and playhead stay in their original session.
     pub fn activate(&mut self, id: DocumentId) -> Result<bool, DocumentsError> {
+        if self.edits_locked() { return Err(DocumentsError::Busy); }
         if self.get(id).is_none() { return Err(DocumentsError::NotOpen); }
         if self.active == Some(id) { return Ok(false); }
         self.can_switch()?;
@@ -311,6 +313,7 @@ impl Documents {
     /// Today's command name/arguments and optional view inputs. A session refusal is `answer.result`,
     /// with its original `EditError` and events. A host refusal means no session was called.
     pub fn call(&mut self, id: DocumentId, method: &str, args: &[Value], view: &Value) -> Result<CallAnswer, DocumentsError> {
+        if self.edits_locked() { return Err(DocumentsError::Busy); }
         if matches!(method, "@setClipboard" | "copySelection" | "cutSelection" | "sheetCopyFrames" | "copyCameraMotion" | "copyCamera" | "copySegmentValues" | "copyVfxClip" | "copyAudioClip" | "cutAudioClip" | "pasteSelection" | "pasteFiguresInFrames" | "sheetPasteFrames" | "pasteCamera" | "pasteCameraMotion" | "pasteSegmentValues" | "pasteAudioClip" | "pasteVfxClip") {
             let host = self.host.as_mut().ok_or(DocumentsError::ServicesRequired)?;
             if !host.allow_clipboard() { return Err(DocumentsError::Busy); }

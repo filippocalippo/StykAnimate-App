@@ -87,6 +87,8 @@ would). The references are today's menus, tooltip, messages, dialog and parts dr
 today's menu stylesheet anchored under today's select field. Looked at side by side at 100 % and 200 %, what remains is glyph
 rasterisation; the limits are in `screens/limits.toml`.
 
+**Owner's dialogs and the offer.** `overlays::layer_of` places the owner's boxes (a dialog) under the menus, so a select inside a dialog opens its list over it (`menu::layer_over`). A message action is `messages::Do`: a registry command, or an owner's own event (`Update::act`, the recovery offer), and may be drawn with a hairline ring (`outline`); a message may carry its own glyph (`icon`). `Event::CloseOverlay(id)` lets an owner close its dialog; a dialog whose title stands alone centres it against the close button (`dialog.rs`). See [recovery.md](recovery.md#the-views).
+
 **Not drawn, on purpose.** The stage header's `head` and `drop` message slots, the stepper's typeable value (it shows the value), and
 the split button's hover shared across its halves while a pointer moves over it (the screen holds it with a flag; the live halves
 each take their own). The entry fade is the page's colour over the box (iced has no group opacity), so the shadow is not faded.

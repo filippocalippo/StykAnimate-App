@@ -15,6 +15,8 @@ pub mod inspector;
 pub mod message;
 pub mod overlay_sheet;
 pub mod overlays;
+pub mod recovery;
+pub mod recovery_sheet;
 pub mod screens;
 pub mod shell;
 // The stage widget draws a frame the engine made (its painter), like the ink pad: engine builds only.

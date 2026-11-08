@@ -32,6 +32,8 @@ pub struct Driver<'a, Message> {
     pub clipboard_writes: Vec<String>,
     /// The input method request of the last update.
     pub input_method: input_method::InputMethod,
+    /// The window redraw requested by the last update; tests can drive its actual deadline.
+    pub redraw_request: window::RedrawRequest,
     modifiers: Modifiers,
 }
 
@@ -62,6 +64,7 @@ impl<'a, Message: 'a> Driver<'a, Message> {
             clipboard_reads: Vec::new(),
             clipboard_writes: Vec::new(),
             input_method: input_method::InputMethod::Disabled,
+            redraw_request: window::RedrawRequest::Wait,
             modifiers: Modifiers::default(),
         }
     }
@@ -81,7 +84,9 @@ impl<'a, Message: 'a> Driver<'a, Message> {
     /// Delivers events to the interface and records the effects it asked for.
     pub fn events(&mut self, events: &[Event]) -> Vec<event::Status> {
         let (state, statuses) = self.ui.update(&window::Headless, &shell::Waker::noop(), events, self.cursor, &mut self.renderer, &mut self.messages);
-        if let State::Updated { clipboard, input_method, .. } = state {
+        self.redraw_request = window::RedrawRequest::NextFrame;
+        if let State::Updated { clipboard, input_method, redraw_request, .. } = state {
+            self.redraw_request = redraw_request;
             self.clipboard_reads.extend(clipboard.reads);
             if let Some(Content::Text(text)) = clipboard.write {
                 self.clipboard_writes.push(text);

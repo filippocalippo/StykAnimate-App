@@ -15,6 +15,7 @@ use iced::advanced::graphics::text::Paragraph;
 use iced::advanced::text::{Alignment, Ellipsis, Paragraph as _, Shaping, Text, Wrapping};
 use iced::widget::{column, container, mouse_area, space, stack};
 use iced::{Element, Fill, Length, Size, Widget as _, alignment};
+use styk_core::i18n::{Label, Presentation};
 use styk_core::shell::band::{Labels, Metrics};
 use styk_core::shell::{Event, Shell};
 use styk_design::typography::TextStyle;
@@ -67,10 +68,11 @@ pub(crate) fn button_style() -> TextStyle {
 
 /// How wide the band's words are set, measured with the font system. Asking for the proof keeps it off the interface
 /// thread until the fonts are ready.
-pub fn measure_labels(_ready: Ready) -> Labels {
-    let width = |content: &str, style: TextStyle| {
+pub fn measure_labels(_ready: Ready, presentation: &Presentation) -> Labels {
+    let width = |label: Label, style: TextStyle| {
+        let words = presentation.label(&label);
         Paragraph::with_text(Text {
-            content,
+            content: words.as_str(),
             bounds: Size::new(f32::INFINITY, f32::INFINITY),
             size: style.pixels(),
             line_height: style.line(),
@@ -104,6 +106,8 @@ pub struct Params<'a> {
     pub theme: Theme,
     /// Proof the fonts are ready.
     pub ready: Ready,
+    /// How the band's words are written in the selected language.
+    pub presentation: &'a Presentation,
     /// How the maximize button looks (it is the window's, in the non-client area).
     pub maximize: MaxButtonState,
 }
@@ -152,7 +156,8 @@ mod tests {
         for (width, session, tabs) in [(1560.0, Session::None, 3), (879.0, Session::None, 3), (700.0, Session::None, 3), (1000.0, Session::Build, 3), (1560.0, Session::Movieclip, 12), (400.0, Session::None, 1)] {
             let shell = shell(width, session, tabs);
             let ready = styk_design::warm_up::install_bundled(styk_platform::font_smoothing::current());
-            let element = window(Params { shell: &shell, theme: Theme::Light, ready, maximize: MaxButtonState::Idle }, container(space()).width(Fill).height(Fill).boxed());
+            let english = Presentation::english();
+            let element = window(Params { shell: &shell, theme: Theme::Light, ready, presentation: &english, maximize: MaxButtonState::Idle }, container(space()).width(Fill).height(Fill).boxed());
             let mut driver = Driver::new(element, Size::new(width, 900.0), &styk_design::fonts::ALL);
             let snapshot = driver.snapshot();
             for placed in &shell.layout().items {

@@ -31,6 +31,8 @@ pub struct Record {
     pub size: usize,
     /// Committed data's digest. Callers must return identities unchanged, never reconstruct them.
     pub version: [u8; 32],
+    /// Legacy ownership cannot be excluded: restore a new document, never adopt/remove this copy.
+    pub read_only: bool,
     /// Listings seal the file attributes and metadata the person saw, or use `version` alone when
     /// metadata is unavailable. A write receipt has no selection seal: its data is committed even
     /// if optional metadata cannot be accessed.
@@ -54,6 +56,8 @@ pub trait Recovery: Send + Sync {
 }
 pub trait RecoveryCopy: Send + Sync {
     fn slot(&self) -> &Slot;
+    /// Claim may narrow the offered access when another process started after listing.
+    fn read_only(&self) -> bool { false }
     fn read<'a>(&'a self, record: &'a Record, maximum: usize, cancel: &'a Cancel) -> RecoveryFuture<'a, Arc<[u8]>>;
     /// `previous == None` requires an empty slot. A successful write returns its new identity.
     /// Data commits before optional display metadata; never publish partial data or a failed save.

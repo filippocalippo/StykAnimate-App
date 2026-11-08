@@ -42,7 +42,7 @@ impl Deadline {
 enum Kind { Front, Resting, Forced }
 struct Snapshot { stamp: Stamp, trees: Vec<Value>, scopes: Vec<f64>, name: String, original_first: bool, owned: Option<Owned> }
 enum Input { Save(Snapshot), List, Restore(Record), Discard(Record), Remove(Owned) }
-enum Output { Written(Owned), Listed(Vec<Record>), Restored(PreparedDocument, Owned), Discarded(Slot), Removed }
+enum Output { Written(Owned), Listed(Vec<Record>), Restored(PreparedDocument, Option<Owned>), Discarded(Slot), Removed }
 struct Work { input: Input, cancel: Cancel }
 enum Action { Write(Stamp, Kind), List, Restore(Slot), Discard(Slot), Remove(Cleanup) }
 struct Pending { action: Action, cancel: Cancel }
@@ -94,7 +94,8 @@ fn execute(options: &HostOptions, store: &dyn Recovery, work: Work) -> Reply {
             let mut prepared = PreparedDocument::open_application(&options.engine, bytes, "recovery.styk", &|| cancel.is_cancelled())?;
             prepared.name = record.name.clone(); prepared.set_clock(options.clock);
             prepared.session.get_mut()?.call_native("@touch", &[], &Value::Null).result?;
-            Ok(Output::Restored(prepared, Owned { lease, record: Some(record) }))
+            let owned = (!record.read_only && !lease.read_only()).then_some(Owned { lease, record: Some(record) });
+            Ok(Output::Restored(prepared, owned))
         }
         Input::Discard(record) => {
             let lease = run_future(store.claim(&record, cancel)).map_err(error)?;
@@ -161,6 +162,7 @@ impl RecoveryHost {
 
 impl Documents {
     pub(super) fn finish_quit(&mut self) -> Effect {
+        if let Some(host) = self.host.as_mut() { host.quit_committed = true; }
         let Some(host) = self.recovery.as_mut() else { return Effect::QuitReady; };
         host.quitting = true; host.quit_ready = false;
         if let Some(pending) = &host.pending { pending.cancel.cancel(); }
@@ -181,6 +183,10 @@ impl Documents {
         self.sync_recovery(); Ok(())
     }
     pub fn recovery_view(&self) -> Option<&View> { self.recovery.as_ref().map(|host| &host.view) }
+    /// The UI must not retire its quit intent on an unrelated lane's failure mid-checkpoint.
+    pub(crate) fn close_checkpoint_pending(&self) -> bool {
+        self.recovery.as_ref().is_some_and(|host| host.closing.is_some() || host.quitting && !host.quit_ready)
+    }
     pub fn set_autosave_seconds(&mut self, seconds: f64) {
         let Some(host) = self.recovery.as_mut() else { return; };
         let seconds = if seconds.is_finite() { seconds.clamp(0.0, 300.0) } else { DEFAULT_AUTOSAVE_SECONDS };
@@ -251,6 +257,7 @@ impl Documents {
             Command::Restore(slot) | Command::Discard(slot) => {
                 if host.pending.is_some() || host.closing.is_some() || !host.cleanup.is_empty() || !host.flush() { return Err(DocumentsError::Busy.into()); }
                 let record = host.view.copies.iter().find(|record| record.slot == *slot).cloned().ok_or(HostError::Recovery(RecoveryError::Missing))?;
+                if matches!(command, Command::Discard(_)) && record.read_only { return Err(HostError::Recovery(RecoveryError::Owned)); }
                 if matches!(command, Command::Restore(_)) {
                     if self.tabs.len() >= MAX_OPEN_PROJECTS { return Err(DocumentsError::TabLimit.into()); }
                     if self.active().is_some_and(|tab| tab.view().map_or(true, |view| view.editing)) { return Err(DocumentsError::FinishEdit.into()); }
@@ -401,7 +408,10 @@ impl Documents {
             (Action::Restore(slot), Output::Restored(prepared, owned)) => {
                 match self.open(prepared) {
                     Ok(id) => {
-                        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) { tab.recovery.owned = Some(owned); tab.recovery.current = Some(Stamp::of(tab)); }
+                        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
+                            tab.recovery.current = owned.as_ref().map(|_| Stamp::of(tab));
+                            tab.recovery.owned = owned;
+                        }
                         if let Some(host) = self.recovery.as_mut() { host.view.copies.retain(|record| record.slot != slot); host.view.selected = host.view.copies.first().map(|record| record.slot.clone()); host.view.visible = !host.view.copies.is_empty(); host.view.error = None; }
                         Effect::Recovery(Event::Restored(id))
                     }
@@ -451,7 +461,7 @@ mod scheduling_tests {
     fn chooser(panicking: bool) -> Effect {
         let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
         let records: Vec<_> = [Slot::legacy(), Slot::named("00000000-0000-4000-8000-000000000002").unwrap()].into_iter().map(|slot| Record {
-            slot, name: "Recovered".into(), saved_at: String::new(), size: STARTUP.len(), version: [0; 32], selection: None,
+            slot, name: "Recovered".into(), saved_at: String::new(), size: STARTUP.len(), version: [0; 32], read_only: false, selection: None,
         }).collect();
         let store = Arc::new(Store { records: records.clone(), changed: AtomicBool::new(false), panic_claim: AtomicBool::new(false) });
         let mut docs = Documents::new();

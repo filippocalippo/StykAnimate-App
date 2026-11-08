@@ -450,6 +450,10 @@ impl Dock {
         self.saves.complete(success, now);
     }
 
+    pub fn flush_save(&mut self, now: u64) { self.saves.flush(now); }
+    pub fn save_pending(&self) -> bool { !self.read_only && self.saves.has_work() }
+    pub fn abandon_save(&mut self) { self.saves.abandon(); }
+
     // ---- Events --------------------------------------------------------------------------------------------------------
 
     pub fn handle(&mut self, event: Event, now: u64) -> Vec<Effect> {

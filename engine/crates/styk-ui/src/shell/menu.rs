@@ -22,11 +22,11 @@ pub(crate) fn view(params: &Params<'_>, menu: Menu) -> Element<'static, Message>
     let palette = params.theme.palette();
     let layout = shell.layout();
     let style = TextStyle::from_role(&tokens::scale::TYPE_UI);
-    let (anchor, rows, submenus): (_, Vec<&str>, bool) = match menu {
-        Menu::Mark => (layout.find(|item| matches!(item, styk_core::shell::band::Item::Mark)), words::APPLICATION_MENUS.to_vec(), true),
+    let (anchor, rows, submenus): (_, Vec<String>, bool) = match menu {
+        Menu::Mark => (layout.find(|item| matches!(item, styk_core::shell::band::Item::Mark)), words::APPLICATION_MENUS.iter().map(|label| params.presentation.label(label)).collect(), true),
         Menu::Tab(id) => {
             let front = shell.tabs().iter().any(|tab| tab.id == id && tab.front);
-            (layout.find(|item| matches!(item, styk_core::shell::band::Item::Tab(over, _) if *over == id)), if front { words::TAB_MENU_FRONT.to_vec() } else { words::TAB_MENU_RESTING.to_vec() }, false)
+            (layout.find(|item| matches!(item, styk_core::shell::band::Item::Tab(over, _) if *over == id)), if front { words::TAB_MENU_FRONT.iter().map(|label| params.presentation.label(label)).collect() } else { words::TAB_MENU_RESTING.iter().map(|label| params.presentation.label(label)).collect() }, false)
         }
     };
     let Some(anchor) = anchor else { return space().boxed() };
