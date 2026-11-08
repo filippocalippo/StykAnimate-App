@@ -460,6 +460,21 @@ impl Editor {
         self.with_records(|records| Ok(records.property_value(&frame, &target, property)?))
     }
 
+    /// `animationValue(target, property)` at the playhead from the frame on show and the views the editor holds, when
+    /// both are ready: `None` rather than evaluating or converting.
+    pub(crate) fn animation_value_ready(&self, target: &Value, property: &str) -> Option<Result<Option<Value>, EditError>> {
+        if !self.sheet() {
+            return Some(Err(EditError::Unported("property values of a document without a layer sheet".into())));
+        }
+        let frame = self.shown_frame_ready()?;
+        let views = self.views()?;
+        Some((|| {
+            let target = normalize_target(target)?;
+            channel_id(&target, property)?;
+            Ok(Records::new(&self.report, &views)?.property_value(&frame, &target, property)?)
+        })())
+    }
+
     /// The same property target view used by `animationValue`: the live frame at
     /// the playhead, otherwise the existing evaluated-record cache at the given tick.
     pub(crate) fn animation_frame_at(&self, tick: &Value) -> Result<Value, EditError> {

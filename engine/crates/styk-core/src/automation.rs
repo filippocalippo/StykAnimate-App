@@ -105,6 +105,24 @@ pub enum Expect {
     Tab(usize, String),
     /// The window's width as the shell knows it, in logical pixels.
     Width(u32),
+    /// A Properties panel number, by its property name (`root_x`), as the panel shows it (the text of a number).
+    Property(String, String),
+    /// How many entries the active project's undo history holds.
+    History(usize),
+}
+
+/// What a script does in the Properties panel, through its widgets.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum InspectorStep {
+    /// Drag a number's scrub label this many pixels (right is positive): one gesture.
+    Scrub { key: String, dx: f64 },
+    /// Focus a number's input, replace its text with this and press Enter: one typed value.
+    Type { key: String, text: String },
+    /// Press and release an arrow key on a number's label: `up` or `down`.
+    Step { key: String, up: bool },
+    /// Show this context: `auto`, `scene`, `camera`, `layer` or `frame`.
+    Context(String),
 }
 
 /// One step.
@@ -146,6 +164,10 @@ pub enum Step {
     Advance(u64),
     /// Stand in for K-doc's save: a save of the project in front landed now.
     SaveLanded,
+    /// Select figures by unique id (none for an empty selection), and a joint (`-1` for the whole figure).
+    Select { uids: Vec<u32>, joint: i64 },
+    /// A step in the Properties panel.
+    Inspector(InspectorStep),
     /// Check something.
     Expect(Expect),
     /// Write the window to a PNG (relative to the script).
@@ -258,7 +280,9 @@ fn expectation(words: &[&str], line: usize) -> Result<Expect, ScriptError> {
         ["export", look @ ("primary" | "ghost")] => Expect::Export((*look).to_string()),
         ["tab", n, state @ ("none" | "edited" | "saving" | "saved")] => Expect::Tab(number(n, line, "tab")?, (*state).to_string()),
         ["width", n] => Expect::Width(n.parse().map_err(|_| bad("width wants a number"))?),
-        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost> or width <n>")),
+        ["property", key, value] if value.parse::<f64>().is_ok() => Expect::Property((*key).to_string(), (*value).to_string()),
+        ["history", n] => Expect::History(n.parse().map_err(|_| bad("history wants a count"))?),
+        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost>, width <n>, property <name> <number> or history <count>")),
     })
 }
 
@@ -320,6 +344,24 @@ impl Script {
                 "save-landed" => Step::SaveLanded,
                 "edit" => Step::Edit(words.first().and_then(|w| w.parse().ok()).ok_or_else(|| wants("a frame rate"))?),
                 "expect" => Step::Expect(expectation(&words, line)?),
+                "select" => match words.as_slice() {
+                    [uids] | [uids, _] => {
+                        let joint = match words.get(1) {
+                            Some(joint) => joint.parse().map_err(|_| wants("<uid,uid..|none> [joint]"))?,
+                            None => -1,
+                        };
+                        let uids = if *uids == "none" { Vec::new() } else { uids.split(',').map(|uid| uid.parse().map_err(|_| wants("<uid,uid..|none> [joint]"))).collect::<Result<_, _>>()? };
+                        Step::Select { uids, joint }
+                    }
+                    _ => return Err(wants("<uid,uid..|none> [joint]")),
+                },
+                "inspector" => Step::Inspector(match words.as_slice() {
+                    ["scrub", key, dx] => InspectorStep::Scrub { key: (*key).to_string(), dx: dx.parse().map_err(|_| wants("scrub <property> <pixels>"))? },
+                    ["type", key, text] => InspectorStep::Type { key: (*key).to_string(), text: (*text).to_string() },
+                    ["step", key, direction @ ("up" | "down")] => InspectorStep::Step { key: (*key).to_string(), up: *direction == "up" },
+                    ["context", name @ ("auto" | "scene" | "camera" | "layer" | "frame")] => InspectorStep::Context((*name).to_string()),
+                    _ => return Err(wants("scrub <property> <pixels>, type <property> <text>, step <property> <up|down> or context <auto|scene|camera|layer|frame>")),
+                }),
                 "screenshot" if !rest.is_empty() => Step::Screenshot(PathBuf::from(rest)),
                 "screenshot" => return Err(wants("a path")),
                 other => return Err(ScriptError { line, message: format!("unknown step {other:?}") }),
@@ -423,6 +465,33 @@ styk-auto/1
     #[test]
     fn an_empty_script_is_no_steps() {
         assert_eq!(Script::parse("# nothing\n").unwrap().steps.len(), 0);
+    }
+
+    #[test]
+    fn the_inspector_steps_parse() {
+        let script = Script::parse("styk-auto/1
+select 1,3
+select none
+select 1 2
+inspector scrub root_x 20
+inspector type root_y 300
+inspector step scale up
+inspector context camera
+expect property root_x 500
+expect history 3
+").expect("it parses");
+        let steps: Vec<Step> = script.steps.into_iter().map(|(_, step)| step).collect();
+        assert_eq!(steps[0], Step::Select { uids: vec![1, 3], joint: -1 });
+        assert_eq!(steps[1], Step::Select { uids: Vec::new(), joint: -1 });
+        assert_eq!(steps[2], Step::Select { uids: vec![1], joint: 2 });
+        assert_eq!(steps[3], Step::Inspector(InspectorStep::Scrub { key: "root_x".into(), dx: 20.0 }));
+        assert_eq!(steps[4], Step::Inspector(InspectorStep::Type { key: "root_y".into(), text: "300".into() }));
+        assert_eq!(steps[5], Step::Inspector(InspectorStep::Step { key: "scale".into(), up: true }));
+        assert_eq!(steps[6], Step::Inspector(InspectorStep::Context("camera".into())));
+        assert_eq!(steps[7], Step::Expect(Expect::Property("root_x".into(), "500".into())));
+        assert_eq!(steps[8], Step::Expect(Expect::History(3)));
+        assert!(Script::parse("inspector scrub root_x far").is_err());
+        assert!(Script::parse("expect property root_x lots").is_err());
     }
 }
 

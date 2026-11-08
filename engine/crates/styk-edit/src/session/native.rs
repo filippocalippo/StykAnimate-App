@@ -114,11 +114,40 @@ impl Session {
         Ok(read(&prepared.doc))
     }
 
+    /// A read the interface makes by name (`animationValue`, `segmentAnimationTarget`, `getIKSettings`, ...), with
+    /// native arguments, against the session's current view: `None` for a name the session does not answer.
+    pub fn read(&self, name: &str, args: &Value) -> Option<Result<Option<Value>, EditError>> {
+        self.editor.interface_query(name, args)
+    }
+
     /// The current frame's records, including a live gesture or property preview.
     /// Only a COW handle is returned; records are neither copied nor serialized.
     /// Uses the editor's existing cache (tree identity, playhead and evaluation options).
     pub fn frame_records(&self) -> Result<Value, EditError> {
         self.editor.shown_frame()
+    }
+
+    /// The frame on show when it needs no evaluation or conversion: `None` when only evaluating would answer. The
+    /// interface thread reads this, never [`Session::frame_records`].
+    pub fn frame_records_ready(&self) -> Option<Value> {
+        self.editor.shown_frame_ready()
+    }
+
+    /// The typed document when the session holds views of it as it is now: `None` rather than converting it.
+    pub fn with_document_ready<T>(&self, read: impl FnOnce(&styk_eval::doc::Document) -> T) -> Option<T> {
+        self.editor.views().map(|prepared| read(&prepared.doc))
+    }
+
+    /// `animationValue(target, property)` at the playhead when it needs no evaluation: `None` when not ready.
+    pub fn animation_value_ready(&self, target: &Value, property: &str) -> Option<Result<Option<Value>, EditError>> {
+        self.editor.animation_value_ready(target, property)
+    }
+
+    /// Takes the views and the frame on show a worker made of the session's document as it is now (`report`) at
+    /// `tick`; a document that changed since keeps what it has.
+    pub fn adopt_evaluation(&self, report: &Value, prepared: std::sync::Arc<styk_eval::eval::Prepared>, tick: f64, frame: Value) {
+        self.editor.adopt_views(report, prepared);
+        self.editor.adopt_frame(report, tick, frame);
     }
 }
 

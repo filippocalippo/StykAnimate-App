@@ -9,8 +9,13 @@
 
 pub mod band;
 pub mod component_sheet;
+pub mod dock;
+pub mod inspector;
+pub mod message;
 pub mod screens;
 pub mod shell;
+
+pub use message::Message;
 
 use iced::widget::{container, space};
 use iced::{Element, Fill, Widget, theme};

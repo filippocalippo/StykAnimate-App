@@ -139,7 +139,7 @@ pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
 }
 
 pub use history::{Command, CommandKind, EntryCosts, HistoryLimits, HistoryMarks};
-pub use frame::FrameSlice;
+pub use frame::{FrameSlice, editor_frame};
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
 pub use layer_focus::FocusLock;
 pub use select::Selection;
