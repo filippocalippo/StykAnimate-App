@@ -1,6 +1,7 @@
 use super::{Operation, UnknownRecords, Zone};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+pub(crate) const MAX_DEPTH: usize = 128;
 pub type GroupId = u32;
 pub type NodeId = u32;
 pub type FloatId = u32;
@@ -336,7 +337,10 @@ impl Layout {
             .saturating_add(1)
     }
     pub fn validate(&self, workspace: Workspace) -> Result<(), LayoutError> {
-        fn node(n: &Node, ids: &mut BTreeSet<u32>) -> Result<(), LayoutError> {
+        fn node(n: &Node, ids: &mut BTreeSet<u32>, depth: usize) -> Result<(), LayoutError> {
+            if depth > MAX_DEPTH {
+                return Err(LayoutError::Limit);
+            }
             if !ids.insert(n.id()) {
                 return Err(LayoutError::Duplicate);
             }
@@ -359,7 +363,7 @@ impl Layout {
                         if !v.is_finite() || v <= 0. {
                             return Err(LayoutError::InvalidGeometry);
                         }
-                        node(&k.node, ids)?;
+                        node(&k.node, ids, depth + 1)?;
                     }
                 }
             }
@@ -367,7 +371,7 @@ impl Layout {
         }
         let mut ids = BTreeSet::new();
         for n in self.main.iter().chain(self.floats.iter().map(|f| &f.root)) {
-            node(n, &mut ids)?;
+            node(n, &mut ids, 0)?;
         }
         let mut floats = BTreeSet::new();
         if self.floats.len() > 8 {
@@ -490,6 +494,8 @@ pub fn essentials(workspace: Workspace) -> Layout {
 /// Layout history and monitor arrangements never enter document undo.
 #[derive(Clone, Debug)]
 pub struct LayoutState {
+    /// Opaque workspace members, independent of arrangement edits and history.
+    pub unknown: BTreeMap<String, styk_doc::Value>,
     pub current: Layout,
     pub base: Layout,
     pub dirty: bool,
@@ -500,6 +506,7 @@ pub struct LayoutState {
 impl LayoutState {
     pub fn new(layout: Layout) -> Self {
         Self {
+            unknown: BTreeMap::new(),
             base: layout.clone(),
             current: layout,
             dirty: false,

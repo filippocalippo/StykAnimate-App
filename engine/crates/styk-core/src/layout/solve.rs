@@ -25,11 +25,14 @@ pub fn tier(width: f64) -> Tier {
 pub enum Fold {
     Strip,
     Sheet,
+    Header,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FitState {
     pub folded: BTreeMap<GroupId, Fold>,
     pub sides: BTreeMap<GroupId, Side>,
+    /// Absolute logical host sizes required to release an automatic fold.
+    pub release: BTreeMap<GroupId, Size>,
     pub width: f64,
     pub height: f64,
 }
@@ -49,6 +52,9 @@ pub struct Screen {
 #[derive(Clone, Debug)]
 pub struct Env {
     pub window: Size,
+    pub scale: f64,
+    /// Host of the pointer coordinates passed to drop_zone/DragSession (None is the main window).
+    pub hit_host: Option<FloatId>,
     pub screens: Vec<Screen>,
     pub setup: u64,
     pub float_host: FloatHost,
@@ -59,6 +65,8 @@ impl Env {
     pub fn new(w: f64, h: f64) -> Self {
         Self {
             window: Size { w, h },
+            scale: 1.,
+            hit_host: None,
             screens: vec![],
             setup: 0,
             float_host: FloatHost::Os,
@@ -82,14 +90,19 @@ pub struct Solution {
     pub groups: BTreeMap<GroupId, Rect>,
     pub headers: BTreeMap<GroupId, Rect>,
     pub dividers: Vec<Divider>,
+    /// Physical desktop frames (main-host physical coordinates for in-window hosts).
     pub floats: BTreeMap<FloatId, Rect>,
+    /// Float-local logical content bounds; all group/header/divider geometry uses its host coordinates.
+    pub float_contents: BTreeMap<FloatId, Rect>,
+    pub float_scales: BTreeMap<FloatId, f64>,
+    pub hosts: BTreeMap<GroupId, Option<FloatId>>,
     pub visible: BTreeSet<PanelId>,
     pub stages: BTreeMap<PanelId, Rect>,
     pub strips: BTreeMap<GroupId, Rect>,
     pub sheets: BTreeMap<GroupId, Rect>,
     pub fit: FitState,
 }
-fn group_min(g: &TabGroup) -> Size {
+pub(super) fn group_min(g: &TabGroup) -> Size {
     g.tabs
         .iter()
         .filter_map(|p| spec(&p.kind))
@@ -98,44 +111,116 @@ fn group_min(g: &TabGroup) -> Size {
             h: a.h.max(s.min.h),
         })
 }
-fn axis(s: Size, a: Axis) -> f64 {
+pub(super) fn axis(s: Size, a: Axis) -> f64 {
     if a == Axis::Horizontal { s.w } else { s.h }
 }
-fn minimum(n: &Node, fold: &BTreeMap<u32, Fold>, sides: &BTreeMap<u32, Side>, gap: f64) -> Size {
-    match n {
-        Node::Tabs(g) => match fold.get(&g.id) {
-            Some(Fold::Sheet) => Size::default(),
-            Some(Fold::Strip) => {
-                let s = sides.get(&g.id).copied().unwrap_or(Side::Right);
-                if s.axis() == Axis::Horizontal {
-                    Size { w: 40., h: 0. }
-                } else {
-                    Size { w: 0., h: 40. }
-                }
-            }
-            None => group_min(g),
+#[cfg(test)]
+thread_local! { pub(super) static WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+fn fit_tree<'a>(
+    n: &'a Node,
+    rect: Rect,
+    host: Option<FloatId>,
+    window: Size,
+    gap: f64,
+    e: &Env,
+    out: &mut Solution,
+) -> super::summary::Summaries<'a> {
+    let mut sums = super::summary::Summaries::new(n, gap);
+    sums.positions(
+        0,
+        if host.is_some() {
+            Side::Top
+        } else {
+            Side::Right
         },
-        Node::Split { axis: a, kids, .. } => {
-            let mut out = Size::default();
-            for k in kids {
-                let m = minimum(&k.node, fold, sides, gap);
-                if *a == Axis::Horizontal {
-                    out.w += m.w;
-                    out.h = out.h.max(m.h)
-                } else {
-                    out.h += m.h;
-                    out.w = out.w.max(m.w)
-                }
-            }
-            let gaps = gap * kids.len().saturating_sub(1) as f64;
-            if *a == Axis::Horizontal {
-                out.w += gaps
+        &mut out.fit.sides,
+    );
+    let candidates = sums.candidates();
+    for item in &sums.items {
+        out.hosts.insert(item.node.id(), host);
+    }
+    let t = tier(window.w);
+    for &index in &candidates {
+        let Node::Tabs(g) = sums.items[index].node else {
+            continue;
+        };
+        let side = out.fit.sides[&g.id];
+        let compact = host.is_none() && matches!(t, Tier::Compact | Tier::Minimal);
+        let low = host.is_none() && window.h <= 568. && side == Side::Bottom;
+        let previous = e.previous.release.get(&g.id).copied();
+        let held = previous.is_some_and(|size| window.w < size.w || window.h < size.h);
+        let fold = if g.collapsed {
+            Some(if host.is_some() {
+                Fold::Header
             } else {
-                out.h += gaps
+                Fold::Strip
+            })
+        } else if compact {
+            Some(if side == Side::Right {
+                Fold::Sheet
+            } else {
+                Fold::Strip
+            })
+        } else if low {
+            Some(Fold::Strip)
+        } else if held {
+            e.previous.folded.get(&g.id).copied()
+        } else {
+            None
+        };
+        if let Some(fold) = fold {
+            sums.fold(index, fold, side);
+            out.fit.folded.insert(g.id, fold);
+            if !g.collapsed {
+                let mut release = previous.unwrap_or_default();
+                if compact {
+                    release.w = release.w.max(816.);
+                }
+                if low {
+                    release.h = release.h.max(584.);
+                }
+                out.fit.release.insert(g.id, release);
             }
-            out
         }
     }
+    for phase in [
+        if host.is_some() {
+            Fold::Header
+        } else {
+            Fold::Strip
+        },
+        Fold::Sheet,
+    ] {
+        for &index in &candidates {
+            let m = sums.items[0].min;
+            if m.w <= rect.w && m.h <= rect.h {
+                break;
+            }
+            let Node::Tabs(g) = sums.items[index].node else {
+                continue;
+            };
+            if out
+                .fit
+                .folded
+                .get(&g.id)
+                .is_some_and(|f| *f == Fold::Sheet || *f == phase)
+            {
+                continue;
+            }
+            let side = out.fit.sides[&g.id];
+            let release = out.fit.release.entry(g.id).or_default();
+            if m.w > rect.w {
+                release.w = release.w.max(window.w + m.w - rect.w + 16.);
+            }
+            if m.h > rect.h {
+                release.h = release.h.max(window.h + m.h - rect.h + 16.);
+            }
+            sums.fold(index, phase, side);
+            out.fit.folded.insert(g.id, phase);
+        }
+    }
+    sums
 }
 /// Pure fitting. Previous transient folds supply directional hysteresis; never save the returned rectangles.
 pub fn solve(l: &Layout, e: &Env) -> Solution {
@@ -174,114 +259,51 @@ pub fn solve(l: &Layout, e: &Env) -> Solution {
         },
         ..Default::default()
     };
-    fn positions(n: &Node, side: Side, out: &mut BTreeMap<u32, Side>) {
-        match n {
-            Node::Tabs(g) => {
-                out.insert(g.id, side);
-            }
-            Node::Split { axis, kids, .. } => {
-                let stage = kids.iter().position(|k| {
-                    let mut g = vec![];
-                    k.node.groups(&mut g);
-                    g.iter().any(|g| g.tabs.iter().any(|p| p.kind == "stage"))
-                });
-                for (i, k) in kids.iter().enumerate() {
-                    let next = if let Some(at) = stage {
-                        if i == at {
-                            side
-                        } else {
-                            match (*axis, i < at) {
-                                (Axis::Horizontal, true) => Side::Left,
-                                (Axis::Horizontal, false) => Side::Right,
-                                (Axis::Vertical, true) => Side::Top,
-                                _ => Side::Bottom,
-                            }
-                        }
-                    } else {
-                        side
-                    };
-                    positions(&k.node, next, out);
-                }
-            }
-        }
-    }
+
     if let Some(n) = &l.main {
-        positions(n, Side::Right, &mut out.fit.sides);
-    }
-    let mut groups = vec![];
-    if let Some(n) = &l.main {
-        n.groups(&mut groups)
-    }
-    let mut candidates: Vec<_> = groups
-        .iter()
-        .filter(|g| !g.tabs.iter().any(|p| p.kind == "stage"))
-        .copied()
-        .collect();
-    candidates.sort_by_key(|g| {
-        (
-            g.tabs
-                .iter()
-                .filter_map(|p| spec(&p.kind))
-                .map(|s| s.keep)
-                .max()
-                .unwrap_or(0),
-            g.id,
-        )
-    });
-    for g in &candidates {
-        let side = out.fit.sides.get(&g.id).copied().unwrap_or(Side::Right);
-        if g.collapsed
-            || matches!(t, Tier::Compact | Tier::Minimal)
-            || (h <= 568. && side == Side::Bottom)
-        {
-            out.fit.folded.insert(
-                g.id,
-                if matches!(t, Tier::Compact | Tier::Minimal) && side == Side::Right {
-                    Fold::Sheet
-                } else {
-                    Fold::Strip
-                },
-            );
-        }
-    }
-    if let Some(n) = &l.main {
-        for phase in [Fold::Strip, Fold::Sheet] {
-            for g in &candidates {
-                let m = minimum(n, &out.fit.folded, &out.fit.sides, gap);
-                if m.w <= rect.w && m.h <= rect.h {
-                    break;
-                }
-                out.fit.folded.insert(g.id, phase);
-            }
-        }
-        if w >= e.previous.width && h >= e.previous.height {
-            for (id, fold) in &e.previous.folded {
-                if out.fit.folded.contains_key(id) {
-                    continue;
-                }
-                let m = minimum(n, &out.fit.folded, &out.fit.sides, gap);
-                if m.w + 16. > rect.w
-                    || m.h + 16. > rect.h
-                    || (e.previous.width <= 800. && w < 816.)
-                    || (e.previous.height <= 568. && h < 584.)
-                {
-                    out.fit.folded.insert(*id, *fold);
-                }
-            }
-        }
-        place(n, rect, gap, &mut out);
+        let sums = fit_tree(n, rect, None, Size { w, h }, gap, e, &mut out);
+        place(n, rect, gap, &sums, &mut out);
     }
     for f in &l.floats {
-        let r = fit_float(&f.frames, e);
-        out.floats.insert(f.id, r);
-        let saved = std::mem::take(&mut out.fit.folded);
-        place(&f.root, r, gap, &mut out);
-        out.fit.folded = saved;
+        let (mut physical, scale) = fit_float_scaled(&f.frames, e);
+        let mut content = Rect {
+            x: 0.,
+            y: 0.,
+            w: physical.w / scale,
+            h: physical.h / scale,
+        };
+        let sums = fit_tree(
+            &f.root,
+            content,
+            Some(f.id),
+            Size {
+                w: content.w,
+                h: content.h,
+            },
+            6.,
+            e,
+            &mut out,
+        );
+        if !sums.items[0].expanded {
+            content.h = content.h.min(sums.items[0].min.h.max(44.));
+            physical.h = content.h * scale;
+        }
+        out.floats.insert(f.id, physical);
+        out.float_contents.insert(f.id, content);
+        out.float_scales.insert(f.id, scale);
+        place(&f.root, content, 6., &sums, &mut out);
     }
     if let Some(id) = e.open
         && out.fit.folded.contains_key(&id)
         && let Some(g) = l.groups().iter().find(|g| g.id == id)
     {
+        let rect = out
+            .hosts
+            .get(&id)
+            .copied()
+            .flatten()
+            .and_then(|id| out.float_contents.get(&id).copied())
+            .unwrap_or(rect);
         let r = Rect {
             x: rect.x,
             y: rect.y,
@@ -323,17 +345,20 @@ fn node_max(n: &Node, a: Axis, total: f64) -> f64 {
 fn clamp_px(n: &Node, a: Axis, value: f64, total: f64) -> f64 {
     value.min(node_max(n, a, total))
 }
-fn expanded(n: &Node, fold: &BTreeMap<u32, Fold>) -> bool {
-    match n {
-        Node::Tabs(g) => !fold.contains_key(&g.id),
-        Node::Split { kids, .. } => kids.iter().any(|k| expanded(&k.node, fold)),
-    }
-}
-fn place(n: &Node, r: Rect, gap: f64, out: &mut Solution) {
+fn place(n: &Node, r: Rect, gap: f64, sums: &super::summary::Summaries<'_>, out: &mut Solution) {
     match n {
         Node::Tabs(g) => {
             if let Some(f) = out.fit.folded.get(&g.id) {
                 match f {
+                    Fold::Header => {
+                        out.headers.insert(
+                            g.id,
+                            Rect {
+                                h: 44f64.min(r.h),
+                                ..r
+                            },
+                        );
+                    }
                     Fold::Strip => {
                         out.strips.insert(g.id, r);
                     }
@@ -377,7 +402,7 @@ fn place(n: &Node, r: Rect, gap: f64, out: &mut Solution) {
             let available = (total - gap * kids.len().saturating_sub(1) as f64).max(0.);
             let mins: Vec<_> = kids
                 .iter()
-                .map(|k| axis(minimum(&k.node, &out.fit.folded, &out.fit.sides, gap), *a))
+                .map(|k| axis(sums.items[sums.indices[&k.node.id()]].min, *a))
                 .collect();
             let minsum: f64 = mins.iter().sum();
             let mut sizes = mins.clone();
@@ -386,7 +411,7 @@ fn place(n: &Node, r: Rect, gap: f64, out: &mut Solution) {
                 .iter()
                 .zip(&mins)
                 .map(|(k, m)| {
-                    if !expanded(&k.node, &out.fit.folded) {
+                    if !sums.items[sums.indices[&k.node.id()]].expanded {
                         0.
                     } else {
                         match k.size {
@@ -406,7 +431,7 @@ fn place(n: &Node, r: Rect, gap: f64, out: &mut Solution) {
             let flex: f64 = kids
                 .iter()
                 .map(|k| {
-                    if expanded(&k.node, &out.fit.folded) {
+                    if sums.items[sums.indices[&k.node.id()]].expanded {
                         match k.size {
                             Sz::Flex(v) => v,
                             _ => 0.,
@@ -420,16 +445,16 @@ fn place(n: &Node, r: Rect, gap: f64, out: &mut Solution) {
             let eligible: f64 = kids
                 .iter()
                 .zip(&sizes)
-                .filter(|(k, _)| expanded(&k.node, &out.fit.folded))
+                .filter(|(k, _)| sums.items[sums.indices[&k.node.id()]].expanded)
                 .map(|(_, v)| *v)
                 .sum();
             let eligible_count = kids
                 .iter()
-                .filter(|k| expanded(&k.node, &out.fit.folded))
+                .filter(|k| sums.items[sums.indices[&k.node.id()]].expanded)
                 .count()
                 .max(1);
             for (i, k) in kids.iter().enumerate() {
-                if !expanded(&k.node, &out.fit.folded) {
+                if !sums.items[sums.indices[&k.node.id()]].expanded {
                     continue;
                 }
                 if flex > 0. {
@@ -465,7 +490,7 @@ fn place(n: &Node, r: Rect, gap: f64, out: &mut Solution) {
                         ..r
                     }
                 };
-                place(&k.node, child, gap, out);
+                place(&k.node, child, gap, sums, out);
                 at += sizes[i];
                 if i + 1 < kids.len() {
                     let dr = if *a == Axis::Horizontal {
@@ -493,6 +518,9 @@ fn place(n: &Node, r: Rect, gap: f64, out: &mut Solution) {
     }
 }
 pub fn fit_float(f: &Frames, e: &Env) -> Rect {
+    fit_float_scaled(f, e).0
+}
+fn fit_float_scaled(f: &Frames, e: &Env) -> (Rect, f64) {
     let remembered = f
         .by_setup
         .iter()
@@ -508,11 +536,21 @@ pub fn fit_float(f: &Frames, e: &Env) -> Rect {
         .or_else(|| e.screens.iter().find(|s| s.key == f.monitor))
         .or_else(|| e.screens.iter().find(|s| s.primary))
         .or(e.screens.first());
+    let scale = if e.float_host == FloatHost::Os {
+        screen.map_or(e.scale, |s| s.scale)
+    } else {
+        e.scale
+    };
+    let scale = if scale.is_finite() && scale > 0. {
+        scale
+    } else {
+        1.
+    };
     let fallback = Rect {
         x: 0.,
         y: 0.,
-        w: e.window.w.max(1.),
-        h: e.window.h.max(1.),
+        w: (e.window.w * scale).max(1.),
+        h: (e.window.h * scale).max(1.),
     };
     let work = if e.float_host == FloatHost::Os {
         screen.map_or(fallback, |s| s.work)
@@ -527,12 +565,15 @@ pub fn fit_float(f: &Frames, e: &Env) -> Rect {
     });
     let w = r.w.min(work.w).max(1.);
     let h = r.h.min(work.h).max(1.);
-    Rect {
-        x: r.x.clamp(work.x, work.x + (work.w - w).max(0.)),
-        y: r.y.clamp(work.y, work.y + (work.h - h).max(0.)),
-        w,
-        h,
-    }
+    (
+        Rect {
+            x: r.x.clamp(work.x, work.x + (work.w - w).max(0.)),
+            y: r.y.clamp(work.y, work.y + (work.h - h).max(0.)),
+            w,
+            h,
+        },
+        scale,
+    )
 }
 /// Snap only when the caller's platform supports global window coordinates.
 pub fn snap(mut r: Rect, targets: &[Rect], threshold: f64) -> Rect {
@@ -588,7 +629,7 @@ pub fn preview(
 }
 pub fn drop_zone(l: &Layout, p: &PanelId, s: &Solution, e: &Env, x: f64, y: f64) -> Zone {
     for (id, r) in &s.headers {
-        if r.contains(x, y) {
+        if s.hosts.get(id).copied().flatten() == e.hit_host && r.contains(x, y) {
             let count = l
                 .groups()
                 .iter()
@@ -601,6 +642,9 @@ pub fn drop_zone(l: &Layout, p: &PanelId, s: &Solution, e: &Env, x: f64, y: f64)
         }
     }
     for d in &s.dividers {
+        if s.hosts.get(&d.split).copied().flatten() != e.hit_host {
+            continue;
+        }
         let r = Rect {
             x: d.rect.x - 5.,
             y: d.rect.y - 5.,
@@ -614,7 +658,7 @@ pub fn drop_zone(l: &Layout, p: &PanelId, s: &Solution, e: &Env, x: f64, y: f64)
             };
         }
     }
-    if x >= 0. && y >= 0. && x < e.window.w && y < e.window.h {
+    if e.hit_host.is_none() && x >= 0. && y >= 0. && x < e.window.w && y < e.window.h {
         for (hit, side) in [
             (x < 16., Side::Left),
             (x > e.window.w - 16., Side::Right),
@@ -627,7 +671,7 @@ pub fn drop_zone(l: &Layout, p: &PanelId, s: &Solution, e: &Env, x: f64, y: f64)
         }
     }
     for (id, r) in &s.groups {
-        if r.contains(x, y) {
+        if s.hosts.get(id).copied().flatten() == e.hit_host && r.contains(x, y) {
             if p.kind == "tools"
                 && l.groups()
                     .iter()
@@ -658,10 +702,18 @@ pub fn drop_zone(l: &Layout, p: &PanelId, s: &Solution, e: &Env, x: f64, y: f64)
             };
         }
     }
+    let scale = e
+        .hit_host
+        .and_then(|id| s.float_scales.get(&id).copied())
+        .unwrap_or(e.scale);
+    let origin = e
+        .hit_host
+        .and_then(|id| s.floats.get(&id).copied())
+        .unwrap_or_default();
     Zone::Float {
         rect: Rect {
-            x,
-            y,
+            x: origin.x + x * scale,
+            y: origin.y + y * scale,
             w: 320.,
             h: 400.,
         },

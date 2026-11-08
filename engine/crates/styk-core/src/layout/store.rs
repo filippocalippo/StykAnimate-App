@@ -125,7 +125,7 @@ fn node(n: &Node) -> Value {
     }
 }
 fn read_node(v: &Value, depth: usize) -> Result<Node, LayoutError> {
-    if depth > 128 {
+    if depth > MAX_DEPTH {
         return Err(LayoutError::Limit);
     }
     let id = uint(get(v, "id")?)?;
@@ -211,6 +211,16 @@ pub fn to_value(l: &Layout) -> Value {
                 })
                 .collect()),
         ),
+        (
+            "presentedPanels",
+            arr(l
+                .stage_tools
+                .map(|_| PanelId::new("tools"))
+                .into_iter()
+                .chain(l.joined_layers.then(|| PanelId::new("layers")))
+                .map(|p| panel(&p))
+                .collect()),
+        ),
         ("closed", arr(l.closed.iter().map(panel).collect())),
         ("dormant", arr(l.dormant.iter().map(panel).collect())),
         ("tools", l.stage_tools.map_or(Value::Null, side)),
@@ -268,6 +278,7 @@ pub fn from_value(v: &Value, w: Workspace) -> Result<Layout, LayoutError> {
         })
         .collect::<Result<_, LayoutError>>()?;
     let known = [
+        "presentedPanels",
         "main",
         "floats",
         "closed",
@@ -417,6 +428,7 @@ pub fn import_v2(v: &Value, geometry: &MigrationGeometry) -> ImportResult {
                 g.collapsed = true;
             }
         }
+        let mut imported_sides = BTreeMap::new();
         if let Some(records) = old
             .and_then(|m| m.get("arrangement").or(Some(m)))
             .and_then(|a| a.get("panels"))
@@ -509,6 +521,7 @@ pub fn import_v2(v: &Value, geometry: &MigrationGeometry) -> ImportResult {
                     Ok(_) => {
                         if let Some(g) = l.groups().iter().find(|g| g.tabs.contains(&p)) {
                             let id = g.id;
+                            imported_sides.insert(id, side);
                             let key = format!("{dock}:{}", legacy_group(record));
                             groups.insert(key, id);
                             let first = columns.entry(dock.into()).or_insert(id);
@@ -611,40 +624,39 @@ pub fn import_v2(v: &Value, geometry: &MigrationGeometry) -> ImportResult {
             });
         }
         // Shared sizes become independent allocations, never a shared mutable setting.
-        fn sizes(n: &mut Node, v: &Value) {
+        fn sizes(n: &mut Node, v: &Value, sides: &BTreeMap<u32, Side>) {
             if let Node::Split { axis, kids, .. } = n {
                 for k in kids {
                     let mut gs = vec![];
                     k.node.groups(&mut gs);
-                    let key = if gs
-                        .iter()
-                        .any(|g| g.tabs.iter().any(|p| p.kind == "timeline"))
-                        && *axis == Axis::Vertical
-                    {
-                        "bottom"
+                    let key = if *axis == Axis::Vertical {
+                        matches!(&k.node,Node::Tabs(g) if g.tabs.iter().any(|p|p.kind=="timeline"))
+                            .then_some("bottom")
+                    } else if gs.iter().all(|g| sides.get(&g.id) == Some(&Side::Left)) {
+                        Some("left")
                     } else if gs
                         .iter()
                         .any(|g| g.tabs.iter().any(|p| p.kind == "structure"))
                     {
-                        "structure"
+                        Some("structure")
                     } else {
-                        "right"
+                        Some("right")
                     };
                     if matches!(k.size, Sz::Px(_))
-                        && let Some(n) = v
-                            .get(key)
+                        && let Some(n) = key
+                            .and_then(|key| v.get(key))
                             .and_then(Value::as_f64)
                             .filter(|n| n.is_finite() && *n > 0.)
                     {
-                        k.size = Sz::Px(n)
+                        k.size = Sz::Px(n);
                     }
-                    sizes(&mut k.node, v);
+                    sizes(&mut k.node, v, sides);
                 }
             }
         }
         if let Some(s) = v.get("shared").and_then(|s| s.get("sizes")) {
             if let Some(n) = &mut l.main {
-                sizes(n, s)
+                sizes(n, s, &imported_sides)
             }
             if let Some(n) = s.get("timelineLabels").and_then(Value::as_f64) {
                 l.layers_width = n.max(120.);
@@ -941,6 +953,7 @@ impl LayoutFile {
         &self,
         storage: &dyn styk_services::storage::Storage,
         now: u64,
+        cancel: &styk_services::Cancel,
     ) -> Result<(), LayoutError> {
         let proposed = self.clone();
         storage
@@ -957,6 +970,7 @@ impl LayoutFile {
                         .encode()
                         .map_err(|e| format!("{e:?}"))
                 }),
+                cancel,
             )
             .await
             .map_err(|e| LayoutError::Storage(e.to_string()))
@@ -1007,7 +1021,7 @@ impl LayoutFile {
     }
 }
 pub fn state_to_value(s: &LayoutState) -> Value {
-    obj(vec![
+    let mut value = obj(vec![
         ("current", to_value(&s.current)),
         ("base", to_value(&s.base)),
         ("dirty", Value::from(s.dirty)),
@@ -1020,10 +1034,26 @@ pub fn state_to_value(s: &LayoutState) -> Value {
                     .collect(),
             ),
         ),
-    ])
+    ]);
+    if let Value::Obj(o) = &mut value {
+        let o = std::sync::Arc::make_mut(o);
+        for (k, v) in &s.unknown {
+            if o.get(k).is_none() {
+                o.set(k, v.clone());
+            }
+        }
+    }
+    value
 }
 pub fn state_from_value(v: &Value, w: Workspace) -> Result<LayoutState, LayoutError> {
     let mut s = LayoutState::new(from_value(get(v, "current")?, w)?);
+    s.unknown = v
+        .as_obj()
+        .ok_or(LayoutError::InvalidFile)?
+        .iter()
+        .filter(|(k, _)| !["current", "base", "dirty", "setups"].contains(&k.as_ref()))
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
     s.base = from_value(get(v, "base")?, w)?;
     s.dirty = s.current != s.base;
     s.setups = get(v, "setups")?

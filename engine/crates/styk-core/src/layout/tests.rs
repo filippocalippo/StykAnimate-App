@@ -340,89 +340,220 @@ fn save_debounce_orders_and_retries() {
     q.complete(false, 800);
     assert_eq!(q.take_due(1000), Some(vec![3]));
 }
+
 #[test]
 fn generated_operation_sequences_preserve_validity_and_round_trip() {
     let mut seed = 17u64;
-    for _ in 0..10_000 {
-        let mut l = essentials(Workspace::Animate);
-        for _ in 0..50 {
+    let mut successes = [0usize; 20];
+    let mut directions = [0usize; 4];
+    let mut workspaces = [0usize; 3];
+    let mut hosts = [0usize; 3];
+    fn split_ids(n: &Node, out: &mut Vec<(u32, usize)>) {
+        if let Node::Split { id, kids, .. } = n {
+            for i in 0..kids.len() - 1 {
+                out.push((*id, i));
+            }
+            for k in kids {
+                split_ids(&k.node, out);
+            }
+        }
+    }
+    for sequence in 0..2400 {
+        let wi = sequence % 3;
+        let w = [Workspace::Animate, Workspace::Draw, Workspace::Rig][wi];
+        let hi = (sequence / 3) % 3;
+        let mut l = essentials(w);
+        let mut e = Env::new(
+            700. + (sequence % 800) as f64,
+            560. + (sequence % 440) as f64,
+        );
+        e.float_host = [FloatHost::Os, FloatHost::InWindow, FloatHost::Sheet][hi];
+        e.screens.push(Screen {
+            key: 1,
+            work: Rect {
+                x: 0.,
+                y: 0.,
+                w: 3840.,
+                h: 2160.,
+            },
+            scale: if sequence % 2 == 0 { 1. } else { 2. },
+            primary: true,
+        });
+        // Every sequence exercises the review's behavioural failures, not just tree validity.
+        l.apply(Operation::Activate(2, sequence % 3), w).unwrap();
+        l.apply(Operation::Reorder(2, 0, 2), w).unwrap();
+        let original = l.groups().into_iter().find(|g| g.id == 2).unwrap().clone();
+        l.apply(Operation::MoveGroup(2, review_float()), w).unwrap();
+        let gid = l.floats[0].root.id();
+        let fid = l.floats[0].id;
+        l.apply(Operation::Collapse(gid, true), w).unwrap();
+        let saved = file_cycle(store::to_value(&l));
+        l = store::from_value(&saved, w).unwrap();
+        let fit = solve(&l, &e);
+        assert!(!fit.visible.contains(&original.tabs[original.active]));
+        l.apply(Operation::Collapse(gid, false), w).unwrap();
+        l.apply(Operation::DockBack(fid), w).unwrap();
+        let group = l.groups().into_iter().find(|g| g.id == 2).unwrap();
+        assert_eq!(group.tabs, original.tabs);
+        assert_eq!(group.active, original.active);
+        for step in 0..48 {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-            let p = p([
-                "properties",
-                "vfx",
-                "library",
-                "tools",
-                "layers",
-                "timeline",
-                "stage",
-            ][(seed >> 32) as usize % 7]);
+            let panels = l.panels();
+            let panel = panels[(seed >> 32) as usize % panels.len()].clone();
             let groups = l.groups();
-            let group = groups[(seed >> 40) as usize % groups.len()].id;
-            let op = match seed % 8 {
-                0 => Operation::Close(p.clone()),
-                1 => Operation::Reopen(p.clone()),
-                2 => Operation::Move(p.clone(), Zone::Tab { group, index: 0 }),
-                3 => Operation::Move(
-                    p.clone(),
-                    Zone::Split {
-                        group,
-                        side: Side::Left,
+            let group = groups[(seed >> 40) as usize % groups.len()];
+            let id = group.id;
+            let len = group.tabs.len();
+            let di = (seed >> 48) as usize % 4;
+            let side = [Side::Left, Side::Right, Side::Top, Side::Bottom][di];
+            let mut splits = vec![];
+            for n in l.main.iter().chain(l.floats.iter().map(|f| &f.root)) {
+                split_ids(n, &mut splits);
+            }
+            let (split, index) = splits
+                .get((seed >> 24) as usize % splits.len().max(1))
+                .copied()
+                .unwrap_or((0, 0));
+            let kind = (step + sequence) % 20;
+            let op = match kind {
+                0 => Operation::Close(panel),
+                1 => Operation::Reopen(l.closed.first().cloned().unwrap_or(panel)),
+                2 => Operation::Move(
+                    panel,
+                    Zone::Tab {
+                        group: id,
+                        index: len / 2,
                     },
                 ),
-                4 => Operation::Move(p.clone(), Zone::WindowEdge { side: Side::Bottom }),
-                5 => Operation::Collapse(group, true),
-                6 => Operation::Move(
-                    p.clone(),
-                    Zone::Float {
-                        rect: Rect {
-                            x: 20.,
-                            y: 20.,
-                            w: 300.,
-                            h: 400.,
+                3 => Operation::Move(panel, Zone::Split { group: id, side }),
+                4 => Operation::Move(panel, Zone::WindowEdge { side }),
+                5 => Operation::Collapse(id, !group.collapsed),
+                6 => Operation::Move(panel, review_float()),
+                7 => Operation::Move(
+                    p("tools"),
+                    Zone::StageTools {
+                        side: if di.is_multiple_of(2) {
+                            Side::Left
+                        } else {
+                            Side::Right
                         },
                     },
                 ),
-                _ => Operation::Move(p.clone(), Zone::StageTools { side: Side::Left }),
+                8 => Operation::MoveGroup(id, review_float()),
+                9 => Operation::DockBack(l.floats.first().map_or(0, |f| f.id)),
+                10 => Operation::Move(panel, Zone::Between { split, index }),
+                11 => Operation::Resize {
+                    split,
+                    index,
+                    first: Sz::Flex(1. + di as f64),
+                    second: Sz::Px(200. + di as f64 * 40.),
+                },
+                12 => Operation::ResetDivider { split, index },
+                13 => Operation::Activate(id, (seed >> 8) as usize % len),
+                14 => Operation::Reorder(id, 0, len - 1),
+                15 => Operation::NewStage,
+                16 => Operation::Move(
+                    p("layers"),
+                    Zone::Tab {
+                        group: id,
+                        index: 0,
+                    },
+                ),
+                17 => Operation::JoinLayers,
+                18 => Operation::Reset,
+                _ => Operation::MoveGroup(
+                    id,
+                    Zone::Tab {
+                        group: groups[0].id,
+                        index: 0,
+                    },
+                ),
             };
             let old = l.clone();
-            let result = l.apply(op, Workspace::Animate);
-            if result.is_err() {
-                assert_eq!(old, l)
-            }
-            l.validate(Workspace::Animate).unwrap();
-            let a: std::collections::BTreeSet<_> = l.panels().into_iter().collect();
-            let b: std::collections::BTreeSet<_> = old.panels().into_iter().collect();
-            assert_eq!(a, b);
-            let e = Env::new(700. + (seed % 800) as f64, 600.);
-            let solution = solve(&l, &e);
-            assert_eq!(solution, solve(&l, &e));
-            let mut main_groups = vec![];
-            if let Some(n) = &l.main {
-                n.groups(&mut main_groups);
-            }
-            let rects: Vec<_> = main_groups
-                .iter()
-                .filter_map(|g| solution.groups.get(&g.id))
-                .collect();
-            for (i, a) in rects.iter().enumerate() {
-                assert!(
-                    a.x >= 0.
-                        && a.y >= 0.
-                        && a.w >= 0.
-                        && a.h >= 0.
-                        && a.x + a.w <= e.window.w + 0.001
-                        && a.y + a.h <= e.window.h + 0.001
-                );
-                for b in &rects[i + 1..] {
-                    let overlap = (a.x + a.w).min(b.x + b.w) - a.x.max(b.x) > 0.001
-                        && (a.y + a.h).min(b.y + b.h) - a.y.max(b.y) > 0.001;
-                    assert!(!overlap, "overlapping main groups");
+            if l.apply(op, w).is_err() {
+                assert_eq!(old, l);
+            } else {
+                successes[kind] += 1;
+                workspaces[wi] += 1;
+                hosts[hi] += 1;
+                if kind == 3 || kind == 4 {
+                    directions[di] += 1;
                 }
             }
+            l.validate(w).unwrap();
+            if kind != 15 && kind != 18 {
+                let a: std::collections::BTreeSet<_> = l.panels().into_iter().collect();
+                let b: std::collections::BTreeSet<_> = old.panels().into_iter().collect();
+                assert_eq!(a, b);
+            }
+            let solution = solve(&l, &e);
+            assert_eq!(solution, solve(&l, &e));
+            for group in l.groups() {
+                if group.collapsed {
+                    assert!(!solution.visible.contains(&group.tabs[group.active]));
+                }
+                let host = solution.hosts[&group.id];
+                let bound = host.map_or(
+                    Rect {
+                        x: 0.,
+                        y: 0.,
+                        w: e.window.w,
+                        h: e.window.h,
+                    },
+                    |id| solution.float_contents[&id],
+                );
+                for r in [
+                    solution.groups.get(&group.id),
+                    solution.headers.get(&group.id),
+                    solution.strips.get(&group.id),
+                    solution.sheets.get(&group.id),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    assert!(
+                        r.x >= 0.
+                            && r.y >= 0.
+                            && r.w >= 0.
+                            && r.h >= 0.
+                            && r.x + r.w <= bound.w + 0.001
+                            && r.y + r.h <= bound.h + 0.001,
+                        "out of host bounds {r:?} {bound:?}"
+                    );
+                }
+            }
+            let rects: Vec<_> = solution
+                .groups
+                .iter()
+                .chain(&solution.strips)
+                .chain(&solution.sheets)
+                .collect();
+            for (i, (id, a)) in rects.iter().enumerate() {
+                for (other, b) in &rects[i + 1..] {
+                    if solution.hosts[id] != solution.hosts[other] {
+                        continue;
+                    }
+                    assert!(
+                        !((a.x + a.w).min(b.x + b.w) - a.x.max(b.x) > 0.001
+                            && (a.y + a.h).min(b.y + b.h) - a.y.max(b.y) > 0.001),
+                        "overlapping host groups"
+                    );
+                }
+            }
+            if step % 8 == 7 {
+                let saved = file_cycle(store::to_value(&l));
+                assert_eq!(l, store::from_value(&saved, w).unwrap());
+            }
         }
-        let bytes = store::encode(&l).unwrap();
-        assert_eq!(l, store::decode(&bytes, Workspace::Animate).unwrap());
     }
+    println!(
+        "operation successes={successes:?}; directions={directions:?}; workspaces={workspaces:?}; hosts={hosts:?}"
+    );
+    // Fixed coverage obligations, not performance thresholds: every operation and direction must run often.
+    assert!(successes.iter().all(|n| *n >= 100));
+    assert!(directions.iter().all(|n| *n >= 100));
+    assert!(workspaces.iter().all(|n| *n >= 100));
+    assert!(hosts.iter().all(|n| *n >= 100));
 }
 
 #[test]
@@ -623,39 +754,7 @@ fn drag_cancellation_leaves_the_owner_byte_equal() {
     assert_eq!(store::encode(&l).unwrap(), bytes);
 }
 
-#[derive(Default)]
-struct MemoryStorage(std::sync::Mutex<Option<Vec<u8>>>);
-impl styk_services::storage::Storage for MemoryStorage {
-    fn load<'a>(
-        &'a self,
-        _: &'a str,
-        max: usize,
-    ) -> styk_services::files::FileFuture<'a, Option<std::sync::Arc<[u8]>>> {
-        Box::pin(async move {
-            let guard = self.0.lock().unwrap();
-            if guard.as_ref().is_some_and(|b| b.len() > max) {
-                return Err(styk_services::files::FileError::TooLarge);
-            }
-            Ok(guard.as_ref().map(|b| std::sync::Arc::from(b.as_slice())))
-        })
-    }
-    fn update<'a>(
-        &'a self,
-        _: &'a str,
-        max: usize,
-        update: styk_services::storage::Update,
-    ) -> styk_services::files::FileFuture<'a, ()> {
-        Box::pin(async move {
-            let mut guard = self.0.lock().unwrap();
-            let next = update(guard.as_deref()).map_err(styk_services::files::FileError::Io)?;
-            if next.len() > max {
-                return Err(styk_services::files::FileError::TooLarge);
-            }
-            *guard = Some(next);
-            Ok(())
-        })
-    }
-}
+use styk_services::storage::fake::MemoryStorage;
 fn ready<F: std::future::Future>(f: F) -> F::Output {
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
     match std::pin::pin!(f).poll(&mut cx) {
@@ -691,14 +790,14 @@ fn storage_transaction_merges_writers_and_preserves_a_newer_file() {
         },
     )
     .unwrap();
-    ready(a.save(&storage, 3)).unwrap();
-    ready(b.save(&storage, 3)).unwrap();
-    let bytes = storage.0.lock().unwrap().clone().unwrap();
+    ready(a.save(&storage, 3, &styk_services::Cancel::new())).unwrap();
+    ready(b.save(&storage, 3, &styk_services::Cancel::new())).unwrap();
+    let bytes = storage.get("layouts.json").unwrap();
     assert_eq!(store::LayoutFile::decode(&bytes).unwrap().user.len(), 2);
-    *storage.0.lock().unwrap() = Some(br#"{"version":4}"#.to_vec());
-    assert!(ready(a.save(&storage, 3)).is_err());
+    storage.put("layouts.json", br#"{"version":4}"#.to_vec());
+    assert!(ready(a.save(&storage, 3, &styk_services::Cancel::new())).is_err());
     assert_eq!(
-        storage.0.lock().unwrap().as_deref(),
+        storage.get("layouts.json").as_deref(),
         Some(br#"{"version":4}"#.as_slice())
     );
 }
@@ -1162,4 +1261,432 @@ fn unknown_fields_deleted_owners_do_not_contaminate_reused_slots() {
             .is_none()
     );
     assert_eq!(l, store::from_value(&saved, Workspace::Animate).unwrap());
+}
+
+fn review_roundtrip(l: &Layout) -> Layout {
+    store::from_value(&file_cycle(store::to_value(l)), Workspace::Animate).unwrap()
+}
+fn review_float() -> Zone {
+    Zone::Float {
+        rect: Rect {
+            x: 100.,
+            y: 100.,
+            w: 640.,
+            h: 480.,
+        },
+    }
+}
+#[test]
+fn review_group_return_order_and_activation() {
+    let mut l = essentials(Workspace::Animate);
+    apply(&mut l, Operation::Activate(2, 1));
+    let original = l.groups().into_iter().find(|g| g.id == 2).unwrap().clone();
+    apply(&mut l, Operation::MoveGroup(2, review_float()));
+    l = review_roundtrip(&l);
+    assert!(
+        solve(&l, &Env::new(1440., 900.))
+            .visible
+            .contains(&p("vfx"))
+    );
+    let id = l.floats[0].id;
+    apply(&mut l, Operation::DockBack(id));
+    l = review_roundtrip(&l);
+    let g = l.groups().into_iter().find(|g| g.id == 2).unwrap();
+    assert_eq!(g.tabs, original.tabs);
+    assert_eq!(g.active, original.active);
+    assert!(
+        solve(&l, &Env::new(1440., 900.))
+            .visible
+            .contains(&p("vfx"))
+    );
+}
+#[test]
+fn review_workspace_extension_after_edit_solve_save() {
+    let mut wire = store::state_to_value(&LayoutState::new(essentials(Workspace::Animate)));
+    add_future(&mut wire, &[]);
+    let mut state = store::state_from_value(&file_cycle(wire), Workspace::Animate).unwrap();
+    let mut next = state.current.clone();
+    apply(&mut next, Operation::Activate(2, 1));
+    state.commit(next, Workspace::Animate).unwrap();
+    assert!(
+        solve(&state.current, &Env::new(1440., 900.))
+            .visible
+            .contains(&p("vfx"))
+    );
+    assert_future_bytes(&mut file_cycle(store::state_to_value(&state)), &[]);
+}
+#[test]
+fn review_presented_panel_extensions_survive_save_and_return() {
+    for kind in ["tools", "layers"] {
+        let mut l = essentials(Workspace::Animate);
+        apply(
+            &mut l,
+            Operation::Move(p(kind), Zone::Tab { group: 2, index: 0 }),
+        );
+        let mut wire = store::to_value(&l);
+        let path = &[
+            "main", "kids", "0", "node", "kids", "1", "node", "tabs", "0",
+        ];
+        add_future(&mut wire, path);
+        l = store::from_value(&file_cycle(wire), Workspace::Animate).unwrap();
+        let op = if kind == "tools" {
+            Operation::Move(p(kind), Zone::StageTools { side: Side::Right })
+        } else {
+            Operation::JoinLayers
+        };
+        apply(&mut l, op);
+        assert!(solve(&l, &Env::new(1440., 900.)).visible.contains(&p(kind)));
+        l = review_roundtrip(&l);
+        apply(
+            &mut l,
+            Operation::Move(p(kind), Zone::Tab { group: 2, index: 0 }),
+        );
+        assert!(solve(&l, &Env::new(1440., 900.)).visible.contains(&p(kind)));
+        assert_future_bytes(&mut file_cycle(store::to_value(&l)), path);
+    }
+}
+#[test]
+fn review_float_collapse_hides_body_and_preserves_frame() {
+    let mut l = essentials(Workspace::Animate);
+    apply(&mut l, Operation::MoveGroup(2, review_float()));
+    let gid = l.floats[0].root.id();
+    let frames = l.floats[0].frames.clone();
+    apply(&mut l, Operation::Collapse(gid, true));
+    l = review_roundtrip(&l);
+    let s = solve(&l, &Env::new(1440., 900.));
+    assert!(!s.visible.contains(&p("properties")));
+    assert!(s.headers[&gid].h <= 44.);
+    assert_eq!(s.floats[&l.floats[0].id].h, 44.);
+    assert_eq!(l.floats[0].frames, frames);
+    apply(&mut l, Operation::Collapse(gid, false));
+    let s = solve(&review_roundtrip(&l), &Env::new(1440., 900.));
+    assert!(s.visible.contains(&p("properties")));
+    assert_eq!(s.floats[&l.floats[0].id].h, 480.);
+}
+#[test]
+fn review_float_host_local_logical_geometry_at_two_scales() {
+    for scale in [1., 2.] {
+        let mut l = essentials(Workspace::Animate);
+        apply(
+            &mut l,
+            Operation::MoveGroup(
+                2,
+                Zone::Float {
+                    rect: Rect {
+                        x: 2000.,
+                        y: 100.,
+                        w: 640. * scale,
+                        h: 480. * scale,
+                    },
+                },
+            ),
+        );
+        l = review_roundtrip(&l);
+        let mut e = Env::new(1440., 900.);
+        e.screens.push(Screen {
+            key: 7,
+            work: Rect {
+                x: 1920.,
+                y: 0.,
+                w: 2560.,
+                h: 1440.,
+            },
+            scale,
+            primary: true,
+        });
+        let s = solve(&l, &e);
+        let gid = l.floats[0].root.id();
+        assert_eq!(
+            s.groups[&gid],
+            Rect {
+                x: 0.,
+                y: 0.,
+                w: 640.,
+                h: 480.
+            }
+        );
+        assert_eq!(s.headers[&gid].h, 40.);
+        assert_eq!(s.floats[&l.floats[0].id].x, 2000.);
+        assert!(
+            !matches!(drop_zone(&l,&p("tools"),&s,&e,320.,20.),Zone::Tab{group,..} if group==gid)
+        );
+        e.hit_host = Some(l.floats[0].id);
+        assert!(
+            matches!(drop_zone(&l,&p("tools"),&s,&e,320.,20.),Zone::Tab{group,..} if group==gid)
+        );
+    }
+}
+#[test]
+fn review_fold_hysteresis_survives_intermediate_sizes() {
+    let l = review_roundtrip(&essentials(Workspace::Animate));
+    for (sizes, vertical, id) in [
+        (vec![800., 808., 810., 816.], false, 2),
+        (vec![568., 576., 578., 584.], true, 3),
+    ] {
+        let mut previous = FitState::default();
+        for (i, size) in sizes.into_iter().enumerate() {
+            let mut e = if vertical {
+                Env::new(1440., size)
+            } else {
+                Env::new(size, 900.)
+            };
+            e.previous = previous;
+            let s = solve(&l, &e);
+            assert_eq!(
+                s.fit.folded.contains_key(&id),
+                i < 3,
+                "axis {vertical} size {size}"
+            );
+            previous = s.fit;
+        }
+    }
+}
+#[test]
+fn review_migration_left_width_and_stack_weights() {
+    let v=styk_doc::json::parse(br#"{"modes":{"animate":{"panels":[{"id":"library","dock":"left","group":0},{"id":"vfx","dock":"left","group":1}],"weights":{"left":[2,3]}}},"shared":{"sizes":{"left":400,"right":280,"bottom":264}}}"#).unwrap();
+    let geo = store::MigrationGeometry {
+        window: Size { w: 1800., h: 1000. },
+        stage: Rect {
+            x: 0.,
+            y: 0.,
+            w: 1000.,
+            h: 700.,
+        },
+        client_x: 0.,
+        client_y: 0.,
+        scale: 1.,
+        setup: 0,
+    };
+    let imported = store::import_v2(&v, &geo);
+    let l = review_roundtrip(&imported.layouts["animate"]);
+    let s = solve(&l, &Env::new(1800., 1000.));
+    let gid = |kind| {
+        l.groups()
+            .into_iter()
+            .find(|g| g.tabs.contains(&p(kind)))
+            .unwrap()
+            .id
+    };
+    assert_eq!(s.groups[&gid("library")].w, 400.);
+    assert_eq!(s.groups[&gid("vfx")].w, 400.);
+    assert_eq!(s.groups[&gid("properties")].w, 280.);
+    fn weights(n: &Node) -> bool {
+        match n {
+            Node::Split {
+                axis: Axis::Vertical,
+                kids,
+                ..
+            } if kids.len() == 2
+                && matches!(kids[0].size, Sz::Flex(2.))
+                && matches!(kids[1].size, Sz::Flex(3.)) =>
+            {
+                true
+            }
+            Node::Split { kids, .. } => kids.iter().any(|k| weights(&k.node)),
+            _ => false,
+        }
+    }
+    assert!(weights(l.main.as_ref().unwrap()));
+}
+
+#[test]
+fn review_storage_cancel_before_commit_preserves_existing_save() {
+    let storage = MemoryStorage::default();
+    let mut file = store::LayoutFile::default();
+    let mut l = essentials(Workspace::Animate);
+    apply(&mut l, Operation::Activate(2, 1));
+    assert!(
+        solve(&l, &Env::new(1440., 900.))
+            .visible
+            .contains(&p("vfx"))
+    );
+    file.save_user(
+        "a",
+        "test",
+        &[Workspace::Animate],
+        &l,
+        store::Stamp {
+            millis: 1,
+            writer: "test".into(),
+        },
+    )
+    .unwrap();
+    ready(file.save(&storage, 1, &styk_services::Cancel::new())).unwrap();
+    let before = storage.get("layouts.json");
+    let cancel = styk_services::Cancel::new();
+    cancel.cancel();
+    assert!(ready(file.save(&storage, 2, &cancel)).is_err());
+    assert_eq!(storage.get("layouts.json"), before);
+}
+#[test]
+fn review_shortfall_work_is_bounded_by_nodes_and_depth() {
+    let mut l = essentials(Workspace::Animate);
+    let mut kids = vec![Kid {
+        node: l.main.take().unwrap(),
+        size: Sz::Flex(1.),
+    }];
+    for i in 0..1024 {
+        kids.push(Kid {
+            node: tabs(100 + i, &[&format!("future-{i}")]),
+            size: Sz::Flex(1.),
+        });
+    }
+    l.main = Some(Node::Split {
+        id: 3000,
+        axis: Axis::Horizontal,
+        kids,
+    });
+    apply(&mut l, Operation::Activate(2, 1));
+    l = review_roundtrip(&l);
+    super::solve::WORK.with(|c| c.set(0));
+    let solution = solve(&l, &Env::new(900., 900.));
+    assert!(solution.fit.folded.len() >= 1024);
+    let visits = super::solve::WORK.with(|c| c.get());
+    assert!(
+        visits <= 3 * 129 * 1030,
+        "{visits} summary visits exceeded three updates per ancestor at the codec's 128-level depth bound"
+    );
+}
+
+fn shortfall_layout(extra: u32) -> Layout {
+    let mut l = essentials(Workspace::Animate);
+    let mut kids = vec![Kid {
+        node: l.main.take().unwrap(),
+        size: Sz::Flex(1.),
+    }];
+    for i in 0..extra {
+        kids.push(Kid {
+            node: tabs(100 + i, &[&format!("future-{i}")]),
+            size: Sz::Flex(1.),
+        });
+    }
+    l.main = Some(Node::Split {
+        id: 100 + extra,
+        axis: Axis::Horizontal,
+        kids,
+    });
+    apply(&mut l, Operation::Activate(2, 1));
+    l
+}
+#[test]
+#[ignore = "release shortfall measurement through the machine queue"]
+fn solver_measurement_shortfall() {
+    // No group-count cap is introduced. Find the largest member of this wide-tree family that
+    // fits the existing 256 KiB persistence bound, as well as the design's 40-group budget case.
+    fn file_bytes(l: &Layout) -> Result<Vec<u8>, LayoutError> {
+        let mut file = store::LayoutFile::default();
+        file.workspaces.insert(
+            "animate".into(),
+            store::Entry {
+                stamp: store::Stamp {
+                    millis: 1,
+                    writer: "test".into(),
+                },
+                value: store::to_value(l),
+            },
+        );
+        file.encode()
+    }
+    let mut low = 37;
+    let mut high = 10000;
+    while low + 1 < high {
+        let mid = (low + high) / 2;
+        if file_bytes(&shortfall_layout(mid)).is_ok() {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    for extra in [37, low] {
+        let l = review_roundtrip(&shortfall_layout(extra));
+        let e = Env::new(801., 600.);
+        let result = solve(&l, &e);
+        assert!(result.fit.folded.len() >= extra as usize);
+        let bytes = file_bytes(&l).unwrap();
+        let mut samples = vec![];
+        for _ in 0..1000 {
+            let start = std::time::Instant::now();
+            std::hint::black_box(solve(std::hint::black_box(&l), std::hint::black_box(&e)));
+            samples.push(start.elapsed().as_nanos());
+        }
+        samples.sort_unstable();
+        println!(
+            "layout.shortfall groups={} bytes={} folded={} p50={} ns p99={} ns max={} ns",
+            extra + 3,
+            bytes.len(),
+            result.fit.folded.len(),
+            samples[500],
+            samples[990],
+            samples[999]
+        );
+        if extra == 37 {
+            assert!(samples[500] <= 200_000, "design p50 0.2 ms");
+            assert!(samples[990] <= 500_000, "design p99 0.5 ms");
+        }
+    }
+}
+
+#[test]
+fn review_storage_failures_and_dropped_save_clean_staging() {
+    use std::{
+        future::Future,
+        task::{Context, Waker},
+    };
+    use styk_services::storage::fake::Failure;
+    let storage = MemoryStorage::default();
+    let mut file = store::LayoutFile::default();
+    let mut l = essentials(Workspace::Animate);
+    apply(&mut l, Operation::Activate(2, 1));
+    assert!(
+        solve(&l, &Env::new(1440., 900.))
+            .visible
+            .contains(&p("vfx"))
+    );
+    file.save_user(
+        "a",
+        "old",
+        &[Workspace::Animate],
+        &l,
+        store::Stamp {
+            millis: 1,
+            writer: "test".into(),
+        },
+    )
+    .unwrap();
+    ready(file.save(&storage, 1, &styk_services::Cancel::new())).unwrap();
+    let before = storage.get("layouts.json").unwrap();
+    apply(&mut l, Operation::Reorder(2, 0, 2));
+    file.save_user(
+        "a",
+        "new",
+        &[Workspace::Animate],
+        &l,
+        store::Stamp {
+            millis: 2,
+            writer: "test".into(),
+        },
+    )
+    .unwrap();
+    for failure in [
+        Failure::Stage,
+        Failure::CancelBeforeCommit,
+        Failure::PauseBeforeCommit,
+    ] {
+        storage.fail(failure);
+        let cancel = styk_services::Cancel::new();
+        let mut save = Box::pin(file.save(&storage, 2, &cancel));
+        let result = save.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+        if failure == Failure::PauseBeforeCommit {
+            assert!(result.is_pending());
+            assert!(storage.staged());
+        } else {
+            assert!(matches!(result, std::task::Poll::Ready(Err(_))));
+        }
+        drop(save);
+        assert!(!storage.staged());
+        assert_eq!(storage.get("layouts.json").unwrap(), before);
+    }
+    storage.fail(Failure::None);
+    ready(file.save(&storage, 2, &styk_services::Cancel::new())).unwrap();
+    assert_ne!(storage.get("layouts.json").unwrap(), before);
 }

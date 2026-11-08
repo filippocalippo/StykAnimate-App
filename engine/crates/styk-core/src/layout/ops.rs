@@ -66,6 +66,12 @@ impl Layout {
                     return Err(LayoutError::InvalidTarget);
                 }
                 let active = g.tabs[g.active].clone();
+                // Capture the unmodified group: removals otherwise shift every later index.
+                let placements: Vec<_> = g
+                    .tabs
+                    .iter()
+                    .filter_map(|p| self.return_placement(p).map(|hint| (p.clone(), hint)))
+                    .collect();
                 let mut dest = None;
                 for p in g.tabs {
                     let target = dest.map_or_else(
@@ -82,6 +88,7 @@ impl Layout {
                         .find(|g| g.tabs.contains(&p))
                         .map(|g| g.id);
                 }
+                self.returns.extend(placements);
                 if let Some(g) = dest.and_then(|id| self.group_mut(id)) {
                     g.active = g.tabs.iter().position(|p| *p == active).unwrap_or(0);
                 }
@@ -121,9 +128,21 @@ impl Layout {
                     .ok_or(LayoutError::Missing)?;
                 let mut groups = vec![];
                 f.root.groups(&mut groups);
-                let panels: Vec<_> = groups.iter().flat_map(|g| g.tabs.clone()).collect();
+                let active: Vec<_> = groups.iter().map(|g| g.tabs[g.active].clone()).collect();
+                let mut panels: Vec<_> = groups.iter().flat_map(|g| g.tabs.clone()).collect();
+                panels.sort_by_key(|p| self.returns.get(p).map(|h| (h.group, h.index)));
                 for p in panels {
                     self.restore(p)?;
+                }
+                for p in active {
+                    let id = self
+                        .groups()
+                        .into_iter()
+                        .find(|g| g.tabs.contains(&p))
+                        .map(|g| g.id);
+                    if let Some(g) = id.and_then(|id| self.group_mut(id)) {
+                        g.active = g.tabs.iter().position(|tab| *tab == p).unwrap_or(0);
+                    }
                 }
             }
             Operation::Collapse(id, on) => {
@@ -285,47 +304,53 @@ impl Layout {
             .chain(self.floats.iter().map(|f| &f.root))
             .any(|n| has(n, id))
     }
+    fn return_placement(&self, p: &PanelId) -> Option<ReturnPlacement> {
+        let g = self.groups().into_iter().find(|g| g.tabs.contains(p))?;
+        let gid = g.id;
+        let index = g.tabs.iter().position(|x| x == p)?;
+
+        if self.main.as_ref().is_some_and(|n| {
+            let mut v = vec![];
+            n.groups(&mut v);
+            v.iter().any(|g| g.id == gid)
+        }) {
+            fn anchor(n: &Node, gid: u32) -> Option<(u32, Side, Sz)> {
+                if let Node::Split { axis, kids, .. } = n {
+                    for (i, k) in kids.iter().enumerate() {
+                        if k.node.id() == gid {
+                            let j = if i == 0 { 1 } else { i - 1 };
+                            let side = match (*axis, i == 0) {
+                                (Axis::Horizontal, true) => Side::Left,
+                                (Axis::Horizontal, false) => Side::Right,
+                                (Axis::Vertical, true) => Side::Top,
+                                _ => Side::Bottom,
+                            };
+                            return Some((kids[j].node.id(), side, k.size));
+                        }
+                        if let Some(a) = anchor(&k.node, gid) {
+                            return Some(a);
+                        }
+                    }
+                }
+                None
+            }
+            let a = self.main.as_ref().and_then(|n| anchor(n, gid));
+            return Some(ReturnPlacement {
+                group: gid,
+                index,
+                sibling: a.map(|a| a.0),
+                side: a.map_or(Side::Right, |a| a.1),
+                size: a.map_or(Sz::Px(320.), |a| a.2),
+            });
+        }
+
+        None
+    }
     fn take(&mut self, p: &PanelId) -> Result<(), LayoutError> {
         if let Some(g) = self.groups().iter().find(|g| g.tabs.contains(p)) {
             let gid = g.id;
-            let index = g.tabs.iter().position(|x| x == p).unwrap_or(0);
-            // A float keeps the return anchor captured at tear-off, even after tab merging.
-            if self.main.as_ref().is_some_and(|n| {
-                let mut v = vec![];
-                n.groups(&mut v);
-                v.iter().any(|g| g.id == gid)
-            }) {
-                fn anchor(n: &Node, gid: u32) -> Option<(u32, Side, Sz)> {
-                    if let Node::Split { axis, kids, .. } = n {
-                        for (i, k) in kids.iter().enumerate() {
-                            if k.node.id() == gid {
-                                let j = if i == 0 { 1 } else { i - 1 };
-                                let side = match (*axis, i == 0) {
-                                    (Axis::Horizontal, true) => Side::Left,
-                                    (Axis::Horizontal, false) => Side::Right,
-                                    (Axis::Vertical, true) => Side::Top,
-                                    _ => Side::Bottom,
-                                };
-                                return Some((kids[j].node.id(), side, k.size));
-                            }
-                            if let Some(a) = anchor(&k.node, gid) {
-                                return Some(a);
-                            }
-                        }
-                    }
-                    None
-                }
-                let a = self.main.as_ref().and_then(|n| anchor(n, gid));
-                self.returns.insert(
-                    p.clone(),
-                    ReturnPlacement {
-                        group: gid,
-                        index,
-                        sibling: a.map(|a| a.0),
-                        side: a.map_or(Side::Right, |a| a.1),
-                        size: a.map_or(Sz::Px(320.), |a| a.2),
-                    },
-                );
+            if let Some(hint) = self.return_placement(p) {
+                self.returns.insert(p.clone(), hint);
             }
             if let Some(g) = self.group_mut(gid) {
                 let active = g.tabs.get(g.active).cloned();

@@ -109,8 +109,8 @@ impl UnknownRecords {
                 live.insert(Record::SetupRect(f.id, *setup));
             }
         }
-        for p in layout.closed.iter().chain(&layout.dormant) {
-            live.insert(Record::Panel(p.clone()));
+        for p in layout.panels() {
+            live.insert(Record::Panel(p));
         }
         for p in layout.returns.keys() {
             live.insert(Record::Return(p.clone()));
@@ -228,7 +228,7 @@ fn walk(v: &mut Value, visit: &mut Visitor<'_>) {
             }
         });
     });
-    for key in ["closed", "dormant"] {
+    for key in ["closed", "dormant", "presentedPanels"] {
         array(v, key, |p| panel(p, false, visit));
     }
     array(v, "returns", |r| {
