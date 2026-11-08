@@ -95,3 +95,4 @@ pub mod budget;
 
 pub mod channel;
 pub mod schema;
+pub mod memory;
