@@ -56,7 +56,7 @@ pub fn chooser<'a, Message: Clone + 'a>(palette: &'static Palette, presentation:
         }
     };
     let open = wires.open.clone();
-    let select = Select::new(ids::SELECT, FocusArea::Panels, palette, options(presentation, model), model.selected, move |request| open(request), step).into_element();
+    let select = Select::new(ids::SELECT, FocusArea::Panels, palette, options(presentation, model), model.selected, move |request| open(request), step).form(true).into_element();
     let field = Column::with_children(vec![text(say(&words::FIELD), TextStyle::from_role(&tokens::scale::TYPE_UI), palette.text_1), select]).spacing(tokens::scale::SPACE_1_5);
     let body = Column::with_children(vec![field.boxed(), text(say(&words::NOTE), TextStyle::from_role(&tokens::scale::TYPE_BODY), palette.text_2)]).spacing(tokens::scale::SPACE_3);
     let send = |event: Event| (wires.send)(event);

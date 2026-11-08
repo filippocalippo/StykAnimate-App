@@ -275,7 +275,17 @@ fn the_close_prompt_is_mounted_and_its_buttons_answer_the_host() {
     let mut app = App::new(&root, &[]);
     let id = app.core.documents.active().unwrap().id();
     styk_core::testing::call(&mut app.core, "setFPS", "[30]").unwrap();
-    app.core.documents.dispatch(styk_core::documents::Request::Close(id)).map_err(|(error, _)| error).unwrap();
+    // The host answers Busy while its own work (an autosave of the edit) is in flight: ask again as a person would.
+    for turn in 0..15_000 {
+        match app.core.documents.dispatch(styk_core::documents::Request::Close(id)) {
+            Ok(_) => break,
+            Err((styk_core::documents::HostError::Documents(styk_core::documents::DocumentsError::Busy), _)) if turn < 14_999 => {
+                app.frame(|_| true);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err((error, _)) => panic!("close: {error}"),
+        }
+    }
     app.frame(|core| core.recovery().closing().is_some());
     let sent = app.click_messages(ids::KEEP_EDITING);
     assert_eq!(App::commands(&sent), [Message::Command(Command::Recovery(Ask::Respond(Choice::Cancel)))]);

@@ -143,8 +143,7 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
   effect has no consumer), so a quit that chooses Save does not end yet.
 
 Screens: `recovery-offer`, `recovery-chooser`, `recovery-busy`, `recovery-error` and `close-prompt`, each in both themes, against
-today's own modules (`engine/crates/styk-app/automation/recovery-reference/screens.mjs`). The select's chevron is 12 px natively and
-16 px in today's dialog form. The interaction script is `engine/crates/styk-ui/tests/recovery.auto` (`recovery ...` steps and `expect
+today's own modules (`engine/crates/styk-app/automation/recovery-reference/screens.mjs`). The select draws today's dialog form there (`Select::form`: a `--icon-sm` chevron 10 px from the end; the inspector's field keeps its `--icon-xs` one). The interaction script is `engine/crates/styk-ui/tests/recovery.auto` (`recovery ...` steps and `expect
 recovery ...` in `styk_core::automation`), run through the widgets by `styk-ui/tests/recovery.rs`, which also drives Restore and
 Discard and the close prompt's Cancel through the mounted buttons to the core and the host. Logic tests: `styk-core/tests/recovery_views.rs`.
 

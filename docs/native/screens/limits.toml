@@ -418,35 +418,35 @@ height = 1270
 # past a channel difference of 24): the measurement rounded up to three places plus 0.002. Each limit is above 0.02 for the same reason:
 # the screens are small and nearly all text, and the native renderer and Chromium rasterise glyph edges differently by more than 24
 # levels (ClearType fringes against grayscale); side by side at 100 % and 200 % the layout, sizes, colours, icons and words are the same
-# to within half a pixel. What differs visibly is the select's chevron, 12 px here and 16 px in today's dialog form.
+# to within half a pixel. Re-measured after the select drew its dialog form (a `--icon-sm` chevron, 10 px from the end).
 
 ["recovery-offer"]
 reference = "docs/native/screens/recovery/recovery-offer.png"
-max_difference = 0.038
+max_difference = 0.037
 width = 640
 height = 140
 
 ["recovery-offer-dark"]
 reference = "docs/native/screens/recovery/recovery-offer-dark.png"
-max_difference = 0.040
+max_difference = 0.039
 width = 640
 height = 140
 
 ["recovery-chooser"]
 reference = "docs/native/screens/recovery/recovery-chooser.png"
-max_difference = 0.034
+max_difference = 0.033
 width = 520
 height = 360
 
 ["recovery-chooser-dark"]
 reference = "docs/native/screens/recovery/recovery-chooser-dark.png"
-max_difference = 0.032
+max_difference = 0.031
 width = 520
 height = 360
 
 ["recovery-busy"]
 reference = "docs/native/screens/recovery/recovery-busy.png"
-max_difference = 0.032
+max_difference = 0.031
 width = 520
 height = 360
 
@@ -470,12 +470,12 @@ height = 360
 
 ["close-prompt"]
 reference = "docs/native/screens/recovery/close-prompt.png"
-max_difference = 0.032
+max_difference = 0.031
 width = 520
 height = 300
 
 ["close-prompt-dark"]
 reference = "docs/native/screens/recovery/close-prompt-dark.png"
-max_difference = 0.030
+max_difference = 0.029
 width = 520
 height = 300
