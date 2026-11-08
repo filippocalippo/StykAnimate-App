@@ -24,7 +24,9 @@ Everything is one Cargo workspace (`engine/`, members `engine/crates/*`). The en
 
 Dependencies point one way: `styk-app` → `styk-ui` → `styk-core` → engine crates and `styk-services`. The engine types
 the core passes on to its own logic are re-exported in one place, `styk_core::engine`; `styk-ui` and the developer tools'
-views never name it or an engine crate, and see only plain view models (`cargo xtask check` enforces it). Nothing in the
+views never name it or an engine crate, and see only plain view models (`cargo xtask check` enforces it). Document data is
+read and written as JSON only through `styk_doc::json` (V8-exact numbers and key order); `serde_json` is allowed only in the
+developer tools (`styk-cli`, `styk-devtools-engine`) for their own protocol and schemas, never for document data. Nothing in the
 engine or the core depends on iced, `styk-ui` or `styk-devtools`. A different front end (a touch layout, Slint, a newer
 toolkit) sits on `styk-core` without rewriting a feature; the core's features are tested without a window.
 
