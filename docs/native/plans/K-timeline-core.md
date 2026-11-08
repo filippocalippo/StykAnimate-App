@@ -1,7 +1,7 @@
 # K-timeline core: plan for review
 
 Base: `native-app` / `origin/native-app` at `a4aa1e0c4f4d0dbe86d89d7cc652738f97bd8537`.
-Step 1 only; implementation starts after the orchestrator returns Sol's plan check.
+Sol approved the plan with the two amendments below; part 1 implementation is authorized.
 
 ## Parts and inventory reconciliation
 
@@ -23,7 +23,10 @@ Part 1 supplies both modes' frame/layer models, cell/card/layer selection, Edit 
 seeking/scrubbing, first/previous/next/last/key navigation, Go to frame, FPS editing, playback limits,
 looping, startup/buffering/pause and presentation feedback. Layers/folders/exposures are read-only;
 frame edits, organization, thumbnails, full navigation geometry, specialized lanes, onion editing
-and widgets follow later. Their unfinished actions remain explicitly unavailable.
+and widgets follow later. Part 1 owns the minimum navigation geometry: row/tick hit testing,
+viewport/scroll state, reveal calculations and scrub edge scrolling. TL-033 and TL-039 are shared
+dependencies of part 1 and their listed later parts (122 unique rows; two cross-part dependencies,
+not additional rows). Broader zoom/navigation tools remain later. Unfinished actions stay unavailable.
 
 ## Part 1 ownership
 
@@ -45,9 +48,12 @@ Follow [patterns](../patterns.md), [documents](../documents.md), [commands](../c
 - K-frames owns preparation, lookahead, cancellation and caches; K-stage owns complete pictures and
   submission. S4's `AudioTransport` owns sound, decode jobs and stream clock. K-cmd owns registry,
   shortcuts, gesture queue and focus routing; K-dock owns panel placement. Reuse these owners.
-- No general native settings owner exists at this base: introduce the minimal shared
-  `styk_core::settings` record/service adapter for timeline preferences, using `Storage`, not a
-  timeline-private file. Part 1 consumes effective auto-key/onion preferences; part 5 adds controls.
+- Build the Settings design's actual `styk_core::settings` owner minimally now: typed `Settings`
+  and `ViewMemory`, one mutation path returning `Change` and effects, with change/revert notifications
+  routed through `Core::dispatch`. Use the schema-1 `settings.json` envelope, separating `values`
+  from `view`, and load transport preferences now, including fit-on-playback. Later controls extend
+  this same owner. The implemented asynchronous transactional `Storage`/K-store `LocalStorage`
+  contract supersedes the design's older synchronous signatures; native session ready reads apply.
   `timeline::onion` will own only enabled state and an uncommitted preference patch; sampling stays
   in the engine. Search/filter/folder collapse belong to the panel; part 2 adds their actions using
   the session's focus-lock seam. The shared hidden-layer filter survives mode switches.
@@ -84,11 +90,14 @@ Replacement resets transient state even if the tab ID survives; stale replies ca
 playback. No interface-thread worker joins.
 
 Document bytes keep today's session/format path, including existing active-layer metadata, FPS,
-unknown fields and legacy drafts; no new timeline fields. Settings persist `timelineMode` and
-`loopPlayback` (which today's code saves), then auto-key, drop policy, fit and onion preferences as
-their controls land. Storage merges only changed keys, preserves unknowns, rejects stale loads
-over local edits and retains failed writes for retry; ordering stamps/writer identity follow the
-existing storage/layout pattern. Ranges, selections, gestures, zoom, filters and playback intent
+unknown fields and legacy drafts; no new timeline fields. Settings import today's legacy preferences
+without changing the legacy file, preserve unknown fields, and refuse writes over a newer schema
+both at load and within the transaction. Persist `timelineMode`, `loopPlayback`, drop policy,
+fit-on-playback and playback quality in `values`, and auto-key/onion preferences in `view`.
+Merge changed keys only; late loads cannot overwrite local edits. Failed writes retry with the
+layout queue's identical backoff. Change/revert effects travel through dispatch, not a view callback.
+Ordering stamps/writer identity follow the existing storage/layout pattern.
+Ranges, selections, gestures, zoom, filters and playback intent
 remain transient. Onion previews persist only on commit; seek/history/replacement cancels them.
 
 ## Commands, messages and view contract
@@ -114,6 +123,8 @@ part 1. Later parts register local actions before exposing them; automation uses
 Views read engine-free `Clone + PartialEq` header/transport, visible layer/exposure/card and
 selection models, with IDs, counts, ranges, pending/enabled reasons, `i18n::Label/Msg`, focus targets
 and deadlines. They send action IDs, values/pointer phases/modifiers and viewport metrics only.
+The core maps pointer coordinates to row/tick, calculates visible slices/reveal/scroll and advances
+scrub edge scrolling on injected time; views never perform this navigation logic.
 Inspector range controls share ViewState. Models/events also build with the engine feature off.
 
 ## Verification after the plan check
@@ -123,6 +134,8 @@ Through the T1 machine queue: targeted core/changed-crate tests, build, clippy a
 time; mutation-check each new wiring test. Cover both modes, selection/locks, exact scrub release,
 range shrink, one-entry FPS edit/undo/redo, stale replies, startup/stall/loop/audio failure,
 save/close Busy and replacement. Compare today's executable results and saved bytes after edits,
+Test settings through real transactional Storage: newer-schema refusal, unknown fields,
+legacy import and failed-write retry, in addition to injected load/change/revert ordering.
 undo/redo and reopen, with an old-versus-old baseline first; only demonstrated baseline variability
 may differ. Frozen fixtures and thresholds stay unchanged. No screenshot claim before views exist.
 
@@ -130,6 +143,6 @@ may differ. Frozen fixtures and thresholds stay unchanged. No screenshot claim b
 
 Reconcile 78 direct rows with 44 named dependencies rather than inventing ownership; use native
 session ownership and executable sheet behavior over stale read-view/F6/draft descriptions.
-Sequence navigation/transport before editing gestures; introduce one shared settings owner because
-only Storage exists. Step 1 seeds via the prescribed script but builds/runs no app. The orchestrator
-obtains Sol's review; this implementer stops after committing.
+Sequence navigation/transport before editing gestures. The approved amendments require the Settings
+design's actual typed owner and minimum core navigation geometry now. Step 1 seeded via the prescribed
+script without a build. This amendment is committed before part 1 implementation.
