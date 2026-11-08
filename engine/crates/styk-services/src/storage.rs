@@ -7,7 +7,8 @@ use std::sync::Arc;
 pub type Update = Box<dyn FnOnce(Option<&[u8]>) -> Result<Vec<u8>, String> + Send>;
 
 pub trait Storage: Send + Sync {
-    /// Read without creating or rewriting a missing file.
+    /// Read without creating or rewriting a missing file. Concurrent replacement of an existing
+    /// file must never appear as `None`; a missing path open needs confirmation after the writer.
     fn load<'a>(&'a self, name: &'a str, maximum: usize) -> FileFuture<'a, Option<Arc<[u8]>>>;
     /// Acquire the per-profile lock on the worker, read under the lock, call update, stage, flush and replace.
     /// Observe cancellation while acquiring the lock and doing bounded I/O. Stage and flush first,

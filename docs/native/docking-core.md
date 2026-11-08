@@ -81,6 +81,12 @@ on the worker and should return promptly; file I/O uses K-doc's bounded chunks a
 
 Reads share `styk-platform::files`' bounded reader, including the check after a file grows; writes
 use `LocalFiles::replace` unchanged in ownership, staging names, flushing and atomic replacement.
+Successful reads hold one handle and do not take the profile lock. A missing path open is rechecked
+under the existing profile lock, after any in-flight replacement settles, before returning `None`.
+The recheck never creates a directory or lock file; if no lock exists, no writer held it at that
+observation. Waiting uses the same cancellable worker acquisition as updates, including when a
+load future is dropped. This keeps transient absence from triggering first-launch defaults/imports.
+The [replacement investigation](storage-replacement.md) records the Windows API and crash-test boundaries.
 Only the transaction's own staging is removed. A committed replacement stays committed even if
 the caller subsequently drops the future or cancels. Storage errors reach the caller unchanged.
 Core tests retain the in-memory implementation and refusal over a newer file.
