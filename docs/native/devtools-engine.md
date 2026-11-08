@@ -89,15 +89,15 @@ results before calling the envelope writer; the writer is not an allocator for a
 
 ## Scenarios, budgets and profiles
 
-The one application language and parser belong to `styk_core::automation` (K-shell). Until that
-parser merges, `scenario` contains only a private-to-the-tooling transitional parser seam; it is
-not a second supported language. After the K-shell handoff, move `frame`, `export` and `advance`
-into the core step enum/parser and consume those steps here. Keep measurement and budget judging
-in the developer runner. Do not add shell, input or window syntax to the transitional parser.
+The one application language and parser belong to `styk_core::automation`. Its steps include
+`open <file>`, `frame <tick>`, `export`, `advance <nanoseconds>` and budget declarations. The
+developer engine consumes that AST; measurement and budget judging remain in the runner. There
+is no separate tooling parser. The headless runner refuses unsupported UI steps with their source
+line before starting work.
 
-`styk-auto/1` supports `file <repository fixture>`, `open`, `frame <tick>`, `export`,
-`advance <nanoseconds>`, comments and budget lines. Scripts are at most 64 KiB/1024 steps and
-64 budgets. Only `advance` changes logical time. Measurement uses a separate real `Clock`.
+Repository scripts use the `styk-auto/1` header. Core bounds scripts at 64 KiB; the headless runner
+also admits at most 1024 actions and 64 budgets, checking actual AST and string capacities before
+cloning or spawning. Only `advance` changes logical time. Measurement uses a separate real `Clock`.
 One scenario task starts through `Spawner`; interface callers poll the single completion slot.
 Only the offline CLI waits. Repository scenarios cover open, a headless frame and CPU export.
 
@@ -107,6 +107,9 @@ pins the document revision, alternates bounded picture uploads with engine progr
 finishes, and writes the first run's PNG; subsequent runs must have identical
 pixel hashes. The CLI writes a profile, a bounded capture, Perfetto JSON and a short summary.
 It hashes the input rather than exposing its path or contents. Existing output directories fail.
+`styk profile --scenario <script.styk-auto>` derives the input from its first `open`; `xtask scenario`
+uses this entry point. Relative paths resolve against the script's directory. Every `open` in a
+profile must identify that same hashed input, including when an explicit input was supplied.
 The export regression first exports twice through the existing CLI path to establish a byte-stable
 baseline, then compares the scenario PNG bytes with that baseline.
 

@@ -333,15 +333,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
                 return Err("invalid scenario name".into());
             }
             let path = format!("scenarios/{name}.styk-auto");
-            let text = fs::read_to_string(root.join(&path)).map_err(|e| e.to_string())?;
-            if text.len() > 65536 {
-                return Err("scenario too large".into());
-            }
-            let file = text
-                .lines()
-                .find_map(|l| l.strip_prefix("file "))
-                .ok_or("scenario needs a file header")?;
-            let mut a = vec!["profile".into(), file.into(), path];
+            let mut a = vec!["profile".into(), "--scenario".into(), path];
             a.extend_from_slice(&rest[1..]);
             cli(root, &a)
         }

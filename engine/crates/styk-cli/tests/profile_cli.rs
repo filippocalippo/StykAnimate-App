@@ -156,7 +156,7 @@ fn a_budget_miss_is_exit_one_with_a_structured_error() {
     std::fs::create_dir_all(&dir).unwrap();
     let script = dir.join("miss.styk-auto");
     // Zero is deliberately impossible for a measured open, testing exit semantics rather than tuning a performance target.
-    std::fs::write(&script, "styk-auto/1\nbudget scenario.ms <= 0ms\nopen\n").unwrap();
+    std::fs::write(&script, format!("styk-auto/1\nbudget scenario.ms <= 0ms\nopen {}\n", root().join("engine/tests/edit/startup.document.json").display())).unwrap();
     let profile = dir.join("profile");
     let output = Command::new(env!("CARGO_BIN_EXE_styk"))
         .current_dir(root())
@@ -184,6 +184,35 @@ fn a_budget_miss_is_exit_one_with_a_structured_error() {
         std::fs::remove_file(profile.join(name)).unwrap();
     }
     std::fs::remove_dir(profile).unwrap();
+    std::fs::remove_file(script).unwrap();
+    std::fs::remove_dir(dir).unwrap();
+}
+
+#[test]
+fn shared_scripts_resolve_their_input_and_refuse_a_different_profile_input() {
+    let dir = root().join(format!("artifacts/profile/shared-script-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("run.styk-auto");
+    std::fs::write(&script, "styk-auto/1\nopen ../../../engine/tests/edit/startup.document.json\nadvance 17\nframe 0\nexport\nbudget scenario.ms >= 0ms\n").unwrap();
+    let out = dir.join("result");
+    let result = Command::new(env!("CARGO_BIN_EXE_styk")).current_dir(root())
+        .args(["profile", "--scenario"]).arg(&script).arg("--out").arg(&out).arg("--full").output().unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["budgets"][0]["line"], 6);
+    assert_eq!(report["budgets"][0]["met"], true);
+    assert_eq!(report["export_hashes"].as_array().unwrap().len(), 3);
+    assert!(out.join("export.png").is_file());
+    let refused = Command::new(env!("CARGO_BIN_EXE_styk")).current_dir(root())
+        .args(["profile", "engine/Cargo.toml"]).arg(&script).arg("--out").arg(dir.join("refused")).output().unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    let error: Value = serde_json::from_slice(&refused.stderr).unwrap();
+    assert!(error["cause"].as_str().unwrap().contains("line 2: a profile must open only its hashed input"));
+    assert!(!dir.join("refused").exists());
+    for name in ["profile.json", "summary.txt", "trace.perfetto.json", "trace.styktrace", "export.png"] {
+        std::fs::remove_file(out.join(name)).unwrap();
+    }
+    std::fs::remove_dir(out).unwrap();
     std::fs::remove_file(script).unwrap();
     std::fs::remove_dir(dir).unwrap();
 }

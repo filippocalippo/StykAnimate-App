@@ -33,7 +33,7 @@ struct EngineHost {
 impl Host for EngineHost {
     fn step(&mut self, step: &Step, _: Duration) -> Result<(), String> {
         match step {
-            Step::Open => {
+            Step::Open(_) => {
                 MEASUREMENT_CLOCK.with(|clock| *clock.borrow_mut() = Some(self.clock.clone()));
                 let engine = styk_engine::Engine::new(engine_clock, self.budgets);
                 let size = std::fs::metadata(&self.path)
@@ -162,7 +162,8 @@ impl Host for EngineHost {
                     .lock()
                     .map_err(|_| "export hash slot unavailable")? = Some(hash);
             }
-            Step::Advance(_) => {}
+            Step::Advance(_) | Step::Budget(_) => {}
+            _ => return Err("step unavailable in profile host".into()),
         }
         Ok(())
     }
@@ -248,27 +249,41 @@ fn profile(args: &[String]) -> Result<bool, String> {
     if !(3..=32).contains(&runs) {
         return Err("profile needs 3..32 runs".into());
     }
-    let text = match args[1].as_str() {
-        "open" => "styk-auto/1\nopen".into(),
-        "frame" => "styk-auto/1\nopen\nframe 0".into(),
-        "export" => "styk-auto/1\nopen\nexport".into(),
-        path if path.ends_with(".styk-auto") => {
-            let mut text = String::with_capacity(65537);
-            std::fs::File::open(path)
-                .map_err(|e| e.to_string())?
-                .take(65537)
-                .read_to_string(&mut text)
-                .map_err(|e| e.to_string())?;
-            text
-        }
-        _ => return Err("supported scenarios: open, frame, export, or .styk-auto script".into()),
+    let scripted = args[1].ends_with(".styk-auto");
+    if args[0] == "--scenario" && !scripted { return Err("--scenario needs a .styk-auto script".into()); }
+    let text = if scripted {
+        let mut text = String::with_capacity(styk_core::automation::MAX_SCRIPT_BYTES + 1);
+        std::fs::File::open(&args[1]).map_err(|e| e.to_string())?
+            .take((styk_core::automation::MAX_SCRIPT_BYTES + 1) as u64)
+            .read_to_string(&mut text).map_err(|e| e.to_string())?;
+        text
+    } else {
+        if args[0].contains(['\n', '\r']) { return Err("input path contains a line break".into()); }
+        let action = match args[1].as_str() {
+            "open" => "", "frame" => "frame 0\n", "export" => "export\n",
+            _ => return Err("supported scenarios: open, frame, export, or .styk-auto script".into()),
+        };
+        format!("styk-auto/1\nopen {}\n{action}", args[0])
     };
-    let script = scenario::parse_script(&text)?;
+    let script = styk_core::automation::Script::parse(&text).map_err(|e| e.to_string())?;
+    let budget_specs = scenario::budgets(&script)?;
+    let base = if scripted { Path::new(&args[1]).parent().unwrap_or(Path::new(".")) } else { Path::new(".") };
+    let first = script.steps.iter().find_map(|(_, step)| match step { Step::Open(path) => Some(path), _ => None })
+        .ok_or("profile scenario needs open <file>")?;
+    let input_path = if args[0] == "--scenario" { base.join(first) } else { Path::new(&args[0]).to_path_buf() }
+        .canonicalize().map_err(|e| e.to_string())?;
+    for (line, step) in &script.steps {
+        if let Step::Open(path) = step {
+            let opened = base.join(path).canonicalize().map_err(|e| format!("line {line}: {e}"))?;
+            if opened != input_path { return Err(format!("line {line}: a profile must open only its hashed input")); }
+        }
+    }
+    let input_name = input_path.to_str().ok_or("input path is not Unicode")?.to_owned();
     let out = Path::new(out);
     std::fs::create_dir_all(out.parent().ok_or("output needs parent")?)
         .map_err(|e| e.to_string())?;
     std::fs::create_dir(out).map_err(|e| format!("output must be a new directory: {e}"))?;
-    let mut input = std::fs::File::open(&args[0]).map_err(|e| e.to_string())?;
+    let mut input = std::fs::File::open(&input_path).map_err(|e| e.to_string())?;
     let mut hash = Sha256::new();
     let mut scratch = [0; 65536];
     loop {
@@ -293,9 +308,9 @@ fn profile(args: &[String]) -> Result<bool, String> {
         let done = scenario::start(
             &styk_platform::spawn::ThreadSpawner,
             clock.clone(),
-            script.steps.clone(),
+            script.clone(),
             EngineHost {
-                path: args[0].clone(),
+                path: input_name.clone(),
                 documents: styk_core::documents::Documents::new(),
                 clock: clock.clone(),
                 engine: None,
@@ -314,10 +329,10 @@ fn profile(args: &[String]) -> Result<bool, String> {
                 for sample in &result {
                     let ms = sample.elapsed.as_secs_f64() * 1000.;
                     match sample.step {
-                        Step::Open => open += ms,
+                        Step::Open(_) => open += ms,
                         Step::Frame(_) => frame += ms,
                         Step::Export => export += ms,
-                        Step::Advance(_) => {}
+                        _ => return Err("runner returned an unmeasured step".into()),
                     }
                 }
                 samples.push(open + frame + export);
@@ -351,8 +366,7 @@ fn profile(args: &[String]) -> Result<bool, String> {
         }
         std::thread::sleep(Duration::from_millis(1));
     };
-    let budgets: Vec<_> = script
-        .budgets
+    let budgets: Vec<_> = budget_specs
         .iter()
         .map(|budget| budget.judge(&metrics))
         .collect::<Result<_, _>>()?;
@@ -564,7 +578,7 @@ mod tests {
                     ..styk_engine::Budgets::for_device(None)
                 },
             };
-            host.step(&Step::Open, Duration::ZERO).unwrap();
+            host.step(&Step::Open(std::path::PathBuf::from(&host.path)), Duration::ZERO).unwrap();
             let generation = host.engine.as_ref().unwrap().generation().unwrap();
             assert_eq!(generation.prepared.doc.images.len(), 3);
             let decoded: Vec<_> = generation

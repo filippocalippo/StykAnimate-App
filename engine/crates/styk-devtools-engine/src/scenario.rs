@@ -1,76 +1,50 @@
-//! Headless scenario seam. Owners implement operations through their normal core paths.
+//! Measurement around the application's one automation AST; there is no tooling grammar.
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use styk_services::{
-    Spawner,
-    clock::{Clock, FixedClock},
-};
+pub use styk_core::automation::{Script, Step};
+use styk_services::{Spawner, clock::{Clock, FixedClock}};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Step {
-    Open,
-    Frame(u32),
-    Export,
-    Advance(u64),
-}
-/// A small versioned prefix of the automation language; unsupported steps fail visibly.
-pub struct Script {
-    pub steps: Vec<Step>,
-    pub budgets: Vec<crate::budget::Budget>,
-}
-pub fn parse(text: &str) -> Result<Vec<Step>, String> {
-    Ok(parse_script(text)?.steps)
-}
-pub fn parse_script(text: &str) -> Result<Script, String> {
-    if text.len() > 64 * 1024 {
-        return Err("scenario exceeds 64 KiB".into());
-    }
-    let mut lines = text.lines();
-    if lines.next() != Some("styk-auto/1") {
-        return Err("expected styk-auto/1".into());
-    }
-    let mut steps = Vec::new();
-    let mut budgets = Vec::new();
-    for (line, text) in lines.enumerate() {
-        if let Some(path) = text.strip_prefix("file ") {
-            if path.len() > 4096 {
-                return Err("scenario input path too long".into());
+const MAX_ACTIONS: usize = 1024;
+const MAX_BUDGETS: usize = 64;
+const MAX_BYTES: usize = styk_core::automation::MAX_SCRIPT_BYTES
+    + 2 * (MAX_ACTIONS + MAX_BUDGETS) * std::mem::size_of::<(usize, Step)>();
+
+/// Admit the actual AST allocation before cloning it or starting a worker. Unknown UI steps
+/// are explicit errors, never ignored actions that would change the measured workload.
+fn admit(script: &Script) -> Result<(), String> {
+    let mut bytes = script.steps.capacity().checked_mul(std::mem::size_of::<(usize, Step)>()).ok_or("scenario byte budget exhausted")?;
+    let mut actions = 0;
+    let mut budgets = 0;
+    for (line, step) in &script.steps {
+        let payload = match step {
+            Step::Open(path) => path.capacity(),
+            Step::Frame(_) | Step::Export | Step::Advance(_) => 0,
+            Step::Budget(spec) => {
+                budgets += 1;
+                spec.metric.capacity() + spec.op.capacity() + spec.unit.capacity()
+                    + spec.floor.as_ref().map_or(0, String::capacity)
             }
-            continue;
-        }
-        if text.trim_start().starts_with("budget ") {
-            if budgets.len() == 64 {
-                return Err("scenario exceeds 64 budgets".into());
-            }
-            budgets.push(crate::budget::Budget::parse(text, line + 2)?);
-            continue;
-        }
-        if text.trim_start().starts_with('#') {
-            continue;
-        }
-        let fields: Vec<_> = text.split_whitespace().collect();
-        let step = match fields.as_slice() {
-            [] => continue,
-            ["open"] => Step::Open,
-            ["export"] => Step::Export,
-            ["frame", tick] => Step::Frame(
-                tick.parse()
-                    .map_err(|_| format!("invalid tick at line {}", line + 2))?,
-            ),
-            ["advance", nanos] => Step::Advance(
-                nanos
-                    .parse()
-                    .map_err(|_| format!("invalid time at line {}", line + 2))?,
-            ),
-            _ => return Err(format!("unsupported scenario step at line {}", line + 2)),
+            _ => return Err(format!("line {line}: step is unavailable in headless profiling")),
         };
-        if steps.len() == 1024 {
-            return Err("scenario exceeds 1024 steps".into());
+        if !matches!(step, Step::Budget(_)) { actions += 1; }
+        bytes = bytes.checked_add(payload).ok_or("scenario byte budget exhausted")?;
+        if bytes > MAX_BYTES || actions > MAX_ACTIONS || budgets > MAX_BUDGETS {
+            return Err(format!("line {line}: scenario byte/action/budget admission exhausted"));
         }
-        steps.push(step);
     }
-    Ok(Script { steps, budgets })
+    if bytes > MAX_BYTES { return Err("scenario byte budget exhausted".into()); }
+    Ok(())
 }
+
+/// Measurement policy consumes parsed budget declarations; syntax belongs to core.
+pub fn budgets(script: &Script) -> Result<Vec<crate::budget::Budget>, String> {
+    admit(script)?;
+    Ok(script.steps.iter().filter_map(|(line, step)| match step {
+        Step::Budget(spec) => Some(crate::budget::Budget { spec: spec.clone(), line: *line }),
+        _ => None,
+    }).collect())
+}
+
 pub trait Host: Send + 'static {
     fn step(&mut self, step: &Step, logical_time: Duration) -> Result<(), String>;
 }
@@ -84,50 +58,39 @@ pub type Completion = Arc<Mutex<Option<Result<Vec<Sample>, String>>>>;
 pub fn start(
     spawner: &dyn Spawner,
     clock: Arc<dyn Clock>,
-    steps: Vec<Step>,
+    script: Script,
     mut host: impl Host,
 ) -> Result<Completion, String> {
-    if steps.len() > 1024 {
-        return Err("scenario exceeds 1024 steps".into());
-    }
+    admit(&script)?;
     let completion = Arc::new(Mutex::new(None));
     let result = completion.clone();
-    spawner
-        .spawn(
-            "devtools.scenario",
-            Box::new(move || {
-                let _clock = styk_trace::clock::scoped(clock.clone());
-                let logical = FixedClock::new();
-                let run = || -> Result<Vec<Sample>, String> {
-                    let mut samples = Vec::new();
-                    for step in steps {
-                        if let Step::Advance(nanos) = step {
-                            logical.advance(Duration::from_nanos(nanos));
-                            continue;
-                        }
-                        let _span = match &step {
-                            Step::Open => styk_trace::span!("scenario.open"),
-                            Step::Frame(_) => styk_trace::span!("scenario.frame"),
-                            Step::Export => styk_trace::span!("scenario.export"),
-                            Step::Advance(_) => styk_trace::span!("scenario.advance"),
-                        };
-                        let start = clock.now();
-                        host.step(&step, logical.now())?;
-                        samples.push(Sample {
-                            step,
-                            elapsed: clock.now().saturating_sub(start),
-                        });
-                    }
-                    Ok(samples)
-                };
-                let outcome = run();
-                drop(host);
-                if let Ok(mut slot) = result.lock() {
-                    *slot = Some(outcome);
+    spawner.spawn("devtools.scenario", Box::new(move || {
+        let _clock = styk_trace::clock::scoped(clock.clone());
+        let logical = FixedClock::new();
+        let run = || -> Result<Vec<Sample>, String> {
+            let mut samples = Vec::new();
+            for (line, step) in script.steps {
+                match &step {
+                    Step::Advance(nanos) => { logical.advance(Duration::from_nanos(*nanos)); continue; }
+                    Step::Budget(_) => continue,
+                    _ => {}
                 }
-            }),
-        )
-        .map_err(|e| e.to_string())?;
+                let _span = match &step {
+                    Step::Open(_) => styk_trace::span!("scenario.open"),
+                    Step::Frame(_) => styk_trace::span!("scenario.frame"),
+                    Step::Export => styk_trace::span!("scenario.export"),
+                    _ => return Err(format!("line {line}: step is unavailable in headless profiling")),
+                };
+                let start = clock.now();
+                host.step(&step, logical.now()).map_err(|error| format!("line {line}: {error}"))?;
+                samples.push(Sample { step, elapsed: clock.now().saturating_sub(start) });
+            }
+            Ok(samples)
+        };
+        let outcome = run();
+        drop(host);
+        if let Ok(mut slot) = result.lock() { *slot = Some(outcome); }
+    })).map_err(|e| e.to_string())?;
     Ok(completion)
 }
 #[cfg(test)]
@@ -144,13 +107,25 @@ mod tests {
     fn clock_advances_only_at_script_barriers() {
         let _serial = crate::TRACE_TEST_LOCK.lock().unwrap();
         let spawner = styk_services::ManualSpawner::new();
-        let steps = parse("styk-auto/1\nadvance 17\nopen\nframe 0\nexport").unwrap();
-        let done = start(&spawner, Arc::new(FixedClock::new()), steps, Fake).unwrap();
+        let script = Script::parse("styk-auto/1\nadvance 17\nopen fixture.styk\nframe 0\nexport\nbudget export.ms <= 10ms").unwrap();
+        assert_eq!(budgets(&script).unwrap()[0].line, 6);
+        let done = start(&spawner, Arc::new(FixedClock::new()), script, Fake).unwrap();
         assert!(done.try_lock().unwrap().is_none());
         assert!(spawner.run_next());
         let result = done.lock().unwrap().take().unwrap().unwrap();
         assert_eq!(result.len(), 3);
         assert!(result.iter().all(|s| s.elapsed.is_zero()));
-        assert!(parse("styk-auto/1\ndrag 0").is_err());
+    }
+    #[test]
+    fn unsupported_steps_and_allocation_pressure_are_refused_before_spawn() {
+        let spawner = styk_services::ManualSpawner::new();
+        let script = Script::parse("styk-auto/1\nkey escape").unwrap();
+        assert!(start(&spawner, Arc::new(FixedClock::new()), script, Fake).unwrap_err().contains("line 2"));
+        let script = Script::parse(&format!("styk-auto/1\n{}", "export\n".repeat(1025))).unwrap();
+        assert!(budgets(&script).is_err());
+        let mut path = std::path::PathBuf::with_capacity(MAX_BYTES + 1);
+        path.push("tiny");
+        assert!(budgets(&Script { steps: vec![(1, Step::Open(path))] }).is_err());
+        assert!(!spawner.run_next());
     }
 }

@@ -2,58 +2,10 @@
 use serde_json::{Value, json};
 #[derive(Clone, Debug)]
 pub struct Budget {
-    pub metric: String,
-    pub op: String,
-    pub limit: f64,
-    pub unit: String,
+    pub spec: styk_core::automation::BudgetSpec,
     pub line: usize,
-    pub floor: Option<String>,
 }
 impl Budget {
-    pub fn parse(text: &str, line: usize) -> Result<Self, String> {
-        let (text, floor) = text
-            .split_once(" floor:")
-            .map_or((text, None), |(a, b)| (a, Some(b.trim().to_owned())));
-        let fields: Vec<_> = text.split_whitespace().collect();
-        let ["budget", metric, op, quantity] = fields.as_slice() else {
-            return Err(format!("invalid budget at line {line}"));
-        };
-        if metric.len() > 128
-            || !metric
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_')
-            || !["<=", ">=", "==", "<", ">"].contains(op)
-            || floor.as_ref().is_some_and(|s| s.len() > 512)
-        {
-            return Err(format!("invalid budget at line {line}"));
-        }
-        let (number, unit, multiplier) = [
-            ("MiB", 1048576.),
-            ("KiB", 1024.),
-            ("ms", 1.),
-            ("s", 1000.),
-            ("B", 1.),
-            ("%", 1.),
-        ]
-        .into_iter()
-        .find_map(|(u, m)| quantity.strip_suffix(u).map(|n| (n, u, m)))
-        .unwrap_or((quantity, "", 1.));
-        let limit = number
-            .parse::<f64>()
-            .map_err(|_| format!("invalid budget value at line {line}"))?
-            * multiplier;
-        if !limit.is_finite() || limit < 0. {
-            return Err("budget must be finite and nonnegative".into());
-        }
-        Ok(Self {
-            metric: (*metric).into(),
-            op: (*op).into(),
-            limit,
-            unit: unit.into(),
-            line,
-            floor,
-        })
-    }
     pub fn judge(&self, runs: &[Value]) -> Result<Value, String> {
         if runs.is_empty() || runs.len() > 32 {
             return Err("budgets need 1..32 runs".into());
@@ -61,11 +13,11 @@ impl Budget {
         let mut samples = Vec::with_capacity(runs.len());
         for run in runs {
             let mut value = run;
-            for field in self.metric.split('.') {
+            for field in self.spec.metric.split('.') {
                 value = value.get(field).ok_or_else(|| {
                     format!(
                         "budget metric unavailable: {} (line {})",
-                        self.metric, self.line
+                        self.spec.metric, self.line
                     )
                 })?;
             }
@@ -78,26 +30,30 @@ impl Budget {
         }
         samples.sort_by(f64::total_cmp);
         let median = samples[(samples.len() - 1) / 2] / 2. + samples[samples.len() / 2] / 2.;
-        let met = match self.op.as_str() {
-            "<=" => median <= self.limit,
-            ">=" => median >= self.limit,
-            "==" => median == self.limit,
-            "<" => median < self.limit,
-            ">" => median > self.limit,
+        let met = match self.spec.op.as_str() {
+            "<=" => median <= self.spec.limit,
+            ">=" => median >= self.spec.limit,
+            "==" => median == self.spec.limit,
+            "<" => median < self.spec.limit,
+            ">" => median > self.spec.limit,
             _ => return Err("invalid budget operator".into()),
         };
         Ok(
-            json!({"metric":self.metric,"op":self.op,"limit":self.limit,"unit":self.unit,"median":median,"runs":runs.len(),"met":met,"line":self.line,"floor":self.floor}),
+            json!({"metric":self.spec.metric,"op":self.spec.op,"limit":self.spec.limit,"unit":self.spec.unit,"median":median,"runs":runs.len(),"met":met,"line":self.line,"floor":self.spec.floor}),
         )
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn parsed_budget(text: &str, line: usize) -> Result<Budget, String> {
+        let script = styk_core::automation::Script::parse(&format!("{}{text}", "\n".repeat(line - 1))).map_err(|e| e.to_string())?;
+        crate::scenario::budgets(&script)?.into_iter().next().ok_or("missing budget".into())
+    }
     #[test]
     fn median_units_and_missing_metrics_are_not_silent() {
-        let b = Budget::parse("budget start.usable <= 0.5s", 3).unwrap();
-        assert_eq!(b.limit, 500.);
+        let b = parsed_budget("budget start.usable <= 0.5s", 3).unwrap();
+        assert_eq!(b.spec.limit, 500.);
         let rows = [
             json!({"start":{"usable":1}}),
             json!({"start":{"usable":600}}),
@@ -105,9 +61,9 @@ mod tests {
         ];
         assert_eq!(b.judge(&rows).unwrap()["met"], false);
         assert!(b.judge(&[json!({})]).is_err());
-        assert!(Budget::parse("budget a <= NaNms", 2).is_err());
+        assert!(parsed_budget("budget a <= NaNms", 2).is_err());
         assert_eq!(
-            Budget::parse("budget memory.rss <= 2MiB", 2).unwrap().limit,
+            parsed_budget("budget memory.rss <= 2MiB", 2).unwrap().spec.limit,
             2097152.
         );
     }

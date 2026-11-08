@@ -1,3 +1,2 @@
 styk-auto/1
-file engine/tests/edit/startup.document.json
-open
+open ../engine/tests/edit/startup.document.json
