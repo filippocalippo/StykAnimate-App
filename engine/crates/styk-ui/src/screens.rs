@@ -35,7 +35,7 @@ pub enum Screen {
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 25] = [
+    pub const ALL: [Screen; 27] = [
         Screen::ComponentSheet,
         Screen::Band,
         Screen::BandDark,
