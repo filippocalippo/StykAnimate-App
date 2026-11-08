@@ -155,7 +155,8 @@ fn a_cancel_before_the_decode_starts_runs_nothing() {
 }
 
 #[test]
-fn the_timeout_ends_a_child_that_never_exits() {
+#[ignore = "quiet-machine latency gate: cargo test -p styk-platform quiet_gate_decode_timeout -- --ignored --test-threads=1"]
+fn quiet_gate_decode_timeout() {
     let dir = scratch("timeout");
     let decoder = FfmpegAudioDecoder::new(hanging_program(&dir), dir.join("work")).with_timeout(Duration::from_millis(300));
     let started = Instant::now();
@@ -192,4 +193,29 @@ fn leftover_folders_of_a_run_that_ended_badly_are_swept() {
     assert!(!old.exists(), "a folder of a dead run is removed");
     assert!(fresh.exists() && other.exists(), "a recent one (maybe another running instance) and a stranger are left alone");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_timeout_ends_a_child_that_never_exits() {
+    let dir = scratch("timeout-order");
+    // No natural five-second exit, no grandchild, no scheduler-dependent startup delay.
+    let program = dir.join("wait.cmd");
+    std::fs::write(&program, "@echo off\r\n:wait\r\ngoto wait\r\n").unwrap();
+    let (started, ready) = std::sync::mpsc::channel();
+    let decoder = FfmpegAudioDecoder::new(program, dir.join("work"))
+        .with_timeout(Duration::from_millis(300))
+        .with_child_started(move |child| { started.send(child).unwrap(); });
+    let (done, result) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        done.send(decoder.decode(b"anything", 1.0, &mut no_reserve(), &Cancel::new())).unwrap();
+    });
+    let child = ready.recv_timeout(Duration::from_secs(120)).expect("decoder child started");
+    let terminal = result.recv_timeout(Duration::from_secs(120));
+    let reaped = child.has_exited();
+    child.terminate();
+    assert_eq!(terminal.unwrap().unwrap_err(), AudioError::Decode("Audio decoding timed out.".into()));
+    assert!(reaped, "timeout killed and reaped the child before decode returned");
+    worker.join().unwrap();
+    assert!(leftovers(&dir.join("work")).is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
 }
