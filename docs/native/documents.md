@@ -197,3 +197,10 @@ command line and a script name with `Request::OpenFile`, one at a time, polling 
 open runs. A project the tabs refuse comes back as a failure and is disposed of on the host's worker. The band's other
 commands (Save, Close, New, Rename) are still dropped until the command registry and the dialogs exist; `Event::Closed`
 tells the band when a project closed.
+
+The recovery panel retains a refused Quit or prompt response until a documents-host progress wake;
+`Core::documents_progress` makes one retry, following the `continue_save` pattern. It never consumes
+a visible prompt on Busy. K-shell currently has no save-file dialog consumer, so its close prompt
+makes Save unavailable for documents without a target and retains Discard/Cancel. Existing targets
+save normally; successful saves finish cleanup before QuitReady. The session-end platform adapter
+uses this same checkpoint and confirmation path; see [recovery.md](recovery.md).

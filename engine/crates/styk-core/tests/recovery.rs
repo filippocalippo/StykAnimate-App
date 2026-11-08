@@ -22,7 +22,7 @@ impl Store {
     fn insert(&self, slot: Slot, bytes: Arc<[u8]>, name: &str) -> Record {
         let mut state = self.state.lock().unwrap(); state.serial += 1;
         let mut version = [0; 32]; version[..8].copy_from_slice(&state.serial.to_le_bytes());
-        let record = Record { slot: slot.clone(), name: name.into(), saved_at: format!("2026-11-08T00:00:{:02}.000Z", state.serial), size: bytes.len(), version, selection: Some(version) };
+        let record = Record { slot: slot.clone(), name: name.into(), saved_at: format!("2026-11-08T00:00:{:02}.000Z", state.serial), size: bytes.len(), version, read_only: false, selection: Some(version) };
         state.entries.insert(slot, Entry { record: record.clone(), bytes, owned: false }); record
     }
     fn records(&self) -> Vec<Entry> { self.state.lock().unwrap().entries.values().cloned().collect() }

@@ -123,6 +123,8 @@ impl Row {
 /// The chooser dialog (`chooseRecovery`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Chooser {
+    /// False while the selected copy could belong to a live legacy process.
+    pub discard_available: bool,
     /// The copies, newest first.
     pub rows: Vec<Row>,
     /// The select's value.
@@ -136,6 +138,8 @@ pub struct Chooser {
 /// The close prompt (`confirmReplace`, with the recovery copy's failure and its retry).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Closing {
+    /// Every affected dirty project has a target the current save flow can use.
+    pub save_available: bool,
     /// `Save changes to {value}?`
     pub title: Label,
     /// `Your changes will be lost if you don't save.`
@@ -178,7 +182,8 @@ pub fn chooser(copies: &[Record], selected: Option<&Slot>, busy: bool, error: Op
         })
         .collect::<Vec<_>>();
     let selected = selected.and_then(|slot| rows.iter().position(|row| row.slot == *slot));
-    Chooser { rows, selected, busy, error: error.map(reported) }
+    let discard_available = selected.is_some_and(|index| !copies[index].read_only);
+    Chooser { rows, selected, busy, discard_available, error: error.map(reported) }
 }
 
 /// What the host reported for a copy it could not use, in the words today's app gives each case (the host's view keeps the
@@ -200,6 +205,7 @@ pub fn closing(names: &[String], recovery_error: Option<&str>) -> Closing {
         many => Label::plain(many.join(", ")),
     };
     Closing {
+        save_available: true,
         title: Label::Msg(Msg::new("appDialogs.saveChangesTo").with("value", value)),
         body: Label::key("appDialogs.yourChangesWillBeLostIfYouDon"),
         warning: recovery_error.map(|message| Label::Msg(Msg::new("app.recoveryCopyCouldNotBeWritten").with("message", message))),

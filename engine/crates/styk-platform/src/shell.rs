@@ -40,6 +40,8 @@ mod stub {
             0
         }
         pub fn on_change(&self, _: impl Fn() + Send + Sync + 'static) {}
+        pub fn take_session_end(&self) -> bool { false }
+        pub fn finish_session_checkpoint(&self) {}
     }
 
     /// No sample.
@@ -99,7 +101,7 @@ pub struct Shell {
     /// The frame the window opens at, when state is used.
     pub restore: Option<WindowFrame>,
     /// The recovery directory of an independent editor.
-    pub workspace: Option<PathBuf>,
+    pub workspace: Result<Option<PathBuf>, String>,
     /// What this start itself asked for, then what later starts sent, until the core takes them.
     pub pending: PendingRequests,
     #[cfg(windows)]
@@ -117,7 +119,7 @@ pub fn start(arguments: &[String], unattended: bool, wakes: &Wakes) -> Start {
     let mut shell = Shell {
         state_path: None,
         restore: None,
-        workspace: None,
+        workspace: Ok(None),
         pending: PendingRequests::new(requests.clone()),
         #[cfg(windows)]
         primary: None,
@@ -148,7 +150,7 @@ pub fn start(arguments: &[String], unattended: bool, wakes: &Wakes) -> Start {
                 return Start::End(ExitCode::FAILURE);
             }
             Role::Independent => {
-                shell.workspace = workspace_directory(&profile);
+                shell.workspace = workspace_directory(&profile).map(Some);
             }
             Role::Primary(primary) => shell.primary = Some(primary),
         }
@@ -164,11 +166,18 @@ pub fn start(arguments: &[String], unattended: bool, wakes: &Wakes) -> Start {
 }
 
 #[cfg(windows)]
-fn workspace_directory(profile: &std::path::Path) -> Option<PathBuf> {
-    crate::recovery::workspace::at_startup(profile).ok()
+fn workspace_directory(profile: &std::path::Path) -> Result<PathBuf, String> {
+    crate::recovery::workspace::at_startup(profile).map_err(|error| error.to_string())
 }
 
 impl Shell {
+    pub fn recovery_directory(&self) -> Option<PathBuf> {
+        match &self.workspace {
+            Ok(Some(path)) => Some(path.clone()),
+            Ok(None) => Some(profile_dir()),
+            Err(error) => { eprintln!("recovery is unavailable: independent workspace adoption failed: {error}"); None }
+        }
+    }
     /// Takes what later starts have sent into `pending`; true if any arrived.
     pub fn collect_requests(&mut self) -> bool {
         #[cfg(windows)]
@@ -295,8 +304,8 @@ impl std::fmt::Debug for Attached {
 /// Attaches the chrome to the window; when `show` says this run owns the showing, puts the window at `frame` (else where it is) and shows it.
 /// Runs on the window's thread.
 #[cfg(windows)]
-pub fn attach(window: &dyn raw_window_handle::HasWindowHandle, frame: Option<WindowFrame>, show: bool) -> Result<Attached, String> {
-    let chrome = crate::windows::chrome::attach(window).map_err(|e| e.to_string())?;
+pub fn attach(window: &dyn raw_window_handle::HasWindowHandle, frame: Option<WindowFrame>, show: bool, shutdown_reason: &str) -> Result<Attached, String> {
+    let chrome = crate::windows::chrome::attach(window, shutdown_reason).map_err(|e| e.to_string())?;
     let hwnd = monitors::hwnd_of(window).ok_or("not a Windows window")?;
     let applied = if show {
         match frame {
@@ -317,7 +326,7 @@ pub fn attach(window: &dyn raw_window_handle::HasWindowHandle, frame: Option<Win
 
 /// No shell on this platform yet.
 #[cfg(not(windows))]
-pub fn attach(_: &dyn raw_window_handle::HasWindowHandle, _: Option<WindowFrame>, _: bool) -> Result<Attached, String> {
+pub fn attach(_: &dyn raw_window_handle::HasWindowHandle, _: Option<WindowFrame>, _: bool, _: &str) -> Result<Attached, String> {
     Ok(Attached { chrome: Chrome, sample: Sample, applied: None })
 }
 
@@ -428,3 +437,18 @@ pub fn foreground() -> isize {
     0
 }
 pub const fn owns_show() -> bool { cfg!(windows) }
+
+#[cfg(all(test, windows))]
+mod recovery_namespace_tests {
+    use super::*;
+    #[test]
+    fn failed_independent_workspace_never_selects_primary_recovery() {
+        let root = std::env::temp_dir().join(format!("styk-b3-bad-workspace-{}", std::process::id()));
+        std::fs::write(&root, b"not a directory").unwrap();
+        let Start::Run(mut shell) = start(&[], true, &Wakes(std::sync::Arc::new(|_| {}))) else { panic!("sandbox shell") };
+        shell.workspace = workspace_directory(&root).map(Some);
+        std::fs::remove_file(root).unwrap();
+        assert!(shell.workspace.is_err(), "adoption failure is retained");
+        assert_eq!(shell.recovery_directory(), None, "failure must never select the primary namespace");
+    }
+}

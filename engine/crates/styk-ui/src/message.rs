@@ -20,6 +20,10 @@ use styk_design::widgets::focus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
+    PollDocuments,
+    QuitReady,
+    SessionCheckpointFinished,
+    Notice(styk_core::commands::Notice),
     /// A command for the core.
     Command(Command),
     /// Focus a number field's input (a click on its scrub label).
@@ -84,6 +88,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             effects.extend(core.refresh());
             run(effects)
         }
+        Message::Notice(notice) => run(core.show_notice(notice)),
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
         Message::Focusing(inner, id) => Task::batch([update(core, *inner), operate(focus::focus(id)).discard()]),
         Message::Idle => Task::none(),
@@ -126,7 +131,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             use styk_core::overlay::host::Event;
             overlay(core, match event { View::Show { target, content, touch, keyboard } => Event::TooltipShow { target, content, touch, keyboard }, View::Hide => Event::TooltipHide })
         }
-        Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
+        Message::PollDocuments | Message::QuitReady | Message::SessionCheckpointFinished | Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
         Message::Snapshot(snapshot) => {
             let synced = focus::sync(core.focus_mut(), &snapshot);
             let effects = core.dispatch(Command::Overlay { now: core.overlays().now(), event: styk_core::overlay::host::Event::Bounds(snapshot.bounds.iter().map(|(id, b)| (*id, styk_design::widgets::menu::rect_of(*b))).collect()) });
@@ -150,6 +155,9 @@ pub fn run(effects: Vec<Effect>) -> Task<Message> {
 #[cfg(feature = "engine")]
 fn effect(effect: Effect) -> Task<Message> {
     match effect {
+        Effect::PollDocuments => Task::done(Message::PollDocuments),
+        Effect::QuitReady => Task::done(Message::QuitReady),
+        Effect::SessionCheckpointFinished => Task::done(Message::SessionCheckpointFinished),
         Effect::Overlay(styk_core::overlay::Effect::Focus(id)) => match id { Some(id) => operate(focus::focus(id)).discard(), None => operate(focus::unfocus()).discard() },
         Effect::Overlay(effect) => Task::done(Message::OverlayEffect(effect)),
         Effect::OverlayChoice { invoker, index } => Task::done(Message::OverlayChoice { invoker, index }),
@@ -162,7 +170,8 @@ fn effect(effect: Effect) -> Task<Message> {
         }))
         .discard(),
         Effect::NotAvailable(id) => Task::done(Message::NotAvailable(id)),
-        Effect::Notice(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
+        Effect::Notice(notice) => Task::done(Message::Notice(notice)),
+        Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
 }
 

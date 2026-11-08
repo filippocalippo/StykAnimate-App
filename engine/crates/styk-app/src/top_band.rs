@@ -76,6 +76,7 @@ pub enum Request {
     Finished(Option<String>),
     /// Every project is answered for and the recovery lane is done: the program may end.
     QuitReady,
+    SessionCheckpointFinished,
 }
 
 /// A script being run.
@@ -110,8 +111,6 @@ pub struct TopBand {
     measured: bool,
     /// A band screen of the catalogue shown in place of the open projects (`--screen band`).
     screen: Option<Screen>,
-    /// What the window is asked for by work that finished outside a message (the documents host's `QuitReady`).
-    outgoing: Vec<Request>,
 }
 
 /// What the stand-in for the workspace sessions answers.
@@ -166,9 +165,9 @@ impl TopBand {
     /// The band over a new, empty set of projects, with K-doc's document host attached: its worker, the local files and the
     /// one application clock.
     /// `notify` is the window's wake for the documents host's workers (it may be called from any thread); `recovery` is the
-    /// folder of the recovery store, where the lane keeps this window's copies and lists the ones an earlier run left (`None`:
+    /// store where the lane keeps this window's copies and lists the ones an earlier run left (`None`:
     /// no recovery, as in a run that must not touch the person's folders).
-    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, notify: Arc<dyn Fn() + Send + Sync>, recovery: Option<PathBuf>) -> Result<TopBand, String> {
+    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, notify: Arc<dyn Fn() + Send + Sync>, recovery: Option<Arc<dyn styk_services::recovery::Recovery>>) -> Result<TopBand, String> {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
         let mut documents = Documents::new();
@@ -190,12 +189,12 @@ impl TopBand {
                 notify: notify.clone(),
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
-        if let Some(directory) = recovery {
-            documents.attach_recovery(Arc::new(styk_platform::recovery::LocalRecovery::new(directory)), clock.clone()).map_err(|error| format!("recovery did not start: {error}"))?;
+        if let Some(store) = recovery {
+            documents.attach_recovery(store, clock.clone()).map_err(|error| format!("recovery did not start: {error}"))?;
             // The first listing is queued by the first poll: ask for it.
             notify();
         }
-        Ok(TopBand { core: styk_core::app::Core::new(documents), layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None, outgoing: Vec::new() })
+        Ok(TopBand { core: styk_core::app::Core::new(documents), layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
@@ -295,18 +294,13 @@ impl TopBand {
 
     /// The window was asked to close. The documents host answers: nothing to ask (the program may end), or a confirmation for the
     /// projects with unsaved work (the close prompt, with its recovery copy's retry) and `Request::QuitReady` once every project is
-    /// answered for and the recovery lane has finished. `true`: end now.
-    pub fn ask_to_quit(&mut self) -> (bool, Task<Message>) {
-        match self.core.documents.dispatch(Ask::Quit) {
-            Ok(Opened::QuitReady) => (true, Task::none()),
-            Ok(effect) => (false, styk_ui::message::run(self.core.document_effect(&effect)).map(Message::Editor)),
-            // Another request is running: the person asks again.
-            Err((HostError::Documents(styk_core::documents::DocumentsError::Busy), _)) => (false, Task::none()),
-            Err((error, _)) => {
-                self.fail(error.to_string());
-                (false, Task::none())
-            }
-        }
+    /// answered for and the recovery lane has finished.
+    pub fn ask_to_quit(&mut self) -> Task<Message> {
+        styk_ui::message::run(self.core.request_quit(false)).map(Message::Editor)
+    }
+
+    pub fn session_end(&mut self) -> Task<Message> {
+        styk_ui::message::run(self.core.request_quit(true)).map(Message::Editor)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -380,6 +374,9 @@ impl TopBand {
         // The tree's focus state is read after anything that can change the tree.
         let reads_focus = !matches!(message, Message::Cursor(..) | Message::Frame | Message::Snapshot(_) | Message::Editor(_));
         let (requests, task) = match message {
+            Message::Editor(styk_ui::message::Message::PollDocuments) => (Vec::new(), self.pump()),
+            Message::Editor(styk_ui::message::Message::QuitReady) => (vec![Request::QuitReady], Task::none()),
+            Message::Editor(styk_ui::message::Message::SessionCheckpointFinished) => (vec![Request::SessionCheckpointFinished], Task::none()),
             Message::Editor(message) => {
                 let now = self.now();
                 // The focus tasks the core asks for run on the tree this message built, then the walk reads it back.
@@ -403,8 +400,6 @@ impl TopBand {
             Message::Frame => self.frame(),
             Message::Documents => (Vec::new(), self.pump()),
         };
-        let mut requests = requests;
-        requests.append(&mut self.outgoing);
         let task = if reads_focus { Task::batch([task, TopBand::snapshot()]) } else { task };
         (requests, task)
     }
@@ -466,7 +461,10 @@ impl TopBand {
     /// project the tabs refuse (the thirteenth) is the host's to dispose of on its worker, and comes back as a failure.
     fn pump(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
-        while let Some(effect) = self.core.documents.poll() {
+        if let Some(effect) = self.core.documents.poll() {
+            // One completion per update. A real transition can queue the next stage without
+            // starting a worker; give it one poll, then follow notifications/deadlines.
+            if !matches!(effect, Opened::None) { tasks.push(Task::done(Message::Documents)); }
             // A close that needs an answer, the recovery lane's events: the core's views take them.
             tasks.push(styk_ui::message::run(self.core.document_effect(&effect)).map(Message::Editor));
             match effect {
@@ -480,10 +478,10 @@ impl TopBand {
                     self.fail(error.to_string());
                 }
                 Opened::Stale(_) | Opened::Cancelled(_) => self.busy = false,
-                Opened::QuitReady => self.outgoing.push(Request::QuitReady),
                 _ => {}
             }
         }
+        tasks.push(styk_ui::message::run(self.core.documents_progress()).map(Message::Editor));
         if !self.busy
             && let Some(request) = self.requests.pop_front()
         {

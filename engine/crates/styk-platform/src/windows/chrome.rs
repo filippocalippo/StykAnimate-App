@@ -37,6 +37,8 @@ struct Shared {
     /// Toggle requests not yet taken by the interface: a count, so none is lost and none is delivered twice.
     toggles: AtomicU32,
     wake: Mutex<Option<Wake>>,
+    session_end: AtomicBool,
+    shutdown_reason: Vec<u16>,
 }
 
 impl Shared {
@@ -102,12 +104,17 @@ impl std::fmt::Display for ChromeError {
 impl std::error::Error for ChromeError {}
 
 /// Attaches the chrome to the window. Call on the window's own thread (inside `iced::window::run`).
-pub fn attach(window: &dyn HasWindowHandle) -> Result<Chrome, ChromeError> {
+pub fn attach(window: &dyn HasWindowHandle, shutdown_reason: &str) -> Result<Chrome, ChromeError> {
     let hwnd = hwnd_of(window).ok_or(ChromeError::NoWindow)?;
-    attach_hwnd(hwnd)
+    attach_hwnd_with_reason(hwnd, shutdown_reason)
 }
 
+#[cfg(test)]
 pub(crate) fn attach_hwnd(hwnd: HWND) -> Result<Chrome, ChromeError> {
+    attach_hwnd_with_reason(hwnd, "Saving test checkpoint")
+}
+
+fn attach_hwnd_with_reason(hwnd: HWND, shutdown_reason: &str) -> Result<Chrome, ChromeError> {
     let shared = Arc::new(Shared {
         regions: Mutex::new(Arc::new(ChromeRegions::default())),
         button: Mutex::new(MaxButton::default()),
@@ -115,6 +122,8 @@ pub(crate) fn attach_hwnd(hwnd: HWND) -> Result<Chrome, ChromeError> {
         fullscreen: AtomicBool::new(false),
         toggles: AtomicU32::new(0),
         wake: Mutex::new(None),
+        session_end: AtomicBool::new(false),
+        shutdown_reason: super::wide(shutdown_reason),
     });
     let data = Box::into_raw(Box::new(shared.clone()));
     // SAFETY: `hwnd` is a live window of the calling thread; `data` is owned by the subclass from here and freed in
@@ -129,6 +138,13 @@ pub(crate) fn attach_hwnd(hwnd: HWND) -> Result<Chrome, ChromeError> {
 }
 
 impl Chrome {
+    /// Coalesced OS quit intent. The core checkpoints before presenting the usual close guard.
+    pub fn take_session_end(&self) -> bool { self.shared.session_end.swap(false, Ordering::AcqRel) }
+
+    /// Post back to the owning window thread; never wait for a checkpoint or a window procedure.
+    pub fn finish_session_checkpoint(&self) {
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(self.hwnd as HWND, CHECKPOINT_FINISHED, 0, 0); }
+    }
     /// Publishes the places of the band after a layout, in physical client pixels. An empty set (the band is hidden)
     /// also ends any press in progress.
     pub fn publish(&self, regions: ChromeRegions) {
@@ -161,6 +177,7 @@ impl Chrome {
     /// changes. It should only post a message.
     pub fn on_change(&self, wake: impl Fn() + Send + Sync + 'static) {
         *Shared::lock(&self.shared.wake) = Some(Box::new(wake));
+        if self.shared.session_end.load(Ordering::Acquire) { self.shared.notify(); }
     }
 
     /// Takes the chrome off the window (the window is being closed by the application).
@@ -197,9 +214,31 @@ fn over_button(shared: &Shared, x: i32, y: i32) -> bool {
     Shared::lock(&shared.regions).maximize.is_some_and(|r: Rect| r.contains(x, y))
 }
 
+const CHECKPOINT_FINISHED: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 0x53;
+
+fn session_message(hwnd: HWND, shared: &Shared, message: u32, wparam: WPARAM) -> Option<LRESULT> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_QUERYENDSESSION, WM_ENDSESSION};
+    use windows_sys::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
+    match message {
+        WM_QUERYENDSESSION | WM_ENDSESSION if message == WM_QUERYENDSESSION || wparam != 0 => {
+            if unsafe { ShutdownBlockReasonCreate(hwnd, shared.shutdown_reason.as_ptr()) } == 0 { eprintln!("could not register shutdown checkpoint: {}", std::io::Error::last_os_error()); }
+            shared.session_end.store(true, Ordering::Release);
+            shared.notify();
+            // Reply immediately. Accepting here permits process termination before the async write.
+            Some(0)
+        }
+        WM_ENDSESSION | CHECKPOINT_FINISHED => {
+            unsafe { ShutdownBlockReasonDestroy(hwnd); }
+            Some(0)
+        }
+        _ => None,
+    }
+}
+
 unsafe extern "system" fn subclass_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, data: usize) -> LRESULT {
     // SAFETY: `data` is the `Box<Arc<Shared>>` leaked by `attach_hwnd`; it lives until `WM_NCDESTROY`, below.
     let shared: &Arc<Shared> = unsafe { &*(data as *const Arc<Shared>) };
+    if let Some(reply) = session_message(hwnd, shared, message, wparam) { return reply; }
     match message {
         WM_NCHITTEST => {
             let regions = Shared::lock(&shared.regions).clone();
@@ -260,6 +299,7 @@ unsafe extern "system" fn subclass_proc(hwnd: HWND, message: u32, wparam: WPARAM
             shared.step(ButtonInput::Cancel(Cancel::Deactivated));
         }
         WM_NCDESTROY => {
+            unsafe { windows_sys::Win32::System::Shutdown::ShutdownBlockReasonDestroy(hwnd); }
             shared.step(ButtonInput::Cancel(Cancel::Destroyed));
             // SAFETY: the window is going away; remove the subclass, then free the data it owned. Nothing touches it
             // after this message.
@@ -324,6 +364,40 @@ mod tests {
     fn destroy(hwnd: HWND) {
         // SAFETY: the window was made by the test.
         unsafe { DestroyWindow(hwnd) };
+    }
+
+    #[test]
+    fn session_query_requests_the_guard_without_accepting_an_uncheckpointed_exit() {
+        let (hwnd, chrome) = setup();
+        let called = Arc::new(AtomicUsize::new(0)); let count = called.clone();
+        chrome.on_change(move || { count.fetch_add(1, Ordering::SeqCst); });
+        let answer = unsafe { SendMessageW(hwnd, windows_sys::Win32::UI::WindowsAndMessaging::WM_QUERYENDSESSION, 0, 0) };
+        destroy(hwnd);
+        assert_eq!(answer, 0, "the interface must request its final checkpoint before consenting");
+        assert!(called.load(Ordering::SeqCst) > 0, "the real window procedure must wake its owner");
+    }
+
+    #[test]
+    fn session_end_translation_coalesces_and_releases_its_block_reason() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{WM_QUERYENDSESSION, WM_ENDSESSION, PeekMessageW, DispatchMessageW, PM_REMOVE, MSG};
+        use windows_sys::Win32::System::Shutdown::ShutdownBlockReasonQuery;
+        let (hwnd, chrome) = setup();
+        let blocked = || { let mut length = 0; unsafe { ShutdownBlockReasonQuery(hwnd, std::ptr::null_mut(), &mut length); } length > 0 };
+        unsafe { SendMessageW(hwnd, WM_QUERYENDSESSION, 0, 0); SendMessageW(hwnd, WM_QUERYENDSESSION, 0, 0); }
+        assert!(chrome.take_session_end()); assert!(!chrome.take_session_end()); assert!(blocked());
+        let mut text = [0u16; 256]; let mut length = text.len() as u32;
+        assert_ne!(unsafe { ShutdownBlockReasonQuery(hwnd, text.as_mut_ptr(), &mut length) }, 0);
+        assert_eq!(String::from_utf16_lossy(&text[..text.iter().position(|c| *c == 0).unwrap()]), "Saving test checkpoint", "the platform preserves the supplied presentation text");
+        chrome.finish_session_checkpoint();
+        let mut message: MSG = unsafe { std::mem::zeroed() };
+        assert_ne!(unsafe { PeekMessageW(&mut message, hwnd, CHECKPOINT_FINISHED, CHECKPOINT_FINISHED, PM_REMOVE) }, 0);
+        unsafe { DispatchMessageW(&message); }
+        assert!(!blocked());
+        unsafe { SendMessageW(hwnd, WM_ENDSESSION, 1, 0); }
+        assert!(chrome.take_session_end()); assert!(blocked());
+        unsafe { SendMessageW(hwnd, WM_ENDSESSION, 0, 0); }
+        assert!(!blocked()); assert!(!chrome.take_session_end());
+        destroy(hwnd);
     }
 
     #[test]

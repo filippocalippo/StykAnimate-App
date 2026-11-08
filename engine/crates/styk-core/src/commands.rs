@@ -52,6 +52,10 @@ pub enum Severity {
 /// change). Effects carry plain data, never a borrowed document.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
+    /// One bounded documents poll; subsequent progress follows host notifications/deadlines.
+    PollDocuments,
+    QuitReady,
+    SessionCheckpointFinished,
     Overlay(crate::overlay::Effect),
     OverlayChoice { invoker: crate::focus::FocusId, index: usize },
     MessageDismissed(u64),

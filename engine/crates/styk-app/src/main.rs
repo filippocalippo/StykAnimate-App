@@ -85,6 +85,8 @@ enum Message {
     Attached(Result<shell::Attached, String>),
     Sampled(shell::Sample),
     Wake(shell::Wake),
+    /// Translated by the platform window procedure, including a forced session end.
+    SessionEnd,
     /// The top band: the projects, the shell and the automation (`top_band`).
     Band(top_band::Message),
     /// A screenshot of an automation step is written.
@@ -178,7 +180,8 @@ impl App {
         };
         // Recovery belongs to a real run: a screen, a script or an unattended test never lists or writes the person's copies. The
         // primary window keeps them in the profile, an independent one in its workspace (`docs/native/recovery.md`).
-        let recovery = (screen.is_none() && strategy.is_none() && launch.automation.is_none()).then(|| shell.workspace.clone().unwrap_or_else(styk_platform::shell::profile_dir));
+        let recovery = (screen.is_none() && strategy.is_none() && launch.automation.is_none()).then(|| shell.recovery_directory()).flatten();
+        let recovery = recovery.map(|path| Arc::new(styk_platform::recovery::LocalRecovery::new(path)) as Arc<dyn styk_services::recovery::Recovery>);
         let documents_wake = wakes.callback();
         let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(move || documents_wake.send(shell::Wake::Documents)), recovery)?;
         band.show_screen(band_screen);
@@ -255,6 +258,7 @@ impl App {
                 Task::none()
             }
             Message::Wake(wake) => self.wake(wake),
+            Message::SessionEnd => self.band.session_end().map(Message::Band),
             Message::Band(message) => self.band_update(message),
             Message::StepSaved(result) => {
                 self.band.captured(result);
@@ -310,6 +314,9 @@ impl App {
                     self.quit_cleared = true;
                     tasks.push(self.close());
                 }
+                top_band::Request::SessionCheckpointFinished => {
+                    if let Some(chrome) = &self.chrome { chrome.finish_session_checkpoint(); }
+                }
                 top_band::Request::Resize(size) => tasks.extend(self.window.map(|id| iced_window::resize(id, size))),
                 top_band::Request::Capture(path) => {
                     self.capture_path = Some(path);
@@ -337,7 +344,8 @@ impl App {
                 self.band.resized(size);
                 let owns_show = window::shell_shows(self.strategy);
                 let frame = self.shell.restore;
-                let attach = iced_window::run(id, move |w| shell::attach(w, frame, owns_show)).map(Message::Attached);
+                let shutdown_reason = self.band.core.presentation().text(&styk_core::i18n::Msg::new("common.saving"));
+                let attach = iced_window::run(id, move |w| shell::attach(w, frame, owns_show, &shutdown_reason)).map(Message::Attached);
                 let shown = if window::shown_after_creation(self.strategy) {
                     Task::batch([iced_window::run(id, |w| platform::show_without_activation(w)).map(Message::Shown), attach])
                 } else {
@@ -382,11 +390,13 @@ impl App {
                 let Some(chrome) = &self.chrome else { return Task::none() };
                 self.max_button = chrome.max_button();
                 let toggles = chrome.take_toggles();
-                match self.window {
-                    Some(id) if toggles > 0 => Task::batch((0..toggles).map(|_| iced_window::toggle_maximize(id))),
-                    _ => Task::none(),
-                }
+                let session_end = chrome.take_session_end();
+                let mut tasks = Vec::new();
+                if let Some(id) = self.window { tasks.extend((0..toggles).map(|_| iced_window::toggle_maximize(id))); }
+                if session_end { tasks.push(Task::done(Message::SessionEnd)); }
+                Task::batch(tasks)
             }
+
             shell::Wake::Instance => {
                 if !self.shell.collect_requests() {
                     return Task::none();
@@ -413,10 +423,7 @@ impl App {
         // The documents host decides first: unsaved projects are asked about (the close prompt) and the recovery lane finishes
         // its copies; an unattended run has no one to ask.
         if self.strategy.is_none() && !self.quit_cleared {
-            let (ready, task) = self.band.ask_to_quit();
-            if !ready {
-                return task.map(Message::Band);
-            }
+            return self.band.ask_to_quit().map(Message::Band);
         }
         self.closing = true;
         match self.shell.save_for_close() {

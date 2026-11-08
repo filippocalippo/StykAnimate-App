@@ -59,7 +59,7 @@ fn copy(n: u8, name: &str, saved_at: &str, size: usize) -> Record {
     let slot = Slot::named(&format!("00000000-0000-4000-8000-{n:012x}")).unwrap_or_else(Slot::legacy);
     let mut version = [0; 32];
     version[0] = n;
-    Record { slot, name: name.into(), saved_at: saved_at.into(), size, version, selection: Some(version) }
+    Record { slot, name: name.into(), saved_at: saved_at.into(), size, version, read_only: false, selection: Some(version) }
 }
 
 /// The copies the screens list: three projects, one of them unnamed, newest first.

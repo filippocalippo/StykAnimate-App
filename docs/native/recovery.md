@@ -8,7 +8,17 @@ state and a reported error. Views never call storage: they send `Command::Recove
 
 After `attach_host`, call `Documents::attach_recovery(store, clock)` with the same window's recovery
 directory and its monotonic clock. Initial listing is queued automatically. Continue calling `poll`
-on worker notifications and schedule an event-loop wake for `recovery_deadline()`. Playback, scrubbing,
+on worker notifications and schedule an event-loop wake for `recovery_deadline()`.
+Accepted transitions may queue work without starting a worker: the core emits `PollDocuments`
+for that first poll, including Quit, Discard cleanup and Retry with timed autosave disabled.
+`TopBand::pump` accepts one completion per message and schedules one continuation for a real
+transition; `None` waits for worker progress or the current deadline. Busy quit/response requests
+are retained by `recovery::Panel` and retried once per host wake (`Core::documents_progress`),
+not from refresh, focus or an immediate retry loop. Repeated close intents coalesce; Cancel
+supersedes a refused answer. Busy keeps the prompt; a terminal refusal retires the invalid question
+and reaches the existing stage-message owner through `Notice`. Cancelled saves and invalidated
+checkpoints release the UI's quit intent so a fresh close remains possible. An unrelated lane's
+failure cannot finish a checkpoint the documents owner still holds. Playback, scrubbing,
 import, drawing gestures, manual export and their owners supply `set_recovery_activity(Activity)`;
 the host additionally checks its own session gesture and document jobs. Settings call
 `set_autosave_seconds`, clamped to today's 0–300 seconds with a 2.5-second default.
@@ -63,7 +73,8 @@ queued copy cleanup.
 
 `styk_platform::recovery::LocalRecovery::new(directory)` accepts an explicit directory and does no
 profile discovery. The primary directory is the shell's profile; an independent window uses the
-shell's workspace. `LocalWorkspaces` wraps S6's existing workspace-adoption policy, shared by shell
+shell's workspace. An independent workspace adoption failure is retained and reported;
+recovery is disabled for that window, never redirected into the primary namespace. `LocalWorkspaces` wraps S6's existing workspace-adoption policy, shared by shell
 startup and the asynchronous service: a dead process's `workspaces/<pid>` directory is renamed to
 the new PID, live directories and reparse points are left alone. The service never recursively deletes
 anything. Tests supply private temporary roots, never the owner's app-data or recovery folder.
@@ -77,6 +88,25 @@ is readable even if metadata is missing or old. Optional metadata/pruning failur
 already committed copy. A write returns a receipt computed from the committed bytes without a
 post-commit read; optional sidecar replacement/read failure cannot poison the next autosave's identity.
 Crash-left staging files are not guessed to belong to this process or deleted.
+
+**Electron coexistence.** Today's `desktop/main.cjs` uses `requestSingleInstanceLock`, and
+`desktop/recovery.cjs` records only `{name,savedAt}`: neither named nor unnamed copies identify
+their owning process. Electron never takes native `.lock` leases. For pre-existing copies,
+`LocalRecovery` therefore also acquires Chromium's profile `lockfile` with conflicting sharing
+permissions, retaining that OS handle for the entire adopted lease. This is both the orphan proof
+and exclusion against a legacy process starting after the check. Sharing violations, access errors
+and unverifiable ownership produce `Record::read_only`, never permission to delete. Independent
+legacy workspaces have no such lock: only this process's already-adopted `workspaces/<pid>`
+namespace is eligible for native adoption; other workspace namespaces stay read-only.
+The pinned [Chromium implementation](https://raw.githubusercontent.com/chromium/chromium/142.0.7444.0/chrome/browser/process_singleton_win.cc)
+and [Electron 39 patch](https://raw.githubusercontent.com/electron/electron/v39.8.10/patches/chromium/process_singleton.patch)
+establish the file handle protocol; native does not impersonate the legacy message window or kill its owner.
+
+A read-only offer restores into a new dirty document without inheriting the source lease. Later
+checkpoint, save, close and quit operate on that new document's own slot. Discard is unavailable
+for the source, and both the core and storage enforce that refusal; pruning excludes it too.
+Claim rechecks profile exclusion, so a legacy owner arriving after listing can only reduce access.
+Native-created copies retain K-rec's exclusive per-slot ownership.
 
 Each lease opens or creates the same `.lock` file with no sharing and holds the OS handle for the
 session. A sharing violation means another process owns it; successful opening reclaims an orphaned
@@ -124,7 +154,9 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
 - **The close prompt** opens from the host's `ConfirmClose` and `ConfirmQuit` effects (`Core::document_effect`, which the window
   hands every effect it takes from `Documents::poll` and `dispatch`). `Don't save`, `Cancel`, `Save`, and `Retry` while the recovery
   copy's failure shows under the body (`Recovery copy could not be written: {reason}`); Escape and its close button are Cancel. `Save`'s
-  file dialog is the save flow's (K-doc, K-cmd): its `SaveDialog` effect has no consumer yet.
+  file dialog is the save flow's (K-doc, K-cmd): no platform save-dialog consumer exists yet.
+  Save is therefore unavailable when any affected dirty document lacks a target; Discard and Cancel
+  stay actionable. Existing targets use the normal K-doc save sequence. The accepted layout and labels are unchanged.
 - **Times** are written as today's English `Intl` writes them (`02:03 PM`, `11/8/26, 2:03 PM`) in the person's UTC offset
   (`Core::set_utc_offset`; the platform supplies it, 0 until it does) in every language, until the catalogue has date formats.
 - **The window's wiring** (`styk-app`): a real run (no `--screen`, `--automation` or unattended strategy) builds
@@ -138,9 +170,22 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
   (`TopBand::recovery_wake`, the overlay deadline's adapter), so nothing runs while it has none. Closing asks the host
   (`TopBand::ask_to_quit`, `Request::Quit`): unsaved projects open the close prompt with its recovery retry, the window ends on the
   host's `QuitReady` (`top_band::Request::QuitReady`) once the lane has finished its copies; an unattended run does not ask.
-  `styk-app/src/recovery_wiring_tests.rs` drives this over a real store with one copy. The playback, scrub, drawing, import and
-  export owners do not yet report `set_recovery_activity`, and `Save` in the prompt waits for the save flow (its `SaveDialog`
-  effect has no consumer), so a quit that chooses Save does not end yet.
+  `styk-app/src/recovery_wiring_tests.rs` drives `App::close`, returned iced tasks, the real coalesced wake
+  stream, the mounted deadline widget and mounted recovery controls over a private local store.
+  It never supplies periodic document polls. The playback, scrub, drawing, import and export
+  owners do not yet report `set_recovery_activity`.
+
+**OS session end.** The platform window subclass translates `WM_QUERYENDSESSION` and a forced
+`WM_ENDSESSION` into the same guarded quit. Query replies immediately with refusal while it posts
+the intent; no interface thread waits for disk. `ShutdownBlockReasonCreate` uses the presentation's
+existing `common.saving` message for the in-flight
+checkpoint. The core releases the reason on checkpoint completion, failure or refusal, via a message
+posted back to the window thread; cancelled session-end and window destruction also release it.
+The normal Save/Discard/Cancel prompt remains the authority for unsaved work. A cancelled OS shutdown
+does not discard anything or automatically answer that prompt. Forced termination or power loss cannot
+be delayed indefinitely; the previous committed recovery copy remains the fallback.
+See [Microsoft's query contract](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession)
+and [shutdown-block lifetime](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-shutdownblockreasoncreate).
 
 Screens: `recovery-offer`, `recovery-chooser`, `recovery-busy`, `recovery-error` and `close-prompt`, each in both themes, against
 today's own modules (`engine/crates/styk-app/automation/recovery-reference/screens.mjs`). The select draws today's dialog form there (`Select::form`: a `--icon-sm` chevron 10 px from the end; the inspector's field keeps its `--icon-xs` one). The interaction script is `engine/crates/styk-ui/tests/recovery.auto` (`recovery ...` steps and `expect

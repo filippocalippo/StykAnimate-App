@@ -67,7 +67,7 @@ pub fn chooser<'a, Message: Clone + 'a>(palette: &'static Palette, presentation:
         body: body.boxed(),
         actions: vec![
             Button::new(ids::CANCEL, FocusArea::Panels, palette, say(&words::CANCEL), send(Event::CancelChooser)).variant(Variant::Ghost).into_element(),
-            Button::new(ids::DISCARD, FocusArea::Panels, palette, say(&words::DISCARD_COPY), send(Event::DiscardChosen)).variant(Variant::Ghost).danger(true).disabled(model.busy).into_element(),
+            Button::new(ids::DISCARD, FocusArea::Panels, palette, say(&words::DISCARD_COPY), send(Event::DiscardChosen)).variant(Variant::Ghost).danger(true).disabled(model.busy || !model.discard_available).into_element(),
             Button::new(ids::RESTORE, FocusArea::Panels, palette, say(&words::CHOOSER_RESTORE), send(Event::RestoreChosen)).variant(Variant::Primary).disabled(model.busy).into_element(),
         ],
         meta: None,
@@ -89,7 +89,7 @@ pub fn closing<'a, Message: Clone + 'a>(palette: &'static Palette, presentation:
     if model.retry() {
         actions.push(Button::new(ids::RETRY, FocusArea::Panels, palette, say(&words::RETRY), send(Choice::Retry)).variant(Variant::Ghost).into_element());
     }
-    actions.push(Button::new(ids::SAVE, FocusArea::Panels, palette, say(&words::SAVE), send(Choice::Save)).variant(Variant::Primary).into_element());
+    actions.push(Button::new(ids::SAVE, FocusArea::Panels, palette, say(&words::SAVE), send(Choice::Save)).variant(Variant::Primary).disabled(!model.save_available).into_element());
     let body = container(text(say(&model.body), TextStyle::from_role(&tokens::scale::TYPE_BODY), palette.text_2)).width(Length::Fill);
     let spec = Dialog {
         size: DialogSize::Sm,

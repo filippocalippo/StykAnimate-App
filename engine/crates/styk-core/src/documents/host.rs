@@ -739,3 +739,78 @@ impl Drop for Documents {
         }
     }
 }
+
+#[cfg(test)]
+mod close_wiring_regression {
+    use super::*;
+    use styk_services::{ManualSpawner, files::fake::MemoryFiles};
+    #[test]
+    fn refused_save_answer_keeps_the_core_prompt() {
+        let startup = include_bytes!("../../../../tests/edit/startup.document.json");
+        let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
+        let prepared = PreparedDocument::open_bytes(&engine, Arc::from(startup.as_slice()), "Project.styk", &|| false).unwrap();
+        let mut documents = Documents::new();
+        documents.attach_host(HostOptions { engine, spawner: Arc::new(ManualSpawner::default()), files: Arc::new(MemoryFiles::default()), startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify: Arc::new(|| {}) }).unwrap();
+        let id = documents.open(prepared).map_err(|(e, _)| e).unwrap();
+        documents.tabs[0].target = Some(FileTarget::new("Project.styk"));
+        documents.call(id, "setFPS", &[Value::Num(30.0)], &Value::Null).unwrap().result.unwrap();
+        // Publication does not block the close prompt, but the single document lane refuses Save.
+        assert!(matches!(documents.dispatch(Request::Publish), Ok(Effect::Started(_))));
+        let prompt = documents.begin_quit().unwrap();
+        let mut core = crate::app::Core::new(documents);
+        core.document_effect(&prompt);
+        core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Save)));
+        assert!(core.recovery().closing().is_some(), "Busy must not consume the visible prompt");
+        assert!(matches!(core.documents.host.as_ref().unwrap().prompt, Some(Prompt::Quit { .. })));
+    }
+
+    struct Threads;
+    impl styk_services::Spawner for Threads {
+        fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+            std::thread::Builder::new().name(name.into()).spawn(job).map(|_| ()).map_err(|e| styk_services::SpawnError(e.to_string()))
+        }
+    }
+    fn saving_core(files: Arc<MemoryFiles>, notify: Arc<dyn Fn() + Send + Sync>) -> crate::app::Core {
+        let startup = include_bytes!("../../../../tests/edit/startup.document.json");
+        let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
+        let prepared = PreparedDocument::open_bytes(&engine, Arc::from(startup.as_slice()), "Project.styk", &|| false).unwrap();
+        let mut documents = Documents::new();
+        documents.attach_host(HostOptions { engine, spawner: Arc::new(Threads), files, startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify }).unwrap();
+        let id = documents.open(prepared).map_err(|(e, _)| e).unwrap();
+        documents.tabs[0].target = Some(FileTarget::new("Project.styk"));
+        documents.call(id, "setFPS", &[Value::Num(30.0)], &Value::Null).unwrap().result.unwrap();
+        crate::app::Core::new(documents)
+    }
+    #[test]
+    fn cancelled_save_releases_quit_intent_and_preserves_work() {
+        use styk_services::files::fake::Failure;
+        let files = Arc::new(MemoryFiles::default());
+        let target = FileTarget::new("Project.styk");
+        files.put(target.clone(), Arc::from(b"previous complete file".as_slice()));
+        files.fail(Failure::CancelBeforeCommit);
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let mut core = saving_core(files.clone(), Arc::new(move || { let _ = send.try_send(()); }));
+        core.request_quit(false);
+        core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Save)));
+        receive.recv_timeout(std::time::Duration::from_secs(15)).unwrap();
+        let answer = core.documents.poll().expect("the real worker notified its answer");
+        assert!(matches!(answer, Effect::Cancelled(_)), "{answer:?}");
+        core.document_effect(&answer);
+        assert!(core.documents.active().unwrap().dirty());
+        assert_eq!(&*files.get(&target).unwrap(), b"previous complete file");
+        core.request_quit(false);
+        assert!(core.recovery().closing().is_some(), "a cancelled save must allow a fresh quit");
+    }
+    #[test]
+    fn stale_response_retires_the_invalid_prompt_and_allows_a_fresh_quit() {
+        let mut core = saving_core(Arc::new(MemoryFiles::default()), Arc::new(|| {}));
+        core.request_quit(false);
+        let id = core.documents.active().unwrap().id();
+        core.documents.call(id, "setFPS", &[Value::Num(31.0)], &Value::Null).unwrap().result.unwrap();
+        core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Discard)));
+        assert!(core.recovery().closing().is_none(), "K-doc consumed the stale prompt; the interface must retire it too");
+        assert!(core.documents.active().unwrap().dirty());
+        core.request_quit(false);
+        assert!(core.recovery().closing().is_some());
+    }
+}

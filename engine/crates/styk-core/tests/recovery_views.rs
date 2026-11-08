@@ -49,7 +49,7 @@ impl Store {
         let mut version = [0; 32];
         version[..8].copy_from_slice(&state.serial.to_le_bytes());
         let bytes: Arc<[u8]> = Arc::from(STARTUP);
-        let record = Record { slot: slot.clone(), name: name.into(), saved_at: format!("2026-11-08T00:00:{:02}.000Z", state.serial), size: bytes.len(), version, selection: Some(version) };
+        let record = Record { slot: slot.clone(), name: name.into(), saved_at: format!("2026-11-08T00:00:{:02}.000Z", state.serial), size: bytes.len(), version, read_only: false, selection: Some(version) };
         state.entries.insert(slot.clone(), Entry { record, bytes, owned: false });
         slot
     }
@@ -108,7 +108,7 @@ impl RecoveryCopy for Copy {
             state.serial += 1;
             let mut version = [0; 32];
             version[..8].copy_from_slice(&state.serial.to_le_bytes());
-            let record = Record { slot: self.slot.clone(), name: name.into(), saved_at: "2026-11-08T00:01:00.000Z".into(), size: bytes.len(), version, selection: Some(version) };
+            let record = Record { slot: self.slot.clone(), name: name.into(), saved_at: "2026-11-08T00:01:00.000Z".into(), size: bytes.len(), version, read_only: false, selection: Some(version) };
             state.entries.insert(self.slot.clone(), Entry { record: record.clone(), bytes: Arc::from(bytes), owned: true });
             Ok(record)
         })
@@ -125,6 +125,8 @@ impl RecoveryCopy for Copy {
 fn core_with(store: &Store) -> Core {
     let mut core = styk_core::testing::core_with_document(STARTUP, "Front.styk", Arc::new(Threads)).unwrap();
     styk_core::testing::attach_recovery(&mut core, Arc::new(store.clone())).unwrap();
+    // Listing and publication use independent lanes. These view assertions start from an idle host.
+    styk_core::testing::poll_until(&mut core, |core| core.documents.published().is_some()).unwrap();
     core
 }
 
@@ -135,7 +137,7 @@ fn send(core: &mut Core, event: Event) {
 
 /// Waits for the documents host to answer what the last event asked for.
 fn settle(core: &mut Core) {
-    styk_core::testing::poll_until(core, |core| core.documents.recovery_view().is_some_and(|view| !view.busy)).unwrap();
+    styk_core::testing::poll_until(core, |core| core.documents.recovery_view().is_some_and(|view| !view.busy) && core.documents.published().is_some()).unwrap();
 }
 
 fn offer(core: &Core) -> Option<(String, String, Vec<String>)> {
@@ -312,7 +314,15 @@ fn cancel_and_escape_close_the_chooser_and_keep_every_copy() {
 fn confirm_close(core: &mut Core) -> Doc {
     let id = core.documents.active().unwrap().id();
     core.documents.call(id, "setFPS", &[styk_core::engine::Value::Num(30.0)], &styk_core::engine::Value::Null).unwrap().result.unwrap();
-    let asked = core.documents.dispatch(Request::Close(id)).map_err(|(error, _)| error).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let asked = loop {
+        match core.documents.dispatch(Request::Close(id)) {
+            Ok(effect) => break effect,
+            Err((styk_core::documents::HostError::Documents(styk_core::documents::DocumentsError::Busy), _)) => { core.documents.poll(); std::thread::yield_now(); }
+            Err((error, _)) => panic!("{error}"),
+        }
+        assert!(std::time::Instant::now() < deadline, "close did not become ready");
+    };
     let mut effect = asked;
     // A failed or running checkpoint comes first: wait for the confirmation.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
@@ -344,6 +354,17 @@ fn the_close_prompt_asks_and_cancel_keeps_the_project() {
     assert_eq!(dialogs(&core), 0);
     assert!(core.recovery().closing().is_none());
     assert_eq!(core.documents.tabs().len(), tabs, "Cancel keeps the project open");
+}
+
+#[test]
+fn untitled_save_must_not_hide_the_only_actionable_prompt() {
+    let mut core = core_with(&Store::default());
+    let effect = confirm_close(&mut core);
+    core.document_effect(&effect);
+    send(&mut core, Event::Respond(Choice::Save));
+    assert!(core.recovery().closing().is_some(), "SaveDialog has no consumer: keep the prompt until saving is available");
+    send(&mut core, Event::Respond(Choice::Cancel));
+    assert!(core.recovery().closing().is_none());
 }
 
 #[test]

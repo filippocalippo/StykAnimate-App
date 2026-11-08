@@ -191,8 +191,26 @@ impl Core {
     /// something (the recovery lane): the application hands every effect it takes from `Documents::poll` or
     /// `Documents::dispatch` here. What the core does with it comes back as effects, like a command's.
     pub fn document_effect(&mut self, effect: &crate::documents::Effect) -> Vec<Effect> {
-        let effects = self.recovery.effect(effect, &mut self.overlays, &mut self.focus);
+        let effects = self.recovery.effect(effect, &self.documents, &mut self.overlays, &mut self.focus);
         effects.into_iter().chain(self.refresh()).collect()
+    }
+
+    pub fn request_quit(&mut self, session_end: bool) -> Vec<Effect> {
+        self.recovery.quit(session_end, &mut self.documents, &mut self.overlays, &mut self.focus)
+    }
+
+    /// Called once on a host wake, after its bounded poll, never from refresh or view.
+    pub fn documents_progress(&mut self) -> Vec<Effect> {
+        self.recovery.progress(&mut self.documents, &mut self.overlays, &mut self.focus)
+    }
+
+    /// The shared notice effect reaches the existing bounded stage-message owner.
+    pub fn show_notice(&mut self, notice: Notice) -> Vec<Effect> {
+        use crate::overlay::messages::{Message, Tone};
+        let tone = match notice.severity { Severity::Warning => Tone::Warning, Severity::Error => Tone::Error };
+        let mut message = Message::new(self.overlays.fresh_id(), "notice", tone, false, Vec::new());
+        message.text = self.presentation.text(&notice.message);
+        self.overlay_event(crate::overlay::host::Event::ShowMessage(message), self.overlays.now())
     }
 
     /// Rebuilds the view models whose inputs changed since the last call, and places pending fact requests. The effects

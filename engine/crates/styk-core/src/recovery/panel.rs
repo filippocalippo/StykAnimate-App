@@ -36,6 +36,9 @@ pub struct Panel {
     closing: Option<Prompt>,
     /// The person's UTC offset in minutes, for the copies' times.
     offset: i32,
+    pending: Option<Request>,
+    quit_requested: bool,
+    session_end: bool,
 }
 
 fn carry(update: Update) -> Vec<Effect> {
@@ -167,23 +170,26 @@ impl Panel {
     }
 
     fn notice(error: &HostError) -> Vec<Effect> {
-        vec![Effect::Notice(Notice { message: match refusal(error) { Label::Msg(msg) => msg, Label::Plain(text) => Msg::new("errors.recovery.refused").with("message", text.to_string()) }, severity: Severity::Warning })]
+        vec![Effect::Notice(Notice {
+            message: match refusal(error) { Label::Msg(msg) => msg, Label::Plain(_) => Msg::new("privacyUi.operationFailedPleaseTryAgain") },
+            severity: if matches!(error, HostError::Documents(_)) { Severity::Warning } else { Severity::Error },
+        })]
     }
 
-    fn ask(documents: &mut Documents, ask: Ask) -> Result<(), HostError> {
-        documents.dispatch(Request::Recovery(ask)).map(drop).map_err(|(error, _)| error)
+    fn ask(documents: &mut Documents, ask: Ask) -> Result<Vec<Effect>, HostError> {
+        documents.dispatch(Request::Recovery(ask)).map(|_| vec![Effect::PollDocuments]).map_err(|(error, _)| error)
     }
 
     /// One thing a recovery view said.
     pub(crate) fn event(&mut self, event: Event, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
         match event {
-            Event::NotNow => Self::ask(documents, Ask::Dismiss).map_or_else(|error| Self::notice(&error), |()| Vec::new()),
+            Event::NotNow => Self::ask(documents, Ask::Dismiss).map_or_else(|error| Self::notice(&error), |effects| effects),
             Event::Manage => self.open_chooser(host, focus),
             Event::Restore => {
                 let copies: Vec<Slot> = documents.recovery_view().map(|view| view.copies.iter().map(|copy| copy.slot.clone()).collect()).unwrap_or_default();
                 match copies.as_slice() {
                     [] => Vec::new(),
-                    [only] => Self::ask(documents, Ask::Restore(only.clone())).map_or_else(|error| Self::notice(&error), |()| Vec::new()),
+                    [only] => Self::ask(documents, Ask::Restore(only.clone())).map_or_else(|error| Self::notice(&error), |effects| effects),
                     _ => self.open_chooser(host, focus),
                 }
             }
@@ -209,11 +215,11 @@ impl Panel {
     }
 
     /// A refusal under the chooser's body; success clears the last one.
-    fn report(&mut self, result: Result<(), HostError>) -> Vec<Effect> {
-        if let Some(open) = &mut self.chooser {
-            open.refused = result.err().map(|error| refusal(&error));
+    fn report(&mut self, result: Result<Vec<Effect>, HostError>) -> Vec<Effect> {
+        match result {
+            Ok(effects) => { if let Some(open) = &mut self.chooser { open.refused = None; } effects }
+            Err(error) => { if let Some(open) = &mut self.chooser { open.refused = Some(refusal(&error)); } Vec::new() }
         }
-        Vec::new()
     }
 
     fn open_chooser(&mut self, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
@@ -226,42 +232,107 @@ impl Panel {
         effects
     }
 
-    /// A close prompt's answer, from a button or from its dialog being dismissed (Escape: Cancel).
-    fn respond(&mut self, choice: Choice, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
-        let Some(prompt) = self.closing.take() else { return Vec::new() };
-        let mut effects = if is_open(host, prompt.overlay) { close(host, focus, prompt.overlay) } else { Vec::new() };
-        let choice = match choice {
-            Choice::Save => CloseChoice::Save,
-            Choice::Discard => CloseChoice::Discard,
-            Choice::Cancel => CloseChoice::Cancel,
-            Choice::Retry => CloseChoice::RetryRecovery,
-        };
-        match documents.dispatch(Request::Respond { prompt: prompt.id, choice }) {
-            Ok(answer) => effects.extend(self.effect(&answer, host, focus)),
-            Err((error, _)) => effects.extend(Self::notice(&error)),
+    /// One coalesced quit intent. Only host progress retries a refused request.
+    pub(crate) fn quit(&mut self, session_end: bool, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+        self.session_end |= session_end;
+        if self.quit_requested {
+            if self.closing.is_some() { return self.checkpoint_finished(); }
+            return Vec::new();
         }
-        effects
+        self.quit_requested = true;
+        self.control(Request::Quit, documents, host, focus)
     }
 
-    /// An effect of the documents host this panel owns: a close or quit that needs an answer opens the close prompt.
-    /// Everything else (a save's file dialog, the recovery lane's own events) is not this panel's.
-    pub(crate) fn effect(&mut self, effect: &Doc, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+    pub(crate) fn progress(&mut self, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+        match self.pending.take() {
+            Some(request) => self.control(request, documents, host, focus),
+            None => Vec::new(),
+        }
+    }
+
+    fn checkpoint_finished(&mut self) -> Vec<Effect> {
+        if std::mem::take(&mut self.session_end) { vec![Effect::SessionCheckpointFinished] } else { Vec::new() }
+    }
+
+    fn control(&mut self, request: Request, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+        let response = matches!(request, Request::Respond { .. });
+        let cancelled = matches!(request, Request::Respond { choice: CloseChoice::Cancel, .. });
+        match documents.dispatch(request) {
+            Ok(answer) => {
+                self.pending = None;
+                let mut effects = Vec::new();
+                if response && let Some(prompt) = self.closing.take() && is_open(host, prompt.overlay) {
+                    effects.extend(close(host, focus, prompt.overlay));
+                }
+                if cancelled { self.quit_requested = false; }
+                effects.extend(self.effect(&answer, documents, host, focus));
+                effects
+            }
+            Err((HostError::Documents(crate::documents::DocumentsError::Busy), request)) => {
+                self.pending = Some(request);
+                Vec::new()
+            }
+            Err((error, _)) => {
+                self.pending = None;
+                self.quit_requested = false;
+                let mut effects = self.checkpoint_finished();
+                // Only Busy leaves K-doc's question alive. A stale/failed answer consumed it.
+                if response && let Some(prompt) = self.closing.take() && is_open(host, prompt.overlay) {
+                    effects.extend(close(host, focus, prompt.overlay));
+                }
+                effects.extend(Self::notice(&error));
+                effects
+            }
+        }
+    }
+
+    /// A refusal keeps the prompt and returned request. Cancel supersedes a pending answer.
+    fn respond(&mut self, choice: Choice, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+        let Some(prompt) = self.closing.as_ref() else { return Vec::new() };
+        if choice == Choice::Save && !prompt.model.save_available { return Vec::new(); }
+        let choice = match choice {
+            Choice::Save => CloseChoice::Save, Choice::Discard => CloseChoice::Discard,
+            Choice::Cancel => CloseChoice::Cancel, Choice::Retry => CloseChoice::RetryRecovery,
+        };
+        self.control(Request::Respond { prompt: prompt.id, choice }, documents, host, focus)
+    }
+
+    /// Route close/checkpoint progress and terminal answers; confirmations open the existing prompt.
+    /// An unavailable save-file dialog is prevented by the prompt's save availability.
+    pub(crate) fn effect(&mut self, effect: &Doc, documents: &Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+        match effect {
+            Doc::Recovery(crate::documents::recovery::Event::Started) | Doc::Started(_) | Doc::ScopeChanged(_) => return vec![Effect::PollDocuments],
+            Doc::QuitReady => { self.quit_requested = false; let mut effects = self.checkpoint_finished(); effects.push(Effect::QuitReady); return effects; }
+            Doc::Failed { .. } | Doc::Stale(_) | Doc::Cancelled(_) | Doc::Recovery(crate::documents::recovery::Event::Failed(_)) => {
+                if self.pending.is_none() && self.closing.is_none() && !documents.close_checkpoint_pending() {
+                    self.quit_requested = false;
+                    return self.checkpoint_finished();
+                }
+                return Vec::new();
+            }
+            _ => {}
+        }
         let (id, names, error): (PromptId, Vec<String>, Option<&str>) = match effect {
             Doc::ConfirmClose { prompt, name, recovery_error, .. } => (*prompt, vec![name.clone()], recovery_error.as_deref()),
             Doc::ConfirmQuit { prompt, names, recovery_error } => (*prompt, names.clone(), recovery_error.as_deref()),
             _ => return Vec::new(),
         };
-        let mut effects = Vec::new();
+        let mut effects = self.checkpoint_finished();
         if let Some(old) = self.closing.take() && is_open(host, old.overlay) {
             effects.extend(close(host, focus, old.overlay));
         }
-        let model = model::closing(&names, error);
+        let mut model = model::closing(&names, error);
+        // K-shell has no save-file dialog yet: never enter an unconsumable Save prompt.
+        model.save_available = match effect {
+            Doc::ConfirmClose { document, .. } => documents.get(*document).is_some_and(|tab| tab.target().is_some()),
+            _ => documents.tabs().iter().filter(|tab| tab.dirty()).all(|tab| tab.target().is_some()),
+        };
         let mut stops = vec![ids::PROMPT_CLOSE, ids::DONT_SAVE, ids::KEEP_EDITING];
         if model.retry() {
             stops.push(ids::RETRY);
         }
-        stops.push(ids::SAVE);
-        let (overlay, opened) = open(host, focus, stops.into_iter().map(target).collect(), ids::SAVE);
+        if model.save_available { stops.push(ids::SAVE); }
+        let (overlay, opened) = open(host, focus, stops.into_iter().map(target).collect(), if model.save_available { ids::SAVE } else { ids::KEEP_EDITING });
         effects.extend(opened);
         self.closing = overlay.map(|overlay| Prompt { overlay, id, model });
         effects
