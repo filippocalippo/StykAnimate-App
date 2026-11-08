@@ -1,4 +1,5 @@
-# Only the orchestrator adds reference captures and chooses thresholds (never tuned to pass).
+# The implementer of a screen proposes its reference capture and limit; the orchestrator accepts or changes them at the merge
+# (never tuned to pass: a limit sits a little above what the complete screen measures and only ever tightens).
 # Paths are repository-relative captures of today's app. An empty reference is pending,
 # not an exemption after a reference is supplied. max_difference is the fraction of
 # pixels with an RGBA channel difference above 24 (`styk image-diff`'s TOLERANCE, decision N8), in [0, 1]; dimensions must match
