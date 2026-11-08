@@ -26,7 +26,7 @@ use iced::{Alignment, Background, Color, Element, Event as IcedEvent, Length, Pa
 use std::rc::Rc;
 use styk_core::focus::{FocusArea, ScopeId};
 use styk_core::overlay::host::{Host, OpenMenu, Purpose, row_id};
-use styk_core::overlay::menu::{Anchor, Entry, Item, Menu};
+use styk_core::overlay::menu::{Entry, Item, Menu};
 use styk_core::overlay::placement::{Rect, Size as PlaceSize};
 
 /// A key the person pressed while a menu is open, in the names the core's `menu::Key` uses.
@@ -89,7 +89,7 @@ struct State {
 }
 
 /// One row: reports the pointer arriving and a click, draws the fill and the ring the core's state asks for.
-struct Row_<'a, Message> {
+struct MenuRow<'a, Message> {
     content: Element<'a, Message>,
     look: Look,
     palette: &'static Palette,
@@ -97,9 +97,9 @@ struct Row_<'a, Message> {
     on_press: Message,
 }
 
-impl<Message> widget::Meta for Row_<'_, Message> {}
+impl<Message> widget::Meta for MenuRow<'_, Message> {}
 
-impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Row_<'a, Message> {
+impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for MenuRow<'a, Message> {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<State>()
     }
@@ -255,7 +255,7 @@ pub fn menu_box<'a, Message: Clone + 'a>(palette: &'static Palette, open: &'a Op
                     let reason = container(words(item.reason.clone(), micro, palette.text_3)).padding(Padding { left: scale::ICON_MD + scale::SPACE_2_5, ..Padding::ZERO });
                     container(Column::with_children(vec![line.boxed(), reason.boxed()]).spacing(scale::SPACE_1_5)).padding(Padding { top: scale::SPACE_1, right: scale::SPACE_2_5, bottom: scale::SPACE_1, left: scale::SPACE_2_5 }).boxed()
                 };
-                let row = Row_ { content: body, look: Look { lit, ring: current && ring, danger: item.danger }, palette, on_hover: send(Event::Hover { menu: id, index }), on_press: send(Event::Press { menu: id, index }) };
+                let row = MenuRow { content: body, look: Look { lit, ring: current && ring, danger: item.danger }, palette, on_hover: send(Event::Hover { menu: id, index }), on_press: send(Event::Press { menu: id, index }) };
                 let key_send = send.clone();
                 let no_ring = Ring { color: Color::TRANSPARENT, width: 0.0, offset: 0.0, radius: 0.0 };
                 let target = Focusable::new(row_id(id, index), FocusArea::Panels, row.boxed(), no_ring)
@@ -297,11 +297,6 @@ pub fn layer<'a, Message: Clone + 'a>(palette: &'static Palette, host: &'a Host,
     placed.extend(extra);
     let pointer = send.clone();
     Layer::new(placed).on_pointer(move |p| pointer(Event::Pointer { press: p.press, inside: p.inside, x: p.position.x, y: p.position.y })).boxed()
-}
-
-/// The anchor rectangle of a widget, for `Anchor::Root`.
-pub fn anchor_of(bounds: Rectangle) -> Anchor {
-    Anchor::Root(rect(bounds))
 }
 
 /// The rectangle the core uses for a measured widget.

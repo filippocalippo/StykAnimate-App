@@ -98,5 +98,7 @@ pub mod testing;
 mod page_tests;
 #[cfg(all(test, feature = "testing"))]
 mod control_tests;
+#[cfg(all(test, feature = "testing"))]
+mod parts_tests;
 
 pub use dir::Dir;
