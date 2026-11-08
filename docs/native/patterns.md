@@ -8,7 +8,7 @@ needs something this page does not cover, say so in your report instead of inven
 
 | State | Owner | Read through | Example |
 | --- | --- | --- | --- |
-| The document, its history, selection, selected joint, playhead, active layer | the tab's `styk-edit` session | `Document::{with_document, frame_records, records, selection, view, read}` (`docs/native/documents.md`); they fail while the session is busy | a figure's `root_x`, `history.undo` |
+| The document, its history, selection, selected joint, playhead, active layer | the tab's `styk-edit` session | on the interface thread only the reads that cannot evaluate ([below](#facts-from-the-workers)); they fail while the session is busy | a figure's `root_x`, `history.undo` |
 | Clipboards | the documents' shared clipboards (`Documents::call` carries them across tabs) | `Documents::has_clipboard(kind)` | the camera pose `camera-copy` copied |
 | Facts that need evaluation or geometry | made on a background lane ([`styk_core::facts`](#facts-from-the-workers)) | the panel's last ready facts | several figures' bounds |
 | View state features depend on | `styk_core::view_state::ViewState` (one per window) | its getters; changes through its setters, which bump `version()` | the tab and context, Edit together and its frames, the Draw tool |
@@ -28,8 +28,8 @@ through `styk_core::testing` (JSON arguments, `select_all`, `undo_depth`, `settl
 
 - `styk-core/src/<panel>/model.rs`: the view model, plain data (`Clone + PartialEq`), no engine types, no borrowed
   document, no finished text: a label is an `i18n::Label` (a message key with parameters, or the document's own text).
-- `styk-core/src/<panel>/contexts.rs`: builds the model from the session's cheap typed reads, the view state and the
-  panel's ready facts. Today's descriptor functions are ported here, line by line.
+- `styk-core/src/<panel>/contexts.rs`: builds the model from the session's ready reads (the frame on show handed in by
+  the refresh), the view state and the panel's ready facts. Today's descriptor functions are ported here, line by line.
 - `styk-core/src/<panel>/mod.rs`: the panel's state, its `Event` enum (what the view can say), `update`, `refresh`, and
   its `app::Lifecycle`.
 - `styk-core/src/<panel>/...`: the panel's logic (the Inspector's `property.rs`, `order.rs`).
@@ -67,21 +67,40 @@ view(&Core) reads core.inspector().model(), .field(), .rename(), core.presentati
 
 ## Facts from the workers
 
-A value a panel shows that needs evaluation or geometry (the selection's bounds) is made by `styk_core::facts` on a
-`styk_services::worker::Worker` lane from the document's published generation (the `FrameDocument` seam the frame
-scheduler reads), keyed by `FactsKey` (document, revision, playhead tick, selection). The interface only `try_lock`s the
-lane's exchange. The panel asks at refresh, shows the last ready facts of the same document and selection until the
-new ones land (`Shown::stale`), and shows a field as `pending` (empty, not editable) until any are ready. A revision not
-published yet is not an answer: the panel asks again at its next refresh. A new fact gets its own field in `facts::Ready`
-and is computed in `facts::make`; the model's key holds the facts shown.
+**What the interface thread may read.** A refresh and a view model's builder read only what the session already holds:
+
+| Safe on the interface thread | Never there (they may evaluate or convert) |
+| --- | --- |
+| `Document::records`, `selection`, `view` (playhead, frame index, history, `editing`), `revision`, `id` | `Document::frame_records`, `with_document`, `read` (`animationValue` and the other named reads) |
+| `Document::frame_records_ready`, `with_document_ready`, `animation_value_ready`: `None` means "not ready" | anything that builds geometry, measures figures or evaluates a frame |
+
+Commands and gestures run inside a dispatch, where the session's own calls evaluate anyway; they may use the full
+reads (`property::Gesture` does). A refresh never does.
+
+**What is not ready comes from a worker.** The frame on show, the document's typed views and every derived fact that
+needs evaluation or geometry (the selection's bounds) are made by `styk_core::facts` on a `styk_services::worker::Worker`
+lane from the document's published generation (the `FrameDocument` seam the frame scheduler reads), with the same
+function the session uses (`styk_edit::editor_frame`), and stamped with a `FactsKey` (document, revision, playhead tick,
+selection). The interface only `try_lock`s the lane's exchange. A landed evaluation is adopted by its document
+(`Document::adopt_evaluation`, a handle move, only at the revision it was made for), so the next ready read answers.
+Until the frame on show and the views are ready the panel is **pending** (`Panel::pending`): its last model with every
+value read from the frame cleared and every control disabled (`contexts::pending`). A revision not published yet is
+not an answer: the panel asks again at its next refresh.
+
+**A fact is shown only under its complete current key.** Facts of another selection, revision or playhead are not shown
+at all: the row is `pending` (empty, disabled), so a gesture can never take a stale fact as its origin or denominator.
+A new fact gets its own field in `facts::Ready`, is computed in `facts::make` and holds its key; the model's key holds
+the facts shown.
 
 ## The lifecycle
 
 `app::Lifecycle` is the one lifecycle every panel implements: `finish` commits what the panel has open, as today's
-`finishCurrentEdit`. `Core` calls it on every panel before a command runs and before another document becomes active
-(`Command::Activate`), so a draft never outlives its document. A panel's `refresh` checks document identity before it
-defers anything: a gesture whose document is no longer active is cancelled on that document, and a busy session keeps
-the previous model.
+`finishCurrentEdit`: the number field's gesture, then any name being typed (the header's rename, a text row). `Core`
+calls it on every panel before a command runs and before another document becomes active (`Command::Activate`), so a
+draft never outlives its document. A draft keeps the document and target it began on and settles there, exactly as
+today's input does when it loses focus (a name commits when it changed and is not blank; Escape keeps the old one). A
+panel's `refresh` checks document identity before it defers anything: a gesture whose document is no longer active is
+cancelled on that document, a draft whose document went away is dropped, and a busy session keeps the previous model.
 
 ## View models
 
@@ -131,6 +150,12 @@ inputs, switches (Space toggles), selects (arrows step the value; the core picks
 F2 renames). A panel that moves focus answers `Effect::Focus(request)` (the rename field as it opens, the name as it
 closes); the view maps a request to its focus target.
 
+**Input methods.** Every text input of a panel (number values, names, text rows) passes the core's composition state
+to its field and reports compositions back: `.composing(core.focus().composing())` and
+`.on_compose(Message::Compose)`; `Message::Compose` sets the focus state (`docs/native/text-input.md`). While a
+composition is open, Enter and Escape belong to the input method and commit or cancel nothing in the panel.
+`inspector::View::of(core, theme)` hands the view the state it needs.
+
 ## Testing a panel
 
 1. **Core tests, no window** (`styk-core/tests/inspector.rs`, `inspector_review.rs`): real fixtures through
@@ -147,8 +172,13 @@ closes); the view maps a request to its focus target.
 4. **Screens**: each context is a catalogue screen (`styk_ui::screens`, `inspector-<context>[-dark]`, built by
    `styk_core::screens`), rendered by `stykanimate --screen` and compared by `cargo xtask check` with today's panel
    captured by the harness beside the band's (`engine/crates/styk-app/automation/inspector-reference/`: bundled
-   Chromium, LCD text on, opaque surfaces, device scale 1). The limits in `docs/native/screens/limits.toml` are measured
-   and only ever tightened.
+   Chromium, LCD text on, opaque surfaces, device scale 1; a context is entered as a person enters it, never by
+   setting state a selection resets). Judge a screen as N8 says: side by side at 100 % and 200 %, the same layout and
+   sizes within about 1 px, the same tokens, icons, radii, states and text; fix what visibly differs, never edges. The
+   guard counts pixels past a channel difference of 24; the limit in `docs/native/screens/limits.toml` sits a little
+   above the measurement, with a reason above 0.02. A part another chunk owns keeps its place in the panel at today's
+   size (`Row::Slot`, the header menu's and quick actions' places, the Library footer) and is **masked** in
+   `limits.toml`: a rectangle naming its owner, which the owner removes when it lands.
 
 ## Checklist for a new panel
 
@@ -156,7 +186,9 @@ closes); the view maps a request to its focus target.
 - [ ] Every control sends an `Event`; every button a `CommandId` or a panel action; nothing in the view decides behaviour.
 - [ ] Each gesture one entry; any failed or abandoned end cancels the session's gesture; undo and redo tested per kind.
 - [ ] The panel implements `Lifecycle`; its refresh checks document identity before deferring.
-- [ ] Facts that need evaluation or geometry come from a lane, never from refresh.
+- [ ] The refresh reads only the ready reads; frames, views and facts that need evaluation come from a lane, shown
+      only under their exact key; the panel is pending until they land.
+- [ ] Every text input wires the composition gate.
 - [ ] Every session call through `answers::call`.
 - [ ] The model's key holds every input; no rebuild while a gesture is open.
 - [ ] Core tests, an automation script, focus with keys, screens in both themes with measured limits.
