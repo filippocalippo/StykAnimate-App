@@ -89,7 +89,7 @@ high-risk or unclear one reverts its chunk); no catch-up merges into branches wi
 | K-cmd | Astra | running (`perf/briefs/native/K-cmd-commands.md`): the registry's data and logic in their own modules beside the slice's `Command`, attached to it when the slice merges |
 | K-fastui | Astra | running, before the screen fan-out (`perf/briefs/native/K-fastui.md`): `styk-screens`, a developer-only preview binary drawing the catalogue through exactly the app's views, pixel-identical to `--screen`; `rust-lld` for dev and test builds if measured clearly faster |
 | K-dock (core) | Astra | running: the layout model, its rules and solver (`perf/briefs/native/K-dock-core.md`); the dock views after it |
-| K-overlay (core) | Astra | done at `d22bf289` (`docs/native/overlays.md`): the overlay stack, guarded closing, focus restoration, placement (120 cases from today's code), the menu model, messages and the tooltip; in review (GPT-6.1 Sol high); its views are K-widgets |
+| K-overlay (core) | Astra | done at `d22bf289`; review: submenu focus ownership (hover keeps focus on the parent as today), menu placement policies in the core (today's submenu alignment and natural width), schedulable hover deadlines; fixing; then a merge train. Its views are K-widgets |
 | RM | Astra | after K-stage merges (both change `styk-render`): the renderer's and engine's memory |
 | K-widgets views, dock views, stage widget, screens | Sonnet | after the slice and K-fastui |
 
