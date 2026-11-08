@@ -47,7 +47,7 @@ pub fn sample(log: &mut Option<Log>, phase: &str, tick: Option<u32>, device: Opt
 }
 
 pub fn renderer_device(renderer: &styk_export::FrameRenderer) -> Option<&wgpu::Device> {
-    match renderer { styk_export::FrameRenderer::Gpu(gpu) => Some(gpu.device()), _ => None }
+    match renderer { styk_export::FrameRenderer::Gpu(gpu, _) => Some(gpu.device()), _ => None }
 }
 
 struct Source(styk_engine::Engine);

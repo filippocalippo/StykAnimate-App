@@ -114,6 +114,19 @@ impl GpuExport {
         self.interrupt.clone()
     }
 
+    /// Finishes an upload batch on the export worker, releasing its staging
+    /// copies. Cancellation and device loss wake this wait just like readback.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn flush_uploads(&self) -> Result<(), String> {
+        if self.interrupt.is_interrupted() { return Err(crate::interrupt::INTERRUPTED.into()); }
+        self.queue.submit([]);
+        self.interrupt.expect(1);
+        let latch = self.interrupt.clone();
+        self.queue.on_submitted_work_done(move || latch.completed(Ok(())));
+        self.poller.as_ref().ok_or("the export has no thread to wait for the GPU")?.send(()).map_err(|e| e.to_string())?;
+        self.interrupt.wait()
+    }
+
     pub fn settings(&self) -> &Settings {
         &self.settings
     }

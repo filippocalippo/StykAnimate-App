@@ -11,6 +11,14 @@ protocol. GPU upload batches release their decoded and staging copies before tak
 more. CPU exports retain the pixels their rasterizer reads. Input file buffers are
 dropped after opening.
 
+For more than two sprite pages, native frame sources use the existing `Resident`
+exporter. Two pages are a soft working-set budget; all pages a frame draws are held
+and grow the atlas when necessary. Unused pictures are not decoded. Drawing cels
+are first decoded for their bounds, then their visible tiles are requested and
+uploaded under the same readiness/refusal protocol as other resident exports.
+Uploads wait on the exporter's interruptible GPU poller, so cancellation or device
+loss also wakes a pending upload batch. A frame never draws partial residency.
+
 Native devices requested by `native_gpu` and the video tool use wgpu's
 `MemoryHints::MemoryUsage`; the backend, compiler and render calculations are
 unchanged. Live GPU allocations and reserved allocator blocks are separate measures.

@@ -102,6 +102,7 @@ struct Timings {
 }
 
 struct Producer {
+    engine: Engine,
     frames: styk_engine::export::ExportFrames,
     generation: Arc<styk_engine::Generation>,
     renderer: FrameRenderer,
@@ -134,6 +135,7 @@ impl FrameProducer for Producer {
         let drawing = Instant::now();
         let doc = &self.generation.prepared.doc;
         let list = if self.transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
+        self.renderer.prepare_frame(&self.engine, &self.frames, &list)?;
         self.renderer.frame_into(doc, &list, frame.camera.as_ref(), layout.matte, out)?;
         finish_frame(layout, out);
         let mut timings = self.timings.lock().unwrap();
@@ -240,7 +242,7 @@ fn make_renderer(engine: &Engine, frames: &styk_engine::export::ExportFrames, se
         crate::memory::sample(memory, "device", None, Some(&device), serde_json::json!({})).map_err(fail)?;
         let exporter = GpuExport::new(&device, &queue, settings, tile);
         crate::memory::sample(memory, "exporter", None, Some(&device), serde_json::json!({})).map_err(fail)?;
-        let mut renderer = FrameRenderer::Gpu(exporter);
+        let mut renderer = FrameRenderer::Gpu(exporter, None);
         renderer.load_images(engine, frames).map_err(fail)?;
         crate::memory::sample(memory, "uploaded", None, Some(&device), serde_json::json!({})).map_err(fail)?;
         Ok((renderer, adapter_name))
@@ -392,6 +394,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let cancel_when = Arc::new(Mutex::new(None::<Instant>));
     let sample: Vec<u32> = option(rest, "--sample-frames").map(|s| s.split(',').filter_map(|n| n.parse().ok()).collect()).unwrap_or_default();
     let mut producer = Producer {
+        engine: engine.clone(),
         frames,
         generation: generation.clone(),
         renderer,
@@ -422,6 +425,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
                 // A frame of the other document between this document's frames.
                 let tick = (index * 7 + 3) % other.frames.ticks();
                 let frame = other.frames.take(tick).ok_or_else(|| fail("no frame of the other document"))?;
+                other.renderer.prepare_frame(&other._engine, &other.frames, &frame.list).map_err(fail)?;
                 other.renderer.frame_into(&other.generation.prepared.doc, &frame.list, frame.camera.as_ref(), layout.matte, &mut scratch).map_err(fail)?;
             }
             let tick = producer.order[index as usize];

@@ -376,6 +376,33 @@ fn cel_document(pictures: u32) -> Vec<u8> {
     format!("{}{}{}", &text[..end], extra, &text[end..]).into_bytes()
 }
 
+/// The default native frame source must use the existing resident exporter,
+/// even when most pages in the document are never drawn by the requested frame.
+#[test]
+fn headless_frame_source_allocates_only_resident_sprite_pages() {
+    let gpu = gpu().expect("GPU required for native memory regression");
+    let engine = Engine::for_export(clock, Budgets { picture_bytes: 32 << 20, ..Budgets::for_device(None) });
+    engine.open(&cel_document(3), "json", "memory regression").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    assert!(frames.generation().assets.pages > 2);
+    let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
+    let mut source = styk_export::FrameRenderer::Gpu(GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE), None);
+    source.load_images(&engine, &frames).unwrap();
+    let styk_export::FrameRenderer::Gpu(exporter, _) = &source else { unreachable!() };
+    assert_eq!(exporter.sprite_layers(), 2, "unused pictures must not allocate their whole-document pages");
+    assert_eq!(frames.images_pending(), 0);
+    assert_eq!(engine.images_pending(), 0, "no second stage decode queue");
+    let frame = frames.take(0).unwrap();
+    source.prepare_frame(&engine, &frames, &frame.list).unwrap();
+    let mut actual = Vec::new();
+    source.frame_into(&frames.generation().prepared.doc, &frame.list, frame.camera.as_ref(), true, &mut actual).unwrap();
+    let (_, reference) = open("engine/crates/styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+    assert_eq!(actual, export(&gpu, &reference, settings, styk_export::TILE_SIDE, 0, true).0,
+        "the cel equals the original whole-atlas path, with no missing or stale tiles");
+    source.interrupt().interrupt();
+    assert_eq!(source.prepare_frame(&engine, &frames, &frame.list).unwrap_err(), styk_export::interrupt::INTERRUPTED);
+}
+
 /// A list that draws only `picture` of the document's images (a record naming its place, as the encoder writes one).
 fn picture_list(assets: &styk_eval::assets::Assets, picture: usize) -> std::sync::Arc<styk_draw::DrawList> {
     use styk_draw::{DrawList, Group, Pass, Prim, K_IMAGE, NO_LAYER, NO_PAINT};

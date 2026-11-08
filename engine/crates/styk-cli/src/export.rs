@@ -81,7 +81,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
         let native = styk_render::native_gpu::native_gpu(wgpu::Instance::enabled_backend_features().contains(wgpu::Backends::DX12), "styk export", |adapter| wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()))?;
         adapter_name = format!("{} ({:?}, {})", native.adapter.get_info().name, native.adapter.get_info().backend, native.attempt.name);
         let (device, queue) = (native.device, native.queue);
-        renderer = FrameRenderer::Gpu(GpuExport::new(&device, &queue, settings, tile));
+        renderer = FrameRenderer::Gpu(GpuExport::new(&device, &queue, settings, tile), None);
     }
 
     let decoding = Instant::now();
@@ -94,7 +94,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
     }
     let verify = option(rest, "--verify").and_then(|n| n.parse::<usize>().ok()).unwrap_or(0);
     if verify > 0 {
-        return verify_runs(&frames, doc, (first, last), matte, verify, &mut renderer);
+        return verify_runs(&engine, &frames, doc, (first, last), matte, verify, &mut renderer);
     }
     let (mut evaluate, mut draw) = (Vec::new(), Vec::new());
     let mut pixels = Vec::new();
@@ -104,6 +104,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
             let frame = frames.take(tick).ok_or("no frame")?;
             let t1 = Instant::now();
             let list = if transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
+            renderer.prepare_frame(&engine, &frames, &list)?;
             renderer.frame_into(doc, &list, frame.camera.as_ref(), matte, &mut pixels)?;
             let t2 = Instant::now();
             evaluate.push((t1 - t0).as_secs_f64() * 1000.0);
@@ -114,13 +115,13 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
             }
         }
     }
-    let tiles = match &renderer { FrameRenderer::Gpu(g) => g.tiles().len(), FrameRenderer::Cpu(c) => c.tiles().len() };
-    let stats = match &renderer { FrameRenderer::Gpu(g) => Some({
+    let tiles = match &renderer { FrameRenderer::Gpu(g, _) => g.tiles().len(), FrameRenderer::Cpu(c) => c.tiles().len() };
+    let stats = match &renderer { FrameRenderer::Gpu(g, _) => Some({
         let s = g.stats();
         format!(", {} passes, {} rounds, layers {:.1} MiB, effect slots {:.1} MiB", s.passes, s.rounds, s.layer_bytes as f64 / 1048576.0, s.effect_bytes as f64 / 1048576.0)
     }), FrameRenderer::Cpu(_) => None };
     println!(
-        "{}: ticks {first}-{last}, {width}x{height} {smoothing:?}{}, {tiles} tile(s); opened {open_ms:.0} ms, {} pictures decoded in {decode_ms:.0} ms; per frame: evaluate p50 {:.2} ms, draw and read p50 {:.2} ms ({} frames) on {adapter_name}{}",
+        "{}: ticks {first}-{last}, {width}x{height} {smoothing:?}{}, {tiles} tile(s); opened {open_ms:.0} ms, {} initial picture uploads in {decode_ms:.0} ms; per frame: evaluate p50 {:.2} ms, draw and read p50 {:.2} ms ({} frames) on {adapter_name}{}",
         doc.name,
         if matte { " over black" } else { "" },
         image_count,
@@ -133,7 +134,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
 }
 
 /// Draws ticks `range` `runs` times and compares each frame with the first pass, by hash.
-fn verify_runs(frames: &styk_engine::export::ExportFrames, doc: &styk_eval::doc::Document, range: (u32, u32), matte: bool, runs: usize, renderer: &mut FrameRenderer) -> Result<(), String> {
+fn verify_runs(engine: &Engine, frames: &styk_engine::export::ExportFrames, doc: &styk_eval::doc::Document, range: (u32, u32), matte: bool, runs: usize, renderer: &mut FrameRenderer) -> Result<(), String> {
     use std::hash::{Hash, Hasher};
     let mut first: Vec<(u64, Vec<u8>)> = Vec::new();
     let mut differing = 0;
@@ -141,6 +142,7 @@ fn verify_runs(frames: &styk_engine::export::ExportFrames, doc: &styk_eval::doc:
         for tick in range.0..=range.1 {
             let frame = frames.take(tick).ok_or("no frame")?;
             let mut pixels = Vec::new();
+            renderer.prepare_frame(engine, frames, &frame.list)?;
             renderer.frame_into(doc, &frame.list, frame.camera.as_ref(), matte, &mut pixels)?;
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             pixels.hash(&mut hasher);
