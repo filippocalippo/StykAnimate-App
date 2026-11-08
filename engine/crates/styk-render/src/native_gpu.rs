@@ -74,11 +74,12 @@ pub struct NativeGpu {
     pub attempt: Attempt,
 }
 
-/// Small buffers share 8–16 MiB blocks. Larger targets get dedicated allocations
-/// rather than pinning a mostly empty 64 MiB pool after the frame retires them.
-/// This sizes allocator blocks, not resources: it never limits artwork.
+/// Each device's allocator starts at 8 MiB (4 MiB host), then doubles blocks as
+/// its live memory types grow, up to the original 256/128 MiB ceilings. wgpu's
+/// allocator owns that growth; retained resources keep their blocks in use until
+/// owner teardown. This sizes blocks, never limits individual artwork resources.
 pub fn memory_hints() -> wgpu::MemoryHints {
-    wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: (8 << 20)..(16 << 20) }
+    wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: (8 << 20)..(256 << 20) }
 }
 
 /// Opens one attempt: an instance, the high-performance adapter and a device with `limits(adapter)`.

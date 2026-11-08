@@ -100,15 +100,46 @@ fn a_large_transient_target_returns_its_allocator_reservation() {
 fn small_native_owners_do_not_grow_large_allocator_blocks() {
     let gpu = styk_render::native_gpu::native_gpu(false,
         "pooled reservation", |a| wgpu::Limits::default().using_resolution(a.limits())).expect("GPU required");
-    let buffers: Vec<_> = (0..32).map(|_| gpu.device.create_buffer(&wgpu::BufferDescriptor {
+    let buffers: Vec<_> = (0..2).map(|_| gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label:Some("small pooled owner"), size:2 << 20,
         usage:wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation:false,
     })).collect();
     let report = gpu.device.generate_allocator_report().unwrap();
-    assert!(report.total_allocated_bytes >= 64 << 20);
+    assert!(report.total_allocated_bytes >= 4 << 20);
     assert!(report.blocks.iter().all(|b| b.size <= 16 << 20),
         "small owners must share blocks no larger than 16 MiB: {:?}", report.blocks.iter().map(|b| b.size).collect::<Vec<_>>());
     drop(buffers);
+}
+
+#[test]
+fn growing_native_owners_allocate_geometric_blocks() {
+    for host in [false, true] {
+        let gpu = styk_render::native_gpu::native_gpu(false,"growing owner",|a| wgpu::Limits::default().using_resolution(a.limits())).unwrap();
+        let before = gpu.device.generate_allocator_report().unwrap().blocks.len();
+        let mut buffers = Vec::new();
+        for count in 1..=64 {
+            buffers.push(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label:Some("growing owner"), size:2 << 20,
+                usage:if host { wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST } else { wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST },
+                mapped_at_creation:false,
+            }));
+            let report = gpu.device.generate_allocator_report().unwrap();
+            // Geometric sum: m + 2m + ... + 2^(k-1)m >= live.
+            let minimum = if host { 4u64 << 20 } else { 8u64 << 20 };
+            let mut capacity = 0; let mut block = minimum; let mut maximum_blocks = 0;
+            while capacity < count * (2 << 20) { capacity += block; block *= 2; maximum_blocks += 1; }
+            assert!(report.blocks.len() <= before + maximum_blocks,
+                "host={host}, live={} MiB: {} new blocks exceeds logarithmic {maximum_blocks}",count*2,report.blocks.len()-before);
+        }
+        let report = gpu.device.generate_allocator_report().unwrap();
+        assert!(report.blocks.iter().any(|b| b.size >= 32 << 20));
+        let held = report.total_reserved_bytes;
+        gpu.queue.submit([]); gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert_eq!(gpu.device.generate_allocator_report().unwrap().total_reserved_bytes,held,"submission does not retire live capacity");
+        drop(buffers);
+        gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(!gpu.device.generate_allocator_report().unwrap().allocations.iter().any(|a| a.name=="growing owner"));
+    }
 }
 
 #[test]

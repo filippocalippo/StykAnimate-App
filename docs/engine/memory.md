@@ -23,9 +23,12 @@ uploaded under the same readiness/refusal protocol as other resident exports.
 Uploads wait on the exporter's interruptible GPU poller, so cancellation or device
 loss also wakes a pending upload batch. A frame never draws partial residency.
 
-Native devices requested by `native_gpu` and the video tool share 8–16 MiB device
-allocator blocks (4–8 MiB host blocks). Larger resources use dedicated allocations;
-these sizes do not limit artwork. The backend, compiler and render calculations are
+Native devices requested by `native_gpu` and the video tool start at 8 MiB device
+allocator blocks (4 MiB host), doubling as each memory type's live usage grows,
+up to the previous 256 MiB device / 128 MiB host ceilings. The existing wgpu
+allocator owns this policy independently for each device and memory type; retained
+resources keep their blocks until teardown. Larger resources can use dedicated
+allocations; these sizes do not limit artwork. The backend, compiler and render calculations are
 unchanged. Live GPU allocations and reserved allocator blocks are separate measures.
 Native exports keep at most one frame's tiles in flight, within the existing
 64 MiB readback budget. Serializing tiles reduced overlap but regressed frame time
