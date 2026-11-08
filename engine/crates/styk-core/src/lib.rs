@@ -11,6 +11,10 @@
 pub mod audio;
 pub mod automation;
 pub mod clipboard;
+#[path = "commands/registry.rs"]
+pub mod command_registry;
+pub mod command_queue;
+pub mod error_policy;
 pub mod controls;
 pub mod documents;
 pub mod engine;
@@ -24,6 +28,7 @@ pub mod limits;
 pub mod number;
 pub mod roving;
 pub mod shell;
+pub mod shortcuts;
 pub mod text_entry;
 pub mod text;
 

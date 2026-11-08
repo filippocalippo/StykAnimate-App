@@ -27,12 +27,18 @@ impl Chord {
     /// F6, Ctrl+F6, Ctrl+Alt+M and Ctrl+Alt+L work from inside a text field (`docs/hotkeys.md`), and nothing else:
     /// Shift+F6 is Remove keyframes (`src/hotkeys.mjs`), so it must not run from a field.
     pub fn works_in_text_fields(&self) -> bool {
-        if self.meta || self.shift {
+        self.works_in_text_fields_on(false)
+    }
+
+    /// The same four chords with `Mod` interpreted for the key map's platform.
+    pub fn works_in_text_fields_on(&self, command_modifier: bool) -> bool {
+        let (primary, secondary) = if command_modifier { (self.meta, self.ctrl) } else { (self.ctrl, self.meta) };
+        if secondary || self.shift || self.alt_graph {
             return false;
         }
         match self.key.as_str() {
             "F6" => !self.alt,
-            "KeyM" | "KeyL" => self.ctrl && self.alt && !self.shift,
+            "KeyM" | "KeyL" => primary && self.alt,
             _ => false,
         }
     }
@@ -41,10 +47,15 @@ impl Chord {
 /// Whether `chord` may run a command given the focus: false while composing, for AltGraph, and in a text field unless
 /// the chord is one of those that work there.
 pub fn command_allowed(focus: &FocusState, chord: &Chord) -> bool {
+    command_allowed_on(focus, chord, false)
+}
+
+/// Platform-aware form used by the single command shortcut router.
+pub fn command_allowed_on(focus: &FocusState, chord: &Chord, command_modifier: bool) -> bool {
     if chord.alt_graph || focus.composing() {
         return false;
     }
-    focus.text_entry().is_none() || chord.works_in_text_fields()
+    focus.text_entry().is_none() || chord.works_in_text_fields_on(command_modifier)
 }
 
 /// Whether the document's undo and redo are reachable: never while a text field has focus (its own history owns
