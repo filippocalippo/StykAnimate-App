@@ -35,6 +35,21 @@ when the regression binaries were compiled; subsequent fixes do not alter those 
   `timeline-review-global-return-baseline.log`: `0 passed; 1 failed` (105 instead of 6).
   After clamping that path, `timeline-review-global-return-fixed.log`: `16 passed; 0 failed; 1 ignored`.
 
+## Pre-integration verification
+
+While the required recovery merge was still absent from origin, the completed changes at
+`0574e4be` ran through the queue (`T1 pre-integration verification`):
+
+- `cargo build -p styk-app`: exit 0 (`timeline-review-build.log`).
+- `cargo test -p styk-core -p styk-services -p styk-app -- --test-threads=1`:
+  38 suites, **827 passed, 0 failed, 10 ignored**, exit 0 (`timeline-review-suites.log`).
+- `cargo xtask check`: exit 0, including source/dependency guards, screenshot limits and
+  app/preview parity (`timeline-review-check.log`). No frozen fixture or threshold changed.
+- Queue result: `BUILD_EXIT=0 TEST_EXIT=0 GUARD_EXIT=0`.
+
+These checks cover the independent fixes and Settings' maintenance API. They do not claim
+that the recovery integration or the drafted real-quit regression has run yet.
+
 ## Decisions
 
 - Retain stop cleanup on the existing session call queue. This avoids a second settlement
