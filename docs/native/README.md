@@ -86,9 +86,12 @@ high-risk or unclear one reverts its chunk); no catch-up merges into branches wi
 | K-shell | Sonnet | **merged `4228bdea`**: the window and the top band (today's layout and folds, tabs, the Ctrl+Tab switcher, today's workspace and Home rules, one clock with `--clock fixed`), opens through K-doc's host, `styk_core::automation` (the one automation language), four band screens in `docs/native/screens/limits.toml` (references captured with ClearType; baseline limits, only tightened). Open: band commands until K-cmd, menus until K-widgets, English literals until R-slice's labels |
 | K-stage | Astra | review fixed at `11de622a` and read: alpha compositing for detached frames, the prepared identity without view inputs (navigation keeps the prepared list), pictures kept across pose edits, one admitted plan, the stage's steps in `styk_core::automation`; native parity 1,342/1,342; pan and zoom ready by the next 15.6 ms poll, cold open and first frame 1.5-2.5 s (heavy documents, pictures). Waiting to merge alone when the freeze lifts |
 | K-rec | Astra | **merged `42c6f910`** (its own pass running): recovery and autosave: worker copies at today's moments, ownership by an OS-held handle, committed data independent of its metadata (an unavailable sidecar no longer hides a copy, an intended improvement), failed close checkpoints warn with a retry, restore and discard as today, workspace adoption. The chooser's view comes later |
-| K-cmd | Astra | after R-slice merges |
-| K-fastui | Astra | after K-cmd, before the screen fan-out (`perf/briefs/native/K-fastui.md`): `styk-screens`, a developer-only preview binary drawing the catalogue through exactly the app's views, pixel-identical to `--screen`; `rust-lld` for dev and test builds if measured clearly faster |
-| K-widgets, K-dock, stage widget, screens | Astra, Sonnet | after K-fastui |
+| K-cmd | Astra | running (`perf/briefs/native/K-cmd-commands.md`): the registry's data and logic in their own modules beside the slice's `Command`, attached to it when the slice merges |
+| K-fastui | Astra | running, before the screen fan-out (`perf/briefs/native/K-fastui.md`): `styk-screens`, a developer-only preview binary drawing the catalogue through exactly the app's views, pixel-identical to `--screen`; `rust-lld` for dev and test builds if measured clearly faster |
+| K-dock (core) | Astra | running: the layout model, its rules and solver (`perf/briefs/native/K-dock-core.md`); the dock views after it |
+| K-overlay (core) | Astra | running: the overlay stack, anchored placement, the menu model, messages and the tooltip (`perf/briefs/native/K-overlay-core.md`); their views are K-widgets |
+| RM | Astra | after K-stage merges (both change `styk-render`): the renderer's and engine's memory |
+| K-widgets views, dock views, stage widget, screens | Sonnet | after the slice and K-fastui |
 
 The automation mode is one language, `styk_core::automation` (merged with K-shell, header `styk-auto/1`); K-dev's runners,
 K-stage's steps and R-slice's panel test move onto it. Then the skeleton gate (full suites, parity, the native smokes, screenshots, the benchmark, `cargo xtask check --wasm`).
