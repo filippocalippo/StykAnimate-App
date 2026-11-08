@@ -30,14 +30,17 @@ pub mod history;
 pub mod i18n;
 pub mod inspector;
 pub mod launch;
+pub mod layout;
 pub mod limits;
 pub mod number;
+pub mod overlay;
 pub mod range;
 pub mod roving;
 pub mod screens;
 pub mod selection_actions;
 pub mod shell;
 pub mod shortcuts;
+pub mod stage;
 pub mod text_entry;
 pub mod text;
 #[cfg(feature = "testing")]

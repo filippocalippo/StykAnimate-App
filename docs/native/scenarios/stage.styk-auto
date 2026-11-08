@@ -1,0 +1,1464 @@
+styk-auto/1
+# Local aliases only; runner uses --clock fixed and a separate measurement clock.
+open scene_a
+frame 100
+advance 100000000
+pointer 1 down middle 300 200
+advance 16000000
+pointer 1 move middle 323 187
+pointer 1 up middle 323 187
+frame 100
+pen 2 hover pen 200 150 0
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+pan 1 0
+frame 100
+advance 16000000
+pan -1 0
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+advance 16000000
+zoom 1.2 323 187
+frame 100
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 100
+play 100 120
+measure frame_time
+open scene_b
+frame 180
+advance 100000000
+pointer 1 down middle 300 200
+advance 16000000
+pointer 1 move middle 323 187
+pointer 1 up middle 323 187
+frame 180
+pen 2 hover pen 200 150 0
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+pan 1 0
+frame 180
+advance 16000000
+pan -1 0
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+advance 16000000
+zoom 1.2 323 187
+frame 180
+advance 16000000
+zoom 0.8333333333333334 323 187
+frame 180
+play 180 120
+measure frame_time

@@ -564,6 +564,10 @@ fn capture(id: iced_window::Id) -> Task<Message> {
 
 fn main() -> ExitCode {
     styk_core::engine::set_memory_limit(styk_platform::memory::document_memory_limit());
+    if iced_wgpu::instance::install(styk_core::stage::gpu_instances).is_err() {
+        eprintln!("the application's GPU policy was already installed");
+        return ExitCode::FAILURE;
+    }
     #[cfg(feature = "devtools")]
     styk_devtools::initialize();
     mark!("startup");

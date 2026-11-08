@@ -32,6 +32,9 @@ pub enum Error {
     /// No device request succeeded.
     #[error("no device request succeeded: {0:?}")]
     RequestDeviceFailed(Vec<(wgpu::Limits, wgpu::RequestDeviceError)>),
+    /// Every backend allowed by the host failed, including device negotiation.
+    #[error("no host GPU attempt succeeded: {0}")]
+    HostAttempts(String),
 }
 
 impl From<Error> for backend::Error {
@@ -49,20 +52,38 @@ impl Compositor {
     /// Returns `None` if no compatible graphics adapter could be found.
     pub async fn request(
         settings: Settings,
-        display: impl compositor::Display,
-        compatible_window: impl compositor::Window,
+        display: impl compositor::Display + Clone,
+        compatible_window: impl compositor::Window + Clone,
         shell: Shell,
     ) -> Result<Self, Error> {
-        let instance = wgpu::util::new_instance_with_webgpu_detection(wgpu::InstanceDescriptor {
+        let descriptors = crate::instance::descriptors(wgpu::InstanceDescriptor {
             backends: settings.backends,
             flags: if cfg!(feature = "strict-assertions") {
                 wgpu::InstanceFlags::debugging()
             } else {
                 wgpu::InstanceFlags::empty()
             },
-            ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display))
-        })
-        .await;
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let mut errors = Vec::new();
+        for descriptor in descriptors {
+            let descriptor = wgpu::InstanceDescriptor {
+                backends: descriptor.backends,
+                flags: descriptor.flags,
+                backend_options: descriptor.backend_options,
+                ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display.clone()))
+            };
+            let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
+            match Self::request_on(settings, instance, compatible_window.clone(), shell.clone()).await {
+                Ok(compositor) => return Ok(compositor),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        Err(Error::HostAttempts(errors.join("; ")))
+    }
+
+    async fn request_on(settings: Settings, instance: wgpu::Instance,
+        compatible_window: impl compositor::Window, shell: Shell) -> Result<Self, Error> {
 
         log::info!("{settings:#?}");
 
@@ -221,8 +242,8 @@ impl Compositor {
 /// Creates a [`Compositor`] with the given [`Settings`] and window.
 pub async fn new(
     settings: Settings,
-    display: impl compositor::Display,
-    compatible_window: impl compositor::Window,
+    display: impl compositor::Display + Clone,
+    compatible_window: impl compositor::Window + Clone,
     shell: Shell,
 ) -> Result<Compositor, Error> {
     Compositor::request(settings, display, compatible_window, shell).await
@@ -358,8 +379,8 @@ impl graphics::Compositor for Compositor {
 
     async fn new(
         settings: backend::Settings,
-        display: impl compositor::Display,
-        compatible_window: impl compositor::Window,
+        display: impl compositor::Display + Clone,
+        compatible_window: impl compositor::Window + Clone,
         shell: Shell,
     ) -> Result<Self, backend::Error> {
         if settings.backend.hardware().is_none() && !settings.backend.matches("wgpu") {

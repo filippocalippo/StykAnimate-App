@@ -3,7 +3,36 @@
 
 use crate::Renderer;
 
+/// A completed GPU picture detached from its renderer. It owns no CPU scene.
+/// The renderer cannot overwrite it while the host presents it. Return it on
+/// the rendering worker with `recycle_frame` once the host no longer shows it.
+pub struct RenderedFrame {
+    output: (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, [u32; 2]),
+    pipeline: wgpu::RenderPipeline,
+}
+
+impl RenderedFrame {
+    pub fn present(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.output.2, &[]);
+        pass.draw(0..3, 0..1);
+    }
+    pub fn texture(&self) -> &wgpu::Texture { &self.output.0 }
+    pub fn bytes(&self) -> u64 { self.output.3[0] as u64 * self.output.3[1] as u64 * 4 }
+}
+
 impl Renderer {
+    /// Move, never copy, the last output to a presenter. Submit its encoder
+    /// before publishing it to another thread on the same device/queue.
+    pub fn take_frame(&mut self) -> Option<RenderedFrame> {
+        self.output.take().map(|output| RenderedFrame { output, pipeline: self.composite.clone() })
+    }
+
+    /// Worker-only recycling after the presenter's submission. Queue ordering
+    /// keeps the previous present ahead of a subsequent write to this texture.
+    pub fn recycle_frame(&mut self, frame: RenderedFrame) {
+        if let Some(old) = self.output.replace(frame.output) { old.0.destroy(); }
+    }
     /// Draws the rendered frame into the host's render pass (viewport already set).
     pub fn present(&self, pass: &mut wgpu::RenderPass<'_>) {
         let Some((_, _, bind, _)) = &self.output else { return };

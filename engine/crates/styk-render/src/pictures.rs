@@ -57,9 +57,19 @@ impl PictureState {
     /// A table of the pictures of `assets` whose layer is `layer_of`'s (`None`: only the soft copy draws), and a soft atlas
     /// for `soft_pages` pages of the layout (a one texel placeholder for none).
     pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue, assets: &Assets, soft_pages: u32, whole: bool, layer_of: impl Fn(&AtlasEntry) -> Option<u32>) -> PictureState {
+        Self::new_bounded(device, queue, assets, soft_pages, whole, layer_of, u64::MAX)
+            .expect("unbounded picture table")
+    }
+
+    /// Reserve the GPU table before any capacity growth; collisions must not
+    /// silently turn a small advertised table into an unbounded allocation.
+    pub(crate) fn new_bounded(device: &wgpu::Device, queue: &wgpu::Queue, assets: &Assets, soft_pages: u32, whole: bool, layer_of: impl Fn(&AtlasEntry) -> Option<u32>, table_bytes: u64) -> Result<PictureState, u64> {
         let pictures: Vec<&AtlasEntry> = assets.atlas.iter().filter(|entry| entry.valid && entry.layer < crate::MAX_PAGES).collect();
-        let mut capacity = (pictures.len() * 4).next_power_of_two().max(TABLE_WIDTH as usize);
+        let mut capacity = pictures.len().checked_mul(4).and_then(usize::checked_next_power_of_two)
+            .ok_or(u64::MAX)?.max(TABLE_WIDTH as usize);
         let (entries, slots) = loop {
+            let required = (capacity as u64).saturating_mul(16);
+            if required > table_bytes { return Err(required); }
             let mut entries = vec![[0u32; 4]; capacity];
             let mut slots = HashMap::with_capacity(pictures.len());
             let placed = pictures.iter().all(|entry| {
@@ -78,7 +88,7 @@ impl PictureState {
             if placed {
                 break (entries, slots);
             }
-            capacity *= 2;
+            capacity = capacity.checked_mul(2).ok_or(u64::MAX)?;
         };
         let (table, table_view) = Table::allocate(device, "styk pictures", wgpu::TextureFormat::Rgba32Uint, (capacity / TABLE_WIDTH as usize) as u32);
         let (soft, soft_view) = if soft_pages == 0 {
@@ -90,7 +100,7 @@ impl PictureState {
         crate::resources::warm_texture(queue, &soft);
         let mut state = PictureState { soft, soft_view, table, table_view, entries, slots, dirty: true, whole, known: assets.atlas.len() };
         state.flush(queue);
-        state
+        Ok(state)
     }
 
     /// The layer of the picture at `entry` in the sprite texture, if it is in.

@@ -496,3 +496,19 @@ fn the_places_of_a_refused_cel_become_tiles_only_as_the_renderer_takes_them() {
     assert_eq!(1 + 3 + rest.len(), tiles);
     assert_eq!(engine.images_backlog(), (0, 0));
 }
+
+#[test]
+fn clearing_tiles_carry_refusal_provenance_to_complete_frame_presenters() {
+    let engine=drawing();
+    let generation=engine.generation().unwrap();
+    let cel=*generation.assets.cels.keys().next().unwrap();
+    let placement=generation.assets.placement(cel);
+    let slot=generation.assets.cels[&cel].1[0][0];
+    engine.inner.state.lock().images.cleared.push((slot,placement));
+    let batch=engine.take_picture_batch(1);
+    assert_eq!(batch.refused,vec![placement]);
+    assert_eq!(batch.images.len(),1);
+    assert_eq!(batch.images[0].placement,placement);
+    assert!(batch.images[0].rgba.iter().all(|&byte| byte==0));
+    assert!(engine.take_picture_batch(1).refused.is_empty());
+}

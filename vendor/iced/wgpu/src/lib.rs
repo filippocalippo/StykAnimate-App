@@ -25,6 +25,7 @@
 pub mod layer;
 pub mod primitive;
 pub mod window;
+pub mod instance;
 
 #[cfg(feature = "geometry")]
 pub mod geometry;
@@ -964,51 +965,50 @@ impl renderer::Headless for Renderer {
             return None;
         }
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let descriptors = instance::descriptors(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
             flags: wgpu::InstanceFlags::empty(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: None,
-                apply_limit_buckets: false,
-            })
-            .await
-            .ok()?;
+        for descriptor in descriptors {
+            let instance = wgpu::Instance::new(descriptor);
+            let Ok(adapter) = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    force_fallback_adapter: false,
+                    compatible_surface: None,
+                    apply_limit_buckets: false,
+                })
+                .await else { continue; };
 
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("iced_wgpu [headless]"),
-                required_features: adapter.features() & wgpu::Features::DUAL_SOURCE_BLENDING,
-                required_limits: wgpu::Limits {
-                    max_bind_groups: 2,
-                    ..wgpu::Limits::default()
+            let Ok((device, queue)) = adapter
+                .request_device(&wgpu::DeviceDescriptor {
+                    label: Some("iced_wgpu [headless]"),
+                    required_features: adapter.features() & wgpu::Features::DUAL_SOURCE_BLENDING,
+                    required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
+                    memory_hints: wgpu::MemoryHints::MemoryUsage,
+                    trace: wgpu::Trace::Off,
+                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                })
+                .await else { continue; };
+
+            let engine = Engine::new(
+                &adapter,
+                device,
+                queue,
+                if graphics::color::GAMMA_CORRECTION {
+                    wgpu::TextureFormat::Rgba8UnormSrgb
+                } else {
+                    wgpu::TextureFormat::Rgba8Unorm
                 },
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            })
-            .await
-            .ok()?;
+                Some(graphics::Antialiasing::MSAAx4),
+                Shell::headless(),
+            );
 
-        let engine = Engine::new(
-            &adapter,
-            device,
-            queue,
-            if graphics::color::GAMMA_CORRECTION {
-                wgpu::TextureFormat::Rgba8UnormSrgb
-            } else {
-                wgpu::TextureFormat::Rgba8Unorm
-            },
-            Some(graphics::Antialiasing::MSAAx4),
-            Shell::headless(),
-        );
-
-        Some(Self::new(engine, settings))
+            return Some(Self::new(engine, settings));
+        }
+        None
     }
 
     fn name(&self) -> String {

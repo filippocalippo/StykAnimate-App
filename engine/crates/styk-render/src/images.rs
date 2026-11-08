@@ -139,14 +139,27 @@ impl Renderer {
         self.lay_out_resident(assets, 0, layers, 0);
     }
 
+    /// Stage admission also bounds the picture lookup table. On refusal the
+    /// current atlas and its lookup table remain installed.
+    pub fn prepare_sprites_export_bounded(&mut self, assets: &Assets, layers: u32, table_bytes: u64) -> Result<(), u64> {
+        let device_limit = u64::from(self.device.limits().max_texture_dimension_2d) * u64::from(crate::resources::TABLE_WIDTH) * 16;
+        let held = PictureState::new_bounded(&self.device, &self.queue, assets, 0, false, |_| None, table_bytes.min(device_limit))?;
+        self.install_resident(assets, 0, layers, held);
+        Ok(())
+    }
+
     fn lay_out_resident(&mut self, assets: &Assets, live: u32, layers: u32, soft_pages: u32) {
+        let held = PictureState::new(&self.device, &self.queue, assets, soft_pages, false, |_| None);
+        self.install_resident(assets, live, layers, held);
+    }
+
+    fn install_resident(&mut self, assets: &Assets, live: u32, layers: u32, held: PictureState) {
         let pages = assets.pages + live;
         let (texture, view) = array_texture(&self.device, "styk sprites", [PAGE, PAGE], layers.max(2), false);
         crate::resources::warm_texture(&self.queue, &texture);
         self.sprite_view = view;
         self.sprite_map.layers = vec![UNMAPPED; pages.min(MAX_PAGES) as usize];
         self.sprite_map.flush(&self.queue);
-        let held = PictureState::new(&self.device, &self.queue, assets, soft_pages, false, |_| None);
         std::mem::replace(&mut self.pictures, held).destroy();
         let old = std::mem::replace(&mut self.sprites, texture);
         self.rebind_sprites();
@@ -182,6 +195,19 @@ impl Renderer {
         old.destroy();
         self.rebind_sprites();
         true
+    }
+
+    /// Extend a native resident-only table without replacing unchanged sprite
+    /// placements or allocating a soft atlas. Admission precedes replacement.
+    pub fn sync_pictures_bounded(&mut self, assets: &Assets, table_bytes: u64) -> Result<(), u64> {
+        if assets.atlas.len() == self.pictures.known { return Ok(()); }
+        let values = self.pictures.values();
+        let device_limit = u64::from(self.device.limits().max_texture_dimension_2d) * u64::from(crate::resources::TABLE_WIDTH) * 16;
+        let held = PictureState::new_bounded(&self.device, &self.queue, assets, 0, false,
+            |entry| values.get(&(entry.layer, entry.y << 12 | entry.x)).and_then(|v| v.checked_sub(1)), table_bytes.min(device_limit))?;
+        std::mem::replace(&mut self.pictures, held).destroy();
+        self.rebind_sprites();
+        Ok(())
     }
 
     /// The picture at `entry` is in layer `layer` of the sprite texture (`None`: it is not, its soft copy draws). Takes
