@@ -3101,6 +3101,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "styk-screens"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "iced_wgpu",
+ "styk-core",
+ "styk-design",
+ "styk-platform",
+ "styk-ui",
+]
+
+[[package]]
 name = "styk-services"
 version = "0.1.0"
 dependencies = [
@@ -3136,6 +3148,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "iced",
+ "iced_runtime",
  "png",
  "pollster",
  "styk-core",

@@ -4,10 +4,16 @@
 //! models, and turns the core's effects into iced tasks. A message that only changes widget state (focus moving to a
 //! field's input after a click on its label) becomes a task here without reaching the core.
 
+#[cfg(feature = "engine")]
 use iced::Task;
+#[cfg(feature = "engine")]
 use iced::advanced::widget::operate;
+#[cfg(feature = "engine")]
 use styk_core::app::Core;
-use styk_core::commands::{Command, Effect};
+use styk_core::commands::Command;
+#[cfg(feature = "engine")]
+use styk_core::commands::Effect;
+#[cfg(feature = "engine")]
 use styk_core::inspector::FocusRequest;
 use styk_core::inspector::property::PropertyKey;
 use styk_design::widgets::focus;
@@ -36,6 +42,7 @@ impl From<Command> for Message {
 }
 
 /// Runs a message: the core decides, the interface carries out the effects.
+#[cfg(feature = "engine")]
 pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     match message {
         Message::Command(command) => {
@@ -65,6 +72,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
 
 /// One effect as a task. Notices, frame requests and the colour picker belong to the shell, the stage and the picker
 /// chunks: until they land they have no task here.
+#[cfg(feature = "engine")]
 fn effect(effect: Effect) -> Task<Message> {
     match effect {
         Effect::Blur => operate(focus::unfocus()).discard(),

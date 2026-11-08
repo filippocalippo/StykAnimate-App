@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Crates the engine side must never reach.
-const FRONT_END: &[&str] = &["styk-ui", "styk-devtools", "styk-devtools-engine", "styk-design", "styk-platform", "styk-app", "styk-text-check", "xtask"];
+const FRONT_END: &[&str] = &["styk-screens", "styk-ui", "styk-devtools", "styk-devtools-engine", "styk-design", "styk-platform", "styk-app", "styk-text-check", "xtask"];
 
 /// The one engine-side crate allowed to reach front-end-side crates, and the crates it may reach, both only through its
 /// `app-tools` feature (decision Q2).

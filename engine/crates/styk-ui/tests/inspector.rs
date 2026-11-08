@@ -72,6 +72,7 @@ fn every_catalogue_context_draws_in_both_themes() {
             std::thread::yield_now();
         }
         assert!(landed(&core), "the facts lane delivered what {context:?} shows");
+        assert_eq!(core.inspector().model().unwrap().as_ref(), &styk_ui::screens::inspector_model(context), "prepared {context:?} model drifted");
         for theme in [Theme::Light, Theme::Dark] {
             let mut driver = Driver::new(element(&core, theme), SIZE, &styk_design::fonts::ALL);
             let (pixels, size) = driver.render(&styk_ui::base_theme(theme), iced::Color::from(theme.palette().surface_field), 1.0);

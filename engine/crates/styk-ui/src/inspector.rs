@@ -74,7 +74,11 @@ pub struct View<'a> {
 }
 
 impl<'a> View<'a> {
+    pub fn model(model: &'a Inspector, presentation: &'a Presentation, theme: Theme) -> Self {
+        Self { model, presentation, field: None, rename: None, text: None, composing: false, theme, button_probe: None }
+    }
     /// The panel as the core holds it, when it has a model.
+    #[cfg(feature = "engine")]
     pub fn of(core: &'a styk_core::app::Core, theme: Theme) -> Option<View<'a>> {
         let panel = core.inspector();
         Some(View { model: panel.model()?, presentation: core.presentation(), field: panel.field(), rename: panel.rename(), text: panel.text_draft(), composing: core.focus().composing(), theme, button_probe: None })

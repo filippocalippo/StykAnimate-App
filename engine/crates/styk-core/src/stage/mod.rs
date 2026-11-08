@@ -1,29 +1,33 @@
 //! The toolkit-independent stage host. See `docs/native/stage.md`.
 pub mod input;
+#[cfg(feature = "engine")]
 mod painter;
+#[cfg(feature = "engine")]
 pub mod picking;
+mod event;
 mod progress;
+#[cfg(feature = "engine")]
 mod surface;
 mod view;
+#[cfg(feature = "engine")]
 use crate::engine::wgpu;
+#[cfg(feature = "engine")]
 pub use painter::{PaintError, PaintLimits, PaintStatus, Painter};
-#[cfg(feature = "testing")]
-pub use surface::Call;
+pub use event::{Cursor, Error as SurfaceError, Event, Gestures, GpuId, LINE_PIXELS, Outcome, Wheel, WheelDelta};
 pub use progress::Progress;
-pub use surface::{Cursor, Error as SurfaceError, Event, Gestures, Gpu, GpuId, LINE_PIXELS, Outcome, Place, Surface, Wheel, WheelDelta};
+#[cfg(all(feature = "engine", feature = "testing"))]
+pub use surface::Call;
+#[cfg(feature = "engine")]
+pub use surface::{Gpu, Place, Surface};
 pub use view::{MAX_ZOOM, MIN_ZOOM, View, Viewport, WheelZoom, ZOOM_STEP};
 
 /// Startup wiring for the toolkit's generic instance-policy hook. The engine
 /// remains the sole owner of preferred backends, compiler overrides and fallback.
+#[cfg(feature = "engine")]
 pub fn gpu_instances() -> Vec<wgpu::InstanceDescriptor> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        styk_render::native_gpu::attempts(
-            wgpu::Instance::enabled_backend_features().contains(wgpu::Backends::DX12),
-        )
-        .iter()
-        .map(|attempt| attempt.descriptor())
-        .collect()
+        styk_render::native_gpu::descriptors()
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -31,8 +35,11 @@ pub fn gpu_instances() -> Vec<wgpu::InstanceDescriptor> {
     }
 }
 
+#[cfg(feature = "engine")]
 use crate::engine::SceneOptions;
+#[cfg(feature = "engine")]
 use crate::frames::{self, Consumer, Frames};
+#[cfg(feature = "engine")]
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
@@ -50,6 +57,7 @@ pub struct Presentation {
     pub quality: f64,
     pub samples: u8,
 }
+#[cfg(feature = "engine")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaintKey {
     pub prepared: frames::Key,
@@ -57,6 +65,7 @@ pub struct PaintKey {
 }
 
 /// One document's stage; document and frame workers keep their existing owners.
+#[cfg(feature = "engine")]
 pub struct Host {
     frames: Frames,
     pub(crate) navigation: Arc<AtomicU64>,
@@ -71,6 +80,7 @@ pub struct Host {
     pub(crate) pan_gesture: Option<(u32, [f64; 2], [f64; 2])>,
 }
 
+#[cfg(feature = "engine")]
 impl Host {
     pub fn new(
         frames: Frames,

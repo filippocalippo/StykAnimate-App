@@ -15,7 +15,7 @@
 
 use super::session::{Done, ExportLook, Session};
 use super::workspace::Workspace;
-use crate::documents::DocumentId;
+use crate::identity::DocumentId;
 
 /// The band's measured width must fit the window with this much to spare (`SHELL_METRICS.bandMargin`).
 pub const FIT_MARGIN: f32 = 24.0;

@@ -7,7 +7,7 @@
 //! admission, so a full queue cannot lose a terminal key event.
 
 use crate::commands::{CommandId, Polygon};
-use crate::documents::DocumentId;
+use crate::identity::DocumentId;
 use crate::shortcuts::{Activation, Release};
 
 pub const CAPACITY: usize = 256;

@@ -1,5 +1,19 @@
-//! Where a dragged tab lands. Tab order, recency, the neighbour and the successor are K-doc's (`Documents::recency`,
-//! `successor`, `neighbour`, `reorder`, `documents/host.rs`); the band adds only the drop rule it needs.
+/// Stable identity within one `Documents` owner. Pair this with a revision in caches and job replies:
+/// two projects can have the same history revision, and undo deliberately restores an older revision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DocumentId(pub(crate) u64);
+
+impl DocumentId {
+    /// The identity as a number, for the interface's own keys (focus targets); it means nothing else.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// An identity for a band shown without open projects (`Shell::preview`) and for tests of logic that only holds ids.
+    pub const fn preview(serial: u64) -> DocumentId {
+        DocumentId(serial)
+    }
+}
 
 /// The place a dragged tab takes when dropped on the half of another tab (`drop` in `project-tabs-view.mjs`): the
 /// target's index, one more after its midpoint, one less when the dragged tab came from before it.

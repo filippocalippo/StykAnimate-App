@@ -3,7 +3,9 @@
 //! order value (a stable sort, as JavaScript's); a position is 1-based. Instance overrides (`_stykStyle`) take part,
 //! as `orderFigure` resolves the instance's figure on a document with property channels.
 
+#[cfg(feature = "engine")]
 use styk_doc::Value;
+#[cfg(feature = "engine")]
 use styk_eval::doc::Figure;
 
 use crate::i18n::Msg;
@@ -25,12 +27,14 @@ pub struct Drawable {
     pub z: f64,
 }
 
+#[cfg(feature = "engine")]
 fn override_z(object: &Value, kind: DrawKind, id: u32) -> Option<f64> {
     let group = if kind == DrawKind::Segment { "segments" } else { "polygons" };
     object.path(&["_stykStyle", group, &id.to_string(), "zIndex"]).and_then(Value::as_f64).filter(|z| z.is_finite())
 }
 
 /// `builderDrawables(orderFigure(editor))`.
+#[cfg(feature = "engine")]
 pub fn drawables(figure: &Figure, object: &Value) -> Vec<Drawable> {
     let mut entries: Vec<Drawable> = figure
         .polyfills
@@ -92,6 +96,7 @@ pub fn values(entries: &[Drawable], selected: (DrawKind, usize), value: f64) -> 
         .collect())
 }
 
+#[cfg(feature = "engine")]
 #[cfg(test)]
 mod tests {
     use super::*;

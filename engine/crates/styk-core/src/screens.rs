@@ -6,20 +6,32 @@
 //! has no window to keep responsive yet, as the band's preview has none), its generation published for the facts lane,
 //! and the lane started through the host's spawner. The caller refreshes until [`Core::refresh`] has the facts.
 
+#[cfg(feature = "engine")]
 use std::collections::HashMap;
+#[cfg(feature = "engine")]
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "engine")]
 use styk_services::Spawner;
 
+#[cfg(feature = "engine")]
 use crate::app::Core;
+#[cfg(feature = "engine")]
 use crate::documents::{Documents, HostOptions, PreparedDocument};
+#[cfg(feature = "engine")]
 use crate::engine::{Budgets, Engine, Value};
+#[cfg(feature = "engine")]
 use crate::facts::Facts;
+#[cfg(feature = "engine")]
 use crate::frames::FrameDocument;
+#[cfg(feature = "engine")]
 use crate::view_state::{InspectorContext, InspectorTab};
 
+#[cfg(feature = "engine")]
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
+#[cfg(feature = "engine")]
 const SHEET: &[u8] = include_bytes!("../../../tests/edit/property-sheet.document.json");
+#[cfg(feature = "engine")]
 const SPRITE: &[u8] = include_bytes!("../../../tests/edit/sprite-segment-sparse-native.document.json");
 
 /// A context of the Properties panel the catalogue shows.
@@ -67,12 +79,14 @@ impl InspectorScreen {
 
 /// A document's published generations by revision, from an engine that opened the same file: what K-doc's
 /// publication supplies to the workers, for fixtures (the screens, the tests).
+#[cfg(feature = "engine")]
 pub struct FixturePublication {
     engine: Engine,
     lineage: u64,
     generations: Mutex<HashMap<u64, Arc<styk_engine::Generation>>>,
 }
 
+#[cfg(feature = "engine")]
 impl FrameDocument for FixturePublication {
     fn picture_engine(&self) -> Option<Engine> {
         Some(self.engine.clone())
@@ -82,6 +96,7 @@ impl FrameDocument for FixturePublication {
     }
 }
 
+#[cfg(feature = "engine")]
 impl FixturePublication {
     /// Opens `bytes` (named `name`) the way documents are prepared.
     pub fn open(bytes: &[u8], name: &str) -> Result<FixturePublication, String> {
@@ -105,6 +120,7 @@ impl FixturePublication {
 /// A core with `bytes` open in one tab, the documents services attached, a facts lane started through `spawner`
 /// (`wake` is called when facts land), and the document's first revision published. Returns the publication, which
 /// publishes later revisions.
+#[cfg(feature = "engine")]
 pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn Spawner>, wake: crate::frames::Wake) -> Result<(Core, Arc<FixturePublication>), String> {
     let opener = Engine::new(|| 0.0, Budgets::for_device(None));
     let prepared = PreparedDocument::open_bytes(&opener, Arc::from(bytes), name, &|| false).map_err(|error| error.message)?;
@@ -125,6 +141,7 @@ pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn Spawner>, w
 }
 
 /// The core a Properties panel screen shows.
+#[cfg(feature = "engine")]
 pub fn inspector(screen: InspectorScreen, spawner: Arc<dyn Spawner>, wake: crate::frames::Wake) -> Result<Core, String> {
     let text;
     let (bytes, select): (&[u8], &str) = match screen {
@@ -162,11 +179,13 @@ pub fn inspector(screen: InspectorScreen, spawner: Arc<dyn Spawner>, wake: crate
     Ok(core)
 }
 
+#[cfg(feature = "engine")]
 /// The stage clearances today's layout solver gives a window with the Animate tool rail on the left (top, right, bottom, left: the
 /// rail and its margin take 72 px on that side; `layout-solver.mjs` `stageInsetsFor`). The layout's own solver supplies them
 /// once the docking views place the stage; until then the fixture states them.
 const STAGE_INSETS: [f64; 4] = [24.0, 28.0, 24.0, 72.0];
 
+#[cfg(feature = "engine")]
 /// The core the Stage screen shows: the startup document (`engine/tests/edit/startup.document.json`, as the Properties
 /// panel's screens open it), fitted at tick 0 into a stage of `size` logical pixels, its painter made later by the
 /// widget on the toolkit's own device. Config of the frame scheduler is the defaults.
@@ -174,17 +193,20 @@ pub fn stage(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, si
     stage_in(spawner, clock, crate::stage::Viewport { size, insets: STAGE_INSETS, ..Default::default() })
 }
 
+#[cfg(feature = "engine")]
 /// The same in a stage region the caller states (the tests' is as large as the canvas, without clearances).
 pub fn stage_in(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, viewport: crate::stage::Viewport) -> Result<Core, String> {
     build_stage(spawner, clock, viewport, None)
 }
 
+#[cfg(feature = "engine")]
 /// A fixture document's publication that holds back its generations until it is opened: a stage whose frame is slow.
 #[derive(Default)]
 pub struct Gate {
     open: std::sync::atomic::AtomicBool,
 }
 
+#[cfg(feature = "engine")]
 impl Gate {
     /// The held generations are served from now on.
     pub fn open(&self) {
@@ -192,11 +214,13 @@ impl Gate {
     }
 }
 
+#[cfg(feature = "engine")]
 struct Gated {
     inner: Arc<dyn FrameDocument>,
     gate: Arc<Gate>,
 }
 
+#[cfg(feature = "engine")]
 impl FrameDocument for Gated {
     fn picture_engine(&self) -> Option<Engine> {
         self.inner.picture_engine()
@@ -206,12 +230,14 @@ impl FrameDocument for Gated {
     }
 }
 
+#[cfg(feature = "engine")]
 /// The stage of [`stage_in`] with its frame held back until the returned gate is opened.
 pub fn stage_gated(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, viewport: crate::stage::Viewport) -> Result<(Core, Arc<Gate>), String> {
     let gate = Arc::new(Gate::default());
     Ok((build_stage(spawner, clock, viewport, Some(gate.clone()))?, gate))
 }
 
+#[cfg(feature = "engine")]
 fn build_stage(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, viewport: crate::stage::Viewport, gate: Option<Arc<Gate>>) -> Result<Core, String> {
     let progress = crate::stage::Progress::new();
     let (mut core, publication) = core_with_document(STARTUP, "Reference.styk", spawner.clone(), Arc::new(|| {}))?;

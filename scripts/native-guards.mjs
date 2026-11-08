@@ -5,12 +5,14 @@ import {readFileSync} from 'node:fs';
 import {resolve, relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {sourceErrors} from './native-source-guards.mjs';
+import {previewGraphCheck, previewParityCheck} from './native-preview-check.mjs';
 import {screenCheck} from './native-screen-guards.mjs';
 import {TOOLCHAIN, THREADED_WASM_ARGS, threadedWasmEnv} from './engine-wasm-config.mjs';
 
-const frontend = new Set(['styk-app', 'styk-ui', 'styk-design', 'styk-devtools', 'styk-devtools-engine', 'styk-platform', 'styk-text-check', 'xtask']);
+const frontend = new Set(['styk-screens', 'styk-app', 'styk-ui', 'styk-design', 'styk-devtools', 'styk-devtools-engine', 'styk-platform', 'styk-text-check', 'xtask']);
 const toolkit = name => /^(iced|winit|cryoglyph)([_-]|$)/.test(name);
 const nativeEdges = {
+  'styk-screens': ['styk-core', 'styk-ui', 'styk-design', 'styk-platform', 'styk-services'],
   'styk-app': ['styk-core', 'styk-ui', 'styk-design', 'styk-platform', 'styk-devtools', 'styk-trace', 'styk-text-check', 'styk-services'],
   'styk-ui': ['styk-core', 'styk-design'],
   // Shared field widgets use core's portable focus and text state (S2a).
@@ -33,6 +35,7 @@ export function directionErrors(metadata) {
       if (entries.some(e => e === 'test-fakes' || /\/test-fakes$/.test(e))) errors.push({package: p, dependency: feature, rule: 'web', message: 'production features may not activate test-fakes'});
     }
     for (const d of p.dependencies.filter(d => d.kind !== 'dev')) {
+      if (d.name === 'styk-screens') errors.push({package: p, dependency: d.name, rule: 'screens', message: 'the preview binary must never be a production dependency'});
       if (d.features?.includes('test-fakes')) errors.push({package: p, dependency: d.name, rule: 'web', message: 'test-fakes may be enabled only by dev-dependencies'});
       if (!frontend.has(p.name) && !['styk-core', 'styk-cli'].includes(p.name) && d.name === 'styk-core') {
         errors.push({package: p, dependency: d.name, rule: 'direction', message: `${p.name} must not depend on the application core`});
@@ -71,7 +74,7 @@ export function directionErrors(metadata) {
             // A permitted front-end module may in turn own its documented edges.
             if (p.name === 'styk-devtools' && ['styk-ui', 'styk-design'].includes(path.at(-1))) continue;
             errors.push({package: p, dependency: path[1] ?? next.name, rule: 'direction', message: `${[...path, next.name].join(' -> ')} crosses an ownership boundary`});
-          } else if (next.name !== 'styk-core' && !(p.name === 'styk-devtools' && ['styk-devtools-engine', 'styk-trace'].includes(next.name)) && !(p.name === 'styk-app' && nativeEdges[p.name].includes(next.name))) walk(next.id, [...path, next.name]);
+          } else if (next.name !== 'styk-core' && !(p.name === 'styk-devtools' && ['styk-devtools-engine', 'styk-trace'].includes(next.name)) && !(['styk-app', 'styk-screens'].includes(p.name) && nativeEdges[p.name].includes(next.name))) walk(next.id, [...path, next.name]);
         }
       };
       walk(p.id, [p.name]);
@@ -196,12 +199,14 @@ export function check(root, wasm = false) {
   console.log('source: Windows isolation, view boundaries, macro unwrap/expect and web Clock/Spawner constraints pass');
   // Check both builds: cfg(not(feature = "devtools")) must not hide violations.
   for (const features of ['styk-design/widgets', 'styk-app/devtools,styk-design/widgets']) {
-    execFileSync('cargo', ['clippy', '--manifest-path', 'engine/Cargo.toml', '--locked', '--no-deps', '-p', 'styk-app', '-p', 'styk-ui', '-p', 'styk-devtools', '-p', 'styk-design', '-p', 'styk-text-check', '--lib', '--bins', '--features', features], {
+    execFileSync('cargo', ['clippy', '--manifest-path', 'engine/Cargo.toml', '--locked', '--no-deps', '-p', 'styk-screens', '-p', 'styk-app', '-p', 'styk-ui', '-p', 'styk-devtools', '-p', 'styk-design', '-p', 'styk-text-check', '--lib', '--bins', '--features', features], {
       cwd: root, stdio: 'inherit', env: {...process.env, CLIPPY_CONF_DIR: resolve(root, 'engine/guard-clippy')},
     });
   }
   console.log('interface: clippy guards pass');
+  previewGraphCheck(root);
   screenCheck(root, execFileSync, metadata.target_directory);
+  previewParityCheck(root, metadata.target_directory);
   // Still verify every independent rule when a branch awaits merge approval.
   if (wasm) wasmCheck(root, metadata);
   if (approvalErrors.length) throw new Error(approvalErrors.join('\n'));

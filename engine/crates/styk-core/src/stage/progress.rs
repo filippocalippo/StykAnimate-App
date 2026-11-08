@@ -6,10 +6,12 @@
 //! `Event::Progress`, whose handling is the one redraw (`styk_ui::stage::progress`). The one lock moves a waker and
 //! is never held for anything else.
 
-use crate::frames::Wake;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::Waker;
+
+/// What a worker calls to say it made progress (the same closure type the frame scheduler and the painter take).
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Default)]
 pub struct Progress {

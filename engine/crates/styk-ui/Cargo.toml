@@ -7,10 +7,16 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+iced_runtime = { path = "../../../vendor/iced/runtime", optional = true }
 bytemuck = { version = "1.0", features = ["derive"] }
 iced = { workspace = true }
-styk-core = { path = "../styk-core" }
+styk-core = { path = "../styk-core", default-features = false }
 styk-design = { path = "../styk-design", features = ["widgets"] }
+
+[features]
+default = ["engine"]
+engine = ["styk-core/engine"]
+headless = ["dep:iced_runtime"]
 
 [dev-dependencies]
 styk-core = { path = "../styk-core", features = ["testing"] }

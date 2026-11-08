@@ -217,8 +217,8 @@ export function sourceErrors(root) {
     errors.push(...boundaryErrors(source,rel));
     if(rel.includes('/styk-platform/'))continue;
     errors.push(...windowsErrors(source,rel));
-    if(/\/styk-(ui|app|devtools)\//.test(rel) || /\/styk-design\/src\/widgets(?:\.rs|\/)/.test(rel) || rel.includes('/styk-text-check/src/pen_lab/')) errors.push(...interfaceErrors(source,rel));
-    if(!/engine\/crates\/(?:styk-app|styk-cli|styk-devtools|styk-text-check|styk-trace|xtask)\//.test(rel) && !rel.includes('/src/bin/')) errors.push(...webErrors(source,rel));
+    if(/\/styk-(ui|app|screens|devtools)\//.test(rel) || /\/styk-design\/src\/widgets(?:\.rs|\/)/.test(rel) || rel.includes('/styk-text-check/src/pen_lab/')) errors.push(...interfaceErrors(source,rel));
+    if(!/engine\/crates\/(?:styk-app|styk-screens|styk-cli|styk-devtools|styk-text-check|styk-trace|xtask)\//.test(rel) && !rel.includes('/src/bin/')) errors.push(...webErrors(source,rel));
   }
   return errors;
 }
