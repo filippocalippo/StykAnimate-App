@@ -288,7 +288,8 @@ impl TopBand {
     /// is due the window polls the documents host. Nothing is scheduled while the lane has no deadline, and a run on the fixed clock
     /// is advanced by its script, which polls.
     pub fn recovery_wake(&self) -> iced::Element<'_, Message> {
-        let deadline = self.core.documents.recovery_deadline().map(|due| due.as_millis().min(u128::from(u64::MAX)) as u64);
+        let deadline = self.core.documents.recovery_deadline().into_iter().chain(self.core.session_end_deadline()).min()
+            .map(|due| due.as_millis().min(u128::from(u64::MAX)) as u64);
         crate::overlay_wake::element(deadline.filter(|_| self.fixed.is_none()), self.clock.clone(), |_| Message::Documents)
     }
 
@@ -296,11 +297,11 @@ impl TopBand {
     /// projects with unsaved work (the close prompt, with its recovery copy's retry) and `Request::QuitReady` once every project is
     /// answered for and the recovery lane has finished.
     pub fn ask_to_quit(&mut self) -> Task<Message> {
-        styk_ui::message::run(self.core.request_quit(false)).map(Message::Editor)
+        styk_ui::message::run(self.core.request_quit()).map(Message::Editor)
     }
 
     pub fn session_end(&mut self) -> Task<Message> {
-        styk_ui::message::run(self.core.request_quit(true)).map(Message::Editor)
+        styk_ui::message::run(self.core.request_session_end(self.clock.now(), styk_platform::shell::session_end_timeout())).map(Message::Editor)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -460,6 +461,8 @@ impl TopBand {
     /// Starts the next queued open when the host is free, and takes what the host has finished (`poll`, nonblocking). A
     /// project the tabs refuse (the thirteenth) is the host's to dispose of on its worker, and comes back as a failure.
     fn pump(&mut self) -> Task<Message> {
+        let expired = self.core.session_end_tick(self.clock.now());
+        if self.core.session_end_expired() { return styk_ui::message::run(expired).map(Message::Editor); }
         let mut tasks = Vec::new();
         if let Some(effect) = self.core.documents.poll() {
             // One completion per update. A real transition can queue the next stage without

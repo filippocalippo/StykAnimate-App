@@ -191,12 +191,28 @@ impl Core {
     /// something (the recovery lane): the application hands every effect it takes from `Documents::poll` or
     /// `Documents::dispatch` here. What the core does with it comes back as effects, like a command's.
     pub fn document_effect(&mut self, effect: &crate::documents::Effect) -> Vec<Effect> {
+        if self.session_end_expired() { return Vec::new(); }
         let effects = self.recovery.effect(effect, &self.documents, &mut self.overlays, &mut self.focus);
         effects.into_iter().chain(self.refresh()).collect()
     }
 
-    pub fn request_quit(&mut self, session_end: bool) -> Vec<Effect> {
-        self.recovery.quit(session_end, &mut self.documents, &mut self.overlays, &mut self.focus)
+    pub fn request_quit(&mut self) -> Vec<Effect> {
+        self.recovery.quit(&mut self.documents, &mut self.overlays, &mut self.focus)
+    }
+
+    /// A bounded OS checkpoint. Time comes from the application's injected clock;
+    /// the platform supplies its shutdown budget. Repeated requests coalesce.
+    pub fn request_session_end(&mut self, now: std::time::Duration, timeout: std::time::Duration) -> Vec<Effect> {
+        self.recovery.session_end(now, timeout);
+        self.request_quit()
+    }
+
+    pub fn session_end_deadline(&self) -> Option<std::time::Duration> { self.recovery.session_end_deadline() }
+    pub fn session_end_expired(&self) -> bool { self.recovery.session_end_expired() }
+
+    /// Run before polling worker replies, including replies queued at the deadline.
+    pub fn session_end_tick(&mut self, now: std::time::Duration) -> Vec<Effect> {
+        self.recovery.session_end_tick(now, &mut self.documents)
     }
 
     /// Called once on a host wake, after its bounded poll, never from refresh or view.

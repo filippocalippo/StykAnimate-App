@@ -10,6 +10,9 @@ use crate::overlay::host::{Event as Overlay, Host, Update};
 use crate::overlay::messages::Message;
 use crate::overlay::Kind;
 use styk_services::recovery::Slot;
+use std::time::Duration;
+
+enum SessionEnd { Checkpoint(Duration), Expired }
 
 /// The chooser while it is open.
 struct Open {
@@ -38,7 +41,7 @@ pub struct Panel {
     offset: i32,
     pending: Option<Request>,
     quit_requested: bool,
-    session_end: bool,
+    session_end: Option<SessionEnd>,
 }
 
 fn carry(update: Update) -> Vec<Effect> {
@@ -116,6 +119,7 @@ impl Panel {
     /// Brings the views in line with the documents host: the offer for the copies it lists, the chooser closed once
     /// its copy is restored or none are left or the dialog was dismissed, a close prompt dismissed as Cancel.
     pub(crate) fn refresh(&mut self, documents: &mut Documents, host: &mut Host, focus: &mut FocusState, presentation: &Presentation) -> Vec<Effect> {
+        if self.session_end_expired() { return Vec::new(); }
         let mut effects = Vec::new();
         if let Some(overlay) = self.chooser_overlay() {
             let view = documents.recovery_view();
@@ -182,6 +186,7 @@ impl Panel {
 
     /// One thing a recovery view said.
     pub(crate) fn event(&mut self, event: Event, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+        if self.session_end_expired() { return Vec::new(); }
         match event {
             Event::NotNow => Self::ask(documents, Ask::Dismiss).map_or_else(|error| Self::notice(&error), |effects| effects),
             Event::Manage => self.open_chooser(host, focus),
@@ -233,14 +238,36 @@ impl Panel {
     }
 
     /// One coalesced quit intent. Only host progress retries a refused request.
-    pub(crate) fn quit(&mut self, session_end: bool, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
-        self.session_end |= session_end;
+    pub(crate) fn quit(&mut self, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+        if self.session_end_expired() { return Vec::new(); }
         if self.quit_requested {
             if self.closing.is_some() { return self.checkpoint_finished(); }
             return Vec::new();
         }
         self.quit_requested = true;
         self.control(Request::Quit, documents, host, focus)
+    }
+
+    pub(crate) fn session_end(&mut self, now: Duration, timeout: Duration) {
+        // Repeated OS queries cannot extend a checkpoint's budget.
+        if self.session_end.is_none() { self.session_end = Some(SessionEnd::Checkpoint(now.saturating_add(timeout))); }
+    }
+
+    pub(crate) fn session_end_deadline(&self) -> Option<Duration> {
+        match self.session_end { Some(SessionEnd::Checkpoint(due)) => Some(due), _ => None }
+    }
+
+    pub(crate) fn session_end_expired(&self) -> bool { matches!(self.session_end, Some(SessionEnd::Expired)) }
+
+    pub(crate) fn session_end_tick(&mut self, now: Duration, documents: &mut Documents) -> Vec<Effect> {
+        if !self.session_end_deadline().is_some_and(|due| now >= due) { return Vec::new(); }
+        self.session_end = Some(SessionEnd::Expired);
+        self.pending = None;
+        self.quit_requested = false;
+        // Unlike an answered Discard, expiry never queues removal of committed copies.
+        // Stop detaches the lanes and retires late replies without waiting for disk.
+        documents.stop_preserving_recovery();
+        vec![Effect::SessionCheckpointFinished, Effect::QuitReady]
     }
 
     pub(crate) fn progress(&mut self, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
@@ -251,7 +278,10 @@ impl Panel {
     }
 
     fn checkpoint_finished(&mut self) -> Vec<Effect> {
-        if std::mem::take(&mut self.session_end) { vec![Effect::SessionCheckpointFinished] } else { Vec::new() }
+        if matches!(self.session_end, Some(SessionEnd::Checkpoint(_))) {
+            self.session_end = None;
+            vec![Effect::SessionCheckpointFinished]
+        } else { Vec::new() }
     }
 
     fn control(&mut self, request: Request, documents: &mut Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
@@ -300,6 +330,7 @@ impl Panel {
     /// Route close/checkpoint progress and terminal answers; confirmations open the existing prompt.
     /// An unavailable save-file dialog is prevented by the prompt's save availability.
     pub(crate) fn effect(&mut self, effect: &Doc, documents: &Documents, host: &mut Host, focus: &mut FocusState) -> Vec<Effect> {
+        if self.session_end_expired() { return Vec::new(); }
         match effect {
             Doc::Recovery(crate::documents::recovery::Event::Started) | Doc::Started(_) | Doc::ScopeChanged(_) => return vec![Effect::PollDocuments],
             Doc::QuitReady => { self.quit_requested = false; let mut effects = self.checkpoint_finished(); effects.push(Effect::QuitReady); return effects; }

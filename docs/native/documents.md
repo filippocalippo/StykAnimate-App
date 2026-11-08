@@ -204,3 +204,7 @@ a visible prompt on Busy. K-shell currently has no save-file dialog consumer, so
 makes Save unavailable for documents without a target and retains Discard/Cancel. Existing targets
 save normally; successful saves finish cleanup before QuitReady. The session-end platform adapter
 uses this same checkpoint and confirmation path; see [recovery.md](recovery.md).
+If its OS-derived deadline expires first, the core instead uses the same asynchronous teardown as
+`Documents::drop`: pending work is cancelled, both lanes are detached, and their payloads and any late
+reply are reclaimed on workers. This terminal path preserves committed recovery files and never calls
+normal quit cleanup. The app exits without waiting for another disk operation.

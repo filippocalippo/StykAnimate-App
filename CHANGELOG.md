@@ -27,6 +27,7 @@ What's new in each version of StykAnimate.
 
 ### Fixed
 
+- Windows shutdown no longer waits indefinitely for an unfinished recovery save, and keeps the last completed recovery copy.
 - Moving a figure shows its new position immediately.
 - Onion skins of styled figures no longer show an old shape after you change the figure’s settings, such as an angle lock.
 - Repeated pastes keep the expected spacing between copied figures.

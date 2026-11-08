@@ -15,7 +15,7 @@ use styk_services::recovery::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Default)]
-struct Gate { fail: AtomicBool, pause: AtomicBool, read_only: AtomicBool, wake: iced::futures::task::AtomicWaker }
+struct Gate { fail: AtomicBool, pause: AtomicBool, ignore_cancel: AtomicBool, after_commit: AtomicBool, read_only: AtomicBool, observer: std::sync::Mutex<Option<mpsc::SyncSender<()>>>, wake: iced::futures::task::AtomicWaker }
 impl Gate { fn release(&self) { self.pause.store(false, Ordering::SeqCst); self.wake.wake(); } }
 struct Store { local: styk_platform::recovery::LocalRecovery, gate: Arc<Gate> }
 impl Recovery for Store {
@@ -35,12 +35,18 @@ impl RecoveryCopy for Copy {
     fn write<'a>(&'a self, previous: Option<&'a Record>, bytes: &'a [u8], name: &'a str, cancel: &'a Cancel) -> RecoveryFuture<'a, Record> {
         Box::pin(async move {
             let gate = self.gate.clone(); cancel.on_cancel(move || gate.wake.wake());
+            let notify = || { if let Some(send) = &*self.gate.observer.lock().unwrap() { send.try_send(()).unwrap(); } };
+            let after_commit = self.gate.after_commit.load(Ordering::SeqCst);
+            let committed = if after_commit { Some(self.local.write(previous, bytes, name, cancel).await) } else { None };
+            notify();
             iced::futures::future::poll_fn(|cx| {
                 self.gate.wake.register(cx.waker());
-                if self.gate.pause.load(Ordering::SeqCst) && !cancel.is_cancelled() { Poll::Pending } else { Poll::Ready(()) }
+                if self.gate.pause.load(Ordering::SeqCst) && (self.gate.ignore_cancel.load(Ordering::SeqCst) || !cancel.is_cancelled()) { Poll::Pending } else { Poll::Ready(()) }
             }).await;
             if self.gate.fail.load(Ordering::SeqCst) { return Err(styk_services::files::FileError::Full.into()); }
-            self.local.write(previous, bytes, name, cancel).await
+            let result = match committed { Some(result) => result, None => self.local.write(previous, bytes, name, cancel).await };
+            notify();
+            result
         })
     }
 }
@@ -234,8 +240,53 @@ fn session_end_retains_the_checkpoint_and_quit_until_the_worker_answers() {
     assert!(rt.app.band.core.recovery().closing().is_none());
     rt.gate.release(); rt.prompt(); rt.drain();
     assert!(rt.checkpoint_finished, "the OS block reason must be released after the checkpoint");
+    assert_eq!(rt.app.band.core.session_end_deadline(), None, "a completed checkpoint retires its timer");
     rt.click(ids::KEEP_EDITING); rt.drain();
     assert!(rt.app.band.core.documents.active().unwrap().dirty()); assert!(!rt.app.closing);
+}
+#[test]
+fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_completion() {
+    for after_commit in [false, true] {
+        let mut rt = Runtime::new(); rt.settled(); rt.dirty(false);
+        rt.app.band.core.documents.set_autosave_seconds(2.5);
+        rt.advance_deadline();
+        rt.until(|app| app.band.core.documents.recovery_view().unwrap().busy);
+        rt.until(|app| !app.band.core.documents.recovery_view().unwrap().busy); rt.drain();
+        let id = rt.app.band.core.documents.active().unwrap().id();
+        rt.app.band.core.documents.call(id, "setFPS", &[styk_core::engine::Value::Num(31.0)], &styk_core::engine::Value::Null).unwrap().result.unwrap();
+        let (send, receive) = mpsc::sync_channel(2);
+        *rt.gate.observer.lock().unwrap() = Some(send);
+        rt.gate.ignore_cancel.store(true, Ordering::SeqCst);
+        rt.gate.after_commit.store(after_commit, Ordering::SeqCst);
+        rt.gate.pause.store(true, Ordering::SeqCst);
+        rt.advance_deadline();
+        receive.recv_timeout(Duration::from_secs(15)).expect("the recovery write entered its gate");
+        let committed: Vec<_> = std::fs::read_dir(&rt.root.0).unwrap().filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "styk"))
+            .map(|entry| (entry.path(), std::fs::read(entry.path()).unwrap())).collect();
+        assert!(!committed.is_empty());
+        rt.message(Message::SessionEnd); rt.drain();
+        assert!(!rt.app.closing && !rt.checkpoint_finished);
+        assert!(rt.app.band.core.recovery().closing().is_none());
+        rt.clock.advance(shell::session_end_timeout() + Duration::from_millis(1));
+        // No gate release, notification or manual Documents tick can supply the missing wake.
+        let sent = {
+            let mut driver = Driver::new(rt.app.band.recovery_wake().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+            driver.redraw(); driver.messages()
+        };
+        assert!(!sent.is_empty(), "session-end must schedule a bounded wake even while recovery is pending");
+        for message in sent { rt.message(message); } rt.drain();
+        assert!(rt.checkpoint_finished, "release the shutdown block reason");
+        assert!(rt.app.closing, "QuitReady must follow without waiting for the gate");
+        assert!(matches!(rt._outcome.try_recv(), Ok(Outcome::Done)), "exit must not wait for another disk save");
+        for (path, bytes) in &committed { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
+        rt.gate.release();
+        receive.recv_timeout(Duration::from_secs(15)).expect("the late checkpoint completed");
+        rt.drain();
+        for (path, bytes) in &committed { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
+        assert!(rt._outcome.try_recv().is_err(), "a late reply cannot finish the window twice");
+        assert!(rt.app.band.core.recovery().closing().is_none());
+    }
 }
 #[test]
 fn self_check_invalidated_checkpoint_allows_another_quit() {

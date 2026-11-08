@@ -42,6 +42,7 @@ mod stub {
         pub fn on_change(&self, _: impl Fn() + Send + Sync + 'static) {}
         pub fn take_session_end(&self) -> bool { false }
         pub fn finish_session_checkpoint(&self) {}
+        pub fn allow_session_end(&self) {}
     }
 
     /// No sample.
@@ -71,6 +72,14 @@ impl Wakes {
 
 pub type SaveCompletion = Box<dyn FnOnce(Result<(), String>) + Send>;
 pub type SaveJob = Box<dyn FnOnce(SaveCompletion) + Send>;
+
+/// The OS's application shutdown budget, sampled when session end is requested.
+pub fn session_end_timeout() -> std::time::Duration {
+    #[cfg(windows)]
+    { crate::windows::chrome::session_end_timeout() }
+    #[cfg(not(windows))]
+    { std::time::Duration::from_secs(5) }
+}
 
 /// The user data folder: `STYK_USER_DATA_DIR`, else the Electron app's own (`%APPDATA%\StykAnimate`), so settings and
 /// recovery files carry over.

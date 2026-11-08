@@ -728,8 +728,10 @@ impl Documents {
     }
 }
 
-impl Drop for Documents {
-    fn drop(&mut self) {
+impl Documents {
+    /// Abandon outstanding work on terminal session end, using normal asynchronous
+    /// teardown. No cleanup command runs and no worker is joined on this thread.
+    pub(crate) fn stop_preserving_recovery(&mut self) {
         if let Some(recovery) = self.recovery.take() { recovery.stop(); }
         if let Some(mut host) = self.host.take() {
             if let Some(pending) = host.pending.take() { pending.cancel.cancel(); }
@@ -737,7 +739,12 @@ impl Drop for Documents {
                 worker.shutdown(Box::new((std::mem::take(&mut self.tabs), std::mem::take(&mut self.clipboards), std::mem::take(&mut host.retired), host.startup)));
             }
         }
+        self.active = None;
     }
+}
+
+impl Drop for Documents {
+    fn drop(&mut self) { self.stop_preserving_recovery(); }
 }
 
 #[cfg(test)]
@@ -790,7 +797,7 @@ mod close_wiring_regression {
         files.fail(Failure::CancelBeforeCommit);
         let (send, receive) = std::sync::mpsc::sync_channel(1);
         let mut core = saving_core(files.clone(), Arc::new(move || { let _ = send.try_send(()); }));
-        core.request_quit(false);
+        core.request_quit();
         core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Save)));
         receive.recv_timeout(std::time::Duration::from_secs(15)).unwrap();
         let answer = core.documents.poll().expect("the real worker notified its answer");
@@ -798,19 +805,51 @@ mod close_wiring_regression {
         core.document_effect(&answer);
         assert!(core.documents.active().unwrap().dirty());
         assert_eq!(&*files.get(&target).unwrap(), b"previous complete file");
-        core.request_quit(false);
+        core.request_quit();
         assert!(core.recovery().closing().is_some(), "a cancelled save must allow a fresh quit");
     }
     #[test]
     fn stale_response_retires_the_invalid_prompt_and_allows_a_fresh_quit() {
         let mut core = saving_core(Arc::new(MemoryFiles::default()), Arc::new(|| {}));
-        core.request_quit(false);
+        core.request_quit();
         let id = core.documents.active().unwrap().id();
         core.documents.call(id, "setFPS", &[Value::Num(31.0)], &Value::Null).unwrap().result.unwrap();
         core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Discard)));
         assert!(core.recovery().closing().is_none(), "K-doc consumed the stale prompt; the interface must retire it too");
         assert!(core.documents.active().unwrap().dirty());
-        core.request_quit(false);
+        core.request_quit();
         assert!(core.recovery().closing().is_some());
+    }
+
+    #[test]
+    fn session_end_deadline_is_fixed_while_busy_and_terminal_after_expiry() {
+        use std::time::Duration;
+        use styk_services::{Clock, FixedClock};
+        use crate::commands::Effect as CoreEffect;
+        let startup = include_bytes!("../../../../tests/edit/startup.document.json");
+        let mut documents = Documents::new();
+        documents.attach_host(HostOptions {
+            engine: Engine::new(|| 0.0, styk_engine::Budgets::for_device(None)),
+            spawner: Arc::new(ManualSpawner::default()), files: Arc::new(MemoryFiles::default()),
+            startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify: Arc::new(|| {}),
+        }).unwrap();
+        assert!(matches!(documents.dispatch(Request::New), Ok(Effect::Started(_))));
+        let mut core = crate::app::Core::new(documents);
+        let clock = FixedClock::new();
+        let budget = Duration::from_secs(5); // A supplied platform budget, never a wall-clock sleep.
+        core.request_session_end(clock.now(), budget);
+        assert_eq!(core.session_end_deadline(), Some(budget));
+        clock.advance(budget - Duration::from_millis(1));
+        core.request_session_end(clock.now(), budget);
+        assert_eq!(core.session_end_deadline(), Some(budget), "Busy and repeated queries cannot extend it");
+        assert!(core.session_end_tick(clock.now()).is_empty());
+        clock.advance(Duration::from_millis(1));
+        assert!(matches!(core.session_end_tick(clock.now()).as_slice(), [CoreEffect::SessionCheckpointFinished, CoreEffect::QuitReady]));
+        assert!(core.session_end_expired()); assert_eq!(core.session_end_deadline(), None);
+        assert!(core.documents.poll().is_none());
+        assert!(core.session_end_tick(clock.now()).is_empty());
+        assert!(core.document_effect(&Effect::QuitReady).is_empty());
+        assert!(core.request_session_end(clock.now(), budget).is_empty());
+        assert!(core.documents_progress().is_empty());
     }
 }

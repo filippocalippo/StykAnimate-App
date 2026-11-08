@@ -10,7 +10,7 @@
 
 use super::monitors::hwnd_of;
 use raw_window_handle::HasWindowHandle;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use styk_services::shell::Rect;
 use styk_services::shell::chrome::{ButtonAction, ButtonInput, Cancel, ChromeRegions, FrameState, MaxButton, MaxButtonState, hit_test, ht};
@@ -29,7 +29,21 @@ const SUBCLASS_ID: usize = crate::input::windows::subclass_id::CHROME;
 
 type Wake = Box<dyn Fn() + Send + Sync>;
 
+/// Windows' configured application kill timeout; Vista's documented five-second
+/// shutdown response window is the fallback when the system cannot supply it.
+pub fn session_end_timeout() -> std::time::Duration {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWAITTOKILLTIMEOUT};
+    let mut millis: u32 = 0;
+    // SAFETY: this query writes one integer to a live, correctly sized local.
+    if unsafe { SystemParametersInfoW(SPI_GETWAITTOKILLTIMEOUT, 0, (&mut millis as *mut u32).cast(), 0) } != 0 {
+        std::time::Duration::from_millis(u64::from(millis))
+    } else {
+        std::time::Duration::from_secs(5)
+    }
+}
+
 struct Shared {
+    identity: usize,
     regions: Mutex<Arc<ChromeRegions>>,
     button: Mutex<MaxButton>,
     button_state: AtomicU8,
@@ -38,6 +52,8 @@ struct Shared {
     toggles: AtomicU32,
     wake: Mutex<Option<Wake>>,
     session_end: AtomicBool,
+    session_ready: AtomicBool,
+    alive: AtomicBool,
     shutdown_reason: Vec<u16>,
 }
 
@@ -115,7 +131,10 @@ pub(crate) fn attach_hwnd(hwnd: HWND) -> Result<Chrome, ChromeError> {
 }
 
 fn attach_hwnd_with_reason(hwnd: HWND, shutdown_reason: &str) -> Result<Chrome, ChromeError> {
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
+    let identity = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)).map_err(|_| ChromeError::Refused)?;
     let shared = Arc::new(Shared {
+        identity,
         regions: Mutex::new(Arc::new(ChromeRegions::default())),
         button: Mutex::new(MaxButton::default()),
         button_state: AtomicU8::new(0),
@@ -123,15 +142,17 @@ fn attach_hwnd_with_reason(hwnd: HWND, shutdown_reason: &str) -> Result<Chrome, 
         toggles: AtomicU32::new(0),
         wake: Mutex::new(None),
         session_end: AtomicBool::new(false),
+        session_ready: AtomicBool::new(false),
+        alive: AtomicBool::new(true),
         shutdown_reason: super::wide(shutdown_reason),
     });
-    let data = Box::into_raw(Box::new(shared.clone()));
+    let data = Arc::into_raw(shared.clone());
     // SAFETY: `hwnd` is a live window of the calling thread; `data` is owned by the subclass from here and freed in
     // `WM_NCDESTROY` (or below if the call fails).
     let ok = unsafe { SetWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID, data as usize) };
     if ok == 0 {
         // SAFETY: the subclass did not take the pointer.
-        drop(unsafe { Box::from_raw(data) });
+        drop(unsafe { Arc::from_raw(data) });
         return Err(ChromeError::Refused);
     }
     Ok(Chrome { shared, hwnd: hwnd as usize })
@@ -143,7 +164,16 @@ impl Chrome {
 
     /// Post back to the owning window thread; never wait for a checkpoint or a window procedure.
     pub fn finish_session_checkpoint(&self) {
-        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(self.hwnd as HWND, CHECKPOINT_FINISHED, 0, 0); }
+        if !self.shared.alive.load(Ordering::Acquire) { return; }
+        // The identity also rejects a queued reply if Windows reuses the HWND.
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(self.hwnd as HWND, CHECKPOINT_FINISHED, self.shared.identity, 0); }
+    }
+
+    /// The application has exhausted its OS budget and will exit without waiting.
+    /// Further shutdown queries must not register another block or checkpoint.
+    pub fn allow_session_end(&self) {
+        self.shared.session_ready.store(true, Ordering::Release);
+        self.finish_session_checkpoint();
     }
     /// Publishes the places of the band after a layout, in physical client pixels. An empty set (the band is hidden)
     /// also ends any press in progress.
@@ -182,9 +212,16 @@ impl Chrome {
 
     /// Takes the chrome off the window (the window is being closed by the application).
     pub fn detach(&self) {
-        // SAFETY: removing our own subclass; the window's thread owns it. The data is freed by the subclass procedure's
-        // final message, so a removal here leaves it to `WM_NCDESTROY`; only the callbacks are dropped.
-        unsafe { RemoveWindowSubclass(self.hwnd as HWND, Some(subclass_proc), SUBCLASS_ID) };
+        if !self.shared.alive.swap(false, Ordering::AcqRel) { return; }
+        // SAFETY: called on the window's thread. Removal prevents WM_NCDESTROY
+        // from reaching this subclass, so detach must reclaim its data itself.
+        unsafe {
+            let hwnd = self.hwnd as HWND;
+            if RemoveWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID) != 0 {
+                windows_sys::Win32::System::Shutdown::ShutdownBlockReasonDestroy(hwnd);
+                drop(Arc::from_raw(Arc::as_ptr(&self.shared)));
+            }
+        }
         *Shared::lock(&self.shared.wake) = None;
     }
 }
@@ -221,12 +258,17 @@ fn session_message(hwnd: HWND, shared: &Shared, message: u32, wparam: WPARAM) ->
     use windows_sys::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
     match message {
         WM_QUERYENDSESSION | WM_ENDSESSION if message == WM_QUERYENDSESSION || wparam != 0 => {
+            if shared.session_ready.load(Ordering::Acquire) {
+                unsafe { ShutdownBlockReasonDestroy(hwnd); }
+                return Some(1);
+            }
             if unsafe { ShutdownBlockReasonCreate(hwnd, shared.shutdown_reason.as_ptr()) } == 0 { eprintln!("could not register shutdown checkpoint: {}", std::io::Error::last_os_error()); }
             shared.session_end.store(true, Ordering::Release);
             shared.notify();
             // Reply immediately. Accepting here permits process termination before the async write.
             Some(0)
         }
+        CHECKPOINT_FINISHED if wparam != shared.identity => Some(0),
         WM_ENDSESSION | CHECKPOINT_FINISHED => {
             unsafe { ShutdownBlockReasonDestroy(hwnd); }
             Some(0)
@@ -236,8 +278,9 @@ fn session_message(hwnd: HWND, shared: &Shared, message: u32, wparam: WPARAM) ->
 }
 
 unsafe extern "system" fn subclass_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, data: usize) -> LRESULT {
-    // SAFETY: `data` is the `Box<Arc<Shared>>` leaked by `attach_hwnd`; it lives until `WM_NCDESTROY`, below.
-    let shared: &Arc<Shared> = unsafe { &*(data as *const Arc<Shared>) };
+    // SAFETY: `data` is the subclass's owned Arc from `attach_hwnd`; it lives until
+    // WM_NCDESTROY below, or explicit detach on this same window thread.
+    let shared: &Shared = unsafe { &*(data as *const Shared) };
     if let Some(reply) = session_message(hwnd, shared, message, wparam) { return reply; }
     match message {
         WM_NCHITTEST => {
@@ -299,6 +342,7 @@ unsafe extern "system" fn subclass_proc(hwnd: HWND, message: u32, wparam: WPARAM
             shared.step(ButtonInput::Cancel(Cancel::Deactivated));
         }
         WM_NCDESTROY => {
+            shared.alive.store(false, Ordering::Release);
             unsafe { windows_sys::Win32::System::Shutdown::ShutdownBlockReasonDestroy(hwnd); }
             shared.step(ButtonInput::Cancel(Cancel::Destroyed));
             // SAFETY: the window is going away; remove the subclass, then free the data it owned. Nothing touches it
@@ -306,7 +350,7 @@ unsafe extern "system" fn subclass_proc(hwnd: HWND, message: u32, wparam: WPARAM
             unsafe {
                 RemoveWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID);
                 let result = DefSubclassProc(hwnd, message, wparam, lparam);
-                drop(Box::from_raw(data as *mut Arc<Shared>));
+                drop(Arc::from_raw(data as *const Shared));
                 return result;
             }
         }
@@ -397,6 +441,58 @@ mod tests {
         assert!(chrome.take_session_end()); assert!(blocked());
         unsafe { SendMessageW(hwnd, WM_ENDSESSION, 0, 0); }
         assert!(!blocked()); assert!(!chrome.take_session_end());
+        destroy(hwnd);
+    }
+
+    #[test]
+    fn expired_session_releases_the_block_and_accepts_further_queries() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{WM_QUERYENDSESSION, WM_ENDSESSION, PeekMessageW, DispatchMessageW, PM_REMOVE, MSG};
+        use windows_sys::Win32::System::Shutdown::ShutdownBlockReasonQuery;
+        let (hwnd, chrome) = setup();
+        let blocked = || { let mut length = 0; unsafe { ShutdownBlockReasonQuery(hwnd, std::ptr::null_mut(), &mut length); } length > 0 };
+        assert_eq!(unsafe { SendMessageW(hwnd, WM_QUERYENDSESSION, 0, 0) }, 0);
+        assert!(chrome.take_session_end()); assert!(blocked());
+        chrome.allow_session_end();
+        let mut message: MSG = unsafe { std::mem::zeroed() };
+        assert_ne!(unsafe { PeekMessageW(&mut message, hwnd, CHECKPOINT_FINISHED, CHECKPOINT_FINISHED, PM_REMOVE) }, 0);
+        unsafe { DispatchMessageW(&message); }
+        assert!(!blocked());
+        assert_eq!(unsafe { SendMessageW(hwnd, WM_QUERYENDSESSION, 0, 0) }, 1);
+        unsafe { SendMessageW(hwnd, WM_ENDSESSION, 1, 0); }
+        assert!(!chrome.take_session_end()); assert!(!blocked());
+        // A late checkpoint reply does not rearm the block or the request.
+        chrome.finish_session_checkpoint();
+        assert_ne!(unsafe { PeekMessageW(&mut message, hwnd, CHECKPOINT_FINISHED, CHECKPOINT_FINISHED, PM_REMOVE) }, 0);
+        unsafe { DispatchMessageW(&message); }
+        assert!(!blocked()); assert!(!chrome.take_session_end());
+        destroy(hwnd);
+    }
+
+    #[test]
+    fn checkpoint_replies_ignore_destroyed_and_reused_windows() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{WM_QUERYENDSESSION, PeekMessageW, PM_REMOVE, MSG};
+        use windows_sys::Win32::System::Shutdown::ShutdownBlockReasonQuery;
+        let (old_hwnd, old) = setup();
+        destroy(old_hwnd);
+        let (hwnd, chrome) = setup();
+        unsafe { SendMessageW(hwnd, WM_QUERYENDSESSION, 0, 0); }
+        // Simulate HWND reuse deterministically; no test depends on Windows' allocator.
+        let stale = Chrome { hwnd: hwnd as usize, shared: old.shared.clone() };
+        stale.finish_session_checkpoint(); stale.allow_session_end();
+        let mut message: MSG = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { PeekMessageW(&mut message, hwnd, CHECKPOINT_FINISHED, CHECKPOINT_FINISHED, PM_REMOVE) }, 0, "no posting after destruction");
+        // A reply already queued before destruction carries its old lifetime's identity.
+        unsafe { SendMessageW(hwnd, CHECKPOINT_FINISHED, old.shared.identity, 0); }
+        let mut length = 0;
+        unsafe { ShutdownBlockReasonQuery(hwnd, std::ptr::null_mut(), &mut length); }
+        assert!(length > 0, "a stale reply cannot clear another window's block");
+        assert!(chrome.take_session_end());
+        let weak = Arc::downgrade(&chrome.shared);
+        chrome.detach();
+        length = 0; unsafe { ShutdownBlockReasonQuery(hwnd, std::ptr::null_mut(), &mut length); }
+        assert_eq!(length, 0, "detach ends the block lifetime too");
+        drop(chrome);
+        assert!(weak.upgrade().is_none(), "detach reclaims the subclass's owner");
         destroy(hwnd);
     }
 

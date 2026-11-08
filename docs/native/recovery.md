@@ -181,9 +181,27 @@ the intent; no interface thread waits for disk. `ShutdownBlockReasonCreate` uses
 existing `common.saving` message for the in-flight
 checkpoint. The core releases the reason on checkpoint completion, failure or refusal, via a message
 posted back to the window thread; cancelled session-end and window destruction also release it.
-The normal Save/Discard/Cancel prompt remains the authority for unsaved work. A cancelled OS shutdown
-does not discard anything or automatically answer that prompt. Forced termination or power loss cannot
-be delayed indefinitely; the previous committed recovery copy remains the fallback.
+The normal Save/Discard/Cancel prompt remains the authority once the checkpoint finishes. A cancelled
+OS shutdown does not discard anything or automatically answer that prompt.
+
+An outstanding session checkpoint has an app-owned deadline in the core's recovery panel, on the
+injected monotonic clock. The platform supplies `SPI_GETWAITTOKILLTIMEOUT`: the configured number of
+milliseconds Windows waits before terminating an application that does not answer shutdown. If the
+query is unsupported or fails, the fallback is the documented five-second Vista shutdown response
+window. A configured zero means no wait. See [Windows' timeout query](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfoa)
+and [Vista's shutdown contract](https://learn.microsoft.com/en-us/windows/win32/shutdown/shutdown-changes-for-windows-vista).
+These OS values establish the bound; no measurement or test threshold selects it.
+
+`TopBand::recovery_wake` schedules the earliest recovery or session deadline even while a worker is
+pending. Repeated queries cannot extend it. Expiry is checked before consuming worker replies: it
+cancels and detaches both document lanes through their existing asynchronous teardown, emits
+`SessionCheckpointFinished` and `QuitReady`, and skips the final window-placement save. It does not
+run Discard or recovery cleanup, delete a committed copy, or wait for a worker to acknowledge cancel.
+An atomic write already committed remains on disk even if its reply arrives late; the detached lane
+retires that reply without adoption or cleanup. Further OS queries are accepted after expiry.
+Checkpoint success, failure or refusal retires the deadline normally. Each posted platform reply
+carries a unique window-lifetime identity; destroyed/detached windows reject late replies, including
+when Windows reuses a handle. Destruction and explicit detach both release the block and subclass owner.
 See [Microsoft's query contract](https://learn.microsoft.com/en-us/windows/win32/shutdown/wm-queryendsession)
 and [shutdown-block lifetime](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-shutdownblockreasoncreate).
 

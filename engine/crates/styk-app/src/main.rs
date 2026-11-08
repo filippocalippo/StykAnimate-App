@@ -426,6 +426,11 @@ impl App {
             return self.band.ask_to_quit().map(Message::Band);
         }
         self.closing = true;
+        if self.band.core.session_end_expired() {
+            if let Some(chrome) = &self.chrome { chrome.allow_session_end(); }
+            // The OS budget is exhausted; window placement must not start another disk wait.
+            return self.finish(Outcome::Done);
+        }
         match self.shell.save_for_close() {
             Some(job) => Task::perform(async move {
                 let (send, receive) = iced::futures::channel::oneshot::channel();
