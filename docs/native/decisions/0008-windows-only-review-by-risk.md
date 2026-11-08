@@ -89,3 +89,12 @@ against it while the logic is finished, on one branch with one review. Freezes s
 ongoing work. Merge conflicts, train passes and their small fixes go to a merge fixer; disk cleanup is a script. First
 priority: the visible loop in the real app (open, stage, select, edit in Properties); then the skeleton gate; the
 docked window's part 2 after it, during step 3.
+
+**Model balance** (the owner, 2026-11-09, from the next chunk started; running work is not restarted): the Codex quota
+is running down, so Opus 5.5 becomes the main back-end and logic implementer, at medium effort by default and xhigh only
+for genuinely hard high-risk chunks (saving and formats, undo, the session, threading, playback and audio, export,
+memory), sparingly and with a reason in the brief. GPT-6 Astra stays available for a minority of chunks, chiefly where a
+chunk already has its context (fix rounds on its own diffs). Sonnet 5.5 stays the screens and views implementer; GPT-6.1
+Sol stays the only reviewer with depth by risk. The machine is the ceiling (3 heavy jobs, a saturated 6-core CPU): the
+agent count stays about where it is, implementers batch their final heavy runs into one queued job, and V0 has priority
+in the queue.
