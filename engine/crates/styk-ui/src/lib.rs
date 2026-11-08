@@ -84,4 +84,8 @@ mod tests {
     }
 }
 
+#[cfg(feature = "engine")]
 pub mod ink_pad;
+
+#[cfg(feature = "headless")]
+pub mod headless;

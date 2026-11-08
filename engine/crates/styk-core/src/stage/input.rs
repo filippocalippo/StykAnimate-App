@@ -1,7 +1,11 @@
 //! The in-process navigation/input seam used by the widget and automation.
+#[cfg(feature = "engine")]
 use super::Host;
+#[cfg(feature = "engine")]
 use crate::frames;
-use styk_services::input::{InputEvent, Modifiers, PenSample, Phase};
+use styk_services::input::{Modifiers, PenSample};
+#[cfg(feature = "engine")]
+use styk_services::input::{InputEvent, Phase};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PointerPhase {
@@ -47,6 +51,7 @@ pub struct StagePen {
     pub document: [f64; 2],
 }
 
+#[cfg(feature = "engine")]
 impl Host {
     pub fn pointer(
         &mut self,

@@ -246,3 +246,10 @@ test('headless developer workers keep UI and engine dependency boundaries', () =
   assert.ok(directionErrors(fixture({'styk-devtools-engine':['bridge'], bridge:['iced']})).some(e => e.message.includes('headless developer workers')));
   assert.ok(directionErrors(fixture({'styk-devtools':['styk-platform']})).some(e => e.rule === 'direction'));
 });
+
+
+test('preview is a front-end host and can never become a production dependency', () => {
+  assert.deepEqual(directionErrors(fixture({'styk-screens': ['styk-ui', 'styk-core', 'styk-platform'], 'styk-ui': ['styk-core'], 'styk-platform': ['styk-services']})), []);
+  assert.match(directionErrors(fixture({'styk-app': ['styk-screens']})).map(e => e.message).join('\n'), /preview binary must never/);
+  assert.match(directionErrors(fixture({'styk-screens': ['styk-edit']})).map(e => e.message).join('\n'), /must not depend/);
+});

@@ -19,6 +19,7 @@ Everything is one Cargo workspace (`engine/`, members `engine/crates/*`). The en
 | `styk-ui` | The iced front end: lays out and draws what the core holds and turns input into core commands. Shell, docking widgets, stage, timeline, inspector, panels, dialogs, Home, Settings, drawing, build, text input. | `styk-core`, `styk-design`, iced |
 | `styk-devtools` | Guarded developer views ([devtools.md](devtools.md)), compiled only with the app's `devtools` feature. | `styk-core`, `styk-ui`, `styk-design`, `styk-trace`, `styk-devtools-engine` |
 | `styk-devtools-engine` | Headless developer workers: bounded captures, control dispatch, owner inspection and profiling. No views or toolkit. | `styk-core` inspection APIs, `styk-services`, `styk-platform`, `styk-trace` |
+| `styk-screens` | Developer-only catalogue PNG previews, sharing the app's view functions and headless renderer. Never a production dependency. | model-only `styk-core`, `styk-ui` with `headless` and without `engine`, `styk-design`, iced, platform capture/text adapters |
 | `styk-app` | The binary `stykanimate`: command line, startup, wiring of platform services into the core, the window. Feature `devtools`. | everything above |
 | `styk-cli` | The headless tools (`styk` binary); its `video` command (feature `app-tools`, off by default) drives a video export of a document through the core's planning and flow, the engine's frame source and the platform's encoder services. `cargo xtask deps` lets it reach `styk-core`, `styk-services` and `styk-platform` only through that feature; it also enables profiling through `styk-devtools-engine`. | engine crates; `styk-core`, `styk-services`, `styk-platform`, `styk-devtools-engine` with `app-tools` |
 | `xtask` | The task runner (`cargo xtask ...`, alias in the repository's `.cargo/config.toml`). | std |
@@ -100,6 +101,8 @@ script format of their own.
 window are taken with PrintWindow (Windows) by the app itself or by `xtask`, never from the screen.
 
 ## Builds
+
+For catalogue iterations use [the preview loop](patterns.md); [build measurements](builds.md) record the linker comparison.
 
 Run from the repository root (`cargo xtask` also works from `engine/`); the workspace is `engine/Cargo.toml`.
 

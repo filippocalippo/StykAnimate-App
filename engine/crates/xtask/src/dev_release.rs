@@ -102,7 +102,7 @@ fn symbols(input: impl BufRead, image: &Pe, name: &str) -> Result<usize, String>
             {
                 count += 1;
                 // Both Rust v0 and legacy mangling retain the crate identifier.
-                if symbol.contains("styk_trace") || symbol.contains("styk_devtools") {
+                if symbol.contains("styk_screens") || symbol.contains("styk_trace") || symbol.contains("styk_devtools") {
                     return Err(format!("release contains linked developer symbol {symbol}"));
                 }
             }
@@ -151,6 +151,7 @@ mod tests {
         for name in [
             "_RNvNtCshash_10styk_trace4ring10ring_bytes",
             "_ZN10styk_trace4ring8registry17hashE",
+            "_RNvCshash_12styk_screens10initialize",
             "_RNvCshash_13styk_devtools10initialize",
         ] {
             assert!(

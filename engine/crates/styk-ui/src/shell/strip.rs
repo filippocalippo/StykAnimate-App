@@ -137,7 +137,7 @@ fn dot_widget(colour: Color) -> Element<'static, Message> {
     container(space()).width(DOT).height(DOT).style(move |_| container::Style::default().background(colour).border(Border { radius: (DOT / 2.0).into(), ..Border::default() })).boxed()
 }
 
-fn close_button(id: styk_core::documents::DocumentId, hot: bool, fg: Color, theme: Theme) -> Element<'static, Message> {
+fn close_button(id: styk_core::identity::DocumentId, hot: bool, fg: Color, theme: Theme) -> Element<'static, Message> {
     let palette = theme.palette();
     let hover_bg = color(palette.surface_pressed);
     let glyph = icon("close", 13.0, if hot { color(palette.text_1) } else { fg });

@@ -23,6 +23,9 @@ fn inspect(mut input: impl BufRead) -> Result<usize, String> {
         let line = std::str::from_utf8(&line)
             .map_err(|e| e.to_string())?
             .trim();
+        if line.starts_with("styk-screens ") {
+            return Err("shipping resolution includes styk-screens".into());
+        }
         if line.starts_with("styk-devtools ") || line.starts_with("styk-devtools-engine ") {
             return Err("shipping resolution includes styk-devtools".into());
         }
@@ -130,6 +133,7 @@ mod tests {
         for line in [
             "styk-trace v0.1.0 features=[enabled]",
             "styk-trace feature \"enabled\"",
+            "styk-screens v0.1.0 features=[]",
             "styk-devtools v0.1.0 features=[]",
             "styk-devtools-engine v0.1.0 features=[]",
         ] {
