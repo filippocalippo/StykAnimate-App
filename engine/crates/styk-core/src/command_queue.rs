@@ -44,6 +44,7 @@ impl Invocation {
         self.phase == Phase::Press && self.entry.shortcut.is_some_and(|shortcut| shortcut.hold)
     }
     fn terminal(self) -> bool { matches!(self.phase, Phase::Release { .. }) }
+    fn handle(self) -> bool { self.source == Source::Keyboard && self.entry.id.starts_with("handle-") }
 }
 
 /// Read from the gesture/drawing owners, never maintained as a second busy state.
@@ -62,8 +63,7 @@ pub struct Activity {
 impl Activity {
     fn continues(self, invocation: Invocation) -> bool {
         self.keyboard_handles.is_some() && invocation.document == self.keyboard_handles
-            && invocation.source == Source::Keyboard
-            && matches!(invocation.entry.id, "handle-left" | "handle-right" | "handle-up" | "handle-down")
+            && invocation.handle()
     }
 
     fn blocks(self, invocation: Invocation) -> bool {
@@ -106,17 +106,29 @@ pub struct GestureQueue {
     pending: [Option<Invocation>; CAPACITY],
     head: usize,
     len: usize,
-    reserved_releases: usize,
 }
 
 impl Default for GestureQueue {
-    fn default() -> Self { Self { pending: [None; CAPACITY], head: 0, len: 0, reserved_releases: 0 } }
+    fn default() -> Self { Self { pending: [None; CAPACITY], head: 0, len: 0 } }
 }
 
 impl GestureQueue {
     pub fn len(&self) -> usize { self.len }
     pub fn is_empty(&self) -> bool { self.len == 0 }
-    pub fn reserved_releases(&self) -> usize { self.reserved_releases }
+    /// One terminal slot per open physical key, including holds already dispatched.
+    /// `held` is the current `Shortcuts::held()` snapshot, after the incoming input event.
+    pub fn reserved_releases(&self, held: &[Activation]) -> usize { self.reservations(held, None) }
+
+    fn reservations(&self, held: &[Activation], incoming: Option<Invocation>) -> usize {
+        let records = || self.records().chain(incoming);
+        // Shortcuts owns unique physical keys. Queue records contribute only their last open press
+        // for a key not already counted there. No cached counter or subtract-on-removal can drift.
+        held.len() + records().enumerate().filter(|(index, event)| {
+            event.held_press() && event.key.is_some()
+                && !held.iter().any(|key| Some(key.key) == event.key)
+                && !records().skip(index + 1).any(|later| later.key == event.key && (later.held_press() || later.terminal()))
+        }).count()
+    }
 
     fn records(&self) -> impl DoubleEndedIterator<Item = Invocation> + '_ {
         (0..self.len).filter_map(|index| self.pending[(self.head + index) % CAPACITY])
@@ -127,22 +139,20 @@ impl GestureQueue {
             .is_some_and(Invocation::held_press)
     }
 
-    pub fn submit(&mut self, invocation: Invocation, activity: Activity) -> Submitted {
+    /// The caller supplies its current holds and immediately rolls back a refusal with `Shortcuts::reject`.
+    pub fn submit(&mut self, invocation: Invocation, activity: Activity, held: &[Activation]) -> Submitted {
         let awaiting = self.awaits_release(invocation.key);
-        let reserved = invocation.terminal() && awaiting;
-        // Cancel/play-pan and a live key's release must reach their owner even while the queue is full.
-        if (invocation.terminal() && !awaiting)
+        let earlier_handle = invocation.handle() && self.records().any(Invocation::handle);
+        // A handle can pass unrelated waiters, never another handle event, including a blocked repeat.
+        let ready = !earlier_handle && ((invocation.terminal() && !awaiting)
             || (!awaiting && activity.continues(invocation) && !activity.blocks(invocation))
             || (invocation.source == Source::Keyboard && matches!(invocation.entry.id, "cancel" | "play-pan"))
-            || (self.is_empty() && !activity.blocks(invocation)) {
-            return Submitted::Ready(invocation);
-        }
-        let reserve = usize::from(invocation.held_press() && !awaiting);
-        if !reserved && self.len + self.reserved_releases + 1 + reserve > CAPACITY {
+            || (self.is_empty() && !activity.blocks(invocation)));
+        let incoming = if ready { None } else { Some(invocation) };
+        if self.len + usize::from(!ready) + self.reservations(held, incoming) > CAPACITY {
             return Submitted::Refused { invocation, reason: Refusal::Full };
         }
-        if reserved { self.reserved_releases -= 1; }
-        self.reserved_releases += reserve;
+        if ready { return Submitted::Ready(invocation); }
         self.pending[(self.head + self.len) % CAPACITY] = Some(invocation);
         self.len += 1;
         Submitted::Queued
@@ -151,7 +161,6 @@ impl GestureQueue {
     fn remove(&mut self, index: usize) -> Option<Invocation> {
         if index >= self.len { return None; }
         let item = self.pending[(self.head + index) % CAPACITY]?;
-        let awaiting = item.held_press() && self.awaits_release(item.key);
         if index == 0 {
             self.pending[self.head] = None;
             self.head = (self.head + 1) % CAPACITY;
@@ -162,7 +171,6 @@ impl GestureQueue {
             self.pending[(self.head + self.len - 1) % CAPACITY] = None;
         }
         self.len -= 1;
-        if awaiting && !self.awaits_release(item.key) { self.reserved_releases -= 1; }
         Some(item)
     }
 
@@ -173,10 +181,10 @@ impl GestureQueue {
             return self.remove(0).map_or(Next::Empty, Next::Cancelled);
         }
         let index = if activity.blocks(front) {
-            // A waiting action must not trap the live gesture's repeats or release.
-            // Scan in queue order, so an unstarted press still precedes its terminal.
-            let Some(index) = self.records().position(|item| item.document == document
-                && activity.continues(item) && !activity.blocks(item)) else { return Next::Blocked; };
+            // Only the first handle is eligible to bypass unrelated waiters. Readiness cannot
+            // turn a later terminal into a candidate ahead of a blocked press or repeat.
+            let Some((index, first)) = self.records().enumerate().find(|(_, item)| item.handle()) else { return Next::Blocked; };
+            if first.document != document || !activity.continues(first) || activity.blocks(first) { return Next::Blocked; }
             index
         } else { 0 };
         self.remove(index).map_or(Next::Empty, Next::Ready)

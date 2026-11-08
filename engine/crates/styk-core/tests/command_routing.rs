@@ -84,18 +84,18 @@ fn review_live_handle_repeats_and_release_do_not_wait_on_their_own_gesture() {
         let first = Invocation::press(first, document);
         let save = Invocation::action(command_registry::by_id("save").unwrap(), document);
         let barrier = if initially_queued { Activity { stroke: true, ..Activity::default() } } else { Activity::default() };
-        assert_eq!(queue.submit(first, barrier), if initially_queued { Submitted::Queued } else { Submitted::Ready(first) });
+        assert_eq!(queue.submit(first, barrier, router.held()), if initially_queued { Submitted::Queued } else { Submitted::Ready(first) });
         if !initially_queued {
             edit(&mut session, "beginTranslationDrag", r#"["Nudge figures"]"#);
             edit(&mut session, "nudgeHandle", "[-1,0]");
         }
-        assert_eq!(queue.submit(save, if initially_queued { barrier } else { active }), Submitted::Queued);
+        assert_eq!(queue.submit(save, if initially_queued { barrier } else { active }, router.held()), Submitted::Queued);
         let Press::Run(repeat) = router.press(&FocusState::new(), &chord, &[Scope::Canvas], Input { repeat: true, ..Input::default() }, |_| true) else { panic!("repeat"); };
         let repeat = Invocation::press(repeat, document);
-        assert_eq!(queue.submit(repeat, if initially_queued { barrier } else { active }),
+        assert_eq!(queue.submit(repeat, if initially_queued { barrier } else { active }, router.held()),
             if initially_queued { Submitted::Queued } else { Submitted::Ready(repeat) });
         let release = Invocation::release(router.release("ArrowLeft").unwrap(), document);
-        assert_eq!(queue.submit(release, if initially_queued { barrier } else { active }),
+        assert_eq!(queue.submit(release, if initially_queued { barrier } else { active }, router.held()),
             if initially_queued { Submitted::Queued } else { Submitted::Ready(release) });
         if initially_queued {
             assert_eq!(queue.next(document, Activity::default(), Settlement::Ready), Next::Ready(first));
@@ -112,7 +112,7 @@ fn review_live_handle_repeats_and_release_do_not_wait_on_their_own_gesture() {
         let after = session.report().clone();
         assert_eq!(queue.next(document, Activity::default(), Settlement::Ready), Next::Ready(save));
         assert_eq!(queue.next(document, Activity::default(), Settlement::Ready), Next::Empty);
-        assert_eq!(queue.reserved_releases(), 0);
+        assert_eq!(queue.reserved_releases(router.held()), 0);
         edit(&mut session, "undo", "[]");
         assert_eq!(session.report(), &baseline);
         assert!(!session.can_undo(), "all repeats commit one undo entry");

@@ -80,6 +80,8 @@ pub struct Activation {
     pub key: &'static str,
     /// Extra gesture Shift, separated from Shift that is part of the binding.
     pub shift: bool,
+    /// This admission continues an already-held key; a refused fresh start has no terminal to dispatch.
+    pub continued: bool,
 }
 
 /// Matching has no side effects and does not decide whether a focused field owns a key.
@@ -97,7 +99,7 @@ pub fn resolve(chord: &Chord, scopes: &[Scope], platform: Platform, desktop: boo
                     if extra { if key.shift { continue; } key.shift = true; }
                     if key.code == chord.key && key.ctrl == chord.ctrl && key.meta == chord.meta && key.alt == chord.alt && key.shift == chord.shift
                         && best.as_ref().is_none_or(|(order, _)| shortcut.order < *order) {
-                        best = Some((shortcut.order, Activation { entry, key: key.code, shift: if shortcut.extra_shift { extra } else { chord.shift } }));
+                        best = Some((shortcut.order, Activation { entry, key: key.code, shift: if shortcut.extra_shift { extra } else { chord.shift }, continued: false }));
                     }
                 }
             }
@@ -173,6 +175,9 @@ impl Shortcuts {
         Self { platform, desktop, held: Vec::new() }
     }
 
+    /// Current physical holds, including a press pending admission. A refused press must be rejected immediately.
+    pub fn held(&self) -> &[Activation] { &self.held }
+
     pub fn press(&mut self, focus: &FocusState, chord: &Chord, scopes: &[Scope], input: Input, allow: impl FnOnce(&Entry) -> bool) -> Press {
         if input.composing || focus.composing() || chord.alt_graph { return Press::Ignored; }
         let resolved = resolve(chord, scopes, self.platform, self.desktop);
@@ -199,7 +204,7 @@ impl Shortcuts {
             }
         }
         if input.prevented { return Press::Ignored; }
-        let Some(activation) = resolved else { return Press::Ignored; };
+        let Some(mut activation) = resolved else { return Press::Ignored; };
         let entry = activation.entry;
         let Some(shortcut) = entry.shortcut else { return Press::Ignored; };
         if (input.polygon && !entry.polygon_key) || !allow(entry) || (input.repeat && !shortcut.repeat) { return Press::Consumed; }
@@ -209,6 +214,7 @@ impl Shortcuts {
         if shortcut.hold {
             if let Some(held) = self.held.iter_mut().find(|held| held.key == activation.key) {
                 if !shortcut.repeat { return Press::Consumed; }
+                activation.continued = true;
                 *held = activation;
             } else {
                 // There are finitely many held bindings in the registry: no event text is retained.
@@ -223,15 +229,17 @@ impl Shortcuts {
         Some(Release { activation: self.held.remove(index), cancelled: false })
     }
 
-    /// A refused submission rolls back its held-key bookkeeping, returning the terminal cancellation.
+    /// Roll back a refused admission. Only a previously accepted hold needs a terminal cancellation;
+    /// a fresh refused press clears bookkeeping without inventing a release for an unstarted key.
     pub fn reject(&mut self, activation: Activation) -> Option<Release> {
         if !self.held.contains(&activation) { return None; }
         let mut release = self.release(activation.key)?;
         release.cancelled = true;
-        Some(release)
+        activation.continued.then_some(release)
     }
 
-    /// Blur, hidden window and document teardown all use this same terminal path.
+    /// Blur, hidden window and document teardown use this terminal path. Submit the drained
+    /// releases as one batch before accepting other input, so their reserved slots stay available.
     pub fn release_all(&mut self) -> impl Iterator<Item = Release> + '_ {
         self.held.drain(..).map(|activation| Release { activation, cancelled: true })
     }

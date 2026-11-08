@@ -23,7 +23,7 @@ fn field(kind: TargetKind) -> FocusState {
     focus
 }
 fn action(id: &str) -> Invocation { Invocation::action(entry(id), Some(DocumentId::preview(1))) }
-fn activation(id: &str, key: &'static str) -> Activation { Activation { entry: entry(id), key, shift: false } }
+fn activation(id: &str, key: &'static str) -> Activation { Activation { entry: entry(id), key, shift: false, continued: false } }
 fn busy() -> Activity { Activity { stroke: true, ..Activity::default() } }
 fn next(queue: &mut GestureQueue) -> Next { queue.next(Some(DocumentId::preview(1)), Activity::default(), Settlement::Ready) }
 
@@ -200,7 +200,7 @@ fn held_keys_release_after_focus_modifiers_or_document_change_and_refusals_rollb
     assert!(matches!(router.press(&focus, &chord, &[Scope::Canvas], Input::default(), |_| true), Press::Run(_)));
     assert_eq!(router.release_all().collect::<Vec<_>>(), [Release { activation: press, cancelled: true }]);
     assert!(matches!(router.press(&focus, &chord, &[Scope::Canvas], Input::default(), |_| true), Press::Run(_)));
-    assert_eq!(router.reject(press), Some(Release { activation: press, cancelled: true }));
+    assert_eq!(router.reject(press), None, "a refused fresh start clears the hold without an unowned terminal");
     assert_eq!(router.release_all().count(), 0);
     assert_eq!(router.press(&focus, &chord, &[Scope::Canvas], Input::default(), |_| false), Press::Consumed);
     assert!(router.release("ArrowLeft").is_none());
@@ -209,8 +209,8 @@ fn held_keys_release_after_focus_modifiers_or_document_change_and_refusals_rollb
 #[test]
 fn queue_releases_in_order_and_rechecks_busy_after_each_command() {
     let mut queue = GestureQueue::default();
-    assert_eq!(queue.submit(action("save"), busy()), Submitted::Queued);
-    assert_eq!(queue.submit(action("undo"), busy()), Submitted::Queued);
+    assert_eq!(queue.submit(action("save"), busy(), &[]), Submitted::Queued);
+    assert_eq!(queue.submit(action("undo"), busy(), &[]), Submitted::Queued);
     assert_eq!(queue.next(action("save").document, busy(), Settlement::Ready), Next::Blocked);
     assert_eq!(next(&mut queue), Next::Ready(action("save")));
     assert_eq!(queue.next(action("save").document, Activity { operation: true, ..Activity::default() }, Settlement::Ready), Next::Blocked);
@@ -222,21 +222,21 @@ fn queue_releases_in_order_and_rechecks_busy_after_each_command() {
 fn drawing_loading_selection_and_gestures_are_barriers_with_keyboard_escape() {
     for activity in [busy(), Activity { gesture: true, ..Activity::default() }, Activity { loading: true, ..Activity::default() }, Activity { selection: true, ..Activity::default() }, Activity { operation: true, ..Activity::default() }] {
         let mut queue = GestureQueue::default();
-        assert_eq!(queue.submit(action("save"), activity), Submitted::Queued);
+        assert_eq!(queue.submit(action("save"), activity, &[]), Submitted::Queued);
         let cancel = Invocation::press(activation("cancel", "Escape"), action("save").document);
-        assert_eq!(queue.submit(cancel, activity), Submitted::Ready(cancel));
+        assert_eq!(queue.submit(cancel, activity, &[]), Submitted::Ready(cancel));
     }
     let key = Invocation::press(activation("copy", "KeyC"), action("save").document);
-    assert_eq!(GestureQueue::default().submit(key, Activity { selection: true, ..Activity::default() }), Submitted::Ready(key));
-    assert_eq!(GestureQueue::default().submit(key, Activity { selection_committing: true, ..Activity::default() }), Submitted::Queued);
+    assert_eq!(GestureQueue::default().submit(key, Activity { selection: true, ..Activity::default() }, &[]), Submitted::Ready(key));
+    assert_eq!(GestureQueue::default().submit(key, Activity { selection_committing: true, ..Activity::default() }, &[]), Submitted::Queued);
 }
 
 #[test]
 fn a_queued_command_never_runs_on_another_document_or_after_failed_settlement() {
     let mut queue = GestureQueue::default();
-    queue.submit(action("delete"), busy());
+    queue.submit(action("delete"), busy(), &[]);
     assert_eq!(queue.next(Some(DocumentId::preview(2)), busy(), Settlement::Ready), Next::Cancelled(action("delete")));
-    queue.submit(action("save"), busy());
+    queue.submit(action("save"), busy(), &[]);
     assert_eq!(queue.next(action("save").document, busy(), Settlement::Failed), Next::Cancelled(action("save")));
     assert!(queue.is_empty());
 }
@@ -246,12 +246,12 @@ fn capacity_refuses_visibly_and_reserves_a_held_keys_release() {
     let mut queue = GestureQueue::default();
     let press = Invocation::press(activation("handle-left", "ArrowLeft"), action("save").document);
     let release = Invocation { phase: Phase::Release { cancelled: false }, ..press };
-    assert_eq!(queue.submit(press, busy()), Submitted::Queued);
-    for _ in 0..command_queue::CAPACITY - 2 { assert_eq!(queue.submit(action("save"), busy()), Submitted::Queued); }
-    assert_eq!(queue.submit(action("undo"), busy()), Submitted::Refused { invocation: action("undo"), reason: command_queue::Refusal::Full });
-    assert_eq!(queue.submit(release, busy()), Submitted::Queued);
+    assert_eq!(queue.submit(press, busy(), &[]), Submitted::Queued);
+    for _ in 0..command_queue::CAPACITY - 2 { assert_eq!(queue.submit(action("save"), busy(), &[]), Submitted::Queued); }
+    assert_eq!(queue.submit(action("undo"), busy(), &[]), Submitted::Refused { invocation: action("undo"), reason: command_queue::Refusal::Full });
+    assert_eq!(queue.submit(release, busy(), &[]), Submitted::Queued);
     assert_eq!(queue.len(), command_queue::CAPACITY);
-    assert_eq!(queue.reserved_releases(), 0);
+    assert_eq!(queue.reserved_releases(&[]), 0);
     assert_eq!(next(&mut queue), Next::Ready(press));
     for _ in 0..command_queue::CAPACITY - 2 { assert_eq!(next(&mut queue), Next::Ready(action("save"))); }
     assert_eq!(next(&mut queue), Next::Ready(release));
@@ -262,13 +262,13 @@ fn capacity_refuses_visibly_and_reserves_a_held_keys_release() {
 fn releasing_a_press_from_the_queue_returns_its_reservation() {
     let mut queue = GestureQueue::default();
     let press = Invocation::press(activation("handle-left", "ArrowLeft"), action("save").document);
-    queue.submit(press, busy());
-    assert_eq!(queue.reserved_releases(), 1);
+    queue.submit(press, busy(), &[]);
+    assert_eq!(queue.reserved_releases(&[]), 1);
     assert_eq!(next(&mut queue), Next::Ready(press));
-    assert_eq!(queue.reserved_releases(), 0);
-    queue.submit(press, busy());
+    assert_eq!(queue.reserved_releases(&[]), 0);
+    queue.submit(press, busy(), &[]);
     assert_eq!(queue.next(Some(DocumentId::preview(2)), busy(), Settlement::Ready), Next::Cancelled(press));
-    assert_eq!(queue.reserved_releases(), 0, "cancellation returns the same reservation");
+    assert_eq!(queue.reserved_releases(&[]), 0, "cancellation returns the same reservation");
 }
 
 #[test]
@@ -283,21 +283,21 @@ fn a_refused_held_repeat_can_cancel_through_a_full_queue_without_losing_its_term
         }
     };
     let first = press_key(false);
-    assert_eq!(queue.submit(Invocation::press(first, action("save").document), busy()), Submitted::Queued);
+    assert_eq!(queue.submit(Invocation::press(first, action("save").document), busy(), &[]), Submitted::Queued);
     for _ in 0..command_queue::CAPACITY - 2 {
-        assert_eq!(queue.submit(Invocation::press(press_key(true), action("save").document), busy()), Submitted::Queued);
+        assert_eq!(queue.submit(Invocation::press(press_key(true), action("save").document), busy(), &[]), Submitted::Queued);
     }
     let rejected = press_key(true);
     let refused = Invocation::press(rejected, action("save").document);
-    assert_eq!(queue.submit(refused, busy()), Submitted::Refused { invocation: refused, reason: command_queue::Refusal::Full });
+    assert_eq!(queue.submit(refused, busy(), &[]), Submitted::Refused { invocation: refused, reason: command_queue::Refusal::Full });
     let release = Invocation::release(router.reject(rejected).unwrap(), action("save").document);
-    assert_eq!(queue.submit(release, busy()), Submitted::Queued);
+    assert_eq!(queue.submit(release, busy(), &[]), Submitted::Queued);
     assert!(router.release("ArrowLeft").is_none(), "the owner rolled back its held key");
     for _ in 0..command_queue::CAPACITY - 1 {
         assert!(matches!(next(&mut queue), Next::Ready(Invocation { phase: Phase::Press, .. })));
     }
     assert_eq!(next(&mut queue), Next::Ready(release));
-    assert_eq!(queue.reserved_releases(), 0);
+    assert_eq!(queue.reserved_releases(&[]), 0);
     assert!(queue.is_empty());
 }
 
