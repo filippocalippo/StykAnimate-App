@@ -19,6 +19,8 @@
 
 mod headless;
 #[cfg(test)]
+mod recovery_wiring_tests;
+#[cfg(test)]
 mod stage_widget_tests;
 #[cfg(feature = "devtools")]
 mod input_check;
@@ -83,6 +85,8 @@ enum Message {
     Attached(Result<shell::Attached, String>),
     Sampled(shell::Sample),
     Wake(shell::Wake),
+    /// Translated by the platform window procedure, including a forced session end.
+    SessionEnd,
     /// The top band: the projects, the shell and the automation (`top_band`).
     Band(top_band::Message),
     /// A screenshot of an automation step is written.
@@ -138,6 +142,8 @@ struct App {
     /// Where the window is captured to for the automation, while it is.
     capture_path: Option<std::path::PathBuf>,
     closing: bool,
+    /// The documents host has answered for every project: closing no longer asks.
+    quit_cleared: bool,
     /// The window's logical size and scale factor, as the interface was last told.
     logical: Size,
     scale: f32,
@@ -157,7 +163,7 @@ enum CheckStep {
 
 impl App {
     fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: SyncSender<Outcome>, shell: Box<shell::Shell>, wakes: wakes::Wakes, foreground_before: isize) -> Result<App, String> {
-        let sheet = screen.filter(|screen| matches!(screen, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..))).map(|screen| {
+        let sheet = screen.filter(|screen| matches!(screen, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..) | Screen::Recovery(..))).map(|screen| {
             let mut sheet = if let Screen::ComponentSheet = screen { Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr) } else { Sheet::for_screen(screen).unwrap_or_else(|| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr)) };
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
             sheet
@@ -172,7 +178,17 @@ impl App {
             }
             styk_core::ClockMode::System => (Arc::new(styk_platform::clock::SystemClock::new()), None),
         };
-        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner))?;
+        // Recovery belongs to a real run: a screen, a script or an unattended test never lists or writes the person's copies. The
+        // primary window keeps them in the profile, an independent one in its workspace (`docs/native/recovery.md`).
+        let recovery = (screen.is_none() && strategy.is_none() && launch.automation.is_none()).then(|| shell.recovery_directory()).flatten();
+        let recovery = recovery.map(|path| Arc::new(styk_platform::recovery::LocalRecovery::new(path)) as Arc<dyn styk_services::recovery::Recovery>);
+        let spawner: Arc<dyn styk_services::Spawner> = Arc::new(styk_platform::spawn::ThreadSpawner);
+        // Screens and unattended runs never read or change the person's preferences.
+        let preferences: Option<Arc<dyn styk_services::storage::Storage>> = if screen.is_none() && strategy.is_none() && launch.automation.is_none() {
+            Some(Arc::new(styk_platform::storage::LocalStorage::for_user(spawner.as_ref()).map_err(|error| error.to_string())?))
+        } else { None };
+        let layouts = preferences.clone().map(|store| Arc::new(styk_core::layout::LayoutStore::new(store)));
+        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, spawner, wakes.callback(), recovery, layouts, preferences)?;
         band.show_screen(band_screen);
         Ok(App {
             sheet,
@@ -197,6 +213,7 @@ impl App {
             band,
             capture_path: None,
             closing: false,
+            quit_cleared: false,
             logical: Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32),
             scale: 1.0,
             rescales: Vec::new(),
@@ -242,12 +259,15 @@ impl App {
                 Task::none()
             }
             Message::Attached(Err(error)) => self.finish(Outcome::Failed(format!("could not attach the window's chrome: {error}"))),
+            Message::Sampled(_) if self.quit_cleared => Task::none(),
             Message::Sampled(sample) => {
                 self.shell.observe(sample);
                 self.shell.changed(&self.wakes.callback());
                 Task::none()
             }
             Message::Wake(wake) => self.wake(wake),
+            Message::SessionEnd if self.quit_cleared => self.finish_session_quit(),
+            Message::SessionEnd => self.band.session_end().map(Message::Band),
             Message::Band(message) => self.band_update(message),
             Message::StepSaved(result) => {
                 self.band.captured(result);
@@ -293,12 +313,29 @@ impl App {
 
     /// A message of the top band, and what it asks of the window.
     fn band_update(&mut self, message: top_band::Message) -> Task<Message> {
+        // Document clearance is final: edits during the preference flush would
+        // otherwise acquire unsaved work after the person's Save/Discard answer.
+        // Worker receipts and deadlines still run until the window has ended.
+        if self.quit_cleared && !matches!(&message,
+            top_band::Message::Layouts | top_band::Message::Deadline | top_band::Message::Documents | top_band::Message::Progress
+            | top_band::Message::Editor(styk_ui::Message::PollDocuments | styk_ui::Message::QuitReady | styk_ui::Message::SessionCheckpointFinished)
+        ) { return Task::none(); }
         let (requests, task) = self.band.update(message);
         let mut tasks = vec![task.map(Message::Band)];
         for request in requests {
             match request {
                 top_band::Request::Minimize => tasks.extend(self.window.map(|id| iced_window::minimize(id, true))),
                 top_band::Request::Close => tasks.push(self.close()),
+                top_band::Request::QuitReady => {
+                    self.quit_cleared = true;
+                    tasks.push(self.close());
+                }
+                top_band::Request::SessionCheckpointFinished => {
+                    if let Some(chrome) = &self.chrome { chrome.finish_session_checkpoint(); }
+                }
+                top_band::Request::PreferencesProgress => {
+                    if self.quit_cleared { tasks.push(self.close()); }
+                },
                 top_band::Request::Resize(size) => tasks.extend(self.window.map(|id| iced_window::resize(id, size))),
                 top_band::Request::Capture(path) => {
                     self.capture_path = Some(path);
@@ -326,7 +363,8 @@ impl App {
                 self.band.resized(size, scale_factor);
                 let owns_show = window::shell_shows(self.strategy);
                 let frame = self.shell.restore;
-                let attach = iced_window::run(id, move |w| shell::attach(w, frame, owns_show)).map(Message::Attached);
+                let shutdown_reason = self.band.core.presentation().text(&styk_core::i18n::Msg::new("common.saving"));
+                let attach = iced_window::run(id, move |w| shell::attach(w, frame, owns_show, &shutdown_reason)).map(Message::Attached);
                 let shown = if window::shown_after_creation(self.strategy) {
                     Task::batch([iced_window::run(id, |w| platform::show_without_activation(w)).map(Message::Shown), attach])
                 } else {
@@ -371,11 +409,13 @@ impl App {
                 let Some(chrome) = &self.chrome else { return Task::none() };
                 self.max_button = chrome.max_button();
                 let toggles = chrome.take_toggles();
-                match self.window {
-                    Some(id) if toggles > 0 => Task::batch((0..toggles).map(|_| iced_window::toggle_maximize(id))),
-                    _ => Task::none(),
-                }
+                let session_end = chrome.take_session_end();
+                let mut tasks = Vec::new();
+                if let Some(id) = self.window { tasks.extend((0..toggles).map(|_| iced_window::toggle_maximize(id))); }
+                if session_end { tasks.push(Task::done(Message::SessionEnd)); }
+                Task::batch(tasks)
             }
+
             shell::Wake::Instance => {
                 if !self.shell.collect_requests() {
                     return Task::none();
@@ -387,25 +427,56 @@ impl App {
             }
             shell::Wake::SaveCheck => {
                 self.shell.save_check(&self.wakes.callback());
-                Task::none()
+                if self.quit_cleared { self.close() } else { Task::none() }
             }
+            shell::Wake::WindowState => {
+                self.shell.window_state_progress(&self.wakes.callback());
+                if self.quit_cleared { self.close() } else { Task::none() }
+            }
+            shell::Wake::Documents => self.band_update(top_band::Message::Documents),
+            shell::Wake::Layouts => self.band_update(top_band::Message::Layouts),
         }
     }
 
     fn close(&mut self) -> Task<Message> {
         // The core's close guard (unsaved work) decides here once documents exist; until then the program ends, once the
         // window state is written (by a worker: the interface thread does not wait for the disk).
-        if std::mem::replace(&mut self.closing, true) {
+        if self.closing {
             return Task::none();
         }
-        match self.shell.save_for_close() {
-            Some(job) => Task::perform(async move {
-                let (send, receive) = iced::futures::channel::oneshot::channel();
-                job(Box::new(move |result| { if send.send(result).is_err() { eprintln!("window save receiver closed"); } }));
-                receive.await.map_err(|error| error.to_string())?
-            }, Message::OutputSaved),
-            None => self.finish(Outcome::Done),
+        // The documents host decides first: unsaved projects are asked about (the close prompt) and the recovery lane finishes
+        // its copies; an unattended run has no one to ask.
+        if self.strategy.is_none() && !self.quit_cleared {
+            return self.band.ask_to_quit().map(Message::Band);
         }
+        if self.band.core.session_end_requested() { return self.finish_session_quit(); }
+        // Documents granted QuitReady. Start both maintenance lanes (the layout queue and Settings), even if one is busy;
+        // their worker receipts continue this sequence through the shared wake stream, and neither admits input. Then the
+        // shell drains its ordered window-placement lane, whose receipt resumes the sequence the same way.
+        let layouts_pending = self.band.flush_layouts();
+        let settings_pending = self.band.flush_settings();
+        if layouts_pending || settings_pending { return Task::none(); }
+        match self.shell.flush_window_state(&self.wakes.callback()) {
+            Ok(true) => Task::none(),
+            result => {
+                self.closing = true;
+                match result {
+                    Err(error) => self.finish(Outcome::Failed(error)),
+                    Ok(_) => self.finish(Outcome::Done),
+                }
+            }
+        }
+    }
+
+    fn finish_session_quit(&mut self) -> Task<Message> {
+        // Document clearance still comes first. Preferences must never extend
+        // an OS shutdown: cancellation leaves the last atomic commit intact.
+        self.shell.cancel_window_state();
+        self.band.abandon_layouts();
+        self.band.abandon_settings();
+        self.closing = true;
+        if let Some(chrome) = &self.chrome { chrome.allow_session_end(); }
+        self.finish(Outcome::Done)
     }
 
     fn frame(&mut self) -> Task<Message> {
@@ -536,7 +607,7 @@ impl App {
             (Some(ready), None) => {
                 // The docked window fills the window under the band; the band's own area holds nothing below it.
                 let below_band = iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed();
-                let layers=iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.dock_wake(), self.band.overlay_wake()];
+                let layers=iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.wake_widget()];
                 // The developer overlay takes no input and sits under the menus and messages.
                 #[cfg(feature = "devtools")]
                 let layers=layers.push(self.band.developer_overlay(self.theme));

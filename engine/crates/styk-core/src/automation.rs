@@ -100,8 +100,52 @@ pub enum Expect {
     Property(String, String),
     /// How many entries the active project's undo history holds.
     History(usize),
+    /// What the recovery views show.
+    Recovery(RecoveryExpect),
     /// Something about the docked window.
     Dock(DockExpect),
+}
+
+/// What a script says the recovery views show (1-based numbers count the copies in the chooser's order).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RecoveryExpect {
+    /// The offer message shows (`true`) or not.
+    Offer(bool),
+    /// The chooser dialog is open.
+    Chooser(bool),
+    /// The close prompt is open.
+    Prompt(bool),
+    /// How many copies the host lists.
+    Copies(usize),
+    /// The copy the chooser has selected.
+    Selected(usize),
+    /// The chooser shows an error under its body.
+    Error(bool),
+}
+
+/// What a script does in the recovery views, through their widgets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RecoveryStep {
+    /// The offer's `Not now`.
+    NotNow,
+    /// The offer's `Manage copies`.
+    Manage,
+    /// The offer's `Restore`.
+    OfferRestore,
+    /// Choose this copy in the chooser's select.
+    Pick(usize),
+    /// The chooser's `Restore`.
+    Restore,
+    /// The chooser's `Discard copy`.
+    Discard,
+    /// The chooser's `Cancel`.
+    Cancel,
+    /// A close prompt's button: `save`, `dont-save`, `cancel` or `retry`.
+    Prompt(String),
+    /// Let the documents host's workers answer (a restore or a discard in flight).
+    Settle,
 }
 
 /// What a script says about the docked window.
@@ -204,6 +248,8 @@ pub enum Step {
     Select { uids: Vec<u32>, joint: i64 },
     /// A step in the Properties panel.
     Inspector(InspectorStep),
+    /// A step in the recovery views.
+    Recovery(RecoveryStep),
     /// A step in the docked window.
     Dock(DockStep),
     /// Check something.
@@ -363,13 +409,19 @@ fn expectation(words: &[&str], line: usize) -> Result<Expect, ScriptError> {
         ["width", n] => Expect::Width(n.parse().map_err(|_| bad("width wants a number"))?),
         ["property", key, value] if value.parse::<f64>().is_ok() => Expect::Property((*key).to_string(), (*value).to_string()),
         ["history", n] => Expect::History(n.parse().map_err(|_| bad("history wants a count"))?),
+        ["recovery", "offer", state @ ("shown" | "hidden")] => Expect::Recovery(RecoveryExpect::Offer(*state == "shown")),
+        ["recovery", "chooser", state @ ("open" | "closed")] => Expect::Recovery(RecoveryExpect::Chooser(*state == "open")),
+        ["recovery", "prompt", state @ ("open" | "closed")] => Expect::Recovery(RecoveryExpect::Prompt(*state == "open")),
+        ["recovery", "error", answer @ ("yes" | "no")] => Expect::Recovery(RecoveryExpect::Error(*answer == "yes")),
+        ["recovery", "copies", n] => Expect::Recovery(RecoveryExpect::Copies(n.parse().map_err(|_| bad("recovery copies wants a count"))?)),
+        ["recovery", "selected", n] => Expect::Recovery(RecoveryExpect::Selected(number(n, line, "recovery selected")?)),
         ["dock", "rect", panel, x, y, w, h] => {
             let number = |text: &str| text.parse::<i32>().map_err(|_| bad("dock rect wants four whole numbers"));
             Expect::Dock(DockExpect::Rect { panel: (*panel).to_string(), rect: [number(x)?, number(y)?, number(w)?, number(h)?] })
         }
         ["dock", "modified", answer @ ("yes" | "no")] => Expect::Dock(DockExpect::Modified(*answer == "yes")),
         ["dock", "tabs", panel, n] => Expect::Dock(DockExpect::Tabs { panel: (*panel).to_string(), count: n.parse().map_err(|_| bad("dock tabs wants a count"))? }),
-        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost>, width <n>, property <name> <number>, history <count>, dock rect <panel> <x> <y> <w> <h>, dock modified <yes|no> or dock tabs <panel> <count>")),
+        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost>, width <n>, property <name> <number>, history <count>; dock rect <panel> <x> <y> <w> <h>, dock modified <yes|no>, dock tabs <panel> <count>, or recovery <offer shown|hidden, chooser open|closed, prompt open|closed, error yes|no, copies <n>, selected <n>>")),
     })
 }
 
@@ -573,6 +625,18 @@ impl Script {
                     ["step", key, direction @ ("up" | "down")] => InspectorStep::Step { key: (*key).to_string(), up: *direction == "up" },
                     ["context", name @ ("auto" | "scene" | "camera" | "layer" | "frame")] => InspectorStep::Context((*name).to_string()),
                     _ => return Err(wants("scrub <property> <pixels>, type <property> <text>, step <property> <up|down> or context <auto|scene|camera|layer|frame>")),
+                }),
+                "recovery" => Step::Recovery(match words.as_slice() {
+                    ["offer", "not-now"] => RecoveryStep::NotNow,
+                    ["offer", "manage"] => RecoveryStep::Manage,
+                    ["offer", "restore"] => RecoveryStep::OfferRestore,
+                    ["chooser", "pick", n] => RecoveryStep::Pick(number(n, line, "pick")?),
+                    ["chooser", "restore"] => RecoveryStep::Restore,
+                    ["chooser", "discard"] => RecoveryStep::Discard,
+                    ["chooser", "cancel"] => RecoveryStep::Cancel,
+                    ["prompt", button @ ("save" | "dont-save" | "cancel" | "retry")] => RecoveryStep::Prompt((*button).to_string()),
+                    ["settle"] => RecoveryStep::Settle,
+                    _ => return Err(wants("offer <not-now|manage|restore>, chooser <pick <n>|restore|discard|cancel>, prompt <save|dont-save|cancel|retry> or settle")),
                 }),
                 "dock" => Step::Dock(match words.as_slice() {
                     ["drag", panel, to] => DockStep::Drag { panel: (*panel).to_string(), to: (*to).to_string() },

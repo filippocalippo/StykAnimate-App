@@ -120,3 +120,9 @@ live-key reservations. Its 2,000 seeded sequences of 60 steps use a separate adm
 order, release ownership, capacity, terminal completion and reservations after each step, including document switches,
 failed settlement, Cancel and a gesture ending while its key remains held. R sets only the handle-edit modifier, never
 opens a gesture. It never reads the queue's storage or uses its reservation implementation as the oracle.
+
+K-timeline assigns its thirteen existing navigation/transport commands to `Owner::Timeline` and
+appends ten parameter/input actions (CMD-277..286). Physical window keys use `message::editor_key`,
+then Core's existing Shortcuts/GestureQueue. Timeline input, settings changes/reverts and worker
+wakes all enter `Core::dispatch`; `ShellReady` is an accepted shared lifecycle handoff, not a second
+command implementation. See [timeline.md](timeline.md) for the view contract and wiring tests.

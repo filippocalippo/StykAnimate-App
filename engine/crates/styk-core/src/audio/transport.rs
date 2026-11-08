@@ -327,6 +327,7 @@ impl<T> Drop for Handoff<T> {
 /// no lock the worker holds: it puts a request, takes a result, and cancels through the job's own token (a short critical section
 /// of its own, with no waiting inside). The worker parks when it has nothing to do.
 struct Jobs {
+    wake: Arc<dyn Fn() + Send + Sync>,
     request: Handoff<Job>,
     result: Handoff<Prepared>,
     shutdown: AtomicBool,
@@ -357,6 +358,7 @@ impl Jobs {
             let result = build_plan(&store, &job.state, job.start, job.end, &job.cancel);
             // An older result nobody took is freed here, on the worker.
             drop(self.result.put(Box::new((job.id, result))));
+            (self.wake)();
         }
     }
 }
@@ -396,12 +398,15 @@ pub struct AudioTransport {
 impl AudioTransport {
     /// A transport on `output` (opened now; a failure is returned and the transport is unusable but safe to drop). Its background
     /// tasks (the preparing worker, the freeing task, the closing task) start through `spawner`.
-    pub fn new(spawner: Arc<dyn Spawner>, mut output: Box<dyn AudioOutput>, host: Arc<dyn HostClock>, decoder: Arc<dyn AudioDecoder>, budget_bytes: u64) -> Result<AudioTransport, AudioError> {
+    pub fn new(spawner: Arc<dyn Spawner>, output: Box<dyn AudioOutput>, host: Arc<dyn HostClock>, decoder: Arc<dyn AudioDecoder>, budget_bytes: u64) -> Result<AudioTransport, AudioError> {
+        Self::new_notifying(spawner, output, host, decoder, budget_bytes, Arc::new(|| {}))
+    }
+    pub fn new_notifying(spawner: Arc<dyn Spawner>, mut output: Box<dyn AudioOutput>, host: Arc<dyn HostClock>, decoder: Arc<dyn AudioDecoder>, budget_bytes: u64, wake: Arc<dyn Fn() + Send + Sync>) -> Result<AudioTransport, AudioError> {
         let shared = Shared::new();
         let renderer = Renderer { shared: shared.clone(), plan: None, playing: false, next_sample: 0, end_sample: 0, generation: 0 };
         let info = output.open(Box::new(renderer))?;
         let store = SourceStore::new(Budget::new(budget_bytes), decoder);
-        let jobs = Arc::new(Jobs { request: Handoff::new(), result: Handoff::new(), shutdown: AtomicBool::new(false), parker: OnceLock::new() });
+        let jobs = Arc::new(Jobs { wake, request: Handoff::new(), result: Handoff::new(), shutdown: AtomicBool::new(false), parker: OnceLock::new() });
         let reclaimer = Reclaimer::new(&*spawner)?;
         {
             let (jobs, store) = (jobs.clone(), store.clone());

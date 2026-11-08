@@ -29,6 +29,7 @@ type Job = Box<dyn FnOnce(&Path) + Send>;
 /// One running request and at most one queued request. Overflow is a visible error, never a lost write.
 pub struct LocalStorage {
     send: SyncSender<Job>,
+    legacy: Option<PathBuf>,
 }
 
 impl LocalStorage {
@@ -44,15 +45,19 @@ impl LocalStorage {
         let base = std::env::var_os("LOCALAPPDATA")
             .filter(|value| !value.is_empty())
             .ok_or_else(|| FileError::Io("LOCALAPPDATA is unavailable".into()))?;
-        Self::new(
+        let mut store = Self::new(
             PathBuf::from(base).join("StykAnimate").join("settings"),
             spawner,
-        )
+        )?;
+        store.legacy = std::env::var_os("STYK_USER_DATA_DIR").filter(|v| !v.is_empty()).map(PathBuf::from)
+            .or_else(|| std::env::var_os("APPDATA").filter(|v| !v.is_empty()).map(|p| PathBuf::from(p).join("StykAnimate")));
+        Ok(store)
     }
 
     /// Explicit profile for hosts and isolated tests. The caller owns the choice of directory.
     pub fn new(directory: impl Into<PathBuf>, spawner: &dyn Spawner) -> Result<Self, FileError> {
         let directory = directory.into();
+        let legacy = Some(directory.clone());
         let (send, receive) = sync_channel::<Job>(1);
         spawner
             .spawn(
@@ -64,7 +69,14 @@ impl LocalStorage {
                 }),
             )
             .map_err(|error| FileError::Io(error.to_string()))?;
-        Ok(Self { send })
+        Ok(Self { send, legacy })
+    }
+
+    /// Explicit native and read-only legacy roots, also used by migration tests.
+    pub fn with_legacy(directory: impl Into<PathBuf>, legacy: impl Into<PathBuf>, spawner: &dyn Spawner) -> Result<Self, FileError> {
+        let mut store = Self::new(directory, spawner)?;
+        store.legacy = Some(legacy.into());
+        Ok(store)
     }
 
     fn request<'a, T: Send + 'static>(
@@ -182,7 +194,10 @@ fn load(
     cancel: &Cancel,
 ) -> Result<Option<Arc<[u8]>>, FileError> {
     cancelled(cancel)?;
-    let file = match File::open(target.path()) {
+    let opened = File::open(target.path());
+    #[cfg(test)]
+    let opened = tests::observe_open(opened);
+    let file = match opened {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(io(error)),
@@ -195,15 +210,22 @@ fn load(
 fn acquire(directory: &Path, cancel: &Cancel) -> Result<File, FileError> {
     cancelled(cancel)?;
     fs::create_dir_all(directory).map_err(io)?;
-    let file = OpenOptions::new()
+    lock_file(open_lock(directory, true).map_err(io)?, cancel)
+}
+
+fn open_lock(directory: &Path, create: bool) -> std::io::Result<File> {
+    OpenOptions::new()
         .read(true)
         .write(true)
-        .create(true)
+        .create(create)
         .truncate(false)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(directory.join(LOCK_NAME))
-        .map_err(io)?;
+}
+
+fn lock_file(file: File, cancel: &Cancel) -> Result<File, FileError> {
+    cancelled(cancel)?;
     let meta = file.metadata().map_err(io)?;
     if !meta.is_file() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(FileError::Io("invalid storage lock file".into()));
@@ -256,13 +278,32 @@ fn acquire(directory: &Path, cancel: &Cancel) -> Result<File, FileError> {
 }
 
 impl Storage for LocalStorage {
+    fn load_legacy<'a>(&'a self, name: &'a str, maximum: usize) -> FileFuture<'a, Option<Arc<[u8]>>> {
+        if let Err(error) = validate_name(name) { return Box::pin(async move { Err(error) }); }
+        let Some(directory) = self.legacy.clone() else { return Box::pin(async { Ok(None) }); };
+        let target = FileTarget::new(directory.join(name));
+        self.request(Cancel::new(), move |_, cancel| load(&target, maximum, cancel))
+    }
     fn load<'a>(&'a self, name: &'a str, maximum: usize) -> FileFuture<'a, Option<Arc<[u8]>>> {
         if let Err(error) = validate_name(name) {
             return Box::pin(async move { Err(error) });
         }
         let name = name.to_owned();
         self.request(Cancel::new(), move |directory, cancel| {
-            load(&FileTarget::new(directory.join(name)), maximum, cancel)
+            let target = FileTarget::new(directory.join(name));
+            let current = load(&target, maximum, cancel)?;
+            if current.is_some() { return Ok(current); }
+            // A failed path open racing Windows replacement is not evidence of an empty
+            // profile. Reopen after the writer's transaction settles, under its same lock.
+            // Never create a directory or lock file on a read: no lock means there was no
+            // writer when we checked. Writers never unlink this stable lock identity.
+            let file = match open_lock(directory, false) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(io(error)),
+            };
+            let _lock = lock_file(file, cancel)?;
+            load(&target, maximum, cancel)
         })
     }
 

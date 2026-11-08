@@ -90,6 +90,15 @@ tab, asks Save/Discard/Cancel when dirty and selects its most recently used pred
 Closing the last tab or replacing an untouched blank keeps that tab's identity. Close Saved keeps the
 front and dirty tabs. Save All visits other dirty tabs in band order, then the original front tab; a
 cancel/failure ends the sequence. Quit uses the same saving sequence after one confirmation.
+An accepted quit Save locks input for the existing `after_save` continuation; failure, cancellation or
+refusal clears that continuation and releases the lock. Discard, a completed quit-save sequence and
+clean quit commit the host's terminal quit state before recovery cleanup starts. `Documents::edits_locked`
+then remains true through `QuitReady` and window teardown, even without a recovery service. The synchronous
+session seam and asynchronous request seam refuse new work; save-target replies and cancellation still run.
+`Core::dispatch` uses that same permission to silently fence commands, stage/pen gestures, drawing and text
+drafts. Overlay housekeeping continues, and its action callbacks re-enter the command gate. Save's private
+continuations alone may settle scopes and mark the committed snapshot saved. No revision can arrive after
+the approved Save/Discard snapshot while cleanup or preference storage drains.
 Renaming trims the name, uses `Untitled` for an empty input and marks an edit without adding history.
 
 `published()` is the accepted stored-document generation for the stage, guarded by the current tab
@@ -197,3 +206,20 @@ command line and a script name with `Request::OpenFile`, one at a time, polling 
 open runs. A project the tabs refuse comes back as a failure and is disposed of on the host's worker. The band's other
 commands (Save, Close, New, Rename) are still dropped until the command registry and the dialogs exist; `Event::Closed`
 tells the band when a project closed.
+
+K-timeline adds `Core::dispatch_document` as the shared panel lifecycle barrier and
+`Core::poll_document` as the completion adapter. The band now also polls from its coalesced
+worker Progress subscription. Native `@timeline` batches reuse the exclusive session worker;
+ready completion drives the stage and never creates a second session or history. The host exposes
+a revision/lineage-checked `FrameDocument` adapter over its existing publication. See [timeline.md](timeline.md).
+
+The recovery panel retains a refused Quit or prompt response until a documents-host progress wake;
+`Core::documents_progress` makes one retry, following the `continue_save` pattern. It never consumes
+a visible prompt on Busy. K-shell currently has no save-file dialog consumer, so its close prompt
+makes Save unavailable for documents without a target and retains Discard/Cancel. Existing targets
+save normally; successful saves finish cleanup before QuitReady. The session-end platform adapter
+uses this same checkpoint and confirmation path; see [recovery.md](recovery.md).
+If its OS-derived deadline expires first, the core instead uses the same asynchronous teardown as
+`Documents::drop`: pending work is cancelled, both lanes are detached, and their payloads and any late
+reply are reclaimed on workers. This terminal path preserves committed recovery files and never calls
+normal quit cleanup. The app exits without waiting for another disk operation.

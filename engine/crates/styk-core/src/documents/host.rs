@@ -25,6 +25,13 @@ pub struct HostOptions {
 
 pub(super) struct EngineLifetime(Engine);
 impl Drop for EngineLifetime { fn drop(&mut self) { self.0.stop(); } }
+struct PublishedFrames { lifetime: Arc<EngineLifetime>, lineage: u64 }
+impl crate::frames::FrameDocument for PublishedFrames {
+    fn snapshot(&self, revision: u64, epoch: u64) -> Option<Arc<styk_engine::Generation>> {
+        self.lifetime.0.generation().filter(|g| epoch == 0 && g.lineage == self.lineage && g.revision == revision)
+    }
+    fn picture_engine(&self) -> Option<Engine> { Some(self.lifetime.0.clone()) }
+}
 
 pub enum Request {
     Recovery(recovery::Command),
@@ -97,7 +104,7 @@ struct CallWork { session: Box<Session>, method: String, args: Vec<Value>, view:
 enum Input {
     Call(Box<CallWork>),
     Bytes(Arc<[u8]>, String), File(FileTarget), Tree(Value, String),
-    Save { tree: Value, name: String, original_first: bool, target: FileTarget },
+    Save { snapshot: Box<dyn FnOnce() -> Value + Send>, name: String, original_first: bool, target: FileTarget },
     Publish { lineage: u64, tree: Value, revision: u64, views: Option<Arc<styk_eval::eval::Prepared>> },
     Leave { tree: Value },
 }
@@ -128,6 +135,7 @@ pub(super) struct Host {
     pending: Option<Pending>,
     prompt: Option<Prompt>,
     after_save: Option<AfterSave>,
+    pub(super) quit_committed: bool,
     continue_save: Option<(Stamp, bool)>,
     retired: Vec<Box<dyn Send>>,
     startup: Value,
@@ -213,7 +221,8 @@ fn execute(options: &HostOptions, work: Work) -> Reply {
                 let opened = options.engine.open_document(OpenSource::Tree { document, name: &name }, OpenOptions { layer_timeline: true }, cancel).map_err(HostError::from)?;
                 PreparedDocument::prepare(opened, true, cancel).map(Output::Open).map_err(HostError::from)
             }
-            Input::Save { tree, name, original_first, target } => {
+            Input::Save { snapshot, name, original_first, target } => {
+                let tree = snapshot();
                 // No helper is borrowed until an engine worker pool has explicitly supplied one.
                 let host = EngineHost { engine: Some(&options.engine), cancel, clock: options.clock, helpers: 0, aside: false };
                 let written = save_project(&[tree], &[], ProjectRequest { reservation: None, name: Some(name), original_first }, &host).map_err(HostError::from)?;
@@ -240,6 +249,12 @@ fn import_limit(name: &str) -> usize {
 }
 
 impl Documents {
+    /// A publication adapter, never a second store. Only frame workers call snapshot.
+    pub fn frame_source(&self, id: DocumentId) -> Option<Arc<dyn crate::frames::FrameDocument>> {
+        let host = self.host.as_ref()?;
+        let lineage = self.get(id)?.lineage();
+        Some(Arc::new(PublishedFrames { lifetime: host.lifetime.clone(), lineage }))
+    }
     /// Start the bounded document lane before accepting work; a refused spawn leaves this owner unchanged.
     pub fn attach_host(&mut self, options: HostOptions) -> Result<(), HostError> {
         if self.host.is_some() { return Err(DocumentsError::Busy.into()); }
@@ -271,8 +286,14 @@ impl Documents {
             tab.prepared.set_clock(clock);
             for scope in &mut tab.scopes { scope.parent.set_clock(clock); }
         }
-        self.host = Some(Host { options: saved_options, lifetime, worker: Some(worker), pending: None, prompt: None, after_save: None, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
+        self.host = Some(Host { options: saved_options, lifetime, worker: Some(worker), pending: None, prompt: None, after_save: None, quit_committed: false, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
         Ok(())
+    }
+
+    /// Once a quit answer is accepted, only its save continuation may mutate sessions.
+    /// Save failure/cancellation clears `after_save`; cleanup and final window teardown never reopen input.
+    pub fn edits_locked(&self) -> bool {
+        self.host.as_ref().is_some_and(|host| host.quit_committed || matches!(host.after_save, Some(AfterSave::All { quit: true, .. })))
     }
 
     pub fn recency(&self) -> impl Iterator<Item = &Document> { self.recent.iter().filter_map(|id| self.get(*id)) }
@@ -293,6 +314,7 @@ impl Documents {
         Some(self.tabs[(at as isize + step.rem_euclid(self.tabs.len() as isize)).rem_euclid(self.tabs.len() as isize) as usize].id)
     }
     pub fn reorder(&mut self, id: DocumentId, index: usize) -> bool {
+        if self.edits_locked() { return false; }
         let Some(from) = self.tabs.iter().position(|tab| tab.id == id) else { return false; };
         let to = index.min(self.tabs.len() - 1);
         if from == to { return false; }
@@ -312,6 +334,11 @@ impl Documents {
 
     /// Every heavy operation is queued. Refused input is returned, never decoded or dropped behind the caller's back.
     pub fn dispatch(&mut self, request: Request) -> Dispatch {
+        // Save dialog replies and explicit cancellation belong to the accepted continuation.
+        // Return every other payload intact: no new session work may race quit cleanup.
+        if self.edits_locked() && !matches!(request, Request::Cancel(_) | Request::SaveTarget { .. }) {
+            return Err((DocumentsError::Busy.into(), request));
+        }
         // Validate before moving payloads. Control replies/cancel are admitted while a prompt/job is outstanding.
         let validation = match &request {
             Request::Cancel(_) | Request::Respond { .. } | Request::SaveTarget { .. } => self.host().map(|_| ()),
@@ -439,7 +466,7 @@ impl Documents {
         let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
         let stamp = Stamp::of(tab);
         if !tab.scopes.is_empty() || tab.view()?.editing { return Err(DocumentsError::FinishEdit.into()); }
-        let input = Input::Save { tree: tab.records()?.clone(), name: tab.project_name().to_owned(), original_first: tab.original_first(), target: target.clone() };
+        let input = Input::Save { snapshot: Box::new(tab.prepared.session.get()?.native_save_snapshot()), name: tab.project_name().to_owned(), original_first: tab.original_first(), target: target.clone() };
         let host = self.host()?;
         host.start(Action::Save { stamp, target }, input).map_err(|(error, input)| { host.retired.push(Box::new(input)); error })
     }
@@ -728,8 +755,10 @@ impl Documents {
     }
 }
 
-impl Drop for Documents {
-    fn drop(&mut self) {
+impl Documents {
+    /// Abandon outstanding work on terminal session end, using normal asynchronous
+    /// teardown. No cleanup command runs and no worker is joined on this thread.
+    pub(crate) fn stop_preserving_recovery(&mut self) {
         if let Some(recovery) = self.recovery.take() { recovery.stop(); }
         if let Some(mut host) = self.host.take() {
             if let Some(pending) = host.pending.take() { pending.cancel.cancel(); }
@@ -737,5 +766,124 @@ impl Drop for Documents {
                 worker.shutdown(Box::new((std::mem::take(&mut self.tabs), std::mem::take(&mut self.clipboards), std::mem::take(&mut host.retired), host.startup)));
             }
         }
+        self.active = None;
+    }
+}
+
+impl Drop for Documents {
+    fn drop(&mut self) { self.stop_preserving_recovery(); }
+}
+
+#[cfg(test)]
+mod close_wiring_regression {
+    use super::*;
+    use styk_services::{ManualSpawner, files::fake::MemoryFiles};
+    #[test]
+    fn refused_save_answer_keeps_the_core_prompt() {
+        let startup = include_bytes!("../../../../tests/edit/startup.document.json");
+        let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
+        let prepared = PreparedDocument::open_bytes(&engine, Arc::from(startup.as_slice()), "Project.styk", &|| false).unwrap();
+        let mut documents = Documents::new();
+        documents.attach_host(HostOptions { engine, spawner: Arc::new(ManualSpawner::default()), files: Arc::new(MemoryFiles::default()), startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify: Arc::new(|| {}) }).unwrap();
+        let id = documents.open(prepared).map_err(|(e, _)| e).unwrap();
+        documents.tabs[0].target = Some(FileTarget::new("Project.styk"));
+        documents.call(id, "setFPS", &[Value::Num(30.0)], &Value::Null).unwrap().result.unwrap();
+        // Publication does not block the close prompt, but the single document lane refuses Save.
+        assert!(matches!(documents.dispatch(Request::Publish), Ok(Effect::Started(_))));
+        let prompt = documents.begin_quit().unwrap();
+        let mut core = crate::app::Core::new(documents);
+        core.document_effect(&prompt);
+        core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Save)));
+        assert!(core.recovery().closing().is_some(), "Busy must not consume the visible prompt");
+        assert!(matches!(core.documents.host.as_ref().unwrap().prompt, Some(Prompt::Quit { .. })));
+        assert!(!core.documents.edits_locked(), "a refused answer never acquired the fence");
+        core.documents.call(id, "setFPS", &[Value::Num(31.0)], &Value::Null).unwrap().result.unwrap();
+    }
+
+    struct Threads;
+    impl styk_services::Spawner for Threads {
+        fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+            std::thread::Builder::new().name(name.into()).spawn(job).map(|_| ()).map_err(|e| styk_services::SpawnError(e.to_string()))
+        }
+    }
+    fn saving_core(files: Arc<MemoryFiles>, notify: Arc<dyn Fn() + Send + Sync>) -> crate::app::Core {
+        let startup = include_bytes!("../../../../tests/edit/startup.document.json");
+        let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
+        let prepared = PreparedDocument::open_bytes(&engine, Arc::from(startup.as_slice()), "Project.styk", &|| false).unwrap();
+        let mut documents = Documents::new();
+        documents.attach_host(HostOptions { engine, spawner: Arc::new(Threads), files, startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify }).unwrap();
+        let id = documents.open(prepared).map_err(|(e, _)| e).unwrap();
+        documents.tabs[0].target = Some(FileTarget::new("Project.styk"));
+        documents.call(id, "setFPS", &[Value::Num(30.0)], &Value::Null).unwrap().result.unwrap();
+        crate::app::Core::new(documents)
+    }
+    #[test]
+    fn failed_or_cancelled_save_releases_quit_intent_and_edit_fence_preserving_work() {
+        use styk_services::files::fake::Failure;
+        for failure in [Failure::ReadOnly, Failure::Full, Failure::CancelBeforeCommit] {
+            let files = Arc::new(MemoryFiles::default());
+            let target = FileTarget::new("Project.styk");
+            files.put(target.clone(), Arc::from(b"previous complete file".as_slice()));
+            files.fail(failure);
+            let (send, receive) = std::sync::mpsc::sync_channel(1);
+            let mut core = saving_core(files.clone(), Arc::new(move || { let _ = send.try_send(()); }));
+            core.request_quit();
+            core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Save)));
+            receive.recv_timeout(std::time::Duration::from_secs(15)).unwrap();
+            let answer = core.documents.poll().expect("the real worker notified its answer");
+            assert!(matches!(answer, Effect::Cancelled(_) | Effect::Failed { .. }), "{answer:?}");
+            core.document_effect(&answer);
+            assert!(!core.documents.edits_locked());
+            let id = core.documents.active().unwrap().id();
+            core.documents.call(id, "setFPS", &[Value::Num(31.0)], &Value::Null).unwrap().result.unwrap();
+            assert!(core.documents.active().unwrap().dirty());
+            assert_eq!(&*files.get(&target).unwrap(), b"previous complete file");
+            core.request_quit();
+            assert!(core.recovery().closing().is_some(), "a failed or cancelled save must allow a fresh quit");
+        }
+    }
+    #[test]
+    fn stale_response_retires_the_invalid_prompt_and_allows_a_fresh_quit() {
+        let mut core = saving_core(Arc::new(MemoryFiles::default()), Arc::new(|| {}));
+        core.request_quit();
+        let id = core.documents.active().unwrap().id();
+        core.documents.call(id, "setFPS", &[Value::Num(31.0)], &Value::Null).unwrap().result.unwrap();
+        core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Discard)));
+        assert!(core.recovery().closing().is_none(), "K-doc consumed the stale prompt; the interface must retire it too");
+        assert!(core.documents.active().unwrap().dirty());
+        core.request_quit();
+        assert!(core.recovery().closing().is_some());
+    }
+
+    #[test]
+    fn session_end_deadline_is_fixed_while_busy_and_terminal_after_expiry() {
+        use std::time::Duration;
+        use styk_services::{Clock, FixedClock};
+        use crate::commands::Effect as CoreEffect;
+        let startup = include_bytes!("../../../../tests/edit/startup.document.json");
+        let mut documents = Documents::new();
+        documents.attach_host(HostOptions {
+            engine: Engine::new(|| 0.0, styk_engine::Budgets::for_device(None)),
+            spawner: Arc::new(ManualSpawner::default()), files: Arc::new(MemoryFiles::default()),
+            startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify: Arc::new(|| {}),
+        }).unwrap();
+        assert!(matches!(documents.dispatch(Request::New), Ok(Effect::Started(_))));
+        let mut core = crate::app::Core::new(documents);
+        let clock = FixedClock::new();
+        let budget = Duration::from_secs(5); // A supplied platform budget, never a wall-clock sleep.
+        core.request_session_end(clock.now(), budget);
+        assert_eq!(core.session_end_deadline(), Some(budget));
+        clock.advance(budget - Duration::from_millis(1));
+        core.request_session_end(clock.now(), budget);
+        assert_eq!(core.session_end_deadline(), Some(budget), "Busy and repeated queries cannot extend it");
+        assert!(core.session_end_tick(clock.now()).is_empty());
+        clock.advance(Duration::from_millis(1));
+        assert!(matches!(core.session_end_tick(clock.now()).as_slice(), [CoreEffect::SessionCheckpointFinished, CoreEffect::QuitReady]));
+        assert!(core.session_end_expired()); assert_eq!(core.session_end_deadline(), None);
+        assert!(core.documents.poll().is_none());
+        assert!(core.session_end_tick(clock.now()).is_empty());
+        assert!(core.document_effect(&Effect::QuitReady).is_empty());
+        assert!(core.request_session_end(clock.now(), budget).is_empty());
+        assert!(core.documents_progress().is_empty());
     }
 }

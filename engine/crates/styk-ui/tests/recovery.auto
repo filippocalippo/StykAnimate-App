@@ -1,0 +1,18 @@
+styk-auto/1
+# Two unsaved copies from an earlier run are offered at start: the person opens the chooser from the offer, picks the older copy,
+# restores it, and the one copy left is offered again; Not now hides that offer.
+expect recovery offer shown
+expect recovery copies 2
+expect recovery chooser closed
+recovery offer manage
+expect recovery chooser open
+expect recovery selected 1
+recovery chooser pick 2
+expect recovery selected 2
+recovery chooser restore
+recovery settle
+expect recovery chooser closed
+expect recovery copies 1
+expect recovery offer shown
+recovery offer not-now
+expect recovery offer hidden

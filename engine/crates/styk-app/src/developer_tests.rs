@@ -676,9 +676,12 @@ fn setup_with_services(
         Arc::new(clock.clone()),
         Some(clock.clone()),
         spawner,
+        styk_platform::shell::Wakes(Arc::new(|_| {})),
+        None,
+        Some(Arc::new(styk_core::layout::LayoutStore::new(store))),
+        None,
     )
     .unwrap();
-    top.layouts = Arc::new(styk_core::layout::LayoutStore::new(store));
     top.attach_developer(runtime.clone());
     let driver = Driver::new(
         iced::widget::space().width(10).height(10).boxed(),

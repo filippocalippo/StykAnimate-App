@@ -22,9 +22,22 @@ use crate::{i18n::Msg, inspector};
 pub enum Command {
     #[cfg(feature = "devtools")]
     Developer(crate::dev_extension::Event),
+    /// Settle the editor before the shell performs a tab/workspace/history transition.
+    Shell(crate::shell::Event),
+    /// Retain quit through panel settlement, then ask the recovery/document owner for clearance.
+    Quit,
+    KeyPressed { chord: crate::text_entry::Chord, repeat: bool, prevented: bool },
+    KeyReleased { key: String, cancelled: bool },
+    Blur,
+    Timeline(crate::timeline::Event),
+    Settings(crate::settings::Event),
+    /// Application clock or a coalesced worker wake. Every owner shares this dispatch entry.
+    Wake { now: u64 },
     Overlay { event: crate::overlay::host::Event, now: u64 },
     /// A registry command (a button, a menu item, a shortcut, a quick action, an automation step).
     Run(CommandId),
+    /// A recovery view: the offer's buttons, the chooser, the close prompt (`docs/native/recovery.md`).
+    Recovery(crate::recovery::model::Event),
     /// A Properties panel control: a field's gesture, a switch, a choice, a section's toggle.
     Inspector(inspector::Event),
     /// Make another open document the active one (a project tab).
@@ -56,6 +69,12 @@ pub enum Severity {
 pub enum Effect {
     #[cfg(feature = "devtools")]
     Developer(crate::dev_extension::Event),
+    ShellReady(crate::shell::Event),
+    SettingsChanged(crate::settings::Change),
+    /// One bounded documents poll; subsequent progress follows host notifications/deadlines.
+    PollDocuments,
+    QuitReady,
+    SessionCheckpointFinished,
     Overlay(crate::overlay::Effect),
     OverlayChoice { invoker: crate::focus::FocusId, index: usize },
     MessageDismissed(u64),

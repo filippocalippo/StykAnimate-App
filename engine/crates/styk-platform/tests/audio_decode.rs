@@ -121,7 +121,8 @@ fn hanging_program(dir: &Path) -> PathBuf {
 }
 
 #[test]
-fn cancel_ends_a_child_that_never_exits_at_once() {
+#[ignore = "quiet-machine latency gate: cargo test -p styk-platform quiet_gate_decode_cancel -- --ignored --test-threads=1"]
+fn quiet_gate_decode_cancel() {
     let dir = scratch("cancel");
     let decoder = FfmpegAudioDecoder::new(hanging_program(&dir), dir.join("work"));
     let cancel = Cancel::new();
@@ -141,6 +142,39 @@ fn cancel_ends_a_child_that_never_exits_at_once() {
     assert!(cancelled_at.elapsed() < Duration::from_secs(1), "the wait woke at once: {:?} (the child would have run for 5 s, total {total:?})", cancelled_at.elapsed());
     assert!(leftovers(&dir.join("work")).is_empty());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn cancel_ends_a_child_that_never_exits_at_once() {
+    let dir = scratch("cancel-order");
+    let program = dir.join("wait.cmd");
+    // No natural exit or grandchild: only cancellation can finish this decode.
+    std::fs::write(&program, "@echo off\r\n:wait\r\ngoto wait\r\n").unwrap();
+    let (started, ready) = std::sync::mpsc::channel();
+    let decoder = FfmpegAudioDecoder::new(program, dir.join("work"))
+        // The decoder's timeout must not rescue a broken cancel wake inside the 120 s hang guard.
+        .with_timeout(Duration::from_secs(3600))
+        .with_child_started(move |child| { started.send(child).unwrap(); });
+    let cancel = Cancel::new();
+    let (done, result) = std::sync::mpsc::channel();
+    let worker = {
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            done.send(decoder.decode(b"anything", 1.0, &mut no_reserve(), &cancel)).unwrap();
+        })
+    };
+    let child = ready.recv_timeout(Duration::from_secs(120)).expect("decoder child started");
+    assert!(!child.has_exited(), "the child cannot complete itself");
+    assert!(result.try_recv().is_err());
+    cancel.cancel();
+    let terminal = result.recv_timeout(Duration::from_secs(120));
+    let reaped = child.has_exited();
+    child.terminate(); // Clean up our child even if cancellation regresses.
+    assert_eq!(terminal.unwrap(), Err(AudioError::Cancelled));
+    assert!(reaped, "cancellation reaped the child before decode returned");
+    worker.join().unwrap();
+    assert!(leftovers(&dir.join("work")).is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

@@ -61,6 +61,9 @@ struct Inner {
     dirty: bool,
     status: PaintStatus,
     closed: bool,
+    transport: Option<crate::timeline::transport::Demand>,
+    encoded: Option<crate::timeline::transport::Demand>,
+    submitted: Option<crate::timeline::transport::Demand>,
     #[cfg(feature = "testing")]
     calls: Vec<Call>,
 }
@@ -91,6 +94,9 @@ impl Surface {
                 dirty: true,
                 status: PaintStatus::Pending,
                 closed: false,
+                transport: None,
+                encoded: None,
+                submitted: None,
                 #[cfg(feature = "testing")]
                 calls: Vec::new(),
             }),
@@ -109,6 +115,52 @@ impl Surface {
     pub fn set_gestures(&self, gestures: Gestures) {
         self.with(|inner| inner.gestures = gestures);
     }
+    /// Playback metadata only. The frame scheduler retains and prepares every lookahead packet.
+    pub fn prepare_playback(&self, start: u32, range: std::ops::Range<u32>, looping: bool, startup: bool, fps: f64) -> Result<bool, frames::Error> {
+        self.with(|inner| {
+            let mut scene = inner.scene.clone(); scene.camera = true; scene.clip_to_canvas = true;
+            let frames = inner.host.frames_mut();
+            frames.lookahead(start, range.clone(), looping, frames::LOOKAHEAD, frames::Config::default().lookahead_bytes, Arc::new(frames::Inputs { scene }))?;
+            let mut compile = 0.;
+            match frames.with_ready(frames::Consumer::Playback(0), |ready| compile = f64::from(ready.prepare_ms)) {
+                frames::Status::Failed(error) => return Err(error), frames::Status::Ready => {}, _ => return Ok(false),
+            }
+            let count = if startup { crate::timeline::transport::startup_frames(fps, compile, 4).min(range.end.saturating_sub(start) as usize) } else { 1 };
+            for index in 0..count { match frames.with_ready(frames::Consumer::Playback(index as u8), |_| {}) {
+                frames::Status::Failed(error) => return Err(error), frames::Status::Ready => {}, _ => return Ok(false),
+            } }
+            Ok(true)
+        }).unwrap_or(Ok(false))
+    }
+    pub fn playback_quality(&self, quality: crate::settings::PlaybackQuality) {
+        self.with(|inner| {
+            use crate::settings::PlaybackQuality::*;
+            inner.quality = match quality { Normal | Auto => 1., Medium => 0.75, Low => 0.5, Draft => 0.25 };
+            inner.samples = if inner.quality == 1. { 4 } else { 1 };
+            inner.dirty = true;
+        });
+    }
+    /// Only the paced transport releases a frame to the painter. No speculative packet changes the picture on show.
+    pub fn transport_frame(&self, demand: crate::timeline::transport::Demand) {
+        self.with(|inner| {
+            inner.transport = Some(demand); inner.scene.camera = true; inner.scene.clip_to_canvas = true;
+            inner.tick = demand.tick; inner.dirty = true; inner.request();
+        });
+    }
+    pub fn take_submission(&self) -> Option<crate::timeline::transport::Demand> { self.with(|inner| {
+        let submitted = inner.submitted.take();
+        if submitted.is_some() && inner.transport == submitted { inner.transport = None; inner.encoded = None; }
+        submitted
+    }).flatten() }
+    pub fn end_transport(&self) {
+        self.with(|inner| {
+            inner.transport = None; inner.encoded = None; inner.submitted = None;
+            inner.quality = 1.; inner.samples = 4; inner.scene.camera = false; inner.scene.clip_to_canvas = false;
+            for slot in 0..frames::LOOKAHEAD { let _ = inner.host.frames_mut().cancel(frames::Consumer::Playback(slot as u8)); }
+            inner.dirty = true;
+        });
+    }
+    pub fn revise(&self, revision: u64) { self.with(|inner| { let _ = inner.host.frames_mut().revise(revision, 0); inner.dirty = true; }); }
 
     /// Runs one event. Navigation changes the view and demands the frame it needs.
     pub fn event(&self, event: Event) -> Result<Outcome, Error> {
@@ -361,6 +413,10 @@ impl Inner {
         if self.closed {
             return;
         }
+        // The widget calls prepare after the preceding encoder was submitted, never at mere picture readiness.
+        if let Some(demand) = self.encoded.take() {
+            if self.transport == Some(demand) { self.submitted = Some(demand); self.progress.notify(); }
+        }
         #[cfg(feature = "testing")]
         self.calls.push(Call::Observe);
         let viewport = Viewport { origin: place.origin, size: place.size, dpr: place.dpr, ..self.host.viewport() };
@@ -409,7 +465,17 @@ impl Inner {
     fn present(&mut self, pass: &mut wgpu::RenderPass<'_>) -> bool {
         #[cfg(feature = "testing")]
         self.calls.push(Call::Present);
-        self.painter.as_ref().is_some_and(|painter| painter.present(pass))
+        let shown = self.painter.as_ref().is_some_and(|painter| painter.present(pass));
+        if shown && self.status == PaintStatus::Ready {
+            if let Some(demand) = self.transport {
+                if self.painter.as_ref().and_then(|p| p.shown_key()).is_some_and(|key| key.prepared.tick == demand.tick) {
+                    self.encoded = Some(demand);
+                    // Schedule the post-submission observation even when the view itself is at rest.
+                    self.progress.notify();
+                }
+            }
+        }
+        shown
     }
 
     fn cursor(&self) -> Cursor {

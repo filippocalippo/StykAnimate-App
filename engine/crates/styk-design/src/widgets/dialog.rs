@@ -58,10 +58,15 @@ pub fn dialog<'a, Message: Clone + 'a>(palette: &'static Palette, spec: Dialog<'
     let Dialog { size, title, description, body, actions, meta, error, close } = spec;
     let width = size.width().min(window.width - 32.0).max(0.0);
     let mut heading: Vec<Element<'a, Message>> = vec![words(title, TextStyle::from_role(&scale::TYPE_TITLE).tracking_em(scale::TRACKING_TITLE_EM), palette.text_1)];
+    let has_description = description.is_some();
     if let Some(description) = description {
         heading.push(words(description, TextStyle::from_role(&scale::TYPE_BODY), palette.text_2));
     }
-    let mut head: Vec<Element<'a, Message>> = vec![container(Column::with_children(heading).spacing(scale::SPACE_1)).width(Length::Fill).boxed()];
+    // `.ui-dialog-head` centres the heading against the close button (`align-self: flex-start`, so with a description, taller than the
+    // button, the button stays on top): a title alone is centred in the button's height.
+    let titled = container(Column::with_children(heading).spacing(scale::SPACE_1)).width(Length::Fill);
+    let titled = if close.is_some() && !has_description { titled.height(Length::Fixed(scale::CONTROL_MD)).center_y(Length::Fixed(scale::CONTROL_MD)) } else { titled };
+    let mut head: Vec<Element<'a, Message>> = vec![titled.boxed()];
     if let Some((id, message)) = close {
         head.push(container(IconButton::new(id, FocusArea::Panels, palette, "close", message).into_element()).align_y(Alignment::Start).boxed());
     }

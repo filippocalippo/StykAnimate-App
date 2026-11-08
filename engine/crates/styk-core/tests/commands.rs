@@ -43,7 +43,7 @@ fn registry_is_appendix_a_plus_the_native_layout_undo_command() {
     let actual: BTreeSet<_> = product_commands().iter().map(|id| id.id()).collect();
     assert_eq!(actual, expected);
     assert_eq!(actual.len(), product_commands().len());
-    assert_eq!(actual.len(), 277);
+    assert_eq!(actual.len(), 287);
     for entry in CommandId::ALL.iter().map(|id| id.info()) {
         assert_eq!(CommandId::from_id(entry.id.id()), Some(entry.id));
         assert!(!entry.label.is_empty(), "{}", entry.id.id());
@@ -80,9 +80,9 @@ fn menu_and_message_actions_reach_dispatch_with_their_registry_identity() {
 
     let mut slot = messages::Messages::default();
     slot.push(messages::Message::new(1, "save-again", messages::Tone::Warning, false, vec![messages::Action {
-        command: CommandId::Save, label: "Retry".into(), dismiss: true,
+        command: CommandId::Save.into(), label: "Retry".into(), dismiss: true, outline: false,
     }]), 0);
-    let command = slot.current().unwrap().actions[0].command;
+    let messages::Do::Command(command) = slot.current().unwrap().actions[0].command.clone() else { panic!("a registry action") };
     assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Save)]);
 }
 
@@ -92,9 +92,8 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let reference = json::parse(&output.stdout).unwrap();
     let commands = reference.get("commands").unwrap().as_arr().unwrap();
-    assert_eq!(commands.len() + 1, product_commands().len());
-    let native_only: BTreeSet<_> = product_commands().iter().map(|id| id.id()).filter(|id| !commands.iter().any(|c| text(c, "id") == *id)).collect();
-    assert_eq!(native_only, BTreeSet::from(["layout-undo"]));
+    assert_eq!(commands.len(), 276, "the executable reference still covers every legacy command");
+    assert_eq!(product_commands().len(), commands.len() + 11, "ten timeline actions and layout undo extend the registry");
     let safe = strings(&reference, "polygonActions");
     let keys = strings(&reference, "polygonKeys");
     let home = strings(&reference, "homeActions");
@@ -400,4 +399,19 @@ fn native_menu_preserves_text_history_and_modal_document_gates() {
     assert_eq!(native_route(entry("undo").id, &focus, true), N::Field(F::Undo));
     assert_eq!(native_route(entry("delete").id, &FocusState::new(), false), N::Run);
     assert_eq!(native_route(entry("save").id, &text, true), N::Blocked);
+}
+
+#[cfg(feature = "devtools")]
+#[test]
+fn developer_scope_preserves_timeline_bindings_and_registry_identity() {
+    let ids: BTreeSet<_> = CommandId::ALL.iter().map(|id| id.id()).collect();
+    assert_eq!(ids.len(), CommandId::ALL.len());
+    assert_eq!(ids.len(), product_commands().len() + 13);
+    for platform in [Platform::Control, Platform::Command] {
+        for (key, shift, command) in [("Space", false, CommandId::PlayPan), ("Comma", false, CommandId::PreviousFrame), ("Period", true, CommandId::NextKeyframe), ("ArrowDown", false, CommandId::TimelineLayerDown), ("F11", false, CommandId::DevOverlay)] {
+            let chord = Chord::new(key, false, false, shift);
+            let binding = shortcuts::resolve(&chord, &[Scope::Developer, Scope::Timeline], platform, true).unwrap();
+            assert_eq!(binding.command, command);
+        }
+    }
 }

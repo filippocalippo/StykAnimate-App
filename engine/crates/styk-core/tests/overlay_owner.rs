@@ -25,7 +25,7 @@ fn focus_owner_pauses_expiry_after_real_tab_navigation() {
     let target = message_button_id(1, 0);
     core.focus_mut().register(ScopeId::ROOT, vec![FocusTarget::new(7, FocusArea::Panels, TargetKind::Control), FocusTarget::new(target.0, FocusArea::Panels, TargetKind::Control)]);
     core.focus_mut().focus(FocusId(7));
-    send(&mut core, Event::ShowMessage(Message::new(1, "m", Tone::Info, false, vec![Action { command: CommandId::Menu, label: "Menu".into(), dismiss: true }])), 0);
+    send(&mut core, Event::ShowMessage(Message::new(1, "m", Tone::Info, false, vec![Action { command: CommandId::Menu.into(), label: "Menu".into(), dismiss: true, outline: false }])), 0);
     assert_eq!(core.focus_mut().tab(true), Some(target));
     send(&mut core, Event::FocusChanged, 100);
     send(&mut core, Event::Tick, 9000);

@@ -13,6 +13,17 @@ const NAME: &str = "preferences.json";
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 thread_local! {
     static WAIT_OBSERVER: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    static OPEN_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+pub(super) fn observe_open(opened: std::io::Result<File>) -> std::io::Result<File> {
+    if OPEN_FAILURE.with(|fail| fail.replace(false)) {
+        // Reproduce the observed Windows open result once, without replacing the real writer
+        // or creating a non-atomic rename in test code. The next open goes to the real file.
+        assert!(opened.is_ok(), "the seeded destination must exist");
+        Err(std::io::Error::from_raw_os_error(2))
+    } else {
+        opened
+    }
 }
 pub(super) fn observe_wait() {
     WAIT_OBSERVER.with(|observer| {
@@ -50,7 +61,7 @@ impl Folder {
 }
 impl Drop for Folder {
     fn drop(&mut self) {
-        for name in [NAME, LOCK_NAME, ".styk-doc-unrelated.tmp"] {
+        for name in [NAME, LOCK_NAME, "window-state.txt", ".styk-doc-unrelated.tmp"] {
             match fs::remove_file(self.0.join(name)) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -123,6 +134,135 @@ fn finish<T>(future: impl Future<Output = T>) -> T {
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .expect("storage future hung"),
         }
+    }
+}
+
+#[test]
+fn missing_open_during_replacement_waits_for_commit_before_reporting_absence() {
+    missing_during_replacement(true);
+}
+
+#[test]
+fn missing_first_publication_waits_for_the_in_flight_writer() {
+    missing_during_replacement(false);
+}
+
+fn missing_during_replacement(existing: bool) {
+    let folder = Folder::new();
+    if existing { folder.seed(); }
+    let (staged, reached) = channel();
+    let (release, gate) = channel();
+    let writer_spawner = TestSpawner::new(move || {
+        WRITE_OBSERVER.with(|observer| {
+            *observer.borrow_mut() = Some(Box::new(move |step, _, _| {
+                if step == WriteStep::Flushed {
+                    staged.send(()).unwrap();
+                    gate.recv_timeout(HANG).unwrap();
+                }
+            }));
+        });
+    });
+    let writer = LocalStorage::new(&folder.0, &writer_spawner).unwrap();
+    let cancel = Cancel::new();
+    let mut write = writer.update(NAME, 32, Box::new(|_| Ok(b"[8]".to_vec())), &cancel);
+    assert!(poll(&mut write).is_pending());
+    reached.recv_timeout(HANG).unwrap();
+
+    // Either the reader waits for the real writer's lock or it incorrectly returns None.
+    // One channel orders those outcomes, so the fail-first case needs no sleep or timeout.
+    let (events, receive) = channel();
+    let waiting = events.clone();
+    let reader_spawner = TestSpawner::new(move || {
+        OPEN_FAILURE.with(|fail| fail.set(existing));
+        WAIT_OBSERVER.with(|observer| {
+            *observer.borrow_mut() = Some(Box::new(move || { let _ = waiting.send(true); }));
+        });
+    });
+    let reader = LocalStorage::new(&folder.0, &reader_spawner).unwrap();
+    let (waited, result) = std::thread::scope(|scope| {
+        let read = scope.spawn(|| {
+            let result = finish(reader.load(NAME, 32));
+            events.send(false).unwrap();
+            result
+        });
+        let waited = receive.recv_timeout(HANG).unwrap();
+        release.send(()).unwrap();
+        finish(write).unwrap();
+        (waited, read.join().unwrap())
+    });
+    assert!(waited, "a transient missing open escaped while replacement held the lock: {result:?}");
+    assert_eq!(&*result.unwrap().expect("committed file"), b"[8]");
+}
+
+#[test]
+fn dropping_a_missing_read_wakes_its_lock_wait_without_creating_files() {
+    let folder = Folder::new();
+    let held = acquire(&folder.0, &Cancel::new()).unwrap();
+    let (waiting, reached) = sync_channel(1);
+    let spawner = TestSpawner::new(move || {
+        WAIT_OBSERVER.with(|observer| {
+            *observer.borrow_mut() = Some(Box::new(move || { let _ = waiting.try_send(()); }));
+        });
+    });
+    let storage = LocalStorage::new(&folder.0, &spawner).unwrap();
+    let mut read = storage.load(NAME, 32);
+    assert!(poll(&mut read).is_pending());
+    reached.recv_timeout(HANG).unwrap();
+    drop(read);
+    // A successful handle read needs no lock. Its completion before releasing the holder
+    // proves that dropping the previous future woke the blocked worker.
+    fs::write(folder.0.join(NAME), b"[7]").unwrap();
+    assert_eq!(&*finish(storage.load(NAME, 32)).unwrap().unwrap(), b"[7]");
+    drop(held);
+    fs::remove_file(folder.0.join(NAME)).unwrap();
+    assert!(finish(storage.load(NAME, 32)).unwrap().is_none());
+    assert_eq!(fs::read_dir(&folder.0).unwrap().count(), 1, "only the existing lock remains");
+}
+
+#[test]
+fn gated_replacements_keep_old_handles_and_every_read_complete() {
+    let folder = Folder::new();
+    folder.seed();
+    let (steps, reached) = channel();
+    let (release, gate) = channel();
+    let writer_spawner = TestSpawner::new(move || {
+        WRITE_OBSERVER.with(|observer| {
+            *observer.borrow_mut() = Some(Box::new(move |step, _, _| {
+                steps.send(step).unwrap();
+                gate.recv_timeout(HANG).unwrap();
+            }));
+        });
+    });
+    let writer = LocalStorage::new(&folder.0, &writer_spawner).unwrap();
+    let reader_spawner = TestSpawner::new(|| {});
+    let reader = LocalStorage::new(&folder.0, &reader_spawner).unwrap();
+    let target = FileTarget::new(folder.0.join(NAME));
+    let mut previous = b"[7]".to_vec();
+    for generation in 0..128 {
+        let next = format!("[{generation},{}]", "9,".repeat(400).trim_end_matches(',')).into_bytes();
+        let proposed = next.clone();
+        // Keep this read handle alive across the rename, forcing Windows' open-reader case.
+        let old = File::open(target.path()).unwrap();
+        let cancel = Cancel::new();
+        let mut write = writer.update(NAME, 8192, Box::new(move |_| Ok(proposed)), &cancel);
+        assert!(poll(&mut write).is_pending());
+        let mut observations = Vec::new();
+        loop {
+            let step = reached.recv_timeout(HANG).unwrap();
+            let stored = finish(reader.load(NAME, 8192));
+            let document = run_future(LocalFiles.read(&target, 8192, &Cancel::new()));
+            observations.push((step, stored, document));
+            release.send(()).unwrap();
+            if step == WriteStep::Renamed { break; }
+        }
+        finish(write).unwrap();
+        assert_eq!(&*read_bounded(old, 8192, &Cancel::new()).unwrap(), previous);
+        for (step, stored, document) in observations {
+            let expected = if step == WriteStep::Renamed { &next } else { &previous };
+            assert_eq!(&*stored.unwrap().expect("replacement must not lose the path"), expected, "{step:?}");
+            assert_eq!(&*document.unwrap(), expected, "{step:?}");
+        }
+        previous = next;
     }
 }
 
@@ -694,3 +834,79 @@ fn killing_a_lock_holder_releases_the_lock_for_the_next_update() {
     finish(next).unwrap();
     assert_eq!(&*finish(storage.load(NAME, 32)).unwrap().unwrap(), b"[8]");
 }
+
+
+// Shell lifecycle against the real profile lock, with worker-only instrumentation.
+struct ShellWorkers {
+    starts: Arc<std::sync::atomic::AtomicUsize>,
+    commits: Arc<std::sync::atomic::AtomicUsize>,
+    waited: std::sync::mpsc::Sender<()>,
+    ended: std::sync::mpsc::Sender<()>,
+}
+impl Spawner for ShellWorkers {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        let (waited, ended, commits) = (self.waited.clone(), self.ended.clone(), self.commits.clone());
+        ThreadSpawner.spawn(name, Box::new(move || {
+            WAIT_OBSERVER.with(|o| *o.borrow_mut() = Some(Box::new(move || { let _ = waited.send(()); })));
+            WRITE_OBSERVER.with(|o| *o.borrow_mut() = Some(Box::new(move |step, _, _| {
+                if matches!(step, WriteStep::Renamed) { commits.fetch_add(1, Ordering::SeqCst); }
+            })));
+            job();
+            let _ = ended.send(());
+        }))
+    }
+}
+
+fn shell_lifecycle(moves: i32, cancel: bool) {
+    use crate::shell::{self, Wake, Wakes};
+    use styk_services::shell::{Rect, window_state::{WindowFrame, WindowStateFile}};
+    let folder = Folder::new();
+    let lock = acquire(&folder.0, &Cancel::new()).unwrap();
+    let (waited, waits) = channel(); let (ended, ends) = channel(); let (wake, wakes) = channel();
+    let counts = ShellWorkers { starts: Arc::default(), commits: Arc::default(), waited, ended };
+    let notify = Wakes(Arc::new(move |w| { let _ = wake.send(w); }));
+    let storage = Arc::new(LocalStorage::new(&folder.0, &counts).unwrap());
+    let shell::Start::Run(mut shell) = shell::start(&[], true, &notify) else { panic!("test shell") };
+    shell.set_window_state_storage(storage, &counts, &notify).unwrap();
+    let frame = |x| WindowFrame { rect: Rect::new(x, 20, 1234, 777), maximized: false, scale_milli: 1000 };
+    for n in 0..moves {
+        shell.assume(&frame(n)); shell.changed(&notify);
+        // Consume the actual debounce wake, not a fabricated completion or a changed deadline.
+        loop {
+            match wakes.recv_timeout(HANG).unwrap() {
+                Wake::SaveCheck => { shell.save_check(&notify); break; }
+                Wake::WindowState => shell.window_state_progress(&notify),
+                _ => panic!("unexpected wake"),
+            }
+        }
+    }
+    waits.recv_timeout(HANG).unwrap(); // The real storage worker reached LockFileEx contention.
+    assert_eq!(counts.starts.load(Ordering::SeqCst), 2, "one lane and one reused storage worker");
+    if cancel {
+        shell.cancel_window_state();
+        assert!(!shell.flush_window_state(&notify).unwrap());
+        // Both workers terminate while the competing lock is STILL held: no latency threshold.
+        ends.recv_timeout(HANG).unwrap(); ends.recv_timeout(HANG).unwrap();
+        assert_eq!(counts.commits.load(Ordering::SeqCst), 0);
+        assert!(!folder.0.join("window-state.txt").exists());
+        assert_eq!(fs::read_dir(&folder.0).unwrap().count(), 1, "only the persistent OS lock remains");
+        drop(lock);
+    } else {
+        assert!(shell.flush_window_state(&notify).unwrap(), "close must retain an outstanding debounce save");
+        drop(lock);
+        while shell.flush_window_state(&notify).unwrap() { wakes.recv_timeout(HANG).unwrap(); }
+        let bytes = fs::read_to_string(folder.0.join("window-state.txt")).unwrap();
+        assert_eq!(WindowStateFile::parse(&bytes).last, Some(frame(moves - 1)));
+        assert_eq!(counts.commits.load(Ordering::SeqCst), 1, "superseded placements never commit");
+        drop(shell);
+        ends.recv_timeout(HANG).unwrap(); ends.recv_timeout(HANG).unwrap();
+        fs::remove_file(folder.0.join("window-state.txt")).unwrap();
+    }
+}
+#[test]
+fn shell_close_drains_a_debounced_save_waiting_on_the_profile_lock() { shell_lifecycle(1, false); }
+#[test]
+fn shell_moves_coalesce_without_growing_workers_under_the_profile_lock() { shell_lifecycle(8, false); }
+#[test]
+fn shell_session_end_cancels_waiters_before_the_profile_lock_is_released() { shell_lifecycle(1, true); }

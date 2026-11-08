@@ -46,6 +46,31 @@ fn wheel(delta: WheelDelta, modifiers: Modifiers) -> Event {
 }
 
 #[test]
+fn accepted_quit_fences_stage_gestures_queued_pen_and_drawing_commands() {
+    use styk_core::{commands::CommandId, documents::{CloseChoice, Effect as Doc, Request}, engine::Value};
+    use styk_services::input::{InputEvent, InputQueue, PenSample, Phase, Tool};
+    let (mut core, surface, _) = quiet();
+    let id = core.documents.active().unwrap().id();
+    core.documents.call(id, "setFPS", &[Value::Num(30.0)], &Value::Null).unwrap().result.unwrap();
+    let Doc::ConfirmQuit { prompt, .. } = core.documents.dispatch(Request::Quit).map_err(|(error, _)| error).unwrap() else { panic!("dirty prompt") };
+    assert!(matches!(core.documents.dispatch(Request::Respond { prompt, choice: CloseChoice::Discard }), Ok(Doc::QuitReady)));
+    // The application has not received QuitReady. Both mouse navigation and native queued pen input use Core.
+    for (phase, x, y) in [(PointerPhase::Down, 100.0, 100.0), (PointerPhase::Move, 130.0, 90.0), (PointerPhase::Up, 130.0, 90.0)] {
+        core.dispatch(Command::Stage(pointer(1, phase, Button::Middle, x, y)));
+    }
+    assert_eq!(view(&surface).pan, [0.0, 0.0]);
+    let queue = InputQueue::new(); surface.set_input(queue.clone());
+    surface.event(Event::PanTool(true)).unwrap();
+    for (phase, x, y) in [(Phase::Down, 100.0, 100.0), (Phase::Move, 130.0, 90.0), (Phase::Up, 130.0, 90.0)] {
+        let mut sample = PenSample::at(0, 5, Tool::Pen, x, y); sample.phase = phase;
+        assert!(queue.push(InputEvent::Sample(sample)));
+    }
+    core.dispatch(Command::Stage(Event::Progress));
+    assert_eq!(view(&surface).pan, [0.0, 0.0]);
+    assert!(core.dispatch(Command::Run(CommandId::DrawingApply)).is_empty(), "no drawing command or refusal may reach the just-closed prompt");
+}
+
+#[test]
 fn a_plain_wheel_pans_by_the_browsers_deltas_and_shift_swaps_the_axes() {
     let (mut core, surface, _) = quiet();
     assert_eq!((view(&surface).zoom, view(&surface).pan), (1.0, [0.0, 0.0]));
@@ -233,6 +258,7 @@ fn the_automated_interaction_ends_on_the_frame_export_makes() {
     let gpu = gpu();
     let clock = Arc::new(FixedClock::new());
     let mut core = core_with(Arc::new(platform_spawn::ThreadSpawner), clock.clone());
+    core.start_timeline(&platform_spawn::ThreadSpawner, Arc::new(|| {})).unwrap();
     let surface = core.stage().expect("a stage");
     let size = [960, 540];
     let target = target(&gpu, size);
@@ -244,8 +270,16 @@ fn the_automated_interaction_ends_on_the_frame_export_makes() {
             step => {
                 let event = Event::from_step(step).unwrap_or_else(|| panic!("line {line}: the stage takes this step"));
                 core.dispatch(Command::Stage(event));
-                if matches!(step, Step::Frame(_)) {
+                if let Step::Frame(tick) = step {
+                    let until = std::time::Instant::now() + Duration::from_secs(30);
+                    loop {
+                        while core.poll_document().is_some() {}
+                        core.dispatch(Command::Wake { now: 0 });
+                        if core.documents.active().unwrap().view().is_ok_and(|v| v.tick == *tick) { break; }
+                        assert!(std::time::Instant::now() < until, "the session seek must land"); std::thread::yield_now();
+                    }
                     settle(&gpu, &surface, 1, &target, size);
+                    assert_eq!(surface.shown_key().unwrap().prepared.tick, *tick);
                     shown += 1;
                 }
             }
@@ -442,7 +476,7 @@ fn a_closed_document_takes_its_stage_with_it() {
     let surface = core.stage().expect("a stage");
     let first = core.documents.active().expect("a document").id();
     let clock = SystemClock::new();
-    let mut send = |core: &mut Core, mut request: Request| {
+    let send = |core: &mut Core, mut request: Request| {
         let start = clock.now();
         loop {
             match core.documents.dispatch(request) {
@@ -476,4 +510,159 @@ fn a_closed_document_takes_its_stage_with_it() {
     assert_eq!(surface.status(), PaintStatus::Closed, "the stage went with its document: painter and host are closed");
     assert!(surface.event(Event::Pan([1.0, 1.0])).is_err());
     assert!(core.documents.get(second).is_some());
+}
+
+#[test]
+fn transport_acknowledges_the_matching_rendered_submission_once_and_rejects_replaced_demands() {
+    use styk_core::timeline::transport::Demand;
+    let gpu=gpu(); let core=core_with(Arc::new(platform_spawn::ThreadSpawner),Arc::new(FixedClock::new()));
+    let surface=core.stage().unwrap(); let size=[960,540]; let output=target(&gpu,size);
+    let first=Demand {token:1,tick:0.}; surface.transport_frame(first);
+    assert_eq!(surface.take_submission(),None);
+    settle(&gpu,&surface,1,&output,size);
+    assert_eq!(surface.take_submission(),None,"a newly encoded picture is not an observed submission");
+    // Replace before the post-submit observation: the old acknowledgement must never satisfy the new request.
+    let second=Demand {token:2,tick:0.}; surface.transport_frame(second);
+    frame(&gpu,&surface,1,&output,size); assert_eq!(surface.take_submission(),None);
+    settle(&gpu,&surface,1,&output,size);
+    frame(&gpu,&surface,1,&output,size); assert_eq!(surface.take_submission(),Some(second));
+    assert_eq!(surface.take_submission(),None);
+    surface.end_transport(); frame(&gpu,&surface,1,&output,size); assert_eq!(surface.take_submission(),None);
+}
+
+#[path = "support/audio.rs"]
+mod audio_support;
+#[test]
+fn space_and_cancel_stop_playback_while_the_document_seek_worker_is_held() {
+    use styk_core::{commands::CommandId, timeline::{Event as Timeline, Payload, transport::State}};
+    struct Release(std::sync::mpsc::Sender<()>);
+    impl Drop for Release {
+        fn drop(&mut self) { let _ = self.0.send(()); }
+    }
+    let gpu = gpu(); let size = [960, 540]; let output = target(&gpu, size);
+    for key in ["Space", "Escape"] {
+        let spawner = Arc::new(platform_spawn::ThreadSpawner);
+        let clock = Arc::new(FixedClock::new()); let progress = styk_core::stage::Progress::new();
+        let (release, receive) = std::sync::mpsc::channel(); let release = Release(release);
+        let receive = std::sync::Mutex::new(receive);
+        let arm = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let armed = arm.clone();
+        let held = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let holding = held.clone();
+        let wake = progress.wake();
+        // Arm only after a real rendered submission enters Playing. Hold the lane's
+        // next completion/retirement notification, leaving Core's seek unsettled.
+        let notify = Arc::new(move || {
+            wake();
+            if std::thread::current().name() == Some("styk-documents") && armed.swap(false, Ordering::SeqCst) {
+                holding.store(true, Ordering::SeqCst);
+                receive.lock().unwrap().recv().unwrap();
+            }
+        });
+        let (mut core, publication) = screens::core_with_document(include_bytes!("../../../tests/edit/property-sheet.document.json"), "Held.styk", spawner.clone(), notify).unwrap();
+        let doc = core.documents.active().unwrap(); let id = doc.id();
+        let source: Arc<dyn styk_core::frames::FrameDocument> = publication;
+        let frames = styk_core::frames::Frames::new(doc.lineage(), doc.revision(), 0, &source, Default::default(), spawner.as_ref(), clock.clone(), progress.wake()).unwrap();
+        let surface = Arc::new(Surface::new(styk_core::stage::Host::new(frames, size, region()).unwrap(), spawner.clone(), clock, progress.clone(), Default::default()));
+        core.set_stage(id, surface.clone()); core.start_timeline(spawner.as_ref(), progress.wake()).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        while core.timeline().model().pending { core.refresh(); assert!(std::time::Instant::now() < until); std::thread::yield_now(); }
+        core.dispatch(Command::Timeline(Timeline::Action { id: CommandId::Play, payload: Payload::None, now: 0 }));
+        while core.timeline().model().transport.state != State::Playing {
+            while core.poll_document().is_some() {}
+            core.dispatch(Command::Wake { now: 0 }); frame(&gpu, &surface, 1, &output, size);
+            assert!(std::time::Instant::now() < until, "the first real picture must start playback"); std::thread::yield_now();
+        }
+        arm.store(true, Ordering::SeqCst);
+        while core.documents.active().unwrap().view().is_ok() {
+            core.dispatch(Command::Wake { now: 100 }); frame(&gpu, &surface, 1, &output, size);
+            assert!(std::time::Instant::now() < until, "playback must dispatch its real seek to the held worker"); std::thread::yield_now();
+        }
+        while !held.load(Ordering::SeqCst) { assert!(std::time::Instant::now() < until, "the document lane must reach the hold"); std::thread::yield_now(); }
+        assert!(core.timeline().playing()); assert!(core.timeline().model().pending);
+        core.dispatch(Command::KeyPressed { chord: styk_core::text_entry::Chord::new(key, false, false, false), repeat: false, prevented: false });
+        core.dispatch(Command::KeyReleased { key: key.into(), cancelled: false });
+        assert_eq!(core.timeline().model().transport.state, State::Paused, "{key} must stop before the seek completes");
+        assert!(core.documents.active().unwrap().view().is_err(), "the seek is still held");
+        drop(release);
+        let mut calls = 0;
+        while core.timeline().model().pending {
+            loop {
+                let unavailable = core.documents.active().unwrap().view().is_err();
+                if core.poll_document().is_none() { break; }
+                if unavailable && core.documents.active().unwrap().view().is_ok() { calls += 1; }
+            }
+            core.dispatch(Command::Wake { now: 1000 }); frame(&gpu, &surface, 1, &output, size);
+            assert!(std::time::Instant::now() < until, "stop settlement must complete"); std::thread::yield_now();
+        }
+        assert_eq!(calls, 2, "the seek and the retained preview cleanup both complete on the real session lane");
+        for now in [1001, 2000, 3000] {
+            core.dispatch(Command::Wake { now }); frame(&gpu, &surface, 1, &output, size);
+            assert!(!core.timeline().playing(), "the completed seek must not restart playback");
+        }
+        assert_eq!(core.timeline().deadline(), None);
+        assert_eq!(surface.take_submission(), None, "a paused seek cannot submit an old transport demand");
+    }
+}
+
+#[test]
+fn audible_playback_starts_only_after_real_picture_submission_and_pause_stops_it() {
+    use styk_core::{commands::CommandId, timeline::{Event as Timeline,Payload,transport::State}};
+    use styk_services::audio::fake::{FakeOutput,FakeConfig};
+    let wav=audio_support::decoded_wav(0.25);
+    let audio=styk_doc::json::parse(format!(r#"{{"version":1,"assets":{{"a":{{"id":"a","name":"tone.wav","size":{},"duration":0.25,"chunks":[{{"data_base64":"{}"}}],"peaks":[0.5]}}}},"tracks":[{{"id":"t","name":"Track","gain":1,"mute":false,"solo":false,"clips":[{{"id":"c","assetId":"a","start":0,"offset":0,"duration":0.25,"gain":1,"fadeIn":0,"fadeOut":0}}]}}]}}"#,wav.len(),audio_support::base64(&wav)).as_bytes()).unwrap();
+    let mut document=styk_doc::json::parse(FIXTURE).unwrap();let mut styk=document.get("_styk").cloned().unwrap_or_else(|| styk_doc::Value::object(styk_doc::Obj::new()));
+    styk.make_obj().unwrap().set("audio",audio);document.make_obj().unwrap().set("_styk",styk);
+    let bytes=styk_doc::json::to_string(&document);
+    let spawner=Arc::new(platform_spawn::ThreadSpawner);let clock=Arc::new(FixedClock::new());let progress=styk_core::stage::Progress::new();
+    let (mut core,publication)=screens::core_with_document(bytes.as_bytes(),"Audio.styk",spawner.clone(),progress.wake()).unwrap();
+    let doc=core.documents.active().unwrap();let id=doc.id();
+    let source:Arc<dyn styk_core::frames::FrameDocument>=publication;
+    let frames=styk_core::frames::Frames::new(doc.lineage(),doc.revision(),0,&source,Default::default(),spawner.as_ref(),clock.clone(),progress.wake()).unwrap();
+    let host=styk_core::stage::Host::new(frames,[960,540],region()).unwrap();
+    let surface=Arc::new(Surface::new(host,spawner.clone(),clock,progress.clone(),Default::default()));core.set_stage(id,surface.clone());
+    core.start_timeline(spawner.as_ref(),progress.wake()).unwrap();
+    let until=std::time::Instant::now()+Duration::from_secs(30);
+    while core.timeline().model().pending {core.refresh();assert!(std::time::Instant::now()<until);std::thread::yield_now();}
+    let (output,fake)=FakeOutput::new(FakeConfig::default(),false);
+    let audio=styk_core::audio::AudioTransport::new_notifying(spawner,Box::new(output),fake.host_clock(),audio_support::TestDecoder::new(audio_support::Behavior::Silence),styk_core::audio::CACHE_BYTES,progress.wake()).unwrap();
+    core.set_audio(Ok(audio));
+    core.dispatch(Command::Settings(styk_core::settings::Event::Set { id: styk_core::settings::SettingId::FitViewOnPlayback, value: styk_doc::Value::Bool(false), now: 0 }));
+    surface.event(Event::Pan([73.,29.])).unwrap();
+    let manual_view = surface.view();
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:0}));
+    assert_eq!(surface.view(),manual_view,"disabled fit preserves the user's view at playback start");
+    assert_eq!(fake.starts(),0,"preparing a plan cannot start sound before a picture is submitted");
+    let gpu=gpu();let size=[960,540];let output=target(&gpu,size);
+    let until=std::time::Instant::now()+Duration::from_secs(30);
+    while core.timeline().model().transport.state!=State::Playing {
+        while core.poll_document().is_some() {}
+        core.dispatch(Command::Wake {now:0});
+        frame(&gpu,&surface,1,&output,size);
+        assert!(std::time::Instant::now()<until,"prepared audio and a real submitted picture must start playback");std::thread::yield_now();
+    }
+    fake.advance_ms(1);assert_eq!(fake.starts(),1,"the first actual picture starts the S4 output once");
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:1}));
+    fake.advance_ms(1);assert_eq!(core.timeline().model().transport.state,State::Paused);
+    assert_eq!(core.timeline().deadline(),None);
+    core.dispatch(Command::Settings(styk_core::settings::Event::Set { id: styk_core::settings::SettingId::FitViewOnPlayback, value: styk_doc::Value::Bool(true), now: 2 }));
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:2}));
+    assert_ne!(surface.view(),manual_view,"enabled fit uses the existing stage navigation owner");
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:3}));
+    let until=std::time::Instant::now()+Duration::from_secs(30);
+    while core.timeline().model().pending { while core.poll_document().is_some() {} core.dispatch(Command::Wake {now:3}); assert!(std::time::Instant::now()<until); std::thread::yield_now(); }
+    // A real preparation refusal is an error, not a silent completed audio plan.
+    let (output,refused)=FakeOutput::new(FakeConfig::default(),false);
+    let limited=styk_core::audio::AudioTransport::new_notifying(Arc::new(platform_spawn::ThreadSpawner),Box::new(output),refused.host_clock(),audio_support::TestDecoder::new(audio_support::Behavior::Silence),0,progress.wake()).unwrap();
+    core.set_audio(Ok(limited));
+    core.dispatch(Command::Timeline(Timeline::Action {id:CommandId::Play,payload:Payload::None,now:4}));
+    let until=std::time::Instant::now()+Duration::from_secs(30);
+    loop {
+        while core.poll_document().is_some() {}
+        let effects=core.dispatch(Command::Wake {now:4});
+        if effects.iter().any(|effect|matches!(effect,styk_core::commands::Effect::Notice(notice) if notice.message.key.starts_with("native.timeline.audio"))) { break; }
+        assert!(std::time::Instant::now()<until,"preparation refusal reaches the Core caller"); std::thread::yield_now();
+    }
+    assert_eq!(core.timeline().model().transport.state,State::Paused,"failed preparation pauses as today's app does");
+    assert_eq!(refused.starts(),0); assert_eq!(core.timeline().deadline(),None);
 }

@@ -155,10 +155,36 @@ fn quit_save_all_preserves_tab_order_and_stops_on_a_cancelled_picker() {
     assert_eq!(names.len(), 2);
     let Effect::SaveDialog { prompt, document, .. } = rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Save }) else { panic!("save first") };
     assert_eq!(document, a);
+    assert!(matches!(rig.docs.call(a, "setFPS", &[Value::Num(90.0)], &Value::Null), Err(DocumentsError::Busy)));
     assert!(matches!(rig.dispatch(Request::SaveTarget { prompt, target: None }), Effect::None));
     assert_eq!(rig.docs.tabs().len(), 2); assert!(rig.docs.tabs().iter().all(|tab| tab.dirty()));
+    rig.fps(a, 31.0); // Cancelling the target dialog releases the accepted-save fence.
     let Effect::ConfirmQuit { prompt, .. } = rig.dispatch(Request::Quit) else { panic!("quit prompt") };
     assert!(matches!(rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Discard }), Effect::QuitReady));
+}
+
+#[test]
+fn accepted_quit_save_keeps_its_fence_across_documents_and_into_final_cleanup() {
+    let mut rig = Rig::new(); let a = rig.open("A.styk"); rig.fps(a, 30.0); let b = rig.open("B.styk"); rig.fps(b, 60.0);
+    let Effect::ConfirmQuit { prompt, .. } = rig.dispatch(Request::Quit) else { panic!("quit prompt") };
+    let mut answer = rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Save });
+    for (expected, name) in [(a, "A.styk"), (b, "B.styk")] {
+        let Effect::SaveDialog { prompt, document, .. } = answer else { panic!("target: {answer:?}") };
+        assert_eq!(document, expected);
+        assert!(matches!(rig.docs.undo(document), Err(DocumentsError::Busy)));
+        rig.dispatch(Request::SaveTarget { prompt, target: Some(FileTarget::new(name)) });
+        answer = rig.next();
+    }
+    assert!(matches!(answer, Effect::QuitReady));
+    assert!(rig.docs.tabs().iter().all(|tab| !tab.dirty()));
+    assert!(rig.files.get(&FileTarget::new("A.styk")).is_some());
+    assert!(rig.files.get(&FileTarget::new("B.styk")).is_some());
+    assert_eq!(rig.docs.tabs().iter().map(|tab| tab.id()).collect::<Vec<_>>(), vec![a, b]);
+    assert!(matches!(rig.docs.call(b, "setFPS", &[Value::Num(90.0)], &Value::Null), Err(DocumentsError::Busy)));
+    let request = Request::Call { document: b, method: "setFPS".into(), args: vec![Value::Num(90.0)], view: Value::Null };
+    assert!(matches!(rig.docs.dispatch(request), Err((HostError::Documents(DocumentsError::Busy), Request::Call { document, method, .. })) if document == b && method == "setFPS"));
+    assert!(matches!(rig.docs.activate(a), Err(DocumentsError::Busy)));
+    assert!(!rig.docs.reorder(b, 0));
 }
 
 fn fixture(relative: &str) -> Arc<[u8]> {

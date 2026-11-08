@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use ring::rand::{SecureRandom, SystemRandom};
 use sha2::{Digest, Sha256};
 use styk_services::{Cancel, files::{FileError, FileTarget, Files}, recovery::*};
@@ -19,9 +19,9 @@ pub mod workspace;
 mod tests;
 
 #[derive(Clone)]
-pub struct LocalRecovery { directory: PathBuf }
+pub struct LocalRecovery { directory: PathBuf, legacy_guard: Arc<Mutex<Weak<File>>> }
 impl LocalRecovery {
-    pub fn new(directory: impl Into<PathBuf>) -> Self { Self { directory: directory.into() } }
+    pub fn new(directory: impl Into<PathBuf>) -> Self { Self { directory: directory.into(), legacy_guard: Arc::default() } }
     pub fn directory(&self) -> &Path { &self.directory }
     fn ensure_directory(&self) -> Result<(), RecoveryError> {
         fs::create_dir_all(&self.directory).map_err(io)?;
@@ -40,7 +40,26 @@ impl LocalRecovery {
                 if matches!(error.raw_os_error(), Some(32 | 33)) { RecoveryError::Owned } else { io(error) }
             })?;
         if lock.metadata().map_err(io)?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 { return Err(RecoveryError::Invalid); }
-        Ok(LocalCopy { store: self.clone(), slot, _lock: lock, metadata_cleanup: Mutex::new(None) })
+        let legacy_guard = self.exclude_legacy();
+        let read_only = legacy_guard.is_none();
+        Ok(LocalCopy { store: self.clone(), slot, _lock: lock, _legacy_guard: legacy_guard, read_only, metadata_cleanup: Mutex::new(None) })
+    }
+    /// Electron 39's Chromium ProcessSingleton holds `<userData>/lockfile` with GENERIC_WRITE,
+    /// FILE_SHARE_READ and DELETE_ON_CLOSE. Acquire a conflicting OS handle, and keep it for
+    /// the entire adopted lease. Existence, PID guesses and a one-time probe are not proof.
+    /// Every failure means unknown/live ownership, hence a read-only offer.
+    fn exclude_legacy(&self) -> Option<Arc<File>> {
+        // Electron's independent windows do not lock their workspace. Only a directory already
+        // adopted into this process's PID namespace proves that no live legacy window owns it.
+        if self.directory.parent().and_then(Path::file_name).and_then(|name| name.to_str()).is_some_and(|name| name.eq_ignore_ascii_case("workspaces"))
+            && self.directory.file_name()?.to_str()?.parse::<u32>().ok()? != std::process::id() { return None; }
+        let mut guard = self.legacy_guard.lock().ok()?; // worker-only, no interface caller
+        if let Some(held) = guard.upgrade() { return Some(held); }
+        let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_OPEN_REPARSE_POINT).open(self.directory.join("lockfile")).ok()?;
+        let meta = file.metadata().ok()?;
+        if !meta.is_file() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 { return None; }
+        let held = Arc::new(file); *guard = Arc::downgrade(&held); Some(held)
     }
     fn slots(&self) -> Result<Vec<Slot>, RecoveryError> {
         let entries = match fs::read_dir(&self.directory) { Ok(entries) => entries, Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()), Err(error) => return Err(io(error)) };
@@ -59,7 +78,8 @@ impl LocalRecovery {
         for slot in self.slots()?.into_iter().filter(|slot| !slot.is_legacy()) {
             check(cancel)?;
             match self.lease(slot) {
-                Ok(copy) => { if let Ok(record) = copy.describe_mode(cancel, false) { spare.push(record); } }
+                Ok(copy) if !copy.read_only => { if let Ok(record) = copy.describe_mode(cancel, false) { spare.push(record); } }
+                Ok(_) => owned += 1,
                 Err(RecoveryError::Owned) => owned += 1,
                 Err(_) => {} // Unreadable copies are never removed.
             }
@@ -68,7 +88,7 @@ impl LocalRecovery {
         for record in spare.into_iter().skip(MAX_SLOTS.saturating_sub(owned)) {
             check(cancel)?;
             // Reclaim only an unchanged, still-unowned copy. A tab may have claimed it since listing.
-            if let Ok(copy) = self.lease(record.slot.clone()) && copy.describe_mode(cancel, false)? == record {
+            if let Ok(copy) = self.lease(record.slot.clone()) && !copy.read_only && copy.describe_mode(cancel, false)? == record {
                 let selected = copy.describe(cancel)?;
                 copy.remove_checked(&selected, &Cancel::new())?;
             }
@@ -104,7 +124,7 @@ fn remove_handle(file: &File) -> Result<(), RecoveryError> {
     if ok == 0 { Err(io(std::io::Error::last_os_error())) } else { Ok(()) }
 }
 
-struct LocalCopy { store: LocalRecovery, slot: Slot, _lock: File, metadata_cleanup: Mutex<Option<[u8; 32]>> }
+struct LocalCopy { store: LocalRecovery, slot: Slot, _lock: File, _legacy_guard: Option<Arc<File>>, read_only: bool, metadata_cleanup: Mutex<Option<[u8; 32]>> }
 
 fn data_version(file: &mut File, cancel: &Cancel) -> Result<[u8; 32], RecoveryError> {
     let mut hash = Sha256::new(); let mut count = 0usize; let mut scratch = [0; 64 * 1024];
@@ -161,7 +181,7 @@ impl LocalCopy {
         // A room check reads only stat/sidecar data, as today's store does. Hash complete payloads
         // only for an offered identity or an actual prune victim, not all spare files every autosave.
         Ok(Record { slot: self.slot.clone(), name: "Recovered animation".into(),
-            saved_at: metadata::file_time(meta.last_write_time()), size, version, selection: Some(hash.finalize().into()) })
+            saved_at: metadata::file_time(meta.last_write_time()), size, version, read_only: self.read_only, selection: Some(hash.finalize().into()) })
     }
     fn with_metadata(mut record: Record, bytes: &[u8], version: [u8; 32]) -> Record {
         if let Some(data_selection) = record.selection {
@@ -179,7 +199,9 @@ impl LocalCopy {
     }
     /// Return only the fingerprint of metadata we can verify and are authorized to clean up.
     fn verify_file(&self, file: &mut File, record: &Record, cancel: &Cancel) -> Result<Option<[u8; 32]>, RecoveryError> {
-        let current = self.describe_data(file, cancel, true)?;
+        let mut current = self.describe_data(file, cancel, true)?;
+        // Access can only become more restrictive at claim. It is not part of the byte identity.
+        current.read_only = record.read_only;
         if current.slot != record.slot || current.size != record.size || current.version != record.version { return Err(RecoveryError::Changed); }
         // This selection offered data alone. A sidecar appearing later was never selected and
         // must neither invalidate the chosen data nor become eligible for deletion.
@@ -202,6 +224,7 @@ impl LocalCopy {
         }
     }
     fn remove_checked(&self, record: &Record, cancel: &Cancel) -> Result<(), RecoveryError> {
+        if self.read_only || record.read_only { return Err(RecoveryError::Owned); }
         self.retry_metadata_cleanup();
         let mut file = open_access(&self.store.path(&self.slot, "styk"), true)?;
         let sidecar = self.verify_file(&mut file, record, cancel)?;
@@ -232,18 +255,21 @@ impl Recovery for LocalRecovery {
                 bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
                 let id = bytes.iter().enumerate().map(|(i, byte)| format!("{}{:02x}", if [4, 6, 8, 10].contains(&i) { "-" } else { "" }, byte)).collect::<String>();
                 let slot = Slot::named(&id).ok_or(RecoveryError::Invalid)?;
-                let copy = self.lease(slot)?;
+                let mut copy = self.lease(slot)?;
+                // A freshly issued empty native slot is ours, even beside a legacy reader.
+                copy.read_only = false;
                 if !self.path(&copy.slot, "styk").try_exists().map_err(io)? && !self.path(&copy.slot, "json").try_exists().map_err(io)? { return Ok(Arc::new(copy) as Arc<dyn RecoveryCopy>); }
                 check(cancel)?;
             }
         })
     }
     fn claim<'a>(&'a self, record: &'a Record, cancel: &'a Cancel) -> RecoveryFuture<'a, Arc<dyn RecoveryCopy>> {
-        Box::pin(async move { check(cancel)?; let copy = self.lease(record.slot.clone())?; copy.verify(record, cancel)?; Ok(Arc::new(copy) as Arc<dyn RecoveryCopy>) })
+        Box::pin(async move { check(cancel)?; let mut copy = self.lease(record.slot.clone())?; copy.read_only |= record.read_only; copy.verify(record, cancel)?; Ok(Arc::new(copy) as Arc<dyn RecoveryCopy>) })
     }
 }
 impl RecoveryCopy for LocalCopy {
     fn slot(&self) -> &Slot { &self.slot }
+    fn read_only(&self) -> bool { self.read_only }
     fn read<'a>(&'a self, record: &'a Record, maximum: usize, cancel: &'a Cancel) -> RecoveryFuture<'a, Arc<[u8]>> {
         Box::pin(async move {
             if record.size > maximum { return Err(FileError::TooLarge.into()); }
@@ -263,6 +289,7 @@ impl RecoveryCopy for LocalCopy {
     }
     fn write<'a>(&'a self, previous: Option<&'a Record>, bytes: &'a [u8], name: &'a str, cancel: &'a Cancel) -> RecoveryFuture<'a, Record> {
         Box::pin(async move {
+            if self.read_only { return Err(RecoveryError::Owned); }
             check(cancel)?;
             if bytes.is_empty() || bytes.len() > MAX_BYTES { return Err(RecoveryError::Invalid); }
             if let Some(record) = previous { self.verify(record, cancel)?; }
@@ -271,7 +298,7 @@ impl RecoveryCopy for LocalCopy {
             // Build the receipt from the exact bytes being committed. No fallible post-commit stat
             // or sidecar read may retract it, including when a reader locks the new file immediately.
             let record = Record { slot: self.slot.clone(), name: display_name(name), saved_at: metadata::now(),
-                size: bytes.len(), version: Sha256::digest(bytes).into(), selection: None };
+                size: bytes.len(), version: Sha256::digest(bytes).into(), read_only: false, selection: None };
             let target = FileTarget::new(self.store.path(&self.slot, "styk"));
             LocalFiles.replace(&target, bytes, cancel).await?;
             let metadata = metadata::encode(&record.name, &record.saved_at);

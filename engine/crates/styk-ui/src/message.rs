@@ -22,6 +22,12 @@ use styk_design::widgets::focus;
 pub enum Message {
     #[cfg(feature = "devtools")]
     DeveloperEffect(styk_core::dev_extension::Event),
+    /// The core accepted the shared lifecycle barrier; the application can hand this to its shell owner.
+    ShellReady(styk_core::shell::Event),
+    PollDocuments,
+    QuitReady,
+    SessionCheckpointFinished,
+    Notice(styk_core::commands::Notice),
     /// A command for the core.
     Command(Command),
     /// Focus a number field's input (a click on its scrub label).
@@ -83,13 +89,15 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
         #[cfg(feature = "devtools")]
         Message::DeveloperEffect(_) => Task::none(), // consumed by the application extension adapter
         Message::Command(command) => {
-            let effects = core.dispatch(command);
-            core.refresh();
-            Task::batch(effects.into_iter().map(effect))
+            let mut effects = core.dispatch(command);
+            // The views the command changed are brought in line; their effects (the recovery offer's message, a dialog that closed) go with it.
+            effects.extend(core.refresh());
+            run(effects)
         }
+        Message::Notice(notice) => run(core.show_notice(notice)),
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
         Message::Focusing(inner, id) => Task::batch([update(core, *inner), operate(focus::focus(id)).discard()]),
-        Message::Idle => Task::none(),
+        Message::Idle | Message::ShellReady(_) => Task::none(),
         Message::Compose(composing) => {
             core.focus_mut().set_composing(composing);
             Task::none()
@@ -129,7 +137,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             use styk_core::overlay::host::Event;
             overlay(core, match event { View::Show { target, content, touch, keyboard } => Event::TooltipShow { target, content, touch, keyboard }, View::Hide => Event::TooltipHide })
         }
-        Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
+        Message::PollDocuments | Message::QuitReady | Message::SessionCheckpointFinished | Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
         Message::Snapshot(mut snapshot) => {
             for (scope, targets) in &mut snapshot.scopes {
                 if *scope != styk_core::focus::ScopeId::ROOT { continue; }
@@ -149,13 +157,24 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     }
 }
 
+/// The tasks of the effects the core answered with: the application hands the ones it takes from the core outside a message
+/// (the documents host's effects, `Core::document_effect`) here too.
+#[cfg(feature = "engine")]
+pub fn run(effects: Vec<Effect>) -> Task<Message> {
+    Task::batch(effects.into_iter().map(effect))
+}
+
 /// One effect as a task. Notices, frame requests and the colour picker belong to the shell, the stage and the picker
 /// chunks: until they land they have no task here.
 #[cfg(feature = "engine")]
-fn effect(effect: Effect) -> Task<Message> {
+pub fn effect(effect: Effect) -> Task<Message> {
     match effect {
         #[cfg(feature = "devtools")]
         Effect::Developer(event) => Task::done(Message::DeveloperEffect(event)),
+        Effect::ShellReady(event) => Task::done(Message::ShellReady(event)),
+        Effect::PollDocuments => Task::done(Message::PollDocuments),
+        Effect::QuitReady => Task::done(Message::QuitReady),
+        Effect::SessionCheckpointFinished => Task::done(Message::SessionCheckpointFinished),
         Effect::Overlay(styk_core::overlay::Effect::Focus(id)) => match id { Some(id) => operate(focus::focus(id)).discard(), None => operate(focus::unfocus()).discard() },
         Effect::Overlay(effect) => Task::done(Message::OverlayEffect(effect)),
         Effect::OverlayChoice { invoker, index } => Task::done(Message::OverlayChoice { invoker, index }),
@@ -169,7 +188,8 @@ fn effect(effect: Effect) -> Task<Message> {
         }))
         .discard(),
         Effect::NotAvailable(id) => Task::done(Message::NotAvailable(id)),
-        Effect::Notice(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
+        Effect::Notice(notice) => Task::done(Message::Notice(notice)),
+        Effect::SettingsChanged(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
 }
 
@@ -222,4 +242,26 @@ pub fn dock_shortcut_at(core: &mut Core, event: &iced::Event, ignored: bool, now
 pub fn update_at(core: &mut Core, message: Message, now: u64) -> Task<Message> {
     let effects = core.dispatch(Command::Overlay { event: styk_core::overlay::host::Event::Time, now });
     Task::batch([Task::batch(effects.into_iter().map(effect)), update(core, message)])
+}
+
+/// Translate toolkit input only. Shortcut precedence, scopes and field/IME gates belong to Core's shared resolver.
+#[cfg(feature = "engine")]
+pub fn editor_key(event: &iced::Event, ignored: bool) -> Option<Message> {
+    use iced::keyboard::{Event, Key, key::Physical};
+    let key_name = |physical: &Physical, logical: &Key| match physical {
+        Physical::Code(code) => format!("{code:?}"),
+        Physical::Unidentified(_) => match logical { Key::Named(name) => format!("{name:?}"), Key::Character(c) if c.len() == 1 => format!("Key{}", c.to_uppercase()), _ => String::new() },
+    };
+    match event {
+        iced::Event::Keyboard(Event::KeyPressed { key, physical_key, modifiers, repeat, .. }) => {
+            let mut chord = styk_core::text_entry::Chord::new(&key_name(physical_key, key), modifiers.control(), modifiers.alt(), modifiers.shift());
+            chord.meta = modifiers.logo();
+            // Windows AltGr is reported as Ctrl+Alt on the physical right Alt key; the text widget retains its input.
+            chord.alt_graph = matches!(key, Key::Named(iced::keyboard::key::Named::AltGraph));
+            Some(Command::KeyPressed { chord, repeat: *repeat, prevented: !ignored }.into())
+        }
+        iced::Event::Keyboard(Event::KeyReleased { key, physical_key, .. }) => Some(Command::KeyReleased { key: key_name(physical_key, key), cancelled: false }.into()),
+        iced::Event::Window(iced::window::Event::Unfocused) => Some(Command::Blur.into()),
+        _ => None,
+    }
 }

@@ -53,6 +53,15 @@ impl From<f64> for Arg {
         Arg::Num(value)
     }
 }
+impl From<Label> for Arg {
+    /// A name the person typed is text; a catalogue label is its message.
+    fn from(value: Label) -> Arg {
+        match value {
+            Label::Msg(msg) => Arg::Msg(msg),
+            Label::Plain(text) => Arg::Text(text),
+        }
+    }
+}
 impl From<usize> for Arg {
     fn from(value: usize) -> Arg {
         Arg::Num(value as f64)

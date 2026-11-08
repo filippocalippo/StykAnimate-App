@@ -290,9 +290,10 @@ fn timeout_defaults_match_actions_not_waiting_count() {
     assert_eq!(msg(1, Tone::Success).timeout, 4000);
     assert_eq!(msg(1, Tone::Error).timeout, 0);
     let actions = vec![Action {
-        command: CommandId::Undo,
+        command: CommandId::Undo.into(),
         label: "Undo".into(),
         dismiss: true,
+        outline: false,
     }];
     assert_eq!(
         Message::new(1, "x", Tone::Info, false, actions.clone()).timeout,
