@@ -34,6 +34,11 @@ when the regression binaries were compiled; subsequent fixes do not alter those 
 - Self-check extended global navigation to a playhead already beyond the document end.
   `timeline-review-global-return-baseline.log`: `0 passed; 1 failed` (105 instead of 6).
   After clamping that path, `timeline-review-global-return-fixed.log`: `16 passed; 0 failed; 1 ignored`.
+- The subscription regression now holds the document worker and feeds an actual redraw to the
+  production recipes, checking emitted Frame messages rather than recipe count. It preserves
+  consumed Progress messages and releases the worker to finish opening through the real handler.
+  Restoring idle-based polling fails it (`timeline-review-redraw-mutation.log`: `0 passed; 1 failed`);
+  the restored fix passes all app tests (`timeline-review-redraw-fixed.log`: `24 passed; 0 failed`).
 
 ## Pre-integration verification
 

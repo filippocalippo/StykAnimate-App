@@ -886,16 +886,58 @@ mod tests {
     }
     #[test]
     fn pending_document_work_keeps_progress_subscription_without_polling_frames() {
-        use iced::advanced::subscription::into_recipes;
-        let (mut top, _) = band();
-        let idle_subscriptions = into_recipes(top.subscription()).len();
+        use iced::{advanced::subscription::{into_recipes, Event as SubscriptionEvent}, futures::{StreamExt, task::noop_waker}};
+        use styk_services::Spawner;
+        #[derive(Default)]
+        struct HeldDocuments(std::sync::Mutex<Option<styk_services::Job>>);
+        impl Spawner for HeldDocuments {
+            fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+                if name == "styk-documents" { assert!(self.0.lock().unwrap().replace(job).is_none()); Ok(()) }
+                else { styk_platform::spawn::ThreadSpawner.spawn(name, job) }
+            }
+        }
+        struct Release(Arc<HeldDocuments>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                if let Some(job) = self.0.0.lock().unwrap().take() {
+                    styk_platform::spawn::ThreadSpawner.spawn("styk-documents", job).unwrap();
+                }
+            }
+        }
+        // Feed one real redraw to the installed recipes. Inspect emitted messages,
+        // not their number: additional worker subscriptions must remain harmless.
+        let redraw = |top: &TopBand| {
+            let waker = noop_waker();
+            let mut context = std::task::Context::from_waker(&waker);
+            into_recipes(top.subscription()).into_iter().filter_map(|recipe| {
+                let event = SubscriptionEvent::Interaction {
+                    window: window::Id::unique(),
+                    event: Event::Window(window::Event::RedrawRequested(std::time::Instant::now())),
+                    status: iced::event::Status::Ignored,
+                };
+                let input = iced::futures::stream::iter([event]).chain(iced::futures::stream::pending());
+                let mut stream = recipe.stream(Box::pin(input));
+                match stream.as_mut().poll_next(&mut context) {
+                    std::task::Poll::Ready(Some(message)) => Some(message), _ => None,
+                }
+            }).collect::<Vec<_>>()
+        };
+        let held = Arc::new(HeldDocuments::default());
+        let release = Release(held.clone());
+        let clock = FixedClock::new();
+        let mut top = TopBand::with_storage(Size::new(1560., 900.), Arc::new(clock.clone()), Some(clock), held, Arc::new(styk_services::storage::fake::MemoryStorage::default())).unwrap();
         top.open_all(&[fixture()]);
         let _ = top.pump();
         assert!(!top.idle(), "automation must still wait for the pending document");
-        assert_eq!(into_recipes(top.subscription()).len(), idle_subscriptions, "pending workers must not install window::frames");
+        let mut messages = redraw(&top);
+        assert!(!messages.iter().any(|message| matches!(message, Message::Frame)), "pending workers must not poll frames on redraw");
         top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
-        assert_eq!(into_recipes(top.subscription()).len(), idle_subscriptions, "automation also waits for Progress during work");
+        messages.extend(redraw(&top));
+        assert!(!messages.iter().any(|message| matches!(message, Message::Frame)), "automation also waits for Progress during work");
         top.run = None;
+        // Preserve any actual worker message consumed while inspecting the subscriptions.
+        for message in messages { let _ = top.update(message); }
+        drop(release);
         settle_from_workers(&mut top);
         assert!(top.core.stage().is_some(), "the production Progress handler completes opening without frame polling");
     }
