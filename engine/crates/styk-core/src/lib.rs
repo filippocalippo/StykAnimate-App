@@ -30,6 +30,7 @@ pub mod inspector;
 pub mod launch;
 pub mod limits;
 pub mod number;
+pub mod overlay;
 pub mod range;
 pub mod roving;
 pub mod screens;
