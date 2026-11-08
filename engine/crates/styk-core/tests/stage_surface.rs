@@ -308,6 +308,7 @@ fn the_render_path_orders_its_calls_never_waits_and_keeps_the_last_picture_while
     core.dispatch(Command::Stage(Event::Pan([50.0, 0.0])));
     assert_eq!(surface.status(), PaintStatus::Pending);
     assert_eq!(surface.shown_key().as_ref(), Some(&shown), "a pending demand leaves the picture on show");
+    assert_eq!(surface.artboard().map(|a| a[0]), Some(0.0), "the backing stays with the picture on show, not with the newer view");
     assert!(surface.needs_frames(), "the toolkit is asked for another frame until the picture lands");
     let calls = {
         surface.take_calls();
@@ -327,5 +328,6 @@ fn the_render_path_orders_its_calls_never_waits_and_keeps_the_last_picture_while
     assert_eq!(surface.status(), PaintStatus::Pending);
     settle(&gpu, &surface, 2, &target, size, &receive);
     assert_eq!(surface.shown_key().expect("the new painter's picture").view.pan, [50.0, 0.0]);
+    assert_eq!(surface.artboard().map(|a| a[0]), Some(50.0), "the backing follows the picture once it lands");
     surface.close();
 }

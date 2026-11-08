@@ -154,7 +154,7 @@ surface is one document's `Host`, its `Painter` and the input policy; `Core` hol
   pending or the view is easing. The painter's own wake (the event loop's coalescing wake, given to the surface by its
   owner) is the other signal; the owner of a window turns it into a redraw.
 - **The artboard backing** (today's `#artboard`: an 8 px checkerboard seen where the scene is transparent, a 1 px ring
-  and a soft drop) is drawn by the widget's own small pipeline (`stage/backing.wgsl`) at `Surface::artboard()`.
+  and a soft drop) is drawn by the widget's own small pipeline (`stage/backing.wgsl`) at `Surface::artboard()`, the canvas as the picture on show has it.
 - **Not here:** tools, handles, the marquee, grids and guides, the HUD, the header and the rail. The surface keeps
   the stage's tick (`Event::Frame`) until the timeline owns it.
 

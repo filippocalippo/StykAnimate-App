@@ -233,12 +233,22 @@ impl Surface {
         self.with(|inner| inner.cursor()).unwrap_or(Cursor::Default)
     }
 
-    /// The artboard's rectangle in the stage's logical pixels (left, top, width, height): where the document's canvas
-    /// lies under the current view, for the backing drawn beneath the picture (`placeArtboard`).
+    /// The artboard's rectangle in the stage's logical pixels (left, top, width, height) for the backing drawn beneath
+    /// the picture (`placeArtboard`): where the canvas lies in the picture on show, so the two never disagree while a
+    /// newer picture is on its way; the current view before a first picture.
     pub fn artboard(&self) -> Option<[f64; 4]> {
         self.with(|inner| {
-            let (view, canvas) = (inner.host.view(), inner.host.canvas());
-            [view.pan[0], view.pan[1], f64::from(canvas[0]) * view.zoom, f64::from(canvas[1]) * view.zoom]
+            let canvas = inner.host.canvas().map(f64::from);
+            match inner.painter.as_ref().and_then(Painter::shown_key) {
+                Some(key) => {
+                    let shown = &key.view;
+                    [shown.pan[0] / shown.density, shown.pan[1] / shown.density, canvas[0] * shown.zoom / shown.density, canvas[1] * shown.zoom / shown.density]
+                }
+                None => {
+                    let view = inner.host.view();
+                    [view.pan[0], view.pan[1], canvas[0] * view.zoom, canvas[1] * view.zoom]
+                }
+            }
         })
     }
 
