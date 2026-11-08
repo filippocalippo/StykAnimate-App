@@ -23,10 +23,11 @@ pub struct HostOptions {
     pub notify: Arc<dyn Fn() + Send + Sync>,
 }
 
-struct EngineLifetime(Engine);
+pub(super) struct EngineLifetime(Engine);
 impl Drop for EngineLifetime { fn drop(&mut self) { self.0.stop(); } }
 
 pub enum Request {
+    Recovery(recovery::Command),
     OpenDialog,
     OpenFile(FileTarget),
     OpenBytes { bytes: Arc<[u8]>, name: String },
@@ -52,7 +53,7 @@ pub enum Request {
 #[derive(Debug)]
 pub enum HostError {
     Documents(DocumentsError), Open(Box<OpenError>), Save(Box<SaveError>), File(FileError), Edit(EditError),
-    NoHost, Stale, Spawn(String),
+    NoHost, Stale, Spawn(String), Recovery(styk_services::recovery::RecoveryError),
 }
 impl From<DocumentsError> for HostError { fn from(value: DocumentsError) -> Self { Self::Documents(value) } }
 impl From<EditError> for HostError { fn from(value: EditError) -> Self { Self::Edit(value) } }
@@ -63,6 +64,7 @@ impl std::fmt::Display for HostError {
         match self {
             Self::Documents(e) => e.fmt(f), Self::Open(e) => e.fmt(f), Self::Save(e) => e.fmt(f),
             Self::File(e) => e.fmt(f), Self::Edit(e) => write!(f, "{e}"),
+            Self::Recovery(e) => e.fmt(f),
             Self::NoHost => f.write_str("document services are not attached"), Self::Stale => f.write_str("the document changed"), Self::Spawn(e) => f.write_str(e),
         }
     }
@@ -71,6 +73,7 @@ impl std::error::Error for HostError {}
 
 #[derive(Debug)]
 pub enum Effect {
+    Recovery(recovery::Event),
     None, OpenDialog, Started(JobId), Cancelled(JobId),
     Opened(DocumentId), Closed(DocumentId), ClosedSaved(Vec<DocumentId>), Renamed(DocumentId), SavedAll, QuitReady,
     Published { document: DocumentId, revision: u64, generation: u64 },
@@ -84,7 +87,7 @@ pub enum Effect {
 
 /// A request rejected before submission retains its payload, including imported bytes or trees.
 pub type Dispatch = Result<Effect, (HostError, Request)>;
-pub(super) struct Scope { pub parent: PreparedDocument, type_id: f64 }
+pub(super) struct Scope { pub parent: PreparedDocument, pub(super) type_id: f64 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Stamp { id: DocumentId, revision: u64, epoch: u64, depth: usize }
 impl Stamp { fn of(tab: &Document) -> Self { Self { id: tab.id, revision: tab.revision(), epoch: tab.epoch, depth: tab.scopes.len() } } }
@@ -118,6 +121,8 @@ enum Prompt {
 enum AfterSave { Close(DocumentId), All { origin: Option<DocumentId>, quit: bool } }
 
 pub(super) struct Host {
+    pub(super) options: Arc<HostOptions>,
+    pub(super) lifetime: Arc<EngineLifetime>,
     worker: Option<Worker<Work, Reply>>,
     pending: Option<Pending>,
     prompt: Option<Prompt>,
@@ -132,6 +137,7 @@ pub(super) struct Host {
 }
 
 impl Host {
+    pub(super) fn recovery_busy(&self) -> bool { self.pending.is_some() || self.prompt.is_some() || self.continue_save.is_some() }
     pub(super) fn retire(&mut self, value: impl Send + 'static) { self.retired.push(Box::new(value)); }
     pub(super) fn retire_clipboard(&mut self, value: Option<Clipboard>) {
         if let Some(value) = value { self.retired.push(Box::new(value)); }
@@ -242,9 +248,11 @@ impl Documents {
         let engine = options.engine.clone();
         let clock = options.clock;
         let options = Arc::new(options);
-        let lifetime = EngineLifetime(engine.clone());
+        let lifetime = Arc::new(EngineLifetime(engine.clone()));
+        let job_lifetime = lifetime.clone();
+        let saved_options = options.clone();
         let worker = Worker::start(spawner.as_ref(), "styk-documents", move |work: Work| {
-            let _keep = &lifetime;
+            let _keep = &job_lifetime;
             let id = work.id;
             let job_options = options.clone();
             run_scheduled(|job| options.engine.spawn(move |_| job()), move || execute(&job_options, work))
@@ -262,7 +270,7 @@ impl Documents {
             tab.prepared.set_clock(clock);
             for scope in &mut tab.scopes { scope.parent.set_clock(clock); }
         }
-        self.host = Some(Host { worker: Some(worker), pending: None, prompt: None, after_save: None, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
+        self.host = Some(Host { options: saved_options, lifetime, worker: Some(worker), pending: None, prompt: None, after_save: None, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
         Ok(())
     }
 
@@ -314,6 +322,7 @@ impl Documents {
 
     fn dispatch_ready(&mut self, request: Request) -> Dispatch {
         match request {
+            Request::Recovery(command) => self.recovery_command(&command).map_err(|error| (error, Request::Recovery(command))),
             Request::OpenDialog => Ok(Effect::OpenDialog),
             request @ (Request::OpenFile(_) | Request::OpenBytes { .. } | Request::OpenDocument { .. } | Request::New) => {
                 if let Err(error) = self.can_switch() { return Err((error.into(), request)); }
@@ -349,8 +358,8 @@ impl Documents {
                 let Some(pending) = self.host.as_ref().and_then(|host| host.pending.as_ref()).filter(|pending| pending.id == id) else { return Err((HostError::Stale, Request::Cancel(id))); };
                 if pending.cancel.cancel() { Ok(Effect::Cancelled(id)) } else { Ok(Effect::None) }
             }
-            Request::Close(id) => self.begin_close(id).map_err(|error| (error, Request::Close(id))),
-            Request::Quit => self.begin_quit().map_err(|error| (error, Request::Quit)),
+            Request::Close(id) => self.recovery_close(recovery::CloseIntent::Close(id)).and_then(|effect| match effect { Some(effect) => Ok(effect), None => self.begin_close(id) }).map_err(|error| (error, Request::Close(id))),
+            Request::Quit => self.recovery_close(recovery::CloseIntent::Quit).and_then(|effect| match effect { Some(effect) => Ok(effect), None => self.begin_quit() }).map_err(|error| (error, Request::Quit)),
             Request::Respond { prompt, choice } => self.respond(prompt, choice).map_err(|error| (error, Request::Respond { prompt, choice })),
             Request::SaveTarget { prompt, target } => self.save_target(prompt, target.clone()).map_err(|error| (error, Request::SaveTarget { prompt, target })),
             Request::EnterMovieclip { document, type_id } => self.enter_scope(document, type_id).map_err(|error| (error, Request::EnterMovieclip { document, type_id })),
@@ -401,6 +410,8 @@ impl Documents {
     }
 
     fn begin_save(&mut self, id: DocumentId, save_as: bool) -> Result<Effect, HostError> {
+        self.interrupt_recovery(id);
+        if self.recovery_writing(id) { return Err(DocumentsError::Busy.into()); }
         if self.active != Some(id) { return Err(DocumentsError::NotActive.into()); }
         // Desktop Save settles the nested editor first, giving each parent its one undo entry.
         // Changed clips are prepared by the worker; unedited scopes only exchange owners.
@@ -447,6 +458,7 @@ impl Documents {
 
     /// Process at most one job per interface update. Large rejected results go back to the worker.
     pub fn poll(&mut self) -> Option<Effect> {
+        if let Some(effect) = self.poll_recovery() { return Some(effect); }
         let host = self.host.as_mut()?;
         if !host.flush_retired() { return None; }
         let reply = host.worker.as_ref()?.take();
@@ -536,6 +548,7 @@ impl Documents {
                     if current { tab.prepared.session.get_mut().map_err(|error| (error.into(), Box::new(()) as Box<dyn Send>))?.call_native("@markSaved", &[], &Value::Null).result.map_err(|error| (error.into(), Box::new(()) as Box<dyn Send>))?; tab.saved_at = saved_at; }
                 }
                 if current {
+                    if let Some(recovery) = self.recovery.as_mut() && let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == stamp.id) { recovery.saved(tab); }
                     match self.host.as_mut().and_then(|host| host.after_save.take()) {
                         Some(AfterSave::Close(document)) => return self.finish_close(document).map_err(|error| (error, Box::new(()) as Box<dyn Send>)),
                         Some(AfterSave::All { origin, quit }) => return self.save_next_for_all(origin, quit).map_err(|error| (error, Box::new(()) as Box<dyn Send>)),
@@ -584,7 +597,7 @@ impl Documents {
         }
     }
 
-    fn begin_close(&mut self, id: DocumentId) -> Result<Effect, HostError> {
+    pub(super) fn begin_close(&mut self, id: DocumentId) -> Result<Effect, HostError> {
         self.activate(id)?;
         let tab = self.get(id).ok_or(DocumentsError::NotOpen)?;
         if tab.view()?.editing { return Err(DocumentsError::FinishEdit.into()); }
@@ -607,21 +620,24 @@ impl Documents {
     fn remove_tab(&mut self, id: DocumentId) {
         let Some(at) = self.tabs.iter().position(|tab| tab.id == id) else { return; };
         if self.active == Some(id) { self.active = self.successor(id); }
-        let tab = self.tabs.remove(at); self.recent.retain(|other| *other != id);
+        let mut tab = self.tabs.remove(at); self.recent.retain(|other| *other != id);
+        self.interrupt_recovery(id);
+        if let Some(recovery) = self.recovery.as_mut() { recovery.release(&mut tab.recovery); }
         if let Some(host) = self.host.as_mut() { host.retired.push(Box::new(tab)); host.publication_needed = self.active.is_some(); }
     }
     fn replace_tab(&mut self, id: DocumentId, prepared: PreparedDocument) -> Result<(), (HostError, Box<dyn Send>)> {
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) else { return Err((HostError::Stale, Box::new(prepared))); };
         let old = std::mem::replace(&mut tab.prepared, prepared);
         let scopes = std::mem::take(&mut tab.scopes);
+        if let Some(recovery) = self.recovery.as_mut() { recovery.release(&mut tab.recovery); }
         tab.target = None; tab.saved_at = None; tab.blank = false; tab.epoch = tab.epoch.wrapping_add(1);
         if let Some(host) = self.host.as_mut() { host.retired.push(Box::new((old, scopes))); }
         Ok(())
     }
-    fn begin_quit(&mut self) -> Result<Effect, HostError> {
+    pub(super) fn begin_quit(&mut self) -> Result<Effect, HostError> {
         self.can_switch()?;
         let stamps: Vec<Stamp> = self.tabs.iter().filter(|tab| tab.dirty()).map(Stamp::of).collect();
-        if stamps.is_empty() { return Ok(Effect::QuitReady); }
+        if stamps.is_empty() { return Ok(self.finish_quit()); }
         let names = self.tabs.iter().filter(|tab| tab.dirty()).map(|tab| tab.project_name().to_string()).collect();
         let host = self.host()?; let prompt = PromptId(host.next()?);
         host.prompt = Some(Prompt::Quit { id: prompt, stamps });
@@ -648,7 +664,7 @@ impl Documents {
             }
             Prompt::Quit { stamps, .. } => {
                 if stamps.iter().any(|stamp| !self.matches(*stamp)) || self.tabs.iter().filter(|tab| tab.dirty()).count() != stamps.len() { return Err(HostError::Stale); }
-                let result = if choice == CloseChoice::Discard { Ok(Effect::QuitReady) } else { self.save_next_for_all(self.active, true) };
+                let result = if choice == CloseChoice::Discard { Ok(self.finish_quit()) } else { self.save_next_for_all(self.active, true) };
                 if matches!(result, Err(HostError::Documents(DocumentsError::Busy))) { self.host()?.prompt = Some(Prompt::Quit { id: prompt, stamps }); }
                 result
             }
@@ -657,7 +673,7 @@ impl Documents {
     }
     fn save_next_for_all(&mut self, origin: Option<DocumentId>, quit: bool) -> Result<Effect, HostError> {
         let next = self.tabs.iter().filter(|tab| Some(tab.id) != origin).chain(self.tabs.iter().filter(|tab| Some(tab.id) == origin)).find(|tab| tab.dirty()).map(|tab| tab.id);
-        let Some(next) = next else { if let Some(origin) = origin { self.activate(origin)?; } return Ok(if quit { Effect::QuitReady } else { Effect::SavedAll }); };
+        let Some(next) = next else { if let Some(origin) = origin { self.activate(origin)?; } return Ok(if quit { self.finish_quit() } else { Effect::SavedAll }); };
         self.activate(next)?;
         self.host()?.after_save = Some(AfterSave::All { origin, quit });
         let result = self.begin_save(next, false);
@@ -707,6 +723,7 @@ impl Documents {
 
 impl Drop for Documents {
     fn drop(&mut self) {
+        if let Some(recovery) = self.recovery.take() { recovery.stop(); }
         if let Some(mut host) = self.host.take() {
             if let Some(pending) = host.pending.take() { pending.cancel.cancel(); }
             if let Some(worker) = host.worker.take() {

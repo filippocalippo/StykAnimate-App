@@ -28,6 +28,7 @@ pub use spawn::{Job, ManualSpawner, SpawnError, Spawner};
 
 pub mod fonts;
 pub mod files;
+pub mod recovery;
 pub mod worker;
 pub mod memory;
 

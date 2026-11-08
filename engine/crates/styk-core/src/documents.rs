@@ -15,6 +15,7 @@ use styk_engine::document::{OpenOptions, OpenSource, OpenedDocument};
 mod host;
 mod tabs;
 pub use tabs::drop_index;
+pub mod recovery;
 pub use host::{CloseChoice, Dispatch, Effect, HostError, HostOptions, JobId, PromptId, Request};
 use styk_services::files::FileTarget;
 
@@ -159,6 +160,7 @@ pub struct Document {
     blank: bool,
     epoch: u64,
     saved_at: Option<f64>,
+    recovery: recovery::CopyState,
 }
 
 impl Document {
@@ -230,6 +232,7 @@ pub struct Documents {
     serial: u64,
     recent: Vec<DocumentId>,
     host: Option<host::Host>,
+    recovery: Option<recovery::RecoveryHost>,
     clipboards: std::collections::HashMap<&'static str, Clipboard>,
 }
 
@@ -257,11 +260,12 @@ impl Documents {
         };
         let id = DocumentId(serial);
         let at = self.active.and_then(|active| self.tabs.iter().position(|tab| tab.id == active)).map_or(self.tabs.len(), |at| at + 1);
-        self.tabs.insert(at, Document { id, prepared, scopes: Vec::new(), target: None, blank: false, epoch: 0, saved_at: None });
+        self.tabs.insert(at, Document { id, prepared, scopes: Vec::new(), target: None, blank: false, epoch: 0, saved_at: None, recovery: recovery::CopyState::default() });
         self.serial = serial;
         self.active = Some(id);
         self.recent.insert(0, id);
         if let Some(host) = self.host.as_mut() { host.publication_needed = true; }
+        self.sync_recovery();
         Ok(id)
     }
 
@@ -274,6 +278,7 @@ impl Documents {
         self.recent.retain(|other| *other != id);
         self.recent.insert(0, id);
         if let Some(host) = self.host.as_mut() { host.publication_needed = true; }
+        self.sync_recovery();
         Ok(true)
     }
 
@@ -335,6 +340,7 @@ impl Documents {
                 }
             }
         }
+        self.sync_recovery();
         Ok(result)
     }
 

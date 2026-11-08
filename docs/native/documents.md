@@ -154,8 +154,9 @@ Run with `node --test tests/native-documents-save-reference.test.mjs`, `STYK_REF
 pinned reference checkout (including its matching WASM package), and `STYK_NATIVE_SAVE_ORACLE` naming
 that artifacts directory; the matching ignored Rust test requires the latter. The reference checkout
 is read only. Comparing against native-app's changed JavaScript paired with an older WASM is invalid.
-Nothing writes frozen fixtures. Recovery/autosave, raw import decoding, the window's dialogs and stage
-presentation remain the respective owners' integrations. The panel seam needs none of those services to edit.
+Nothing writes frozen fixtures. [Recovery/autosave](recovery.md) attaches a bounded worker lane and
+chooser model to this owner. Raw import decoding, the window's dialogs and stage presentation remain
+the respective owners' integrations. The panel seam needs none of those services to edit.
 
 ## Exclusive long commands
 

@@ -12,6 +12,19 @@ const PIECE: usize = 256 * 1024;
 #[derive(Default)]
 pub struct LocalFiles;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WriteStep { Created, Written, Flushed, Commit, Renamed }
+#[cfg(test)]
+type Observer = Box<dyn Fn(WriteStep, &Path, &Path)>;
+#[cfg(test)]
+thread_local! { pub(crate) static WRITE_OBSERVER: std::cell::RefCell<Option<Observer>> = const { std::cell::RefCell::new(None) }; }
+fn observe(step: WriteStep, target: &Path, stage: &Path) {
+    #[cfg(test)]
+    WRITE_OBSERVER.with(|observer| { if let Some(observer) = observer.borrow().as_ref() { observer(step, target, stage); } });
+    #[cfg(not(test))]
+    let _ = (step, target, stage);
+}
+
 fn io(error: std::io::Error) -> FileError {
     match error.kind() {
         std::io::ErrorKind::PermissionDenied => FileError::ReadOnly,
@@ -74,17 +87,22 @@ impl Files for LocalFiles {
                     Err(error) => return Err(io(error)),
                 }
             };
+            observe(WriteStep::Created, destination, &stage.path);
             for piece in bytes.chunks(PIECE) {
                 cancelled(cancel)?;
                 file.write_all(piece).map_err(io)?;
+                observe(WriteStep::Written, destination, &stage.path);
             }
             cancelled(cancel)?;
             file.sync_all().map_err(io)?;
+            observe(WriteStep::Flushed, destination, &stage.path);
             drop(file);
+            observe(WriteStep::Commit, destination, &stage.path);
             if !cancel.begin_commit() { return Err(FileError::Cancelled); }
             // On Windows std::fs::rename uses a replacing move on the same volume. No copy/delete fallback.
             fs::rename(&stage.path, destination).map_err(io)?;
             stage.committed = true;
+            observe(WriteStep::Renamed, destination, &stage.path);
             Ok(())
         })
     }

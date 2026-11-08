@@ -46,6 +46,8 @@ pub mod clock;
 pub mod windows;
 #[cfg(windows)]
 pub mod files;
+#[cfg(windows)]
+pub mod recovery;
 pub mod memory;
 
 pub mod shell;
