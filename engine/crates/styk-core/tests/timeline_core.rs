@@ -161,6 +161,20 @@ fn settings_revert_rejects_aba_and_tracks_each_setting_independently() {
 }
 
 #[test]
+fn global_transport_returns_from_beyond_end_without_changing_the_cell_selection() {
+    let mut rig = Rig::new();
+    rig.action(Id::TimelineSelectCell, Payload::Cell { point: [248., 81.], modifiers: Modifiers::default() });
+    let selection = rig.core.view_state().range().clone();
+    let end = rig.core.timeline().model().total.saturating_sub(1) as f64;
+    for command in [Id::PreviousFrame, Id::NextFrame, Id::LastFrame, Id::FirstFrame] {
+        rig.action(Id::TimelineSeek, Payload::Number(end + 100.));
+        rig.core.dispatch(Command::Run(command)); rig.settle();
+        assert_eq!(rig.tick(), if command == Id::FirstFrame { 0. } else { end });
+        assert_eq!(rig.core.view_state().range(), &selection);
+    }
+}
+
+#[test]
 fn accepted_exit_fences_commands_and_document_requests_until_window_teardown() {
     let mut rig = Rig::new();
     let revision = rig.core.documents.active().unwrap().revision();

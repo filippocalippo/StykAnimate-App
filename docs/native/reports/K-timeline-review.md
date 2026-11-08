@@ -31,6 +31,9 @@ when the regression binaries were compiled; subsequent fixes do not alter those 
 - `timeline-review-final-settings.log`: `6 passed; 0 failed` through real LocalStorage,
   including final-drain sharing refusal, preservation of the last complete file, no later retry,
   ordinary backoff/retry, unknown fields, newer-schema refusal and legacy import.
+- Self-check extended global navigation to a playhead already beyond the document end.
+  `timeline-review-global-return-baseline.log`: `0 passed; 1 failed` (105 instead of 6).
+  After clamping that path, `timeline-review-global-return-fixed.log`: `16 passed; 0 failed; 1 ignored`.
 
 ## Decisions
 

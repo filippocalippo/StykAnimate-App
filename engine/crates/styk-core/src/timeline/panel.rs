@@ -705,7 +705,7 @@ impl Panel {
                 if global && self.model.mode == TimelineMode::Advanced && matches!(id, FirstFrame | PreviousFrame | NextFrame | LastFrame) {
                     let end = p.total.saturating_sub(1) as f64;
                     let next = match id { FirstFrame => 0., LastFrame => end, PreviousFrame => (tick - 1.).max(0.), _ => (tick + 1.).min(end) };
-                    return self.seek(next, documents, session, stage);
+                    return self.seek(next.clamp(0., end), documents, session, stage);
                 }
                 if self.model.mode == TimelineMode::Simple {
                     let at = p.cards.partition_point(|card| card.tick as f64 <= tick).saturating_sub(1);
