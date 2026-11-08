@@ -23,11 +23,7 @@ fn run() -> Result<ExitCode, String> {
     if !launch.files.is_empty() || launch.automation.is_some() || launch.control || launch.pen_lab || launch.shell_check || launch.input_check.is_some() || launch.self_test.is_some() {
         return Err("styk-screens accepts catalogue captures only".into());
     }
-    let sheet = match screen {
-        Screen::ComponentSheet => Some(Sheet::new(screen.theme(), styk_design::widgets::Dir::Ltr)),
-        Screen::Controls(_) => Some(Sheet::controls_page(screen.theme())),
-        _ => None,
-    };
+    let sheet = Sheet::for_screen(screen);
     let model = match screen { Screen::Inspector(context, _) => Some(styk_ui::screens::inspector_model(context)), _ => None };
     let presentation = styk_core::i18n::Presentation::english();
     let panel = model.as_ref().map(|model| styk_ui::inspector::View::model(model, &presentation, screen.theme()));

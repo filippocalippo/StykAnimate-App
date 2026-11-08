@@ -110,6 +110,8 @@ pub struct Sheet {
     pub status: String,
     /// The page shows the design system's controls in every state ([`crate::controls_sheet`]) instead of the fields and focus page.
     pub controls: bool,
+    /// The page is one of the overlay screens ([`crate::overlay_sheet`]).
+    pub overlay: Option<crate::overlay_sheet::Page>,
     /// What the last walk of the tree found: where each target is.
     pub snapshot: focus::Snapshot,
 }
@@ -133,6 +135,7 @@ impl Sheet {
             dialog_open: false,
             status: String::new(),
             controls: false,
+            overlay: None,
             snapshot: focus::Snapshot::default(),
         }
     }
@@ -358,9 +361,23 @@ impl Sheet {
         Sheet { controls: true, ..Sheet::new(theme, Dir::Ltr) }
     }
 
+    /// The sheet a catalogue screen is drawn from, for the screens that are sheets.
+    pub fn for_screen(screen: crate::screens::Screen) -> Option<Sheet> {
+        use crate::screens::Screen;
+        match screen {
+            Screen::ComponentSheet => Some(Sheet::new(screen.theme(), Dir::Ltr)),
+            Screen::Controls(_) => Some(Sheet::controls_page(screen.theme())),
+            Screen::Overlay(page, _) => Some(Sheet { overlay: Some(crate::overlay_sheet::Page::new(page, screen.theme())), ..Sheet::new(screen.theme(), Dir::Ltr) }),
+            _ => None,
+        }
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         if self.controls {
             return crate::controls_sheet::page(self.theme);
+        }
+        if let Some(page) = &self.overlay {
+            return page.view();
         }
         let palette = self.theme.palette();
         let dir = self.dir;

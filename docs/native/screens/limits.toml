@@ -304,3 +304,108 @@ reference = "docs/native/screens/controls/controls-dark.png"
 max_difference = 0.011
 width = 938
 height = 2120
+
+# The overlay screens and the panel parts (K-widgets-b): today's menus, tooltip, messages, dialog and panel parts, drawn by
+# today's stylesheets and today's own modules (`openMenu`, `createDialog`) in bundled Chromium (LCD text on, opaque surfaces,
+# device scale 1) by engine/crates/styk-app/automation/overlays-reference/screens.mjs. The pointer in the menu pages is the
+# browser's own (the hover that opens a submenu and the fill under the pointer are real events). Today's native <select> list
+# is an operating-system popup the page cannot capture: the select's reference is today's menu stylesheet anchored under
+# today's select field. The limits are the differing-pixel fractions the guard measured on 2026-11-08 (debug build,
+# headless, `styk image-diff` past a channel difference of 24) rounded up to three places, plus 0.002; what remains is the
+# glyph rasterisation of Chromium's LCD text against the native renderer's, which nothing shows at 100 % or 200 %.
+
+["menu-root"]
+reference = "docs/native/screens/overlays/menu-root.png"
+max_difference = 0.022
+width = 360
+height = 540
+
+["menu-root-dark"]
+reference = "docs/native/screens/overlays/menu-root-dark.png"
+max_difference = 0.021
+width = 360
+height = 540
+
+["menu-submenu"]
+reference = "docs/native/screens/overlays/menu-submenu.png"
+max_difference = 0.019
+width = 560
+height = 300
+
+["menu-submenu-dark"]
+reference = "docs/native/screens/overlays/menu-submenu-dark.png"
+max_difference = 0.019
+width = 560
+height = 300
+
+["menu-context"]
+reference = "docs/native/screens/overlays/menu-context.png"
+max_difference = 0.013
+width = 420
+height = 300
+
+["menu-context-dark"]
+reference = "docs/native/screens/overlays/menu-context-dark.png"
+max_difference = 0.013
+width = 420
+height = 300
+
+["select-open"]
+reference = "docs/native/screens/overlays/select-open.png"
+max_difference = 0.012
+width = 320
+height = 220
+
+["select-open-dark"]
+reference = "docs/native/screens/overlays/select-open-dark.png"
+max_difference = 0.011
+width = 320
+height = 220
+
+["tooltip"]
+reference = "docs/native/screens/overlays/tooltip.png"
+max_difference = 0.016
+width = 320
+height = 140
+
+["tooltip-dark"]
+reference = "docs/native/screens/overlays/tooltip-dark.png"
+max_difference = 0.016
+width = 320
+height = 140
+
+["toasts"]
+reference = "docs/native/screens/overlays/toasts.png"
+max_difference = 0.009
+width = 520
+height = 430
+
+["toasts-dark"]
+reference = "docs/native/screens/overlays/toasts-dark.png"
+max_difference = 0.009
+width = 520
+height = 430
+
+["dialog"]
+reference = "docs/native/screens/overlays/dialog.png"
+max_difference = 0.016
+width = 520
+height = 400
+
+["dialog-dark"]
+reference = "docs/native/screens/overlays/dialog-dark.png"
+max_difference = 0.015
+width = 520
+height = 400
+
+["parts"]
+reference = "docs/native/screens/overlays/parts.png"
+max_difference = 0.009
+width = 938
+height = 1270
+
+["parts-dark"]
+reference = "docs/native/screens/overlays/parts-dark.png"
+max_difference = 0.010
+width = 938
+height = 1270

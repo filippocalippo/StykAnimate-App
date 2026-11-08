@@ -1,4 +1,5 @@
 //! Overlay ownership, dismissal and focus. No toolkit, services or clock reads.
+pub mod host;
 pub mod menu;
 pub mod messages;
 pub mod placement;
@@ -17,6 +18,10 @@ pub enum Kind {
 impl Kind {
     fn passive(self) -> bool {
         matches!(self, Self::Toast | Self::Tooltip)
+    }
+    /// Kinds that need no entry of their own on the stack (a tooltip and a message are drawn by their own state).
+    pub(crate) fn passive_entry(self) -> bool {
+        self.passive()
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -480,3 +485,5 @@ pub enum OpenFocus {
     Target(FocusId),
     Keep,
 }
+#[cfg(test)]
+mod host_tests;

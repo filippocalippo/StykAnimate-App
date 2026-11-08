@@ -184,6 +184,37 @@ impl<'a, Message: 'a> Driver<'a, Message> {
         self.ui.operate(&self.renderer, &mut operation);
     }
 
+    /// Runs a task as the runtime does against this tree: widget operations run on it (and chain), messages the task produced
+    /// are returned. A test calls this after it rebuilt the tree from the state the task's message produced, as the runtime
+    /// does (update, rebuild, then the task's actions).
+    pub fn run(&mut self, task: iced::Task<Message>) -> Vec<Message>
+    where
+        Message: 'static,
+    {
+        use iced_test::futures::futures::StreamExt;
+        use iced_test::runtime::Action;
+        let Some(mut stream) = iced_test::runtime::task::into_stream(task) else { return Vec::new() };
+        let mut produced = Vec::new();
+        iced_test::futures::futures::executor::block_on(async {
+            while let Some(action) = stream.next().await {
+                match action {
+                    Action::Output(message) => produced.push(message),
+                    Action::Widget(operation) => {
+                        let mut current = Some(operation);
+                        while let Some(mut operation) = current.take() {
+                            self.ui.operate(&self.renderer, operation.as_mut());
+                            if let iced::advanced::widget::operation::Outcome::Chain(next) = operation.finish() {
+                                current = Some(next);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+        produced
+    }
+
     /// Runs the operation that takes focus from everything.
     pub fn unfocus(&mut self) {
         let mut operation = focus::unfocus();
@@ -215,7 +246,7 @@ impl<'a, Message: 'a> Driver<'a, Message> {
     }
 }
 
-fn key_event(key: Key, text: Option<&str>, modifiers: Modifiers, pressed: bool) -> Event {
+pub fn key_event(key: Key, text: Option<&str>, modifiers: Modifiers, pressed: bool) -> Event {
     let physical_key = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
     if pressed {
         Event::Keyboard(keyboard::Event::KeyPressed {

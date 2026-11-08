@@ -58,6 +58,9 @@ worked example) composes them and sends messages. A control reports; it never co
 | `badge` | `Chip`, `badge` (the section tint tile) | |
 | `frame` | `FieldFrame` | the field box: hover hairline, accent ring and halo while anything inside holds focus (it asks the tree), danger ring, half opacity |
 | `surface`, `control` | `Surface`, `Look`, `Preview`, shadows | the pressable box under buttons, chips and segmented items |
+| `card`, `layer`, `enter`, `viewport` | `Card` (fill, radius, `--elevation-*`, hairline, halo, clip), `Layer`/`Placed`, `Enter` (the entry at the core's phase), `Viewport` (a bounded scroll) | every overlay and island is a `Card`; the layer places boxes where the core's arithmetic says |
+| `menu`, `select`, `tooltip`, `toast`, `dialog` | menu list and rows, the select (opens an anchored menu), tooltip, message, dialog, popover, sheet | drawn from `styk_core::overlay::host`; [overlays.md](overlays.md) |
+| `parts`, `progress`, `splitter` | stepper, kbd, chord, dot, divider, crumb, island, list row, section head, tabs, scroll area, empty state, split button; progress bar, spinner; splitter | small parts a panel composes; the `parts` screen shows them against today's |
 
 **Input roles.** An input-like control declares its `styk_core::focus::InputRole` in its own constructor, so no panel can
 forget it and let Delete reach the document: text and number fields are `Text`, `Select` is `Select`, switch and checkbox

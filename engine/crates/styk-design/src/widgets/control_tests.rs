@@ -9,6 +9,7 @@ use super::color::ColorField;
 use super::dir::Dir;
 use super::field::EditField;
 use super::number_field::{NumberField, value_width};
+use super::parts::{Tab, Tabs, stepper};
 use super::segmented::{Segment, Segmented};
 use super::select::{Choice, Select};
 use super::slider::{Slide, Slider};
@@ -32,6 +33,7 @@ enum Msg {
     Slide(Slide),
     Toggle(bool),
     Pick(usize),
+    Open(super::select::Open),
     Step(i32),
     Press(&'static str),
     Idle,
@@ -262,7 +264,7 @@ fn every_control<'a>() -> Element<'a, Msg> {
     column = column
         .push(EditField::new(FocusId(1), area, Role::SingleLine, "name", palette).on_input(|_| Msg::Idle).into_element())
         .push(NumberField::new(FocusId(2), FocusId(3), area, "X", "12", palette).on_input(|_| Msg::Idle).on_scrub(|_| Msg::Idle).into_element())
-        .push(Select::new(FocusId(4), area, palette, vec![Choice { label: "Linear".into(), disabled: false }, Choice { label: "Hold".into(), disabled: false }], Some(0), Msg::Pick, Msg::Step).into_element())
+        .push(Select::new(FocusId(4), area, palette, vec![Choice { label: "Linear".into(), disabled: false }, Choice { label: "Hold".into(), disabled: false }], Some(0), Msg::Open, Msg::Step).into_element())
         .push(Checkbox::new(FocusId(5), area, palette, Checked::No, Msg::Toggle).label("Visible").into_element())
         .push(Switch::new(FocusId(6), area, palette, false, Msg::Toggle).into_element())
         .push(Radio::new(FocusId(7), area, palette, true, Msg::Press("radio")).label("Linear").into_element())
@@ -272,7 +274,9 @@ fn every_control<'a>() -> Element<'a, Msg> {
         .push(Segmented::new(FocusId(20), area, palette, vec![Segment::text("Animate"), Segment::text("Draw")], 0, Msg::Pick).buttons().into_element())
         .push(Button::new(FocusId(30), area, palette, "Export", Msg::Press("export")).into_element())
         .push(IconButton::new(FocusId(31), area, palette, "plus", Msg::Press("add")).into_element())
-        .push(Chip::new(FocusId(32), area, palette, "Figures", Msg::Press("chip")).into_element());
+        .push(Chip::new(FocusId(32), area, palette, "Figures", Msg::Press("chip")).into_element())
+        .push(Tabs::new(FocusId(40), area, palette, vec![Tab { label: "Props".into(), icon: None }, Tab { label: "Effects".into(), icon: None }], 0, |_| Msg::Idle).into_element())
+        .push(stepper(palette, FocusId(50), area, "3", false, false, |_| Msg::Idle));
     column.width(300.0).boxed()
 }
 
@@ -301,6 +305,10 @@ fn every_input_like_control_declares_its_role_and_keeps_delete_from_the_document
         (30, "button", InputRole::None),
         (31, "icon button", InputRole::None),
         (32, "chip", InputRole::None),
+        (40, "tabs, shown tab", InputRole::Radio),
+        (41, "tabs, other tab", InputRole::Radio),
+        (50, "stepper's minus", InputRole::Text),
+        (51, "stepper's plus", InputRole::Text),
     ] {
         focus.reconcile(Some(FocusId(id)));
         assert_eq!(focus.input_role(), role, "{kind} declares {role:?}");
@@ -388,26 +396,43 @@ fn rgba_mix_is_css_color_mix_in_srgb() {
 
 fn select_element<'a>() -> Element<'a, Msg> {
     let options = vec![Choice { label: "Linear".into(), disabled: false }, Choice { label: "Hold".into(), disabled: false }];
-    Select::new(FocusId(4), FocusArea::Panels, palette(), options, Some(0), Msg::Pick, Msg::Step).label("Easing").into_element()
-}
-
-/// Opens the select by a click, then clicks `below` pixels under the field: what the list answers.
-fn pick_below(below: f32) -> Vec<Msg> {
-    let mut driver = driver(select_element());
-    let bounds = driver.snapshot().bounds_of(FocusId(4)).expect("the select is laid out");
-    driver.click(Point::new(bounds.x + 60.0, bounds.y + bounds.height / 2.0));
-    driver.messages();
-    // The menu is an overlay: it is laid out by the update after the one that opened it.
-    driver.redraw();
-    driver.click(Point::new(bounds.x + 60.0, bounds.y + bounds.height + below));
-    driver.messages()
+    Select::new(FocusId(4), FocusArea::Panels, palette(), options, Some(0), Msg::Open, Msg::Step).label("Easing").into_element()
 }
 
 #[test]
-fn a_select_opened_by_a_click_shows_a_menu_whose_options_can_be_picked() {
-    let picked: Vec<Msg> = (4..90).step_by(2).flat_map(|below| pick_below(below as f32)).collect();
-    assert!(picked.contains(&Msg::Pick(1)), "the second option can be picked from the menu: {picked:?}");
-    assert!(picked.contains(&Msg::Pick(0)), "and the first: {picked:?}");
+fn a_press_on_a_select_asks_the_owner_to_open_its_list_under_the_whole_field() {
+    let mut driver = driver(select_element());
+    let line = driver.snapshot().bounds_of(FocusId(4)).expect("the select is laid out");
+    driver.click(Point::new(line.x + 60.0, line.y + line.height / 2.0));
+    let opened = driver.messages();
+    let [Msg::Open(open)] = opened.as_slice() else { panic!("one request: {opened:?}") };
+    assert!(!open.keyboard, "a press asked");
+    assert_eq!(open.anchor.height, super::frame::HEIGHT, "the anchor is the field, not its inner line");
+    assert!(open.anchor.x < line.x && open.anchor.x + open.anchor.width > line.x + line.width, "and it is wider than the line inside the frame's padding");
+}
+
+#[test]
+fn space_enter_and_alt_down_open_a_focused_select_and_plain_arrows_step_it() {
+    let mut driver = driver(select_element());
+    driver.focus(FocusId(4));
+    driver.press(Named::Space);
+    driver.press(Named::Enter);
+    driver.modifiers(iced::keyboard::Modifiers::ALT);
+    driver.press(Named::ArrowDown);
+    driver.modifiers(iced::keyboard::Modifiers::default());
+    let messages = driver.messages();
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(messages.iter().all(|message| matches!(message, Msg::Open(open) if open.keyboard)), "each asked by the keyboard: {messages:?}");
+    driver.press(Named::ArrowDown);
+    assert_eq!(driver.messages(), [Msg::Step(1)], "without Alt the arrow steps the value");
+}
+
+#[test]
+fn an_unfocused_select_ignores_the_opening_keys() {
+    let mut driver = driver(select_element());
+    driver.press(Named::Space);
+    driver.press(Named::Enter);
+    assert!(driver.messages().is_empty());
 }
 
 #[test]
@@ -418,7 +443,7 @@ fn a_focused_select_asks_for_the_neighbouring_option_with_the_arrow_keys_and_a_d
     driver.press(Named::ArrowUp);
     assert_eq!(driver.messages(), [Msg::Step(1), Msg::Step(-1)]);
     let options = vec![Choice { label: "Linear".into(), disabled: false }, Choice { label: "Hold".into(), disabled: false }];
-    let off = Select::new(FocusId(4), FocusArea::Panels, palette(), options, Some(0), Msg::Pick, Msg::Step).disabled(true).into_element();
+    let off = Select::new(FocusId(4), FocusArea::Panels, palette(), options, Some(0), Msg::Open, Msg::Step).disabled(true).into_element();
     let mut disabled = super::testing::Driver::new(off, Size::new(420.0, 300.0), &crate::fonts::ALL);
     let bounds = disabled.snapshot().bounds_of(FocusId(4)).expect("laid out");
     disabled.click(Point::new(bounds.x + 60.0, bounds.y + 10.0));

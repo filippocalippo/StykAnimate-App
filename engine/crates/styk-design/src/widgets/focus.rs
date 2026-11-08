@@ -210,6 +210,10 @@ struct State {
     visible: bool,
     /// Space went down and its release will activate.
     armed: bool,
+    /// The pointer is over the control (for its tooltip).
+    over: bool,
+    /// Its tooltip was asked for by keyboard focus.
+    tip_focus: bool,
 }
 
 impl operation::Focusable for State {
@@ -242,6 +246,7 @@ pub struct Focusable<'a, Message> {
     keys: Keys<'a, Message>,
     on_activate: Option<Message>,
     on_focus_change: Option<Box<dyn Fn(bool) -> Message + 'a>>,
+    tooltip: Option<(super::tooltip::Content, Box<dyn Fn(super::tooltip::TipEvent) -> Message + 'a>)>,
     ring: Ring,
     /// The ring shows whatever the focus is (the component sheet's focus state, a test).
     shown: bool,
@@ -261,9 +266,17 @@ impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
             keys: Keys::Button,
             on_activate: None,
             on_focus_change: None,
+            tooltip: None,
             ring,
             shown: false,
         }
+    }
+
+    /// The control has a tooltip: pointer hover, keyboard focus and what ends them are reported to the core, which decides when it
+    /// shows (the host's tooltip) and the layer draws it at this control's measured bounds.
+    pub fn tooltip(mut self, content: super::tooltip::Content, on_event: impl Fn(super::tooltip::TipEvent) -> Message + 'a) -> Self {
+        self.tooltip = Some((content, Box::new(on_event)));
+        self
     }
 
     /// Draws the ring whether or not the control holds focus (a preview of the focus state).
@@ -437,6 +450,32 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Focusable<'a,
             state.focused = false;
             state.visible = false;
             state.armed = false;
+        }
+
+        if let Some((content, on_event)) = &self.tooltip {
+            let bounds = layout.bounds();
+            let touch = matches!(event, Event::Touch(_));
+            let over = self.enabled && cursor.is_over(bounds);
+            let pressed = matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::WheelScrolled { .. }) | Event::Touch(touch::Event::FingerPressed { .. }));
+            let escape = matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { key: Key::Named(Named::Escape), .. }));
+            let state = tree.state.downcast_mut::<State>();
+            let ringed = state.focused && state.visible;
+            if over && !state.over {
+                state.over = true;
+                shell.publish(on_event(super::tooltip::TipEvent::Show { target: self.id, content: content.clone(), touch, keyboard: false }));
+            } else if !over && state.over {
+                state.over = false;
+                shell.publish(on_event(super::tooltip::TipEvent::Hide));
+            } else if over && pressed || escape && (state.focused || state.over) {
+                shell.publish(on_event(super::tooltip::TipEvent::Hide));
+            }
+            if ringed && !state.tip_focus {
+                state.tip_focus = true;
+                shell.publish(on_event(super::tooltip::TipEvent::Show { target: self.id, content: content.clone(), touch: false, keyboard: true }));
+            } else if !ringed && state.tip_focus {
+                state.tip_focus = false;
+                shell.publish(on_event(super::tooltip::TipEvent::Hide));
+            }
         }
 
         let state = tree.state.downcast_ref::<State>();
@@ -618,12 +657,19 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Anchor<'a, Message> {
 pub struct Scope<'a, Message> {
     scope: ScopeId,
     content: Element<'a, Message>,
+    /// A modal scope contains the pointer; a menu's does not (a press outside it closes it and goes on to the page).
+    modal: bool,
 }
 
 impl<'a, Message: 'a> Scope<'a, Message> {
     /// Wraps `content` as the scope `scope`.
     pub fn new(scope: ScopeId, content: Element<'a, Message>) -> Self {
-        Scope { scope, content }
+        Scope { scope, content, modal: true }
+    }
+
+    /// Only marks the scope for the focus walk: the pointer is not contained (a menu tree).
+    pub fn passive(scope: ScopeId, content: Element<'a, Message>) -> Self {
+        Scope { scope, content, modal: false }
     }
 }
 
@@ -663,7 +709,7 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Scope<'a, Message> {
     ) {
         // A press outside the dialog is the dialog's and nobody else's: it neither reaches the page behind nor makes the
         // dialog's own focused control lose focus (focus stays inside the modal).
-        if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Touch(touch::Event::FingerPressed { .. })) && !cursor.is_over(layout.bounds()) {
+        if self.modal && matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Touch(touch::Event::FingerPressed { .. })) && !cursor.is_over(layout.bounds()) {
             shell.capture_event();
             return;
         }
@@ -672,7 +718,7 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Scope<'a, Message> {
 
         // A modal scope contains the pointer: whatever the dialog did not take, the page behind it must not receive (a click
         // on a field behind it would give that field focus).
-        if matches!(event, Event::Mouse(_) | Event::Touch(_)) && !shell.is_event_captured() {
+        if self.modal && matches!(event, Event::Mouse(_) | Event::Touch(_)) && !shell.is_event_captured() {
             shell.capture_event();
         }
     }
