@@ -958,7 +958,7 @@ layout's whole size for a document of four pages or fewer, else a few layers of 
 error or a lost device retries the frame with half the tile side, then once with a new worker
 and device (the export renderer's ladder), then fails; nothing is written.
 
-Native tools retire each tile through one readback slot before starting the next,
+Native tools allocate readbacks for at most the tiles in one frame,
 and use a two-page soft sprite working set for larger layouts. The visible set may
 grow above it; no needed page is evicted. See [native export ownership](memory.md#native-export-ownership)
 for decoded copies, exact scratch lifetimes and allocator diagnostics.

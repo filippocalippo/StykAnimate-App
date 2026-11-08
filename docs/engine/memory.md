@@ -23,8 +23,9 @@ Native devices requested by `native_gpu` and the video tool share 8–16 MiB dev
 allocator blocks (4–8 MiB host blocks). Larger resources use dedicated allocations;
 these sizes do not limit artwork. The backend, compiler and render calculations are
 unchanged. Live GPU allocations and reserved allocator blocks are separate measures.
-Native exports keep one tile in flight: its readback retires temporary glyph masks
-and replaced targets before the next tile is encoded. Browser hosts still pipeline
+Native exports keep at most one frame's tiles in flight, within the existing
+64 MiB readback budget. Serializing tiles reduced overlap but regressed frame time
+in paired measurements; the tiles remain pipelined. Browser hosts still pipeline
 tiles and frames to hide mapping latency across processes.
 
 Exact-size renderers size isolation arrays once for the maximum of all depths of
