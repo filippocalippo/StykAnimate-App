@@ -49,6 +49,8 @@ pub struct Surface<'a, Message> {
     look: Box<dyn Fn(Interaction) -> Look + 'a>,
     on_press: Option<Message>,
     preview: Option<Preview>,
+    /// The radius of each corner (top left, top right, bottom right, bottom left) where they differ from the look's.
+    corners: Option<[f32; 4]>,
     width: Length,
     height: Length,
 }
@@ -56,7 +58,7 @@ pub struct Surface<'a, Message> {
 impl<'a, Message: Clone + 'a> Surface<'a, Message> {
     /// A surface showing `face`, drawn as `look` says for each interaction.
     pub fn new(face: Element<'a, Message>, look: impl Fn(Interaction) -> Look + 'a) -> Self {
-        Surface { rest: face, hover: None, look: Box::new(look), on_press: None, preview: None, width: Length::Shrink, height: Length::Shrink }
+        Surface { rest: face, hover: None, look: Box::new(look), on_press: None, preview: None, corners: None, width: Length::Shrink, height: Length::Shrink }
     }
 
     /// The face shown while hovered or pressed, when it differs from the rest face (the same size).
@@ -74,6 +76,12 @@ impl<'a, Message: Clone + 'a> Surface<'a, Message> {
     /// Holds a state fixed (the component sheet and tests).
     pub fn preview(mut self, preview: Option<Preview>) -> Self {
         self.preview = preview;
+        self
+    }
+
+    /// Round the corners as given (a half of a split button is square where it meets the other).
+    pub fn corners(mut self, corners: [f32; 4]) -> Self {
+        self.corners = Some(corners);
         self
     }
 
@@ -186,7 +194,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Surface<'a, M
         let bounds = Rectangle { x: bounds.x + (bounds.width - width) / 2.0, y: bounds.y + (bounds.height - height) / 2.0, width, height };
         paint_shadows(renderer, bounds, look.radius, look.shadows, look.opacity);
         if let Some(fill) = look.fill {
-            paint_fill(renderer, bounds, look.radius, fill.faded(look.opacity));
+            match self.corners {
+                Some(corners) => super::control::paint_fill_corners(renderer, bounds, corners, fill.faded(look.opacity)),
+                None => paint_fill(renderer, bounds, look.radius, fill.faded(look.opacity)),
+            }
         }
         if let Some((ring, color)) = look.ring {
             let inner = Rectangle { x: bounds.x + look.border, y: bounds.y + look.border, width: bounds.width - 2.0 * look.border, height: bounds.height - 2.0 * look.border };

@@ -11,6 +11,7 @@ use styk_core::shell::workspace::{Report, Workspace};
 use styk_core::shell::{Shell, TabView, Window};
 use styk_core::screens::InspectorScreen;
 use styk_design::Theme;
+use crate::overlay_sheet::OverlayScreen;
 
 /// A screen of the catalogue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +28,8 @@ pub enum Screen {
     BandBuild,
     /// The design system's controls in every state (`styk_ui::controls_sheet`); dark when `true`.
     Controls(bool),
+    /// An overlay or panel-parts screen (`crate::overlay_sheet`); dark when `true`.
+    Overlay(OverlayScreen, bool),
     /// The Properties panel in a context (`styk_core::screens`), docked at today's default size; dark when `true`.
     Inspector(InspectorScreen, bool),
     /// The stage: a repository fixture fitted into the stage region at tick 0; dark when `true`.
@@ -35,7 +38,7 @@ pub enum Screen {
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 27] = [
+    pub const ALL: [Screen; 43] = [
         Screen::ComponentSheet,
         Screen::Band,
         Screen::BandDark,
@@ -63,6 +66,22 @@ impl Screen {
         Screen::Stage(true),
         Screen::Controls(false),
         Screen::Controls(true),
+        Screen::Overlay(OverlayScreen::MenuRoot, false),
+        Screen::Overlay(OverlayScreen::MenuRoot, true),
+        Screen::Overlay(OverlayScreen::MenuSubmenu, false),
+        Screen::Overlay(OverlayScreen::MenuSubmenu, true),
+        Screen::Overlay(OverlayScreen::MenuContext, false),
+        Screen::Overlay(OverlayScreen::MenuContext, true),
+        Screen::Overlay(OverlayScreen::SelectOpen, false),
+        Screen::Overlay(OverlayScreen::SelectOpen, true),
+        Screen::Overlay(OverlayScreen::Tooltip, false),
+        Screen::Overlay(OverlayScreen::Tooltip, true),
+        Screen::Overlay(OverlayScreen::Toasts, false),
+        Screen::Overlay(OverlayScreen::Toasts, true),
+        Screen::Overlay(OverlayScreen::Dialog, false),
+        Screen::Overlay(OverlayScreen::Dialog, true),
+        Screen::Overlay(OverlayScreen::Parts, false),
+        Screen::Overlay(OverlayScreen::Parts, true),
     ];
 
     /// The ID the command line uses.
@@ -75,6 +94,22 @@ impl Screen {
             Screen::BandBuild => "band-build",
             Screen::Controls(false) => "controls",
             Screen::Controls(true) => "controls-dark",
+            Screen::Overlay(OverlayScreen::MenuRoot, false) => "menu-root",
+            Screen::Overlay(OverlayScreen::MenuRoot, true) => "menu-root-dark",
+            Screen::Overlay(OverlayScreen::MenuSubmenu, false) => "menu-submenu",
+            Screen::Overlay(OverlayScreen::MenuSubmenu, true) => "menu-submenu-dark",
+            Screen::Overlay(OverlayScreen::MenuContext, false) => "menu-context",
+            Screen::Overlay(OverlayScreen::MenuContext, true) => "menu-context-dark",
+            Screen::Overlay(OverlayScreen::SelectOpen, false) => "select-open",
+            Screen::Overlay(OverlayScreen::SelectOpen, true) => "select-open-dark",
+            Screen::Overlay(OverlayScreen::Tooltip, false) => "tooltip",
+            Screen::Overlay(OverlayScreen::Tooltip, true) => "tooltip-dark",
+            Screen::Overlay(OverlayScreen::Toasts, false) => "toasts",
+            Screen::Overlay(OverlayScreen::Toasts, true) => "toasts-dark",
+            Screen::Overlay(OverlayScreen::Dialog, false) => "dialog",
+            Screen::Overlay(OverlayScreen::Dialog, true) => "dialog-dark",
+            Screen::Overlay(OverlayScreen::Parts, false) => "parts",
+            Screen::Overlay(OverlayScreen::Parts, true) => "parts-dark",
             Screen::Inspector(InspectorScreen::Scene, false) => "inspector-scene",
             Screen::Inspector(InspectorScreen::Scene, true) => "inspector-scene-dark",
             Screen::Inspector(InspectorScreen::Figure, false) => "inspector-figure",
@@ -110,14 +145,14 @@ impl Screen {
     /// The theme the screen is drawn in.
     pub const fn theme(self) -> Theme {
         match self {
-            Screen::BandDark | Screen::Controls(true) | Screen::Inspector(_, true) | Screen::Stage(true) => Theme::Dark,
+            Screen::BandDark | Screen::Controls(true) | Screen::Inspector(_, true) | Screen::Stage(true) | Screen::Overlay(_, true) => Theme::Dark,
             _ => Theme::Light,
         }
     }
 
     /// Whether the screen is the top band over its window (the band screens need the shell's layout).
     pub const fn is_band(self) -> bool {
-        !matches!(self, Screen::ComponentSheet | Screen::Controls(_) | Screen::Inspector(..) | Screen::Stage(..))
+        !matches!(self, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..) | Screen::Inspector(..) | Screen::Stage(..))
     }
 
     /// The screen with this ID.

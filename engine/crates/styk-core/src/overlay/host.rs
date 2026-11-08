@@ -156,7 +156,7 @@ impl Update {
 }
 
 /// The overlay controller of one window.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Host {
     stack: Stack,
     menus: Vec<OpenMenu>,
@@ -240,6 +240,7 @@ impl Host {
 
     /// Opens a root menu (a menu button's, a context menu's or a select's) and focuses its first row, or `focus` when given.
     /// `invoker` is where focus returns. A pointer-opened menu hides the ring until the first key (`keyboard == false`).
+    #[allow(clippy::too_many_arguments)] // One opening: what the menu holds, where it goes, who asked and who gets focus back.
     pub fn open(&mut self, entries: Vec<Entry>, anchor: Anchor, purpose: Purpose, invoker: Option<FocusId>, keyboard: bool, focus_row: Option<usize>, focus: &mut FocusState) -> Update {
         let menu = Menu::new(entries);
         let id = self.fresh_id();

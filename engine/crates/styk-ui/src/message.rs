@@ -35,6 +35,29 @@ pub enum Message {
     /// An input method opened (true) or closed (false) a composition in the focused field: while one is open, Enter and
     /// Escape belong to the input method (`docs/native/text-input.md`).
     Compose(bool),
+    /// A select's list should open (a press, or Space, Enter or Alt+Down on it). The window's overlay owner
+    /// (`crate::overlays::Overlays`) opens the menu and, when an option is chosen, answers with that option's message.
+    OpenSelect(Box<SelectRequest>),
+    /// A menu row, key or press reached the overlay layer: the overlay owner decides.
+    Overlay(styk_design::widgets::menu::Event),
+    /// A stage message's action or close button.
+    Toast(styk_design::widgets::toast::Event),
+}
+
+/// A select asking for its list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectRequest {
+    /// The select's focus target: focus returns to it when the list closes.
+    pub invoker: styk_core::focus::FocusId,
+    /// Where the select is, for placing the list.
+    pub anchor: iced::Rectangle,
+    /// A key asked (the ring shows in the list).
+    pub keyboard: bool,
+    /// Each option's words and whether it is disabled.
+    pub options: Vec<(String, bool)>,
+    pub chosen: Option<usize>,
+    /// The message each option stands for, in the options' order.
+    pub picks: Vec<Message>,
 }
 
 impl From<Command> for Message {
@@ -63,6 +86,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             Some(id) => operate(focus::focus(id)).discard(),
             None => Task::none(),
         },
+        Message::OpenSelect(_) | Message::Overlay(_) | Message::Toast(_) => Task::none(),
         Message::Snapshot(snapshot) => {
             let synced = focus::sync(core.focus_mut(), &snapshot);
             match synced.unfocus {

@@ -618,12 +618,19 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Anchor<'a, Message> {
 pub struct Scope<'a, Message> {
     scope: ScopeId,
     content: Element<'a, Message>,
+    /// A modal scope contains the pointer; a menu's does not (a press outside it closes it and goes on to the page).
+    modal: bool,
 }
 
 impl<'a, Message: 'a> Scope<'a, Message> {
     /// Wraps `content` as the scope `scope`.
     pub fn new(scope: ScopeId, content: Element<'a, Message>) -> Self {
-        Scope { scope, content }
+        Scope { scope, content, modal: true }
+    }
+
+    /// Only marks the scope for the focus walk: the pointer is not contained (a menu tree).
+    pub fn passive(scope: ScopeId, content: Element<'a, Message>) -> Self {
+        Scope { scope, content, modal: false }
     }
 }
 
@@ -663,7 +670,7 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Scope<'a, Message> {
     ) {
         // A press outside the dialog is the dialog's and nobody else's: it neither reaches the page behind nor makes the
         // dialog's own focused control lose focus (focus stays inside the modal).
-        if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Touch(touch::Event::FingerPressed { .. })) && !cursor.is_over(layout.bounds()) {
+        if self.modal && matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Touch(touch::Event::FingerPressed { .. })) && !cursor.is_over(layout.bounds()) {
             shell.capture_event();
             return;
         }
@@ -672,7 +679,7 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Scope<'a, Message> {
 
         // A modal scope contains the pointer: whatever the dialog did not take, the page behind it must not receive (a click
         // on a field behind it would give that field focus).
-        if matches!(event, Event::Mouse(_) | Event::Touch(_)) && !shell.is_event_captured() {
+        if self.modal && matches!(event, Event::Mouse(_) | Event::Touch(_)) && !shell.is_event_captured() {
             shell.capture_event();
         }
     }

@@ -75,6 +75,11 @@ pub fn paint_fill(renderer: &mut iced::Renderer, bounds: Rectangle, radius: f32,
     renderer.fill_quad(Quad { bounds, border: Border { radius: radius.into(), ..Border::default() }, shadow: Shadow::default(), snap: false }, Color::from(color));
 }
 
+/// A filled rectangle with its own radius at each corner (top left, top right, bottom right, bottom left).
+pub fn paint_fill_corners(renderer: &mut iced::Renderer, bounds: Rectangle, corners: [f32; 4], color: Rgba) {
+    renderer.fill_quad(Quad { bounds, border: Border { radius: iced::border::Radius { top_left: corners[0], top_right: corners[1], bottom_right: corners[2], bottom_left: corners[3] }, ..Border::default() }, shadow: Shadow::default(), snap: false }, Color::from(color));
+}
+
 /// The radius a pill has on a box this high.
 pub fn pill(height: f32) -> f32 {
     height / 2.0

@@ -31,7 +31,7 @@ use styk_design::widgets::select::{Choice, Select};
 use styk_design::widgets::toggle::Switch;
 use styk_design::{Palette, Theme, tokens};
 
-use crate::message::Message;
+use crate::message::{Message, SelectRequest};
 
 const BASE_ID: u64 = 0x1_0000;
 
@@ -257,13 +257,16 @@ impl Kit<'_> {
         let options: Vec<Choice> = row.options.iter().map(|option| Choice { label: self.label(&option.label), disabled: option.disabled }).collect();
         let chosen = row.value.as_ref().and_then(|value| row.options.iter().position(|option| !option.disabled && &option.value == value));
         let values: Vec<Arc<str>> = row.options.iter().map(|option| option.value.clone()).collect();
+        let id = self.id();
+        let words: Vec<(String, bool)> = options.iter().map(|option| (option.label.clone(), option.disabled)).collect();
+        let picks: Vec<Message> = values.iter().map(|value| send(Event::Choose(choice, value.clone()))).collect();
         let mut select = Select::new(
-            self.id(),
+            id,
             FocusArea::Panels,
             self.palette,
             options,
             chosen,
-            move |index| send(Event::Choose(choice, values[index].clone())),
+            move |open| Message::OpenSelect(Box::new(SelectRequest { invoker: id, anchor: open.anchor, keyboard: open.keyboard, options: words.clone(), chosen, picks: picks.clone() })),
             move |step| send(Event::ChooseStep(choice, step)),
         )
         .disabled(row.disabled)

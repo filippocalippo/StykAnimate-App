@@ -156,8 +156,8 @@ enum CheckStep {
 
 impl App {
     fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: SyncSender<Outcome>, shell: Box<shell::Shell>, wakes: wakes::Wakes, foreground_before: isize) -> Result<App, String> {
-        let sheet = screen.filter(|screen| matches!(screen, Screen::ComponentSheet | Screen::Controls(_))).map(|screen| {
-            let mut sheet = if let Screen::Controls(_) = screen { Sheet::controls_page(screen.theme()) } else { Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr) };
+        let sheet = screen.filter(|screen| matches!(screen, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..))).map(|screen| {
+            let mut sheet = if let Screen::ComponentSheet = screen { Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr) } else { Sheet::for_screen(screen).unwrap_or_else(|| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr)) };
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
             sheet
         });
@@ -768,8 +768,7 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
     let size = launch.size.unwrap_or(window::DEFAULT_SIZE);
     let sheet = screen.and_then(|screen| match screen {
         Screen::ComponentSheet => Some(Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr)),
-        Screen::Controls(_) => Some(Sheet::controls_page(screen.theme())),
-        _ => None,
+        _ => Sheet::for_screen(screen),
     });
     let theme = screen.map_or(Theme::default(), Screen::theme);
     let scale = launch.scale.unwrap_or(1.0) as f32;
