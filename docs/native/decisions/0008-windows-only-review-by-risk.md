@@ -51,6 +51,15 @@ or the fix would change the design. **Cheap checks while coding**: implementers 
 `cargo clippy` on the crates they touch and build and test when a piece is done, only the changed crates; every chunk still
 ends with its full done criteria.
 
+**Cheaper interface work** (the owner, 2026-11-08): chunk K-fastui, after K-cmd and before the screen fan-out, adds a
+developer-only `styk-screens` binary that renders catalogue screens headless from fixture view models through exactly the
+app's view functions, widgets, fonts and renderer (pixel-identical to `stykanimate --screen`, checked at gates; never
+shipped), for implementers' screenshot loop; the real app's screen check still runs before a chunk is done and before
+every merge. It also measures `rust-lld` against the MSVC linker and switches dev and test builds only if clearly faster
+with every test, guard and the release-isolation check passing. **Screenshot limits** are baselines only while a screen's
+parts are missing; with all parts present a screen's limit sits close to its measured difference and is only tightened;
+a limit above about 0.02 carries its reason in `limits.toml` and is reviewed at the next gate.
+
 **Proof** proportionate to risk (no exhaustive sweeps unless a real failure calls for one; representative scenes; full
 suites at gates). **Reports** of about 30 lines (what changed, checks and results, screenshot scores, departures from the
 brief, risks). Short Handoff updates at merges; decision records only for real decisions.
