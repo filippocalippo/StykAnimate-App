@@ -241,13 +241,21 @@ The platform suite synchronizes on the actual child or flush helper, with bounde
 Video cancellation ends a suspended audio-pass child and reaps it before returning; a commit
 returns cancellation while its flush is held. Both flush/receiver completion orders remove the
 stage and preserve the destination. Decoder timeout kills and reaps a child with no natural exit.
+Decoder cancellation likewise waits for child startup, cancels a child with no natural exit,
+and checks that it was reaped and its scratch folder removed before returning.
+The core transport test holds the decoder after it acknowledges cancellation: its reservation
+must remain accounted until it returns. An empty prepare on the same serial worker then
+acknowledges cleanup before the test checks the budget; a decoder's private cancellation flag
+is not a completion event. Stop must return while that decoder return gate is still closed.
 
 The original latency workloads and bounds remain quiet-machine gate checks (1 s for audio-pass
-cancellation, 250 ms for flush cancellation, 3 s for decoder timeout). The orchestrator runs these
+cancellation, 1 s for decoder cancellation, 100 ms for transport stop, 250 ms for flush cancellation,
+3 s for decoder timeout). The orchestrator runs these
 with the machine quiet, through the queue, from `engine/`:
 
 ```sh
 timeout 300 cargo test -p styk-platform quiet_gate_ -- --ignored --test-threads=1
+timeout 300 cargo test -p styk-core quiet_gate_transport_cancel -- --ignored --test-threads=1
 ```
 
 These ignored measurements are required at the gate; a loaded functional suite does not certify latency.
