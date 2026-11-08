@@ -3104,6 +3104,7 @@ name = "styk-screens"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "iced_wgpu",
  "styk-core",
  "styk-design",
  "styk-platform",

@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 iced.workspace = true
+iced_wgpu = { path = "../../../vendor/iced/wgpu" }
 styk-core = { path = "../styk-core", default-features = false }
 styk-design = { path = "../styk-design", features = ["widgets"] }
 styk-ui = { path = "../styk-ui", default-features = false, features = ["headless"] }

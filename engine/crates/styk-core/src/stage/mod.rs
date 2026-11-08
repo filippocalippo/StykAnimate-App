@@ -17,12 +17,7 @@ pub use view::{MAX_ZOOM, MIN_ZOOM, View, Viewport, WheelZoom, ZOOM_STEP};
 pub fn gpu_instances() -> Vec<wgpu::InstanceDescriptor> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        styk_render::native_gpu::attempts(
-            wgpu::Instance::enabled_backend_features().contains(wgpu::Backends::DX12),
-        )
-        .iter()
-        .map(|attempt| attempt.descriptor())
-        .collect()
+        styk_render::native_gpu::descriptors()
     }
     #[cfg(target_arch = "wasm32")]
     {

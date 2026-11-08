@@ -248,3 +248,10 @@ The model-only graph also contains `styk-doc`, the leaf value store used by the 
 layout's unknown fields and persistence. It still excludes evaluation, editing, scheduling and
 rendering engine crates. Layout and overlay logic, registry metadata and plain stage navigation
 remain available without the core engine feature; document/painter adapters require it.
+
+The preview also installs the application's native GPU policy (Direct3D 12/FXC preference,
+explicit environment overrides and ordered fallback). The engine renderer and preview host
+compile the single `engine/shared/native_gpu_policy.rs` module against their existing wgpu
+re-export; the preview does not link the engine renderer to obtain this configuration.
+K-stage's application policy exposed a real app/preview byte mismatch when the preview still
+used iced's defaults. The same catalogue byte-identity guard covers this host configuration.

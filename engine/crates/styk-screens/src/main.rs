@@ -1,9 +1,14 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::let_underscore_must_use, unused_must_use, clippy::disallowed_methods, clippy::disallowed_types)]
 //! Developer-only catalogue host. It always renders without a window.
 use std::process::ExitCode;
+use iced_wgpu::wgpu;
+#[path = "../../../shared/native_gpu_policy.rs"]
+mod gpu_policy;
 use styk_ui::{component_sheet::Sheet, screens::Screen};
 
 fn run() -> Result<(), String> {
+    iced_wgpu::instance::install(gpu_policy::descriptors)
+        .map_err(|_| "the preview GPU policy was already installed".to_string())?;
     let launch = styk_core::Launch::parse(std::env::args().skip(1)).map_err(|e| e.to_string())?;
     let screen = launch.screen.as_deref().and_then(Screen::from_id).ok_or_else(|| format!("--screen must name one of {}", Screen::ids()))?;
     let path = launch.screenshot.as_ref().ok_or("--screenshot <png> is required")?;
