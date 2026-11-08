@@ -79,3 +79,13 @@ entry in the workspace's polish list in the Handoff, which one fixer clears befo
 not cosmetic); (4) no idle implementers: while a fixer works on one chunk, the next independent chunk starts. Screen
 chunks with new behaviour stay two steps (Astra's core part, then Sonnet's views). Sol stays the only reviewer, blockers
 block, high-risk chunks get xhigh and the orchestrator's full read.
+
+**Throughput** (the owner, 2026-11-09; quality rules unchanged, the problem was parallelism): GPT-6 Astra stays the main
+back-end and logic implementer and Opus 5.5 at medium effort is added beside it as extra back-end and logic capacity,
+under the same reviews (this replaces "one Opus implementer"); Sonnet 5.5 stays the screens implementer; Sol stays the
+only reviewer. Five or six implementers run whenever ready work exists, from a written plan (step 3:
+`perf/briefs/native/step3-plan.md`). For screen chunks the core's interface is committed first and the views are built
+against it while the logic is finished, on one branch with one review. Freezes stop merges only, never new chunks or
+ongoing work. Merge conflicts, train passes and their small fixes go to a merge fixer; disk cleanup is a script. First
+priority: the visible loop in the real app (open, stage, select, edit in Properties); then the skeleton gate; the
+docked window's part 2 after it, during step 3.

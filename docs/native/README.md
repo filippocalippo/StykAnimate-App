@@ -13,7 +13,7 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
-**Updated 2026-11-09 14:00.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
+**Updated 2026-11-09 16:00.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
 tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had only merged N0). Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
@@ -31,7 +31,7 @@ seed store `wt/shared-target` is back (crates.io dependencies; `node perf/make-s
 Windows only (the architecture stays portable). GPT-6 Astra implements back-end and logic, Sonnet the screens, one Opus
 implementer the reference slice (the interface architecture and the Inspector, `docs/native/patterns.md`); GPT-6.1 Sol is
 the only reviewer, by risk; logic stays out of the views; `cargo xtask check` guards the rules. In-flight chunks finish with
-no new review round unless a finding is a blocker. **Process additions of 2026-11-08** (N8): a self-check against `native-common.md`'s Known findings before every hand-in; a half-page plan checked by Sol before coding for high-risk and new-owner chunks; only purely cosmetic findings in screen chunks may merge, each recorded in the workspace's polish list below and cleared before that workspace's gate; no idle implementers. Screen chunks with new behaviour are two steps: Astra's core part, then Sonnet's views.
+no new review round unless a finding is a blocker. **Throughput decision of 2026-11-09** (N8): Opus 5.5 medium joins Astra as back-end and logic capacity, Sonnet stays on screens, five or six implementers run from the step-3 plan (`perf/briefs/native/step3-plan.md`), views build against a committed core interface, freezes stop merges only, chores go to a merge fixer and `perf/disk-clean.sh`. First priority: the visible loop (chunk V0). **Process additions of 2026-11-08** (N8): a self-check against `native-common.md`'s Known findings before every hand-in; a half-page plan checked by Sol before coding for high-risk and new-owner chunks; only purely cosmetic findings in screen chunks may merge, each recorded in the workspace's polish list below and cleared before that workspace's gate; no idle implementers. Screen chunks with new behaviour are two steps: Astra's core part, then Sonnet's views.
 
 **In flight.**
 
