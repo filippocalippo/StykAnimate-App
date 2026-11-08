@@ -161,9 +161,13 @@ driver optimization. The temporary direct-D3D12 source was removed; logs and the
 reproducer are described in [ND's evidence](../../engine/crates/styk-render/tests/msaa-determinism.md).
 
 Observed native ticks are A at 1080p **131, 138, 181**, D at 1080p **571**, and D at 4K **541, 544**.
-Every observed native repeat difference is at most **one channel level**. RM first saw 36 pixels
-on A/131 and four on D/541; ND's three-process comparisons saw up to **89 pixels** on A/131.
-These are observations, not bounds or allowances. D/571 was reported by RM but did not recur in
+Most observed native repeat differences are **one channel level**, but not all: RM's final
+equality runs (2026-11-08, `docs/native/render-memory.md`) found B (tdd2) at 1080p tick **164**
+differing by **eight levels** between runs of the unchanged baseline binary (further baseline runs
+reproduce either picture exactly), and A tick **202** varying by **two levels** baseline to baseline.
+RM first saw 36 pixels on A/131 and four on D/541; ND's three-process comparisons saw up to **89
+pixels** on A/131. These are observations, not bounds or allowances: no test may use them as a
+tolerance; exact comparisons run on Vulkan. D/571 was reported by RM but did not recur in
 ND's short runs. Vulkan's repeated and partitioned controls are byte-identical, as were RM's
 960 RGBA hashes. Chromium/D3D12's X2 frames 183, 184, 185, 186 and 188 differ in 1–3 pixels by
 one level; the shared driver cause is **very likely**, not independently proven for the browser.
