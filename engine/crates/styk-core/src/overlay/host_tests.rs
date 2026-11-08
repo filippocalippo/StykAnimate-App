@@ -318,7 +318,7 @@ fn departure_cancels_intent_even_when_a_deadline_is_already_queued() {
     let (mut host, mut focus) = (Host::default(), page());
     let id = open(&mut host, &mut focus, false);
     host.event(Event::Hover { menu: id, index: 2 }, &mut focus, 0);
-    host.event(Event::Leave { menu: Some(id) }, &mut focus, 100);
+    host.event(Event::Leave { menu: Some(id), row: None }, &mut focus, 100);
     host.event(Event::Tick, &mut focus, 150);
     assert_eq!(host.menus().len(), 1);
     assert_eq!(host.menus()[0].hovered(), None);
@@ -435,11 +435,27 @@ fn leaving_a_row_clears_its_fill_and_leaving_the_tree_cancels_what_was_pending()
     let id = open(&mut host, &mut focus, false);
     host.event(Event::Hover { menu: id, index: 1 }, &mut focus, 0);
     assert_eq!(host.menus()[0].hovered(), Some(1));
-    host.event(Event::Leave { menu: Some(id) }, &mut focus, 10);
+    host.event(Event::Leave { menu: Some(id), row: None }, &mut focus, 10);
     assert_eq!(host.menus()[0].hovered(), None);
     host.event(Event::Hover { menu: id, index: 2 }, &mut focus, 20);
-    host.event(Event::Leave { menu: None }, &mut focus, 30);
+    host.event(Event::Leave { menu: None, row: None }, &mut focus, 30);
     assert_eq!(host.next_deadline(), None, "the submenu's hover intent died with the pointer");
+}
+
+#[test]
+fn a_leave_naming_a_row_that_is_no_longer_hovered_is_stale_and_changes_nothing() {
+    let (mut host, mut focus) = (Host::default(), page());
+    let id = open(&mut host, &mut focus, false);
+    host.event(Event::Hover { menu: id, index: 2 }, &mut focus, 0);
+    host.event(Event::Hover { menu: id, index: 1 }, &mut focus, 10);
+    host.event(Event::Leave { menu: Some(id), row: Some(2) }, &mut focus, 10);
+    assert_eq!(host.menus()[0].hovered(), Some(1), "the row just reached keeps its fill");
+    host.event(Event::Hover { menu: id, index: 2 }, &mut focus, 20);
+    host.event(Event::Leave { menu: Some(id), row: Some(1) }, &mut focus, 20);
+    assert_eq!(host.menus()[0].hovered(), Some(2));
+    assert!(host.next_deadline().is_some(), "and its submenu intent is still pending");
+    host.event(Event::Leave { menu: Some(id), row: Some(2) }, &mut focus, 30);
+    assert_eq!(host.menus()[0].hovered(), None, "the leave of the hovered row clears it");
 }
 
 #[test]

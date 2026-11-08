@@ -519,7 +519,9 @@ pub enum Event {
     Select { invoker: FocusId, anchor: Rect, options: Vec<(String, bool)>, chosen: Option<usize>, keyboard: bool, press: u64 },
     Key { key: String, ctrl: bool, meta: bool, alt: bool },
     Hover { menu: u64, index: usize },
-    Leave { menu: Option<u64> },
+    /// The pointer left a row (`menu` and `row`), a whole menu (`menu` only) or the tree (neither). A leave naming a row
+    /// that is no longer the hovered one is stale (the pointer already reached another row) and changes nothing.
+    Leave { menu: Option<u64>, row: Option<usize> },
     Press { menu: u64, index: usize },
     Pointer { pressed: bool, inside: bool, anchor: Option<FocusId>, press: u64 },
     Bounds(Vec<(FocusId, Rect)>),
@@ -601,8 +603,10 @@ impl Host {
             }
             Event::Key { key, ctrl, meta, alt } => { if key == "Escape" { self.tooltip.hide(now); } out = self.key(menu::Key { key: &key, ctrl, meta, alt, composing: focus.composing() }, &lookup, focus, now); }
             Event::Hover { menu, index } => { self.leave(); out = self.hover(menu, index, focus, now); }
-            Event::Leave { menu } => {
-                for open in &mut self.menus { if menu.is_none_or(|id| id == open.id) { open.menu.cancel_hover(); open.hovered = None; } }
+            Event::Leave { menu, row } => {
+                for open in &mut self.menus {
+                    if menu.is_none_or(|id| id == open.id) && row.is_none_or(|r| open.hovered == Some(r)) { open.menu.cancel_hover(); open.hovered = None; }
+                }
             }
             Event::Press { menu, index } => out = self.press(menu, index, &lookup, focus, now),
             Event::Bounds(bounds) => self.bounds = bounds,

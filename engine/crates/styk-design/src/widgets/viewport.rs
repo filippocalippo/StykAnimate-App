@@ -69,6 +69,15 @@ impl Operation for Find {
     }
 }
 
+/// The pointer as the rows see it: only inside the visible bounds. A row scrolled out of view is drawn clipped, so it must
+/// not be hovered, pressed or given an interaction either.
+fn within(cursor: mouse::Cursor, view: Rectangle) -> mouse::Cursor {
+    match cursor.position_over(view) {
+        Some(at) => mouse::Cursor::Available(at),
+        None => mouse::Cursor::Unavailable,
+    }
+}
+
 fn max_offset(content: f32, view: f32) -> f32 {
     (content - view).max(0.0)
 }
@@ -152,12 +161,12 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Viewport<'a, Message>
             shell.request_redraw();
         }
         if let Some((child, state)) = layout.iter_mut(&mut tree.children).next() {
-            self.content.update(state, event, child, cursor, renderer, shell, viewport);
+            self.content.update(state, event, child, within(cursor, view), renderer, shell, viewport);
         }
     }
 
     fn mouse_interaction(&self, tree: &Tree, layout: Layout, cursor: mouse::Cursor, viewport: &Rectangle, renderer: &Renderer) -> mouse::Interaction {
-        layout.iter(&tree.children).next().map_or(mouse::Interaction::None, |(child, state)| self.content.mouse_interaction(state, child, cursor, viewport, renderer))
+        layout.iter(&tree.children).next().map_or(mouse::Interaction::None, |(child, state)| self.content.mouse_interaction(state, child, within(cursor, layout.bounds()), viewport, renderer))
     }
 
     fn draw(&self, tree: &Tree, renderer: &mut Renderer, theme: &Theme, style: &renderer::Style, layout: Layout, cursor: mouse::Cursor, viewport: &Rectangle) {
@@ -168,7 +177,7 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Viewport<'a, Message>
         if let Some((child, state)) = layout.iter(&tree.children).next() {
             let clip = view.intersection(viewport).unwrap_or(view);
             renderer.with_layer(clip, |renderer| {
-                self.content.draw(state, renderer, theme, style, child, cursor, &clip);
+                self.content.draw(state, renderer, theme, style, child, within(cursor, view), &clip);
                 // `mask-image: linear-gradient(to bottom, black calc(100% - 12px), transparent)`: the last 12 px fade into the box.
                 if room > 0.0 && offset < room - 1.0 {
                     let at = Rectangle { y: view.y + view.height - FADE, height: FADE, ..view };

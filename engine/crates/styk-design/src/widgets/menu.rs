@@ -50,7 +50,7 @@ pub enum Event {
     /// A click on the item `index` of menu `menu`.
     Press { menu: u64, index: usize },
     /// The pointer left a row of menu `menu` (`Some`), or left every menu of the layer (`None`).
-    Leave { menu: Option<u64> },
+    Leave { menu: Option<u64>, row: Option<usize> },
     /// A pointer press or release: where it landed and whether on a menu.
     Pointer { press: bool, inside: bool, x: f32, y: f32 },
 }
@@ -263,7 +263,7 @@ pub fn menu_box<'a, Message: Clone + 'a>(palette: &'static Palette, open: &'a Op
                     let reason = container(words(item.reason.clone(), micro, palette.text_3)).padding(Padding { left: scale::ICON_MD + scale::SPACE_2_5, ..Padding::ZERO });
                     container(Column::with_children(vec![line.boxed(), reason.boxed()]).spacing(scale::SPACE_1_5)).padding(Padding { top: scale::SPACE_1, right: scale::SPACE_2_5, bottom: scale::SPACE_1, left: scale::SPACE_2_5 }).boxed()
                 };
-                let row = MenuRow { content: body, look: Look { lit, ring: current && ring, danger: item.danger }, palette, on_hover: send(Event::Hover { menu: id, index }), on_leave: send(Event::Leave { menu: Some(id) }), on_press: send(Event::Press { menu: id, index }) };
+                let row = MenuRow { content: body, look: Look { lit, ring: current && ring, danger: item.danger }, palette, on_hover: send(Event::Hover { menu: id, index }), on_leave: send(Event::Leave { menu: Some(id), row: Some(index) }), on_press: send(Event::Press { menu: id, index }) };
                 let key_send = send.clone();
                 let no_ring = Ring { color: Color::TRANSPARENT, width: 0.0, offset: 0.0, radius: 0.0 };
                 let target = Focusable::new(row_id(id, index), FocusArea::Panels, row.boxed(), no_ring)
@@ -310,7 +310,7 @@ pub fn layer<'a, Message: Clone + 'a>(palette: &'static Palette, host: &'a Host,
     placed.extend(extra);
     let pointer = send.clone();
     let leave = send.clone();
-    Layer::new(placed).on_pointer(move |p| pointer(Event::Pointer { press: p.press, inside: p.inside, x: p.position.x, y: p.position.y })).on_leave(move || leave(Event::Leave { menu: None })).boxed()
+    Layer::new(placed).on_pointer(move |p| pointer(Event::Pointer { press: p.press, inside: p.inside, x: p.position.x, y: p.position.y })).on_leave(move || leave(Event::Leave { menu: None, row: None })).boxed()
 }
 
 /// The rectangle the core uses for a measured widget.

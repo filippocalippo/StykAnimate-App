@@ -110,7 +110,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
                 View::Key(k) => Event::Key { key: k.key, ctrl: k.ctrl, meta: k.meta, alt: k.alt },
                 View::Hover { menu, index } => Event::Hover { menu, index },
                 View::Press { menu, index } => Event::Press { menu, index },
-                View::Leave { menu } => Event::Leave { menu },
+                View::Leave { menu, row } => Event::Leave { menu, row },
                 View::Pointer { press, inside, x, y } => Event::Pointer { pressed: press, inside, anchor: core.overlays().anchor_at(f64::from(x), f64::from(y)), press: core.overlays().press_sequence() },
             };
             overlay(core, event)

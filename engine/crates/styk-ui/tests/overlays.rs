@@ -408,6 +408,50 @@ fn the_pointer_filling_rows_follows_it_and_leaving_a_row_or_the_menus_clears_wha
 }
 
 #[test]
+fn moving_between_rows_up_or_down_keeps_the_row_it_reached_and_a_submenu_deadline_still_fires() {
+    let mut app = App::new(Page::Controls, WINDOW);
+    app.entries = tall_rows(6, Some(2));
+    app.rebuild();
+    app.open();
+    let id = app.menu(0).id();
+    let at = |app: &mut App, n: usize| app.centre(row_id(id, n));
+    // Down onto the submenu row: its intent is scheduled, and the row stays hovered after the row above leaves.
+    let (above, row2) = (at(&mut app, 1), at(&mut app, 2));
+    app.now = 4000;
+    app.move_to(above);
+    app.move_to(row2);
+    assert_eq!(app.menu(0).hovered(), Some(2), "moving down keeps the row reached");
+    assert_eq!(app.core.overlay_deadline(), Some(4150), "and the submenu row's hover intent is pending");
+    let (from, onto) = (at(&mut app, 3), at(&mut app, 2));
+    app.move_to(from);
+    assert_eq!(app.core.overlay_deadline(), None, "leaving the submenu row for the next cancelled its intent");
+    // Up: the new row's hover arrives before the old row's leave, which must not clear it.
+    app.now = 5000;
+    app.move_to(from);
+    app.move_to(from);
+    assert_eq!(app.menu(0).hovered(), Some(3));
+    app.move_to(onto);
+    assert_eq!(app.menu(0).hovered(), Some(2), "moving up keeps the row reached");
+    assert_eq!(app.core.overlay_deadline(), Some(5150), "and the submenu row's hover intent is still pending");
+    app.advance(150);
+    assert_eq!(app.core.overlays().menus().len(), 2, "the deadline fired and opened the submenu");
+    // Up again, off a row that has no submenu, and down onto rows in order.
+    let (r1, r0) = (at(&mut app, 1), at(&mut app, 0));
+    app.move_to(r1);
+    assert_eq!(app.menu(0).hovered(), Some(1), "moving up past the submenu row");
+    app.move_to(r0);
+    assert_eq!(app.menu(0).hovered(), Some(0));
+    for n in 1..5 {
+        let down = at(&mut app, n);
+        app.move_to(down);
+        assert_eq!(app.menu(0).hovered(), Some(n), "moving down to row {n}");
+    }
+    // Leaving the whole menu still clears it.
+    app.move_to(Point::new(560.0, 380.0));
+    assert_eq!(app.menu(0).hovered(), None);
+}
+
+#[test]
 fn hover_opens_a_submenu_at_the_core_deadline_and_the_pointer_can_cross_into_it() {
     let mut app = App::new(Page::Controls, WINDOW);
     app.open();
@@ -622,6 +666,40 @@ fn a_tall_root_menu_scrolls_to_the_last_row_by_keyboard_and_back_by_wheel() {
     let before = app.bounds(row_id(id, 0)).y;
     app.input(Event::Mouse(mouse::Event::WheelScrolled { delta: mouse::ScrollDelta::Lines { x: 0.0, y: 30.0 } }));
     assert!(app.bounds(row_id(id, 0)).y > before, "the wheel moved the rows");
+    app.agree();
+}
+
+#[test]
+fn rows_scrolled_out_of_view_take_no_pointer_while_the_visible_ones_still_do() {
+    let mut app = App::new(Page::Short, Size::new(640.0, 300.0));
+    app.entries = tall_rows(40, None);
+    app.rebuild();
+    app.open();
+    let id = app.menu(0).id();
+    app.key(Named::End);
+    assert_eq!(app.menu(0).current(), Some(39));
+    // The rows the viewport shows hover; walk up from the last one until the pointer reaches rows it has scrolled away.
+    let mut shown = 0;
+    let mut last_shown = 39;
+    let mut clipped = None;
+    for n in (0..40).rev() {
+        let centre = app.centre(row_id(id, n));
+        app.move_to(centre);
+        if app.menu(0).hovered() == Some(n) {
+            assert!(clipped.is_none(), "row {n} hovers above a row that did not");
+            shown += 1;
+            last_shown = n;
+        } else if clipped.is_none() {
+            clipped = Some(n);
+        } else {
+            assert_eq!(app.menu(0).hovered(), None, "row {n} is clipped away and took the pointer");
+            assert_eq!(app.menu(0).current(), Some(last_shown), "and the keyboard's row did not move");
+        }
+    }
+    assert!(shown >= 5, "the visible rows hovered ({shown})");
+    assert!(clipped.is_some(), "some rows are scrolled out of view");
+    // The release still ends a press cleanly after all that.
+    app.release_button();
     app.agree();
 }
 
