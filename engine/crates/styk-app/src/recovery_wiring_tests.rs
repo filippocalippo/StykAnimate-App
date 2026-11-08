@@ -10,7 +10,7 @@ use styk_core::documents::{Effect as Doc, Request};
 use styk_core::focus::FocusId;
 use styk_core::recovery::model::ids;
 use styk_design::widgets::testing::Driver;
-use styk_services::{FixedClock, Cancel};
+use styk_services::{Clock, FixedClock, Cancel};
 use styk_services::recovery::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -52,6 +52,8 @@ impl RecoveryCopy for Copy {
 }
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
 const WINDOW: Size = Size::new(900.0, 600.0);
+// A deadlock guard, not a latency requirement. Completion is established by events and durable state.
+const HANG_GUARD: Duration = Duration::from_secs(300);
 
 struct LayoutStorage {
     inner: styk_services::storage::fake::MemoryStorage,
@@ -139,12 +141,46 @@ impl Runtime {
         if let Some(message) = message { self.message(message); true } else { false }
     }
     #[track_caller]
-    fn until(&mut self, done: impl Fn(&App) -> bool) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    fn until(&mut self, done: impl Fn(&App) -> bool) { self.drive_until(done, false); }
+    #[track_caller]
+    fn until_with_deadlines(&mut self, done: impl Fn(&App) -> bool) { self.drive_until(done, true); }
+    #[track_caller]
+    fn drive_until(&mut self, done: impl Fn(&App) -> bool, advance_deadlines: bool) {
+        let guard = std::time::Instant::now() + HANG_GUARD;
         while !done(&self.app) || !self.messages.is_empty() {
-            if !self.next() { self.ready.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("production tasks/wakes stranded the requested transition"); }
-            assert!(std::time::Instant::now() < deadline, "production tasks spun without settling");
+            assert!(std::time::Instant::now() < guard, "production events did not settle before the hang guard");
+            if self.next() { continue; }
+            // Session-end tests control time themselves. Deadline-driven tests also execute every
+            // newly scheduled window wake, including a recovery retry after document publication.
+            if advance_deadlines && self.advance_window_deadline() { continue; }
+            let received = self.ready.recv_timeout(guard.saturating_duration_since(std::time::Instant::now()));
+            assert!(received.is_ok(),
+                "production events stranded the transition: {received:?}; clock={:?}, wake={:?}, recovery={:?}, layouts_idle={}, layout_due={:?}, published={:?}",
+                self.clock.now(), self.app.band.core.wake_deadline(self.app.band.layouts_idle()), self.app.band.core.documents.recovery_view(),
+                self.app.band.layouts_idle(), self.app.band.core.dock().deadline(), self.app.band.core.documents.published());
         }
+    }
+    /// Consume what the mounted adapter scheduled, never manufacture a Documents/Deadline message.
+    fn advance_window_deadline(&mut self) -> bool {
+        let sent = {
+            let mut driver = Driver::new(self.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+            let at = std::time::Instant::now();
+            driver.events(&[iced::Event::Window(iced::window::Event::RedrawRequested(at))]);
+            let mut sent = driver.messages();
+            if sent.is_empty() {
+                match driver.redraw_request {
+                    iced::window::RedrawRequest::At(next) => self.clock.advance(next.duration_since(at)),
+                    iced::window::RedrawRequest::Wait => return false,
+                    iced::window::RedrawRequest::NextFrame => panic!("the idle deadline adapter must schedule a time, not poll frames"),
+                }
+                driver.redraw();
+                sent = driver.messages();
+                assert!(!sent.is_empty(), "the scheduled window wake must reach the production handler");
+            }
+            sent
+        };
+        for message in sent { self.message(message); }
+        true
     }
     fn drain(&mut self) {
         for _ in 0..128 { if !self.next() { return; } }
@@ -298,11 +334,10 @@ fn untitled_save_keeps_an_actionable_close_prompt() {
     assert!(!rt.app.band.core.recovery().closing().unwrap().1.save_available);
     rt.settle_prompt_animation();
     {
-        // Inspectable evidence of the existing prompt, with only its unavailable Save state changed.
+        // Render the existing prompt into this runtime's private directory; parallel processes share no output.
         let mut driver = Driver::new(rt.app.band.overlay_layer(Theme::Light).map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
         let (rgba, size) = driver.render(&styk_ui::base_theme(Theme::Light), iced::Color::WHITE, 1.0);
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../artifacts/b3/untitled.png");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let path = rt.root.0.join("untitled.png");
         styk_platform::screenshot::write(&path, &Image { rgba, width: size.width, height: size.height }).unwrap();
     }
     rt.click(ids::KEEP_EDITING); rt.drain();
@@ -358,7 +393,7 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
         rt.gate.after_commit.store(after_commit, Ordering::SeqCst);
         rt.gate.pause.store(true, Ordering::SeqCst);
         rt.advance_deadline();
-        receive.recv_timeout(Duration::from_secs(15)).expect("the recovery write entered its gate");
+        receive.recv_timeout(HANG_GUARD).expect("the recovery write entered its gate");
         let committed: Vec<_> = std::fs::read_dir(&rt.root.0).unwrap().filter_map(Result::ok)
             .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "styk"))
             .map(|entry| (entry.path(), std::fs::read(entry.path()).unwrap())).collect();
@@ -379,7 +414,7 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
         assert!(matches!(rt._outcome.try_recv(), Ok(Outcome::Done)), "exit must not wait for another disk save");
         for (path, bytes) in &committed { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
         rt.gate.release();
-        receive.recv_timeout(Duration::from_secs(15)).expect("the late checkpoint completed");
+        receive.recv_timeout(HANG_GUARD).expect("the late checkpoint completed");
         rt.drain();
         for (path, bytes) in &committed { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
         assert!(rt._outcome.try_recv().is_err(), "a late reply cannot finish the window twice");
@@ -409,7 +444,7 @@ fn merged_quit_guards_documents_then_flushes_or_abandons_layout_without_exceedin
         rt.click(ids::DONT_SAVE);
         rt.until(|app| app.quit_cleared);
         if failure == Failure::PauseBeforeCommit && !session_first {
-            receive.recv_timeout(Duration::from_secs(15)).expect("the final layout write is paused");
+            receive.recv_timeout(HANG_GUARD).expect("the final layout write is paused");
             assert!(!rt.app.closing, "ordinary quit waits for the final layout receipt");
             let revision = rt.app.band.core.documents.active().unwrap().revision();
             rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Run(styk_core::commands::CommandId::Undo)))));
@@ -434,7 +469,7 @@ fn merged_quit_guards_documents_then_flushes_or_abandons_layout_without_exceedin
             assert_eq!(saved, committed, "refusal and session-end cancellation preserve the committed file");
         }
         store.inner.fail(Failure::None);
-        if failure == Failure::PauseBeforeCommit && !session_first { receive.recv_timeout(Duration::from_secs(15)).expect("the detached layout write completed"); }
+        if failure == Failure::PauseBeforeCommit && !session_first { receive.recv_timeout(HANG_GUARD).expect("the detached layout write completed"); }
         rt.drain();
         assert_eq!(store.inner.get("layouts.json").unwrap(), saved, "late completion cannot replace the preserved file");
     }
@@ -477,29 +512,44 @@ fn a_pending_layout_load_waits_for_its_receipt_without_spinning_the_save_deadlin
 fn the_unified_deadline_wakes_layout_before_recovery_without_periodic_polls() {
     use styk_services::{Clock, storage::fake::MemoryStorage};
     use styk_core::layout::{PanelId, store::LayoutFile};
-    let store = Arc::new(MemoryStorage::default());
-    store.put("layouts.json", LayoutFile::default().encode().unwrap());
-    let mut rt = Runtime::with_layouts(Some(store.clone())); rt.settled(); rt.dirty(false);
-    rt.app.band.core.documents.set_autosave_seconds(2.5);
-    rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(PanelId::new("vfx")))))));
-    let due = rt.app.band.core.wake_deadline(true).unwrap();
-    assert_eq!(Some(due), rt.app.band.core.dock().deadline());
-    assert!(Duration::from_millis(due) < rt.app.band.core.documents.recovery_deadline().unwrap());
-    rt.clock.advance(Duration::from_millis(due).saturating_sub(rt.clock.now()));
-    let sent = {
-        let mut driver = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
-        driver.redraw(); driver.messages()
-    };
-    assert!(!sent.is_empty());
-    for message in sent { rt.message(message); }
-    rt.until(|app| !app.band.core.dock().save_pending());
-    assert!(LayoutFile::decode(&store.get("layouts.json").unwrap()).unwrap().workspaces.contains_key("animate"));
-    rt.advance_deadline();
-    let root = rt.root.0.clone();
-    // A fast write may finish within the returned tasks; wait for the durable
-    // outcome, not a busy state that can already have passed.
-    rt.until(|app| !app.band.core.documents.recovery_view().unwrap().busy && std::fs::read_dir(&root).unwrap().filter_map(Result::ok).any(|entry| entry.path().extension().is_some_and(|ext| ext == "styk")));
+    for deferred in [true, false] {
+        let store = Arc::new(MemoryStorage::default());
+        store.put("layouts.json", LayoutFile::default().encode().unwrap());
+        let mut rt = Runtime::with_layouts(Some(store.clone())); rt.settled(); rt.dirty(false);
+        rt.app.band.core.documents.set_autosave_seconds(2.5);
+        rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(PanelId::new("vfx")))))));
+        let due = rt.app.band.core.wake_deadline(true).unwrap();
+        assert_eq!(Some(due), rt.app.band.core.dock().deadline());
+        assert!(Duration::from_millis(due) < rt.app.band.core.documents.recovery_deadline().unwrap());
+        rt.clock.advance(Duration::from_millis(due).saturating_sub(rt.clock.now()));
+        let sent = {
+            let mut driver = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+            driver.redraw(); driver.messages()
+        };
+        assert!(!sent.is_empty());
+        for message in sent { rt.message(message); }
+        rt.until(|app| !app.band.core.dock().save_pending());
+        assert!(LayoutFile::decode(&store.get("layouts.json").unwrap()).unwrap().workspaces.contains_key("animate"));
+        // Force the same retry branch as a publication still busy when recovery first comes due.
+        if deferred { rt.app.band.core.documents.set_recovery_activity(styk_core::documents::recovery::Activity { saving: true, ..Default::default() }); }
+        rt.advance_deadline();
+        if deferred {
+            rt.drain();
+            assert!(rt.app.band.core.documents.recovery_deadline().is_some_and(|due| due > rt.clock.now()), "busy recovery must rearm its production deadline");
+            assert!(!rt.app.band.core.documents.recovery_view().unwrap().busy);
+            rt.app.band.core.documents.set_recovery_activity(Default::default());
+            let mut driver = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+            driver.redraw();
+            assert!(driver.messages().is_empty(), "the retry is not due yet");
+            assert!(matches!(driver.redraw_request, iced::window::RedrawRequest::At(_)), "the mounted adapter must request the rearmed deadline");
+        }
+        let root = rt.root.0.clone();
+        // A fast write may finish within the returned tasks; wait for the durable
+        // outcome, not a busy state that can already have passed.
+        rt.until_with_deadlines(|app| !app.band.core.documents.recovery_view().unwrap().busy && std::fs::read_dir(&root).unwrap().filter_map(Result::ok).any(|entry| entry.path().extension().is_some_and(|ext| ext == "styk")));
+    }
 }
+
 #[test]
 fn self_check_invalidated_checkpoint_allows_another_quit() {
     let mut rt = Runtime::new(); rt.settled(); rt.dirty(false);
