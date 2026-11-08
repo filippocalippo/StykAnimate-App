@@ -9,6 +9,7 @@ use styk_core::shell::session::Session;
 use styk_core::shell::strip::TabState;
 use styk_core::shell::workspace::{Report, Workspace};
 use styk_core::shell::{Event, Shell, TabView, Window};
+use styk_core::screens::InspectorScreen;
 use styk_design::Theme;
 
 /// A screen of the catalogue.
@@ -24,11 +25,37 @@ pub enum Screen {
     BandFolded,
     /// The band while a figure is being built: Build is the workspace, Test rig and Done show, Export is quiet.
     BandBuild,
+    /// The Properties panel in a context (`styk_core::screens`), docked at today's default size; dark when `true`.
+    Inspector(InspectorScreen, bool),
 }
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 5] = [Screen::ComponentSheet, Screen::Band, Screen::BandDark, Screen::BandFolded, Screen::BandBuild];
+    pub const ALL: [Screen; 23] = [
+        Screen::ComponentSheet,
+        Screen::Band,
+        Screen::BandDark,
+        Screen::BandFolded,
+        Screen::BandBuild,
+        Screen::Inspector(InspectorScreen::Scene, false),
+        Screen::Inspector(InspectorScreen::Scene, true),
+        Screen::Inspector(InspectorScreen::Figure, false),
+        Screen::Inspector(InspectorScreen::Figure, true),
+        Screen::Inspector(InspectorScreen::Joint, false),
+        Screen::Inspector(InspectorScreen::Joint, true),
+        Screen::Inspector(InspectorScreen::Figures, false),
+        Screen::Inspector(InspectorScreen::Figures, true),
+        Screen::Inspector(InspectorScreen::Text, false),
+        Screen::Inspector(InspectorScreen::Text, true),
+        Screen::Inspector(InspectorScreen::Image, false),
+        Screen::Inspector(InspectorScreen::Image, true),
+        Screen::Inspector(InspectorScreen::Camera, false),
+        Screen::Inspector(InspectorScreen::Camera, true),
+        Screen::Inspector(InspectorScreen::Layer, false),
+        Screen::Inspector(InspectorScreen::Layer, true),
+        Screen::Inspector(InspectorScreen::Frame, false),
+        Screen::Inspector(InspectorScreen::Frame, true),
+    ];
 
     /// The ID the command line uses.
     pub const fn id(self) -> &'static str {
@@ -38,20 +65,38 @@ impl Screen {
             Screen::BandDark => "band-dark",
             Screen::BandFolded => "band-folded",
             Screen::BandBuild => "band-build",
+            Screen::Inspector(InspectorScreen::Scene, false) => "inspector-scene",
+            Screen::Inspector(InspectorScreen::Scene, true) => "inspector-scene-dark",
+            Screen::Inspector(InspectorScreen::Figure, false) => "inspector-figure",
+            Screen::Inspector(InspectorScreen::Figure, true) => "inspector-figure-dark",
+            Screen::Inspector(InspectorScreen::Joint, false) => "inspector-joint",
+            Screen::Inspector(InspectorScreen::Joint, true) => "inspector-joint-dark",
+            Screen::Inspector(InspectorScreen::Figures, false) => "inspector-figures",
+            Screen::Inspector(InspectorScreen::Figures, true) => "inspector-figures-dark",
+            Screen::Inspector(InspectorScreen::Text, false) => "inspector-text",
+            Screen::Inspector(InspectorScreen::Text, true) => "inspector-text-dark",
+            Screen::Inspector(InspectorScreen::Image, false) => "inspector-image",
+            Screen::Inspector(InspectorScreen::Image, true) => "inspector-image-dark",
+            Screen::Inspector(InspectorScreen::Camera, false) => "inspector-camera",
+            Screen::Inspector(InspectorScreen::Camera, true) => "inspector-camera-dark",
+            Screen::Inspector(InspectorScreen::Layer, false) => "inspector-layer",
+            Screen::Inspector(InspectorScreen::Layer, true) => "inspector-layer-dark",
+            Screen::Inspector(InspectorScreen::Frame, false) => "inspector-frame",
+            Screen::Inspector(InspectorScreen::Frame, true) => "inspector-frame-dark",
         }
     }
 
     /// The theme the screen is drawn in.
     pub const fn theme(self) -> Theme {
         match self {
-            Screen::BandDark => Theme::Dark,
+            Screen::BandDark | Screen::Inspector(_, true) => Theme::Dark,
             _ => Theme::Light,
         }
     }
 
     /// Whether the screen is the top band over its window (the band screens need the shell's layout).
     pub const fn is_band(self) -> bool {
-        !matches!(self, Screen::ComponentSheet)
+        !matches!(self, Screen::ComponentSheet | Screen::Inspector(..))
     }
 
     /// The screen with this ID.
@@ -97,7 +142,9 @@ mod tests {
             assert_eq!(Screen::from_id(screen.id()), Some(screen));
         }
         assert_eq!(Screen::from_id("nope"), None);
-        assert_eq!(Screen::ids(), "component-sheet, band, band-dark, band-folded, band-build");
+        assert!(Screen::ids().starts_with("component-sheet, band, band-dark, band-folded, band-build, inspector-scene, inspector-scene-dark"));
+        assert_eq!(Screen::from_id("inspector-text-dark"), Some(Screen::Inspector(InspectorScreen::Text, true)));
+        assert!(Screen::Inspector(InspectorScreen::Camera, true).theme() == Theme::Dark && !Screen::Inspector(InspectorScreen::Camera, false).is_band());
         assert!(Screen::BandDark.theme() == Theme::Dark && Screen::Band.theme() == Theme::Light);
         assert!(Screen::BandBuild.is_band() && !Screen::ComponentSheet.is_band());
     }

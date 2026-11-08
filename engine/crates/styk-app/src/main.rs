@@ -568,6 +568,8 @@ fn main() -> ExitCode {
         eprintln!("the application's GPU policy was already installed");
         return ExitCode::FAILURE;
     }
+    #[cfg(feature = "devtools")]
+    styk_devtools::initialize();
     mark!("startup");
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let launch = match Launch::parse(shell::without_links(&arguments)) {
@@ -584,6 +586,23 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    #[cfg(feature = "devtools")]
+    let _control = if launch.control {
+        match styk_devtools::channel::shell_reader() {
+            Ok(reader) => Some(reader),
+            Err(error) => {
+                eprintln!("control channel: {error}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        None
+    };
+    #[cfg(not(feature = "devtools"))]
+    if launch.control {
+        eprintln!("--control requires a developer build");
+        return ExitCode::from(2);
+    }
     let screen = match launch.screen.as_deref().map(|id| (id, Screen::from_id(id))) {
         Some((id, None)) => {
             eprintln!("unknown screen {id:?}: the catalogue has {}", Screen::ids());
@@ -747,7 +766,12 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
     let size = launch.size.unwrap_or(window::DEFAULT_SIZE);
     let sheet = (screen == Some(Screen::ComponentSheet)).then(|| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr));
     let theme = screen.map_or(Theme::default(), Screen::theme);
-    let result = headless::screenshot(theme, size, launch.scale.unwrap_or(1.0) as f32, sheet.as_ref(), screen.filter(|screen| screen.is_band())).and_then(|image| {
+    let scale = launch.scale.unwrap_or(1.0) as f32;
+    let result = match screen {
+        Some(screen @ Screen::Inspector(..)) => headless::inspector_screenshot(screen, size, scale),
+        _ => headless::screenshot(theme, size, scale, sheet.as_ref(), screen.filter(|screen| screen.is_band())),
+    }
+    .and_then(|image| {
         mark!("first-frame");
         screenshot::write(path, &image)
     });

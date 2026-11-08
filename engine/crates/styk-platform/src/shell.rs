@@ -163,29 +163,7 @@ pub fn start(arguments: &[String], unattended: bool, wakes: &Wakes) -> Start {
 
 #[cfg(windows)]
 fn workspace_directory(profile: &std::path::Path) -> Option<PathBuf> {
-    use crate::windows::updates::process_alive;
-    use styk_services::shell::instance::{RenameFailure, WorkspaceEntry, WorkspaceFs, workspace_directory};
-    struct RealFs;
-    impl WorkspaceFs for RealFs {
-        fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
-            std::fs::create_dir_all(path)
-        }
-        fn exists(&self, path: &std::path::Path) -> bool {
-            path.exists()
-        }
-        fn entries(&self, path: &std::path::Path) -> std::io::Result<Vec<WorkspaceEntry>> {
-            Ok(std::fs::read_dir(path)?.flatten().map(|entry| WorkspaceEntry { name: entry.file_name().to_string_lossy().into_owned(), is_dir: entry.file_type().is_ok_and(|t| t.is_dir()) }).collect())
-        }
-        fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> Result<(), RenameFailure> {
-            std::fs::rename(from, to).map_err(|e| match e.kind() {
-                std::io::ErrorKind::NotFound => RenameFailure::Missing,
-                std::io::ErrorKind::AlreadyExists => RenameFailure::Exists,
-                std::io::ErrorKind::PermissionDenied => RenameFailure::Denied,
-                _ => RenameFailure::Other,
-            })
-        }
-    }
-    workspace_directory(&RealFs, profile, std::process::id(), &process_alive).ok()
+    crate::recovery::workspace::at_startup(profile).ok()
 }
 
 impl Shell {

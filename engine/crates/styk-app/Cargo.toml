@@ -23,7 +23,7 @@ iced_winit = { path = "../../../vendor/iced/winit", optional = true }
 pollster = "0.4"
 styk-core = { path = "../styk-core" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
-styk-devtools = { path = "../styk-devtools", optional = true }
+styk-devtools = { path = "../styk-devtools", optional = true, features = ["ui"] }
 styk-platform = { path = "../styk-platform" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }

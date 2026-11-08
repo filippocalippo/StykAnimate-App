@@ -1,0 +1,21 @@
+styk-auto/1
+# The Properties panel on tests/edit/startup.document.json (figure 1 selected): a drag of a scrub label, a typed value,
+# an arrow step on a label, undo and redo, each checked by what the panel then shows and what history holds.
+select 1
+inspector scrub root_x 20
+expect history 1
+inspector type root_y 300
+expect property root_y 300
+expect history 2
+inspector step scale up
+expect property scale 101
+expect history 3
+click undo
+click undo
+click undo
+expect property root_x 480
+expect property root_y 280
+expect property scale 100
+expect history 0
+click redo
+expect history 1

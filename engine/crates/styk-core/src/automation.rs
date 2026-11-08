@@ -107,6 +107,24 @@ pub enum Expect {
     Tab(usize, String),
     /// The window's width as the shell knows it, in logical pixels.
     Width(u32),
+    /// A Properties panel number, by its property name (`root_x`), as the panel shows it (the text of a number).
+    Property(String, String),
+    /// How many entries the active project's undo history holds.
+    History(usize),
+}
+
+/// What a script does in the Properties panel, through its widgets.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum InspectorStep {
+    /// Drag a number's scrub label this many pixels (right is positive): one gesture.
+    Scrub { key: String, dx: f64 },
+    /// Focus a number's input, replace its text with this and press Enter: one typed value.
+    Type { key: String, text: String },
+    /// Press and release an arrow key on a number's label: `up` or `down`.
+    Step { key: String, up: bool },
+    /// Show this context: `auto`, `scene`, `camera`, `layer` or `frame`.
+    Context(String),
 }
 
 /// One step.
@@ -122,6 +140,8 @@ pub enum Step {
     Pointer(Pointer),
     /// Logical stage coordinates; the runner supplies the shared clock timestamp.
     Pen(PenSample),
+    /// Request a document frame at a finite nonnegative tick; integer profiling
+    /// ticks and exact fractional stage samples use the same action.
     Frame(f64),
     /// Consecutive playback requests, wrapping at the document's end.
     Play {
@@ -131,6 +151,10 @@ pub enum Step {
     Measure(String),
     /// Open a project file (relative to the script).
     Open(PathBuf),
+    /// Export the active document through its export owner.
+    Export,
+    /// A measurement budget; the profiling runner judges it after the runs.
+    Budget(BudgetSpec),
     /// Let this many frames pass.
     Wait(u32),
     /// Resize the window to this logical size.
@@ -158,10 +182,43 @@ pub enum Step {
     Advance(u64),
     /// Stand in for K-doc's save: a save of the project in front landed now.
     SaveLanded,
+    /// Select figures by unique id (none for an empty selection), and a joint (`-1` for the whole figure).
+    Select { uids: Vec<u32>, joint: i64 },
+    /// A step in the Properties panel.
+    Inspector(InspectorStep),
     /// Check something.
     Expect(Expect),
     /// Write the window to a PNG (relative to the script).
     Screenshot(PathBuf),
+}
+
+/// Parsed measurement declaration. Core owns syntax; tools own measurement and verdicts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BudgetSpec {
+    pub metric: String,
+    pub op: String,
+    pub limit: f64,
+    pub unit: String,
+    pub floor: Option<String>,
+}
+
+fn budget(text: &str, line: usize) -> Result<BudgetSpec, ScriptError> {
+    let bad = |message: &str| ScriptError { line, message: message.into() };
+    let (text, floor) = text.split_once(" floor:")
+        .map_or((text, None), |(a, b)| (a, Some(b.trim().to_owned())));
+    let fields: Vec<_> = text.split_whitespace().collect();
+    let ["budget", metric, op, quantity] = fields.as_slice() else { return Err(bad("invalid budget declaration")); };
+    if metric.len() > 128 || !metric.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_')
+        || !["<=", ">=", "==", "<", ">"].contains(op)
+        || floor.as_ref().is_some_and(|s| s.len() > 512) {
+        return Err(bad("invalid budget declaration"));
+    }
+    let (number, unit, multiplier) = [("MiB", 1048576.), ("KiB", 1024.), ("ms", 1.), ("s", 1000.), ("B", 1.), ("%", 1.)]
+        .into_iter().find_map(|(u, m)| quantity.strip_suffix(u).map(|n| (n, u, m)))
+        .unwrap_or((quantity, "", 1.));
+    let limit = number.parse::<f64>().map_err(|_| bad("invalid budget value"))? * multiplier;
+    if !limit.is_finite() || limit < 0. { return Err(bad("budget must be finite and nonnegative")); }
+    Ok(BudgetSpec { metric: (*metric).into(), op: (*op).into(), limit, unit: unit.into(), floor })
 }
 
 /// A script that cannot be run.
@@ -284,11 +341,9 @@ fn expectation(words: &[&str], line: usize) -> Result<Expect, ScriptError> {
             Expect::Tab(number(n, line, "tab")?, (*state).to_string())
         }
         ["width", n] => Expect::Width(n.parse().map_err(|_| bad("width wants a number"))?),
-        _ => {
-            return Err(bad(
-                "expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost> or width <n>",
-            ));
-        }
+        ["property", key, value] if value.parse::<f64>().is_ok() => Expect::Property((*key).to_string(), (*value).to_string()),
+        ["history", n] => Expect::History(n.parse().map_err(|_| bad("history wants a count"))?),
+        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost>, width <n>, property <name> <number> or history <count>")),
     })
 }
 
@@ -419,6 +474,9 @@ impl Script {
                 },
                 "open" if !rest.is_empty() => Step::Open(PathBuf::from(rest)),
                 "open" => return Err(wants("a path")),
+                "export" if words.is_empty() => Step::Export,
+                "export" => return Err(wants("no arguments")),
+                "budget" => Step::Budget(budget(content, line)?),
                 "wait" => Step::Wait(
                     words
                         .first()
@@ -472,6 +530,24 @@ impl Script {
                         .ok_or_else(|| wants("a frame rate"))?,
                 ),
                 "expect" => Step::Expect(expectation(&words, line)?),
+                "select" => match words.as_slice() {
+                    [uids] | [uids, _] => {
+                        let joint = match words.get(1) {
+                            Some(joint) => joint.parse().map_err(|_| wants("<uid,uid..|none> [joint]"))?,
+                            None => -1,
+                        };
+                        let uids = if *uids == "none" { Vec::new() } else { uids.split(',').map(|uid| uid.parse().map_err(|_| wants("<uid,uid..|none> [joint]"))).collect::<Result<_, _>>()? };
+                        Step::Select { uids, joint }
+                    }
+                    _ => return Err(wants("<uid,uid..|none> [joint]")),
+                },
+                "inspector" => Step::Inspector(match words.as_slice() {
+                    ["scrub", key, dx] => InspectorStep::Scrub { key: (*key).to_string(), dx: dx.parse().map_err(|_| wants("scrub <property> <pixels>"))? },
+                    ["type", key, text] => InspectorStep::Type { key: (*key).to_string(), text: (*text).to_string() },
+                    ["step", key, direction @ ("up" | "down")] => InspectorStep::Step { key: (*key).to_string(), up: *direction == "up" },
+                    ["context", name @ ("auto" | "scene" | "camera" | "layer" | "frame")] => InspectorStep::Context((*name).to_string()),
+                    _ => return Err(wants("scrub <property> <pixels>, type <property> <text>, step <property> <up|down> or context <auto|scene|camera|layer|frame>")),
+                }),
                 "screenshot" if !rest.is_empty() => Step::Screenshot(PathBuf::from(rest)),
                 "screenshot" => return Err(wants("a path")),
                 other => {
@@ -500,6 +576,33 @@ fn finite(text: &str, line: usize) -> Result<f64, ScriptError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stage_inspector_and_profiling_steps_share_one_ordered_script() {
+        let script = Script::parse(concat!(
+            "styk-auto/1\n",
+            "pan 3 -2\ninspector context camera\nzoom 1.2 100 200\n",
+            "select 1 2\nframe 1.25\ninspector scrub root_x 20\n",
+            "pointer 7 cancel middle 1.5 2.5\nexpect property root_x 500\n",
+            "pen 8 hover pen 3 4 0\nclick undo\nplay 100 120\n",
+            "expect history 0\nframe 2\nexport\nbudget export.ms <= 0.5s\n",
+        )).unwrap();
+        assert_eq!(script.steps.len(), 15);
+        assert_eq!(script.steps[0], (2, Step::Pan([3., -2.])));
+        assert_eq!(script.steps[1], (3, Step::Inspector(InspectorStep::Context("camera".into()))));
+        assert_eq!(script.steps[3].1, Step::Select { uids: vec![1], joint: 2 });
+        assert_eq!(script.steps[4].1, Step::Frame(1.25));
+        assert!(matches!(&script.steps[5].1, Step::Inspector(InspectorStep::Scrub { key, dx }) if key == "root_x" && *dx == 20.));
+        assert!(matches!(&script.steps[6].1, Step::Pointer(Pointer { id: 7, .. })));
+        assert_eq!(script.steps[7].1, Step::Expect(Expect::Property("root_x".into(), "500".into())));
+        assert!(matches!(&script.steps[8].1, Step::Pen(PenSample { pointer: 8, .. })));
+        assert_eq!(script.steps[9].1, Step::Click(Target::Undo));
+        assert_eq!(script.steps[10].1, Step::Play { from: 100., frames: 120 });
+        assert_eq!(script.steps[11].1, Step::Expect(Expect::History(0)));
+        assert_eq!(script.steps[12].1, Step::Frame(2.));
+        assert_eq!(script.steps[13].1, Step::Export);
+        assert!(matches!(&script.steps[14].1, Step::Budget(spec) if spec.limit == 500.));
+    }
 
     #[test]
     fn stage_steps_share_the_versioned_shell_script() {
@@ -698,5 +801,64 @@ styk-auto/1
     #[test]
     fn an_empty_script_is_no_steps() {
         assert_eq!(Script::parse("# nothing\n").unwrap().steps.len(), 0);
+    }
+
+    #[test]
+    fn the_inspector_steps_parse() {
+        let script = Script::parse("styk-auto/1
+select 1,3
+select none
+select 1 2
+inspector scrub root_x 20
+inspector type root_y 300
+inspector step scale up
+inspector context camera
+expect property root_x 500
+expect history 3
+").expect("it parses");
+        let steps: Vec<Step> = script.steps.into_iter().map(|(_, step)| step).collect();
+        assert_eq!(steps[0], Step::Select { uids: vec![1, 3], joint: -1 });
+        assert_eq!(steps[1], Step::Select { uids: Vec::new(), joint: -1 });
+        assert_eq!(steps[2], Step::Select { uids: vec![1], joint: 2 });
+        assert_eq!(steps[3], Step::Inspector(InspectorStep::Scrub { key: "root_x".into(), dx: 20.0 }));
+        assert_eq!(steps[4], Step::Inspector(InspectorStep::Type { key: "root_y".into(), text: "300".into() }));
+        assert_eq!(steps[5], Step::Inspector(InspectorStep::Step { key: "scale".into(), up: true }));
+        assert_eq!(steps[6], Step::Inspector(InspectorStep::Context("camera".into())));
+        assert_eq!(steps[7], Step::Expect(Expect::Property("root_x".into(), "500".into())));
+        assert_eq!(steps[8], Step::Expect(Expect::History(3)));
+        assert!(Script::parse("inspector scrub root_x far").is_err());
+        assert!(Script::parse("expect property root_x lots").is_err());
+    }
+}
+
+#[cfg(test)]
+mod developer_steps_tests {
+    use super::*;
+
+    #[test]
+    fn developer_actions_and_budgets_use_the_application_language() {
+        let script = Script::parse("styk-auto/1\nopen fixture.styk\nframe 0\nadvance 17\nexport\nbudget export.ms <= 0.5s floor:shared machine\n").unwrap();
+        assert_eq!(script.steps.len(), 5);
+        assert_eq!(script.steps[1], (3, Step::Frame(0.0)));
+        assert_eq!(script.steps[3], (5, Step::Export));
+        let Step::Budget(spec) = &script.steps[4].1 else { panic!("budget AST missing"); };
+        assert_eq!(spec.limit, 500.);
+        assert_eq!(spec.floor.as_deref(), Some("shared machine"));
+        for text in ["frame nope", "frame -1", "frame 1 extra", "export extra", "budget x <= NaNms"] {
+            assert_eq!(Script::parse(&format!("styk-auto/1\n{text}\n")).unwrap_err().line, 2);
+        }
+        assert!(Script::parse("styk-auto/1\nfile fixture.styk\nopen\n").is_err());
+    }
+}
+
+#[cfg(test)]
+mod repository_scenarios {
+    use super::*;
+    #[test]
+    fn every_headless_fixture_is_a_valid_application_script() {
+        for text in [include_str!("../../../../scenarios/open.styk-auto"), include_str!("../../../../scenarios/frame.styk-auto"), include_str!("../../../../scenarios/export.styk-auto")] {
+            let script = Script::parse(text).unwrap();
+            assert!(matches!(&script.steps[0].1, Step::Open(_)));
+        }
     }
 }

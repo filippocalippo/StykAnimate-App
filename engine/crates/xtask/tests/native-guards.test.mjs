@@ -134,6 +134,36 @@ test('screen catalogue and limits reject malformed thresholds and retain pending
   assert.throws(() => parseLimits(text.replace('0.0', 'invalid')), /limits.toml:3: screenshot: invalid value/);
 });
 
+test('a screen masks the parts another chunk owns, each a rectangle inside the screen naming its owner', () => {
+  const text = '["a"]\nreference = "ref.png"\nmax_difference = 0.01\nwidth = 10\nheight = 10';
+  const masked = parseLimits(`${text}\nmasks = [\n  [1, 2, 3, 4, "K-cmd: the quick actions"],\n  [0, 9, 10, 1, "K-dock: the corners"],\n]`).get('a');
+  assert.deepEqual(masked.masks, [[1, 2, 3, 4, 'K-cmd: the quick actions'], [0, 9, 10, 1, 'K-dock: the corners']]);
+  assert.deepEqual(parseLimits(text).get('a').masks, []);
+  assert.throws(() => parseLimits(`${text}\nmasks = [\n  [1, 2, 3, 4],\n]`), /a: a mask is \[x, y, width, height, "owner: what"\]/);
+  assert.throws(() => parseLimits(`${text}\nmasks = [\n  [8, 8, 3, 3, "K-cmd: past the edge"],\n]`), /mask \[8, 8, 3, 3\] lies outside the screen/);
+  assert.throws(() => parseLimits(`${text}\nmasks = [\n  [1, 2, 3, 4, "K-cmd"],`), /limits.toml:6: screenshot: unclosed masks/);
+});
+
+test('masked rectangles are painted alike in both images before they are compared', async () => {
+  const {readPng, writePng} = await import('../../../../scripts/png.mjs');
+  const {maskedCopies} = await import('../../../../scripts/native-screen-guards.mjs');
+  mkdirSync('tmp', {recursive: true});
+  const root = mkdtempSync(resolve('tmp/screen-mask-'));
+  try {
+    const image = colour => ({width: 4, height: 4, data: Buffer.from(Array.from({length: 16}, () => [...colour, 255]).flat())});
+    writePng(join(root, 'ref.png'), image([0, 0, 0]));
+    writePng(join(root, 'actual.png'), image([200, 0, 0]));
+    const [left, right] = maskedCopies(join(root, 'ref.png'), join(root, 'actual.png'), [[0, 0, 2, 4, 'K-cmd: left half']], root, 'a');
+    const [a, b] = [readPng(left), readPng(right)];
+    const pixel = (img, x, y) => [...img.data.subarray((y * 4 + x) * 4, (y * 4 + x) * 4 + 3)];
+    for (let y = 0; y < 4; y++) {
+      assert.deepEqual([pixel(a, 1, y), pixel(b, 1, y)], [[255, 255, 255], [255, 255, 255]], 'the masked half is the same in both');
+      assert.deepEqual([pixel(a, 2, y), pixel(b, 2, y)], [[0, 0, 0], [200, 0, 0]], 'the rest is compared as captured');
+    }
+    assert.deepEqual(maskedCopies('r.png', 'a.png', [], root, 'b'), ['r.png', 'a.png'], 'an unmasked screen compares its captures');
+  } finally { rmSync(root, {recursive: true}); }
+});
+
 function fixture(edges, registry = []) {
   const names = [...new Set([...Object.keys(edges), ...Object.values(edges).flat()])];
   return {
@@ -199,4 +229,20 @@ test('wasm gate selects the engine binding, core and services without native too
   const m = fixture({'styk-cli': ['styk-doc'], 'styk-ui': ['styk-core'], 'styk-core': ['styk-services'], 'styk-wasm': ['styk-doc']});
   assert.deepEqual(wasmPackages(m), ['styk-core', 'styk-services', 'styk-wasm']);
   assert.throws(() => wasmPackages(fixture({'styk-core': ['styk-services']})), /styk-wasm is missing/);
+});
+
+test('headless developer workers keep UI and engine dependency boundaries', () => {
+  const m = fixture({'styk-cli': ['styk-devtools-engine'], 'styk-devtools-engine': ['styk-core', 'styk-platform', 'styk-services', 'styk-trace'], 'styk-platform':['styk-services'], 'styk-trace':['styk-services']});
+  const cli = m.packages.find(p => p.name === 'styk-cli');
+  assert.ok(directionErrors(m).some(e => e.rule === 'devtools'));
+  cli.dependencies[0].optional = true;
+  cli.features['app-tools'] = ['dep:styk-devtools-engine'];
+  assert.deepEqual(directionErrors(m), []);
+  cli.features.default = ['app-tools'];
+  assert.ok(directionErrors(m).some(e => e.rule === 'devtools'));
+  assert.deepEqual(directionErrors(fixture({'styk-devtools':['styk-devtools-engine','styk-trace'], 'styk-devtools-engine':['styk-platform'], 'styk-platform':['styk-services'], 'styk-trace':['styk-services']})), []);
+  assert.ok(directionErrors(fixture({'styk-core':['styk-devtools-engine']})).some(e => e.rule === 'direction'));
+  assert.ok(directionErrors(fixture({'styk-cli':['styk-devtools']})).some(e => e.rule === 'devtools'));
+  assert.ok(directionErrors(fixture({'styk-devtools-engine':['bridge'], bridge:['iced']})).some(e => e.message.includes('headless developer workers')));
+  assert.ok(directionErrors(fixture({'styk-devtools':['styk-platform']})).some(e => e.rule === 'direction'));
 });

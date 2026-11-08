@@ -13,6 +13,7 @@ styk-core = { path = "../styk-core" }
 styk-design = { path = "../styk-design", features = ["widgets"] }
 
 [dev-dependencies]
+styk-core = { path = "../styk-core", features = ["testing"] }
 png = "0.18"
 pollster = "0.4"
 styk-platform = { path = "../styk-platform" }

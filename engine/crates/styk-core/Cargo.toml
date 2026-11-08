@@ -6,6 +6,11 @@ version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# `styk_core::testing`: what the interface's tests need to open a document without naming an engine crate.
+testing = []
+inspect = ["styk-edit/inspect", "styk-engine/inspect", "styk-eval/inspect"]
+
 [dependencies]
 styk-alloc = { path = "../styk-alloc" }
 styk-doc = { path = "../styk-doc" }
@@ -18,8 +23,16 @@ styk-render = { path = "../styk-render" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }
 unicode-normalization = "=0.1.23"
+# Plural rules and number formatting for the interface's 27 languages: ICU4X 1.4, CLDR 44, the data of Electron 39's ICU 74.
+fixed_decimal = { version = "0.5", features = ["ryu"] }
+icu_decimal = "=1.4.0"
+icu_locid = "1.4"
+icu_plurals = "=1.4.0"
+icu_provider = "1.4"
 
 [dev-dependencies]
+# The integration tests open documents through the same harness the interface's tests use.
+styk-core = { path = ".", features = ["testing"] }
 styk-services = { path = "../styk-services", features = ["test-fakes"] }
 styk-export = { path = "../styk-export" }
 sha2 = "0.10"
@@ -28,3 +41,4 @@ zstd = "0.13"
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
+

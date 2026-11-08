@@ -44,8 +44,18 @@ macro_rules! video_tools {
 pub mod clock;
 #[cfg(windows)]
 pub mod windows;
+#[cfg(all(windows, feature = "dev-control"))]
+mod control_windows;
+#[cfg(all(windows, feature = "dev-control"))]
+pub use control_windows::LocalControl;
+#[cfg(all(not(windows), feature = "dev-control"))]
+mod control_unavailable;
+#[cfg(all(not(windows), feature = "dev-control"))]
+pub use control_unavailable::LocalControl;
 #[cfg(windows)]
 pub mod files;
+#[cfg(windows)]
+pub mod recovery;
 pub mod memory;
 
 pub mod shell;

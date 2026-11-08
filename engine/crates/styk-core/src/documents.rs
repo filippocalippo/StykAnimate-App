@@ -15,6 +15,7 @@ use styk_engine::document::{OpenOptions, OpenSource, OpenedDocument};
 mod host;
 mod tabs;
 pub use tabs::drop_index;
+pub mod recovery;
 pub use host::{CloseChoice, Dispatch, Effect, HostError, HostOptions, JobId, PromptId, Request};
 use styk_services::files::FileTarget;
 
@@ -159,9 +160,14 @@ pub struct Document {
     blank: bool,
     epoch: u64,
     saved_at: Option<f64>,
+    recovery: recovery::CopyState,
 }
 
 impl Document {
+    #[cfg(feature = "inspect")]
+    pub fn inspection(&self) -> Result<crate::inspect::DocumentSnapshot, DocumentsError> { Ok(self.prepared.session.get()?.inspection().into()) }
+    #[cfg(feature = "inspect")]
+    pub fn inspect_history(&self, offset:usize) -> Result<crate::inspect::Page<crate::inspect::HistoryRow>, DocumentsError> { Ok(self.prepared.session.get()?.inspect_history(offset).into()) }
     pub fn id(&self) -> DocumentId { self.id }
     pub fn name(&self) -> &str { &self.prepared.name }
     pub fn revision(&self) -> u64 { self.prepared.session.revision() }
@@ -189,6 +195,31 @@ impl Document {
 
     /// Current frame records, shared with the session (live drafts and previews included).
     pub fn frame_records(&self) -> Result<Value, EditError> { self.prepared.session.get().map_err(|error| EditError::Invalid(error.to_string()))?.frame_records() }
+
+    /// The reads the interface thread may make for a panel: they answer from what the session holds and never evaluate
+    /// or convert (D7). `None` means "not ready": the facts lane makes the frame and views from the published generation
+    /// ([`crate::facts`]) and [`Document::adopt_evaluation`] takes them.
+    ///
+    /// The frame on show (a gesture's draft or preview, the retained frame, or a cached evaluation at the playhead).
+    pub fn frame_records_ready(&self) -> Option<Value> { self.prepared.session.get().ok()?.frame_records_ready() }
+    /// The typed document, when the session holds views of it as it is now.
+    pub fn with_document_ready<T>(&self, read: impl FnOnce(&TypedDocument) -> T) -> Option<T> { self.prepared.session.get().ok()?.with_document_ready(read) }
+    /// `animationValue(target, property)` at the playhead, when the frame on show and the views are ready.
+    pub fn animation_value_ready(&self, target: &Value, property: &str) -> Option<Result<Option<Value>, EditError>> { self.prepared.session.get().ok()?.animation_value_ready(target, property) }
+    /// Takes the views and frame a worker made of revision `revision` at `tick`; a document that changed since keeps
+    /// what it has.
+    pub fn adopt_evaluation(&self, revision: u64, views: std::sync::Arc<crate::engine::Prepared>, tick: f64, frame: Value) {
+        if revision != self.revision() { return; }
+        if let Ok(session) = self.prepared.session.get() { session.adopt_evaluation(&session.report().clone(), views, tick, frame); }
+    }
+
+    /// A named read of the session (`animationValue`, ...); `None` when the session does not answer that name.
+    pub fn read(&self, name: &str, args: &Value) -> Option<Result<Option<Value>, EditError>> {
+        match self.prepared.session.get() {
+            Ok(session) => session.read(name, args),
+            Err(error) => Some(Err(EditError::Invalid(error.to_string()))),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -230,16 +261,30 @@ pub struct Documents {
     serial: u64,
     recent: Vec<DocumentId>,
     host: Option<host::Host>,
+    recovery: Option<recovery::RecoveryHost>,
     clipboards: std::collections::HashMap<&'static str, Clipboard>,
 }
 
 struct Clipboard { source: (DocumentId, u64), holder: (DocumentId, u64), value: Value }
 
 impl Documents {
+    #[cfg(feature = "inspect")]
+    pub fn inspection_state(&self) -> Result<crate::inspect::State, DocumentsError> {
+        let documents = self.tabs.iter().map(|tab| {
+            let view = tab.view()?;
+            Ok(crate::inspect::DocumentState {
+                id: tab.id.0, revision: view.revision, tick: view.tick,
+                dirty: view.dirty, undo: view.history.undo, redo: view.history.redo,
+            })
+        }).collect::<Result<Vec<_>, DocumentsError>>()?;
+        Ok(crate::inspect::State { active: self.active.map(|id| id.0), documents })
+    }
     pub fn new() -> Self { Self::default() }
     pub fn tabs(&self) -> &[Document] { &self.tabs }
     pub fn get(&self, id: DocumentId) -> Option<&Document> { self.tabs.iter().find(|tab| tab.id == id) }
     pub fn active(&self) -> Option<&Document> { self.active.and_then(|id| self.get(id)) }
+    /// Whether the shared clipboard of `kind` (`camera`, `figures`, ...) holds something to paste.
+    pub fn has_clipboard(&self, kind: &str) -> bool { self.clipboards.contains_key(kind) }
 
     fn can_switch(&self) -> Result<(), DocumentsError> {
         if self.host.as_ref().is_some_and(host::Host::blocks_switch) { return Err(DocumentsError::Busy); }
@@ -257,11 +302,12 @@ impl Documents {
         };
         let id = DocumentId(serial);
         let at = self.active.and_then(|active| self.tabs.iter().position(|tab| tab.id == active)).map_or(self.tabs.len(), |at| at + 1);
-        self.tabs.insert(at, Document { id, prepared, scopes: Vec::new(), target: None, blank: false, epoch: 0, saved_at: None });
+        self.tabs.insert(at, Document { id, prepared, scopes: Vec::new(), target: None, blank: false, epoch: 0, saved_at: None, recovery: recovery::CopyState::default() });
         self.serial = serial;
         self.active = Some(id);
         self.recent.insert(0, id);
         if let Some(host) = self.host.as_mut() { host.publication_needed = true; }
+        self.sync_recovery();
         Ok(id)
     }
 
@@ -274,6 +320,7 @@ impl Documents {
         self.recent.retain(|other| *other != id);
         self.recent.insert(0, id);
         if let Some(host) = self.host.as_mut() { host.publication_needed = true; }
+        self.sync_recovery();
         Ok(true)
     }
 
@@ -335,9 +382,36 @@ impl Documents {
                 }
             }
         }
+        self.sync_recovery();
         Ok(result)
     }
 
     pub fn undo(&mut self, id: DocumentId) -> Result<CallAnswer, DocumentsError> { self.call(id, "undo", &[], &Value::Null) }
     pub fn redo(&mut self, id: DocumentId) -> Result<CallAnswer, DocumentsError> { self.call(id, "redo", &[], &Value::Null) }
+}
+
+#[cfg(all(test, feature = "inspect"))]
+mod inspection_handoff_tests {
+    use super::*;
+
+    #[test]
+    fn inspection_refuses_a_handed_off_session_and_keeps_prior_tickets_valid() {
+        let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
+        let bytes = include_bytes!("../../../tests/edit/startup.document.json");
+        let prepared = PreparedDocument::open_bytes(&engine, bytes.as_slice().into(), "fixture.styk", &|| false).unwrap();
+        let mut owner = Documents::new();
+        owner.open(prepared).map_err(|(error, _)| error).unwrap();
+        let ticket = owner.active().unwrap().inspection().unwrap();
+        let revision = ticket.revision;
+        // This is the same exclusive handoff the document host uses for worker commands.
+        let session = owner.tabs[0].prepared.session.take().unwrap();
+        assert!(matches!(owner.active().unwrap().inspection(), Err(DocumentsError::Busy)));
+        assert!(matches!(owner.active().unwrap().inspect_history(0), Err(DocumentsError::Busy)));
+        assert!(matches!(crate::inspect::state(&owner), Err(DocumentsError::Busy)));
+        assert_eq!(ticket.node_raw(&["fps"]).unwrap().value.as_deref(), Some("24"));
+        owner.tabs[0].prepared.session = SessionOwner::Ready(session);
+        assert_eq!(owner.active().unwrap().inspection().unwrap().revision, revision);
+        assert_eq!(crate::inspect::state(&owner).unwrap().documents[0].revision, revision);
+        assert!(owner.active().unwrap().inspect_history(0).is_ok());
+    }
 }

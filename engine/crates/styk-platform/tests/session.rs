@@ -318,6 +318,41 @@ fn a_cancel_during_the_finish_ends_the_wait_for_the_encoder() {
 #[test]
 fn a_cancel_during_the_audio_pass_ends_it_and_removes_the_files() {
     let Some(ffmpeg) = ffmpeg() else { return };
+    let dir = scratch("audio-pass-order");
+    let (started, ready) = std::sync::mpsc::channel();
+    let service = FfmpegVideoService::new(&ffmpeg).with_audio_started(suspend, move |child| {
+        started.send(child).unwrap();
+    });
+    let dest = dir.join("out.mp4");
+    let mut req = request(Container::Mp4, Codec::H264, 16, 16, 4);
+    req.fps = 1.0;
+    req.audio = true;
+    let cancel = Cancel::new();
+    let mut session = service.begin(&dest, &VideoRequest::Ffmpeg(req), &cancel).unwrap();
+    fill(&mut *session, 4, &|i| frame(16, 16, i, 255, false)).unwrap();
+    for _ in 0..4 { session.write_audio(&vec![0.25; 96_000]).unwrap(); }
+    let (done, result) = std::sync::mpsc::channel();
+    let finishing = std::thread::spawn(move || { done.send(session.finish()).unwrap(); });
+    let child = ready.recv_timeout(Duration::from_secs(120)).expect("audio child started");
+    assert!(!child.has_exited(), "the suspended audio child cannot complete itself");
+    assert!(result.try_recv().is_err());
+    cancel.cancel();
+    let terminal = result.recv_timeout(Duration::from_secs(120));
+    let reaped = child.has_exited();
+    // Cleanup our child even if the mechanism regresses.
+    child.terminate();
+    assert_eq!(terminal.unwrap(), Err(VideoError::Cancelled));
+    finishing.join().unwrap();
+    assert!(reaped, "finish reaped the audio child before returning");
+    assert!(stages(&dir).is_empty());
+    assert!(!dest.exists());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[ignore = "quiet-machine latency gate: cargo test -p styk-platform quiet_gate_audio_pass -- --ignored --test-threads=1"]
+fn quiet_gate_audio_pass() {
+    let Some(ffmpeg) = ffmpeg() else { return };
     let dir = scratch("audio-pass");
     let service = FfmpegVideoService::new(&ffmpeg);
     let dest = dir.join("out.mp4");

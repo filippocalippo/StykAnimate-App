@@ -323,10 +323,12 @@ fn dropping_the_worker_does_not_wait_for_the_work_it_has_queued() {
     assert!(alive.upgrade().is_none(), "the worker thread was still running 150 ms after it was told to stop");
 }
 
-/// Queues commands behind a held worker, then releases it.
+/// Returns only after the worker has consumed the hold and cannot consume another request until released.
 fn held(worker: &Worker) -> Arc<(Mutex<bool>, Condvar)> {
     let hold = Arc::new((Mutex::new(false), Condvar::new()));
-    worker.send(Request::Hold(hold.clone()));
+    let (entered, reached) = channel();
+    assert!(worker.send(Request::Hold { release: hold.clone(), entered }));
+    reached.recv_timeout(WAIT).expect("the worker entered the hold");
     hold
 }
 
@@ -553,12 +555,12 @@ fn presses_and_requests_past_the_limits_are_refused_and_counted_and_a_stroke_end
         worker.command(StrokeCommand::Cancel { id }, &settings);
     }
     let sent = (0..MAX_QUEUED_CONTROL + 10).filter(|_| worker.send(Request::Ping { token: 1 })).count();
-    // (The hold itself is one of the queued requests.)
-    assert_eq!(sent, MAX_QUEUED_CONTROL - 1);
+    // The acknowledged hold has already left the queue.
+    assert_eq!(sent, MAX_QUEUED_CONTROL);
     release(&hold);
     let mut pongs = 0;
     let mut ended = 0;
-    while pongs < MAX_QUEUED_CONTROL - 1 {
+    while pongs < MAX_QUEUED_CONTROL {
         match worker.wait(WAIT).expect("the worker answers") {
             Reply::Pong { .. } => pongs += 1,
             Reply::Finished { .. } | Reply::Cancelled { .. } | Reply::Failed { .. } => ended += 1,
@@ -725,7 +727,7 @@ fn history_the_worker_refused_is_kept_and_sent_in_order_and_what_cannot_be_kept_
     release(&hold);
     // Room again once the pings are answered.
     let mut pongs = 0;
-    while pongs < MAX_QUEUED_CONTROL - 1 {
+    while pongs < MAX_QUEUED_CONTROL {
         if matches!(worker.wait(WAIT), Some(Reply::Pong { .. })) {
             pongs += 1;
         }
@@ -740,9 +742,11 @@ fn history_the_worker_refused_is_kept_and_sent_in_order_and_what_cannot_be_kept_
     let mut full = HistoryOutbox::default();
     let hold = held(&worker);
     while worker.send(Request::Ping { token: 2 }) {}
+    assert!(!worker.send(Request::Undo), "the queue is saturated");
     for _ in 0..MAX_KEPT_HISTORY {
         assert!(full.submit(&worker, HistoryOp::Undo));
     }
+    assert_eq!(full.kept(), MAX_KEPT_HISTORY);
     assert!(!full.submit(&worker, HistoryOp::Undo));
     assert_eq!(full.lost, 1);
     release(&hold);

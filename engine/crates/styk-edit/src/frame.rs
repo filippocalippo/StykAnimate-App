@@ -15,6 +15,19 @@ use styk_eval::records::Records;
 use crate::record::{frame_mut, uid};
 use crate::{EditError, Editor};
 
+/// One evaluation of the records at `tick`: with `clips` the movieclips sampled; `editor_native` the native timeline's
+/// own reading (`evaluatedEditorWith`), else `evaluatedFrame`.
+fn evaluate(records: &Records, tick: f64, clips: bool, editor_native: bool) -> Result<Value, EditError> {
+    Ok(if editor_native { records.evaluated_editor_with(tick, clips)? } else { records.evaluated_with(tick, clips)? })
+}
+
+/// The frame on show at `tick` of `report`, from views made of it (`prepared`): exactly what the editor evaluates and
+/// caches for its playhead, made elsewhere (the facts lane, from a published generation).
+pub fn editor_frame(report: &Value, prepared: &Prepared, tick: f64) -> Result<Value, EditError> {
+    let sheet = report.path(&["_styk", "layerSheet"]).is_some();
+    evaluate(&Records::new(report, prepared)?, tick, true, !sheet)
+}
+
 /// What evaluation keeps between calls, for as long as the document does not change.
 #[derive(Clone, Default)]
 pub(crate) struct Cache {
@@ -184,8 +197,7 @@ impl Editor {
         if let Some((_, _, _, frame)) = self.eval.borrow().frames.iter().find(|(at, with, editor, _)| *at == tick.to_bits() && *with == clips && *editor == editor_native) {
             return Ok(frame.clone());
         }
-        let records = Records::new(&self.report, &prepared)?;
-        let frame = if editor_native { records.evaluated_editor_with(tick, clips)? } else { records.evaluated_with(tick, clips)? };
+        let frame = evaluate(&Records::new(&self.report, &prepared)?, tick, clips, editor_native)?;
         let mut cache = self.eval.borrow_mut();
         if cache.frames.len() >= 4 {
             cache.frames.remove(0);
@@ -199,6 +211,45 @@ impl Editor {
     pub(crate) fn evaluated_without_patches(&self, tick: f64) -> Result<Value, EditError> {
         let prepared = self.prepared()?;
         Ok(Records::new(&self.report, &prepared)?.evaluated_options(tick, false, true)?)
+    }
+
+    /// The frame on show when answering needs no evaluation and no conversion: a gesture's draft or preview, the
+    /// retained frame, or the evaluation the editor holds for the playhead over views of the document as it is now.
+    /// `None` when only evaluating would answer (the interface then asks a worker: [`editor_frame`]).
+    pub(crate) fn shown_frame_ready(&self) -> Option<Value> {
+        if let Some(preview) = self.property_preview() {
+            return Some(preview);
+        }
+        match (&self.authored, &self.retained) {
+            (Some(edit), _) => Some(edit.frame.clone()),
+            (None, Some(frame)) => Some(frame.clone()),
+            (None, None) => {
+                let editor_native = !self.sheet();
+                let cache = self.eval.borrow();
+                cache.report.as_ref().filter(|held| held.same_node(&self.report))?;
+                cache.frames.iter().find(|(at, clips, editor, _)| *at == self.tick.to_bits() && *clips && *editor == editor_native).map(|(.., frame)| frame.clone())
+            }
+        }
+    }
+
+    /// Takes the frame on show a worker made of `report` (the document as it is now) at `tick` with [`editor_frame`],
+    /// after the views it was made with were adopted: the next read at that tick is ready without evaluating.
+    pub fn adopt_frame(&self, report: &Value, tick: f64, frame: Value) {
+        if !report.same_node(&self.report) {
+            return;
+        }
+        let editor_native = !self.sheet();
+        let mut cache = self.eval.borrow_mut();
+        if !cache.report.as_ref().is_some_and(|held| held.same_node(report)) {
+            return;
+        }
+        if cache.frames.iter().any(|(at, clips, editor, _)| *at == tick.to_bits() && *clips && *editor == editor_native) {
+            return;
+        }
+        if cache.frames.len() >= 4 {
+            cache.frames.remove(0);
+        }
+        cache.frames.push((tick.to_bits(), true, editor_native, frame));
     }
 
     /// `editor.evaluatedFrame`: the draft of the gesture in progress, else the

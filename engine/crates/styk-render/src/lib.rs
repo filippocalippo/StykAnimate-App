@@ -286,3 +286,6 @@ impl Renderer {
         &self.queue
     }
 }
+
+#[cfg(all(feature = "inspect", feature = "gpu"))]
+pub mod inspect;

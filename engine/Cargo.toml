@@ -49,8 +49,23 @@ opt-level = 1
 # The app's quick iteration profile (`cargo build --profile quick -p styk-app`): incremental, the workspace's crates at
 # opt-level 1 and every dependency at 3 (the dev profile's own rule), never measured. Release is what ships.
 [profile.quick]
-inherits = "dev"
+inherits = "release"
+opt-level = 1
+lto = "off"
+codegen-units = 256
 incremental = true
+debug = "line-tables-only"
+strip = false
+[profile.quick.package."*"]
+opt-level = 3
+[profile.quick.package.styk-eval]
+opt-level = 3
+[profile.quick.package.styk-render]
+opt-level = 3
+[profile.quick.package.styk-raster]
+opt-level = 3
+[profile.quick.package.styk-edit]
+opt-level = 3
 
 # iced and its pre-release git dependencies are vendored under ../vendor (docs/native/decisions/0002-vendored-iced.md);
 # these patches make every git source in the dependency graph resolve to those copies, so Cargo.lock holds no git source

@@ -34,6 +34,36 @@ or `cfg(windows)` outside `styk-platform`; no `unwrap`, `expect` or ignored `Res
 clippy `disallowed_methods` for file I/O, `sleep` and blocking waits in interface crates; views never import the engine; new
 dependencies only from an allow list the orchestrator keeps; a screenshot difference limit per screen.
 
+**A merge train, not catch-up rebuilds** (the owner, 2026-11-08). A finished chunk is not merged with `native-app` to be
+re-tested on newer work; only on a real conflict or a dependency on code merged after it started. Reviewed chunks (their
+own tests, review and the orchestrator's diff read done on their branches) merge onto `native-app` three or four in a
+row, then one combined pass runs on the result (build, the changed crates' tests, `cargo xtask check`). High-risk chunks
+and chunks that touch the same files or crates merge alone, with their own pass on the merged result. A failed pass stops
+all merges until it is fixed (the culprit by the failing area, reverted if the fix is not quick); nothing is pushed or
+branched from an untested train head. When a combined pass fails and the failure is small,
+a fresh fixer (Astra for back-end and logic, Sonnet for interface code and mechanical breaks) gets the merged chunks, the
+failing check with its output and the files; it finds the culprit and fixes it at the owner, never weakening a test,
+touching frozen tapes and fixtures, loosening a threshold or adding a special case, and stops and reports when the real
+fix is large, unclear or changes the design. Its diff gets the orchestrator's read (and Sol when it touches back-end,
+logic or a high-risk area), then the pass runs again; other merges wait only during a small fix. The chunk is reverted
+and sent back with the failure instead when the failure is in a high-risk area, the cause is unclear after one attempt,
+or the fix would change the design. **Cheap checks while coding**: implementers iterate with `cargo check` and
+`cargo clippy` on the crates they touch and build and test when a piece is done, only the changed crates; every chunk still
+ends with its full done criteria.
+
+**Cheaper interface work** (the owner, 2026-11-08): chunk K-fastui, after K-cmd and before the screen fan-out, adds a
+developer-only `styk-screens` binary that renders catalogue screens headless from fixture view models through exactly the
+app's view functions, widgets, fonts and renderer (pixel-identical to `stykanimate --screen`, checked at gates; never
+shipped), for implementers' screenshot loop; the real app's screen check still runs before a chunk is done and before
+every merge. It also measures `rust-lld` against the MSVC linker and switches dev and test builds only if clearly faster
+with every test, guard and the release-isolation check passing. **Interface parity** (the owner, 2026-11-08, replacing stricter readings of 1:1): someone comparing the two apps side
+by side sees the same app: layout, sizes and spacing within about 1 px, the same colours, fonts, weights, icons, radii,
+states, text and noticeable behaviour. Identical anti-aliasing, ClearType edges, glyph rasterisation, dithering, sub-pixel
+positions, exact pixel counts and millisecond timing are not required. Screenshot checks guard against mistakes: pixels
+count as different past a channel difference of 24; a complete screen's limit sits a little above what it measures; the
+agent compares the images at 100 % and 200 %, and a screen with nothing visibly different is done. Engine parity (saved
+and export bytes, evaluation, the parity suites) stays exact.
+
 **Proof** proportionate to risk (no exhaustive sweeps unless a real failure calls for one; representative scenes; full
 suites at gates). **Reports** of about 30 lines (what changed, checks and results, screenshot scores, departures from the
 brief, risks). Short Handoff updates at merges; decision records only for real decisions.
