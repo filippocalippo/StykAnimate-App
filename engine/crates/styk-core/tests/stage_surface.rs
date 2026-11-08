@@ -2,7 +2,8 @@
 //! (`docs/native/stage.md`, "The stage widget"). The widget itself is `styk-ui`'s; what it would otherwise decide is here.
 #[path = "../../styk-platform/src/spawn.rs"]
 mod platform_spawn;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use styk_core::app::Core;
 use styk_core::commands::Command;
@@ -20,14 +21,14 @@ fn region() -> Viewport {
     Viewport { size: [960.0, 540.0], insets: [0.0; 4], ..Viewport::default() }
 }
 
-fn core_with(spawner: Arc<dyn styk_services::Spawner>, clock: Arc<dyn Clock>, wake: styk_core::frames::Wake) -> Core {
-    screens::stage_in(spawner, clock, wake, region()).expect("the stage fixture opens")
+fn core_with(spawner: Arc<dyn styk_services::Spawner>, clock: Arc<dyn Clock>) -> Core {
+    screens::stage_in(spawner, clock, region()).expect("the stage fixture opens")
 }
 
 /// A core whose workers never run: input policy needs no frames.
 fn quiet() -> (Core, Arc<Surface>, FixedClock) {
     let clock = FixedClock::new();
-    let core = core_with(Arc::new(ManualSpawner::default()), Arc::new(clock.clone()), Arc::new(|| {}));
+    let core = core_with(Arc::new(ManualSpawner::default()), Arc::new(clock.clone()));
     let surface = core.stage().expect("the active document has a stage");
     (core, surface, clock)
 }
@@ -205,7 +206,7 @@ fn frame(gpu: &styk_render::native_gpu::NativeGpu, surface: &Surface, id: u64, t
 }
 
 /// Frames until the picture on show answers the newest demand (the worker finishes in its own time).
-fn settle(gpu: &styk_render::native_gpu::NativeGpu, surface: &Surface, id: u64, target: &wgpu::Texture, size: [u32; 2], wake: &mpsc::Receiver<()>) {
+fn settle(gpu: &styk_render::native_gpu::NativeGpu, surface: &Surface, id: u64, target: &wgpu::Texture, size: [u32; 2]) {
     let clock = SystemClock::new();
     let start = clock.now();
     loop {
@@ -216,16 +217,8 @@ fn settle(gpu: &styk_render::native_gpu::NativeGpu, surface: &Surface, id: u64, 
             _ => {}
         }
         assert!(clock.now() - start < Duration::from_secs(45), "the stage did not settle");
-        let _ = wake.recv_timeout(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(5));
     }
-}
-
-fn wake_channel() -> (styk_core::frames::Wake, mpsc::Receiver<()>) {
-    let (send, receive) = mpsc::sync_channel(1);
-    let wake: styk_core::frames::Wake = Arc::new(move || {
-        let _ = send.try_send(());
-    });
-    (wake, receive)
 }
 
 /// The brief's automated interaction: the script is run step by step through `Core::dispatch`, and the frame it ends on is
@@ -234,9 +227,8 @@ fn wake_channel() -> (styk_core::frames::Wake, mpsc::Receiver<()>) {
 fn the_automated_interaction_ends_on_the_frame_export_makes() {
     use styk_core::automation::{Script, Step};
     let gpu = gpu();
-    let (wake, receive) = wake_channel();
     let clock = Arc::new(FixedClock::new());
-    let mut core = core_with(Arc::new(platform_spawn::ThreadSpawner), clock.clone(), wake);
+    let mut core = core_with(Arc::new(platform_spawn::ThreadSpawner), clock.clone());
     let surface = core.stage().expect("a stage");
     let size = [960, 540];
     let target = target(&gpu, size);
@@ -249,7 +241,7 @@ fn the_automated_interaction_ends_on_the_frame_export_makes() {
                 let event = Event::from_step(step).unwrap_or_else(|| panic!("line {line}: the stage takes this step"));
                 core.dispatch(Command::Stage(event));
                 if matches!(step, Step::Frame(_)) {
-                    settle(&gpu, &surface, 1, &target, size, &receive);
+                    settle(&gpu, &surface, 1, &target, size);
                     shown += 1;
                 }
             }
@@ -279,15 +271,14 @@ fn the_automated_interaction_ends_on_the_frame_export_makes() {
     let began = start.now();
     while !surface.painter_exited() {
         assert!(start.now() - began < Duration::from_secs(10), "the paint worker did not reclaim its resources");
-        let _ = receive.recv_timeout(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
 #[test]
 fn the_render_path_orders_its_calls_never_waits_and_keeps_the_last_picture_while_a_frame_is_pending() {
     let gpu = gpu();
-    let (wake, receive) = wake_channel();
-    let mut core = core_with(Arc::new(platform_spawn::ThreadSpawner), Arc::new(FixedClock::new()), wake);
+    let mut core = core_with(Arc::new(platform_spawn::ThreadSpawner), Arc::new(FixedClock::new()));
     let surface = core.stage().expect("a stage");
     let size = [960, 540];
     let target = target(&gpu, size);
@@ -300,7 +291,7 @@ fn the_render_path_orders_its_calls_never_waits_and_keeps_the_last_picture_while
     assert!(position(Call::Attach) < position(Call::Request), "the painter exists before the demand reaches it");
     assert!(position(Call::Request) < position(Call::Flush) && position(Call::Flush) < position(Call::Update), "scheduler progress, then the painter's newest picture");
     assert!(position(Call::Update) < position(Call::Present), "update after the previous encoder, present into this frame's pass");
-    settle(&gpu, &surface, 1, &target, size, &receive);
+    settle(&gpu, &surface, 1, &target, size);
     surface.take_calls();
     assert!(frame(&gpu, &surface, 1, &target, size), "a complete picture is presented");
     let shown = surface.shown_key().expect("a picture on show");
@@ -309,7 +300,6 @@ fn the_render_path_orders_its_calls_never_waits_and_keeps_the_last_picture_while
     assert_eq!(surface.status(), PaintStatus::Pending);
     assert_eq!(surface.shown_key().as_ref(), Some(&shown), "a pending demand leaves the picture on show");
     assert_eq!(surface.artboard().map(|a| a[0]), Some(0.0), "the backing stays with the picture on show, not with the newer view");
-    assert!(surface.needs_frames(), "the toolkit is asked for another frame until the picture lands");
     let calls = {
         surface.take_calls();
         // Only the demand, then prepare and present in order, however long the worker takes.
@@ -321,13 +311,165 @@ fn the_render_path_orders_its_calls_never_waits_and_keeps_the_last_picture_while
     let presents = calls.iter().filter(|c| **c == Call::Present).count();
     assert_eq!((updates, presents), (1, 1), "one update and one present per frame: {calls:?}");
     // A recreated toolkit context (a new GPU identity) makes a new painter; the old one is closed, never joined here.
-    settle(&gpu, &surface, 1, &target, size, &receive);
+    settle(&gpu, &surface, 1, &target, size);
     surface.take_calls();
     frame(&gpu, &surface, 2, &target, size);
     assert!(surface.take_calls().contains(&Call::Attach), "a new context needs a new painter");
     assert_eq!(surface.status(), PaintStatus::Pending);
-    settle(&gpu, &surface, 2, &target, size, &receive);
+    settle(&gpu, &surface, 2, &target, size);
     assert_eq!(surface.shown_key().expect("the new painter's picture").view.pan, [50.0, 0.0]);
     assert_eq!(surface.artboard().map(|a| a[0]), Some(50.0), "the backing follows the picture once it lands");
     surface.close();
+}
+
+#[test]
+fn losing_focus_ends_space_and_drags_so_nothing_navigates_afterwards() {
+    let (mut core, surface, _) = quiet();
+    // Space held, the window loses focus, Space is released elsewhere: coming back, a left drag is the tool owner's.
+    core.dispatch(Command::Stage(Event::Space(true)));
+    assert_eq!(surface.cursor(), Cursor::Grab);
+    core.dispatch(Command::Stage(Event::Blur));
+    assert_eq!(surface.cursor(), Cursor::Default, "the held Space was forgotten");
+    let outcome = surface.event(pointer(1, PointerPhase::Down, Button::Left, 100.0, 100.0)).unwrap();
+    assert_eq!(outcome.routed.len(), 1, "the press is no pan any more");
+    surface.event(pointer(1, PointerPhase::Move, Button::Left, 140.0, 100.0)).unwrap();
+    assert_eq!(view(&surface).pan, [0.0, 0.0]);
+    // A pan drag in progress ends where it stands, and the Pan tool (a tool, not a key) stays.
+    surface.event(Event::PanTool(true)).unwrap();
+    surface.event(pointer(2, PointerPhase::Down, Button::Left, 10.0, 10.0)).unwrap();
+    surface.event(pointer(2, PointerPhase::Move, Button::Left, 20.0, 10.0)).unwrap();
+    assert_eq!(surface.cursor(), Cursor::Grabbing);
+    core.dispatch(Command::Stage(Event::Blur));
+    assert_eq!(surface.cursor(), Cursor::Grab);
+    assert_eq!(view(&surface).pan, [10.0, 0.0], "the drag kept what it had moved");
+    surface.event(pointer(2, PointerPhase::Move, Button::Left, 90.0, 10.0)).unwrap();
+    assert_eq!(view(&surface).pan, [10.0, 0.0], "later moves of the captured pointer pan nothing");
+}
+
+struct Count(AtomicUsize);
+impl std::task::Wake for Count {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn queued_pen_samples_wake_the_stage_and_reach_the_host_on_the_next_progress() {
+    use styk_services::input::{InputEvent, InputQueue, PenSample, Phase, Tool};
+    let (mut core, surface, _) = quiet();
+    let queue = InputQueue::new();
+    surface.set_input(queue.clone());
+    surface.event(Event::PanTool(true)).unwrap();
+    let progress = surface.progress();
+    let count = Arc::new(Count(AtomicUsize::new(0)));
+    let waker = std::task::Waker::from(count.clone());
+    assert!(!progress.poll(&waker), "nothing queued, nothing to do");
+    let sample = |phase, x, y| {
+        let mut sample = PenSample::at(0, 5, Tool::Pen, x, y);
+        sample.phase = phase;
+        InputEvent::Sample(sample)
+    };
+    assert!(queue.push(sample(Phase::Down, 100.0, 100.0)));
+    assert!(queue.push(sample(Phase::Move, 130.0, 90.0)));
+    assert_eq!(count.0.load(Ordering::SeqCst), 1, "the queue woke the stage once, with no other event");
+    assert_eq!(view(&surface).pan, [0.0, 0.0], "nothing has reached the host yet");
+    assert!(progress.poll(&waker));
+    core.dispatch(Command::Stage(Event::Progress));
+    assert_eq!(view(&surface).pan, [30.0, -10.0], "the samples reached the host with their provenance");
+    core.dispatch(Command::Stage(Event::Progress));
+    assert_eq!(view(&surface).pan, [30.0, -10.0], "a drained queue gives nothing twice");
+}
+
+/// A spawner that refuses the stage's paint worker while told to, and counts how often it was asked.
+struct PaintWorker {
+    threads: platform_spawn::ThreadSpawner,
+    refuse: std::sync::atomic::AtomicBool,
+    asked: AtomicUsize,
+}
+impl styk_services::Spawner for PaintWorker {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        if name == "styk-stage" {
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            if self.refuse.load(Ordering::SeqCst) {
+                return Err(styk_services::SpawnError("no thread for the paint worker".into()));
+            }
+        }
+        self.threads.spawn(name, job)
+    }
+}
+
+#[test]
+fn a_paint_worker_that_cannot_start_is_reported_and_retried_only_with_a_new_graphics_context() {
+    let gpu = gpu();
+    let spawner = Arc::new(PaintWorker { threads: platform_spawn::ThreadSpawner, refuse: true.into(), asked: AtomicUsize::new(0) });
+    let core = core_with(spawner.clone(), Arc::new(FixedClock::new()));
+    let surface = core.stage().expect("a stage");
+    let size = [960, 540];
+    let target = target(&gpu, size);
+    for _ in 0..5 {
+        assert!(!frame(&gpu, &surface, 1, &target, size));
+    }
+    assert_eq!(spawner.asked.load(Ordering::SeqCst), 1, "five frames, one attempt");
+    assert!(matches!(surface.status(), PaintStatus::Failed(styk_core::stage::PaintError::Device(message)) if message.contains("did not start")));
+    assert_eq!(surface.fault(), Some(styk_core::stage::PaintError::Device("the paint worker did not start: no thread for the paint worker".into())));
+    // Input and demands never retry it either.
+    surface.event(Event::Pan([3.0, 0.0])).unwrap();
+    surface.event(Event::Frame(1.0)).unwrap();
+    frame(&gpu, &surface, 1, &target, size);
+    assert_eq!(spawner.asked.load(Ordering::SeqCst), 1);
+    // A new context is a recovery, and is refused again while the spawner still refuses.
+    frame(&gpu, &surface, 2, &target, size);
+    assert_eq!(spawner.asked.load(Ordering::SeqCst), 2);
+    assert!(surface.fault().is_some());
+    // Once the worker can start, the next context recovers: the fault is gone and the picture arrives.
+    spawner.refuse.store(false, Ordering::SeqCst);
+    frame(&gpu, &surface, 3, &target, size);
+    assert_eq!(spawner.asked.load(Ordering::SeqCst), 3);
+    assert_eq!(surface.fault(), None);
+    settle(&gpu, &surface, 3, &target, size);
+    assert_eq!(surface.shown_key().expect("a picture").view.pan, [3.0, 0.0]);
+    surface.close();
+}
+
+#[test]
+fn a_closed_document_takes_its_stage_with_it() {
+    use styk_core::documents::{DocumentsError, Effect, HostError, Request};
+    let mut core = core_with(Arc::new(platform_spawn::ThreadSpawner), Arc::new(FixedClock::new()));
+    let surface = core.stage().expect("a stage");
+    let first = core.documents.active().expect("a document").id();
+    let clock = SystemClock::new();
+    let mut send = |core: &mut Core, mut request: Request| {
+        let start = clock.now();
+        loop {
+            match core.documents.dispatch(request) {
+                Ok(effect) => return effect,
+                Err((HostError::Documents(DocumentsError::Busy), returned)) => {
+                    assert!(clock.now() - start < Duration::from_secs(5));
+                    request = returned;
+                    std::thread::yield_now();
+                }
+                Err((error, _)) => panic!("dispatch: {error}"),
+            }
+        }
+    };
+    assert!(matches!(send(&mut core, Request::OpenBytes { bytes: Arc::from(FIXTURE), name: "Second.styk".into() }), Effect::Started(_)));
+    let start = clock.now();
+    let second = loop {
+        match core.documents.poll() {
+            Some(Effect::Opened(id)) => break id,
+            Some(other) => panic!("unexpected {other:?}"),
+            None => {
+                assert!(clock.now() - start < Duration::from_secs(20), "the open must finish");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    };
+    core.refresh();
+    assert_ne!(surface.status(), PaintStatus::Closed, "its document is open: the stage lives, though it is not the active one");
+    assert!(core.stage().is_none(), "the active document has no stage of its own");
+    assert!(matches!(send(&mut core, Request::Close(first)), Effect::Closed(id) if id == first));
+    core.refresh();
+    assert_eq!(surface.status(), PaintStatus::Closed, "the stage went with its document: painter and host are closed");
+    assert!(surface.event(Event::Pan([1.0, 1.0])).is_err());
+    assert!(core.documents.get(second).is_some());
 }

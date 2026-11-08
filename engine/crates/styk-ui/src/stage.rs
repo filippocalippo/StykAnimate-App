@@ -12,13 +12,16 @@ use iced::advanced::mouse;
 use iced::keyboard::{self, key::Named};
 use iced::widget::shader::{self, Action, Shader, Viewport};
 use bytemuck::{Pod, Zeroable};
-use iced::{Element, Event as Toolkit, Length, Point, Rectangle, Widget as _, touch, wgpu, window};
+use iced::futures::{Stream, future::poll_fn, stream};
+use iced::{Element, Event as Toolkit, Length, Point, Rectangle, Subscription, Widget as _, touch, wgpu, window};
 use std::fmt;
 use std::sync::Arc;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-use styk_core::services::input::{InputEvent, InputQueue, Modifiers};
+use std::task::Poll;
+use styk_core::services::input::Modifiers;
 use styk_core::stage::input::{Button, Pointer, PointerPhase};
-use styk_core::stage::{Cursor, Event, Gpu, Place, Surface, Wheel, WheelDelta};
+use styk_core::stage::{Cursor, Event, Gpu, Place, Progress, Surface, Wheel, WheelDelta};
 use crate::Message;
 use iced::widget::container;
 use styk_core::app::Core;
@@ -31,15 +34,15 @@ const CHECKER: f32 = 8.0;
 /// The mouse as a pointer. Fingers count up from one, so a finger never takes the mouse's identity.
 const MOUSE: u32 = 0;
 
-/// The stage widget for `surface`. `queue` is the platform's input queue, when a pen source feeds one; `send` wraps an
-/// [`Event`] as the application's message (`Message::Command(Command::Stage(event))`).
-pub fn stage<'a, Message: 'a>(surface: Arc<Surface>, queue: Option<InputQueue>, theme: Theme, send: impl Fn(Event) -> Message + 'a) -> Element<'a, Message> {
-    Shader::new(Program { surface, queue, theme, send: Box::new(send) }).width(Length::Fill).height(Length::Fill).boxed()
+/// The stage widget for `surface`; `send` wraps an [`Event`] as the application's message
+/// (`Message::Command(Command::Stage(event))`). The surface's pen queue and its progress are the core's: the application
+/// mounts [`progress`] while a stage is shown.
+pub fn stage<'a, Message: 'a>(surface: Arc<Surface>, theme: Theme, send: impl Fn(Event) -> Message + 'a) -> Element<'a, Message> {
+    Shader::new(Program { surface, theme, send: Box::new(send) }).width(Length::Fill).height(Length::Fill).boxed()
 }
 
 struct Program<'a, Message> {
     surface: Arc<Surface>,
-    queue: Option<InputQueue>,
     theme: Theme,
     send: Box<dyn Fn(Event) -> Message + 'a>,
 }
@@ -53,7 +56,6 @@ pub struct State {
     button: Option<Button>,
     last: [f64; 2],
     finger: Option<u64>,
-    scratch: Vec<InputEvent>,
 }
 
 fn modifiers(held: iced::keyboard::Modifiers) -> Modifiers {
@@ -145,13 +147,11 @@ impl<Message> Program<'_, Message> {
                 state.finger = None;
                 Some((self.pointer(finger(id.0), PointerPhase::Cancel, Button::Left, state.last, modifiers(state.modifiers)), false))
             }
-            // The window lost focus mid-drag: the gesture ends where it stands, as an interrupted pointer does.
+            // The window lost focus: whatever the keyboard and the pointer said before is stale. Space may be released, and a
+            // modifier changed, in another window; a drag ends where it stands. The core forgets its side with `Blur`.
             Toolkit::Window(window::Event::Unfocused) => {
-                if let Some(held) = state.button.take() {
-                    Some((self.pointer(MOUSE, PointerPhase::Cancel, held, state.last, Modifiers::NONE), false))
-                } else {
-                    state.finger.take().map(|id| (self.pointer(finger(id), PointerPhase::Cancel, Button::Left, state.last, Modifiers::NONE), false))
-                }
+                *state = State::default();
+                Some((Event::Blur, false))
             }
             _ => None,
         }
@@ -169,21 +169,11 @@ impl<Message> shader::Program<Message> for Program<'_, Message> {
     fn update(&self, state: &mut State, event: &Toolkit, bounds: Rectangle, cursor: mouse::Cursor) -> Option<Action<Message>> {
         let translated = self.translate(state, event, bounds, cursor);
         let captured = translated.as_ref().is_some_and(|(_, capture)| *capture);
-        let sent = translated.map(|(event, _)| event).or_else(|| {
-            // Pen samples wait in the platform's queue; they go with the next event that carries nothing else.
-            let queue = self.queue.as_ref()?;
-            state.scratch.clear();
-            queue.drain(&mut state.scratch);
-            (!state.scratch.is_empty()).then(|| Event::Pen(std::mem::take(&mut state.scratch)))
-        });
-        let sent = sent.or_else(|| (matches!(event, Toolkit::Window(window::Event::RedrawRequested(_))) && self.surface.moving()).then_some(Event::Tick));
-        let action = match sent {
-            Some(event) => Action::publish((self.send)(event)),
-            // A picture on its way, or the view easing: one more frame, from the toolkit's own redraw. The painter's
-            // wake and the scheduler's progress are the other signals; this is the one that needs no owner.
-            None if self.surface.needs_frames() && matches!(event, Toolkit::Window(window::Event::RedrawRequested(_))) => Action::request_redraw(),
-            None => return None,
-        };
+        let redraw = matches!(event, Toolkit::Window(window::Event::RedrawRequested(_)));
+        // While the view eases, each redraw advances it: display-paced, and only for as long as the core says it moves.
+        // Everything else the stage waits for (a picture, scheduler results, pen samples) arrives as [`progress`].
+        let sent = translated.map(|(event, _)| event).or_else(|| (redraw && self.surface.moving()).then_some(Event::Tick))?;
+        let action = Action::publish((self.send)(sent));
         Some(if captured { action.and_capture() } else { action })
     }
 
@@ -315,9 +305,40 @@ impl shader::Primitive for Primitive {
 
 /// The active document's stage on the window field, filling the region it is given, as the message the application
 /// carries: every input travels as `Command::Stage` through `Core::dispatch`. `None` while no document has a stage.
-pub fn view<'a>(core: &Core, queue: Option<InputQueue>, theme: Theme) -> Option<Element<'a, Message>> {
+pub fn view<'a>(core: &Core, theme: Theme) -> Option<Element<'a, Message>> {
     let surface = core.stage()?;
     let field = theme.palette().surface_field;
-    let widget = stage(surface, queue, theme, |event| Message::Command(Command::Stage(event)));
+    let widget = stage(surface, theme, |event| Message::Command(Command::Stage(event)));
     Some(container(widget).width(Length::Fill).height(Length::Fill).style(move |_| container::Style::default().background(iced::Color::from(field))).boxed())
+}
+
+/// The stage's progress as a subscription: the scheduler, the paint worker and the pen queue wake the stage from their
+/// own threads, the wakes coalesce in the surface, and each answer is one [`Event::Progress`] message, whose handling is
+/// the one redraw. Mount it while the stage is shown; without it nothing polls (the widget never redraws for a pending
+/// picture on its own).
+pub fn subscription(core: &Core) -> Subscription<Message> {
+    match core.stage() {
+        Some(surface) => Subscription::run_with(Watch(surface), watch),
+        None => Subscription::none(),
+    }
+}
+
+struct Watch(Arc<Surface>);
+
+impl Hash for Watch {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state);
+    }
+}
+
+fn watch(watch: &Watch) -> impl Stream<Item = Message> + use<> {
+    progress(watch.0.progress())
+}
+
+/// The messages of [`subscription`]: one for every run of notifications between two polls.
+pub fn progress(progress: Arc<Progress>) -> impl Stream<Item = Message> {
+    stream::unfold(progress, |progress| async move {
+        poll_fn(|context| if progress.poll(context.waker()) { Poll::Ready(()) } else { Poll::Pending }).await;
+        Some((Message::Command(Command::Stage(Event::Progress)), progress))
+    })
 }

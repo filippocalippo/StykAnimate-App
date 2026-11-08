@@ -2816,6 +2816,7 @@ name = "styk-app"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "iced_renderer",
  "iced_runtime",
  "iced_wgpu",
  "iced_winit",

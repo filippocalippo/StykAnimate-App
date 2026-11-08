@@ -3,7 +3,7 @@
 //!
 //! The widget in `styk-ui` is glue. It reports what happened (a [`Event`], the size and density of its place) and
 //! calls three entry points on the render path: [`Surface::prepare`] (after the previous frame's encoder was
-//! submitted), [`Surface::present`] (recording into the widget's pass) and [`Surface::needs_frames`]. Everything it
+//! submitted), [`Surface::present`] (recording into the widget's pass) and [`Surface::moving`]. Everything it
 //! would otherwise decide lives here: pan or zoom for a wheel, line or pixel units, which presses the stage keeps,
 //! when a frame is requested and what is shown while one is pending.
 //!
@@ -13,11 +13,12 @@
 //! touches it: it exchanges single owned pointers with the [`Painter`] (`docs/native/stage.md`).
 
 use super::input::{InputResult, Navigation, Pointer};
-use super::{Host, PaintLimits, PaintStatus, Painter, Viewport};
+use super::progress::Progress;
+use super::{Host, PaintError, PaintLimits, PaintStatus, Painter, Viewport};
 use crate::engine::{SceneOptions, wgpu};
-use crate::frames::Wake;
+use crate::frames;
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
-use styk_services::input::{InputEvent, Modifiers};
+use styk_services::input::{InputEvent, InputQueue, Modifiers};
 use styk_services::{Clock, Spawner};
 
 /// Pixels a wheel line stands for: Chromium reports one notch of a mouse wheel as 100 pixels at the default scroll
@@ -84,8 +85,13 @@ pub enum Event {
     /// Zoom by a factor about a stage point.
     Zoom { factor: f64, at: [f64; 2] },
     FitCanvas,
-    /// The view eases one frame on: sent on each redraw while [`Surface::needs_frames`] says the view is moving.
+    /// The view eases one frame on: sent on each redraw while [`Surface::moving`] says the view is moving.
     Tick,
+    /// The scheduler, the paint worker or the pen queue made progress (the coalesced wake, [`Progress`]): scheduler
+    /// results are collected and queued pen samples reach the host. The message that carries it is the one redraw.
+    Progress,
+    /// The window lost focus: Space is no longer held, no drag stays captured. Whatever the keyboard said before is stale.
+    Blur,
     /// Show this tick of the animation.
     Frame(f64),
 }
@@ -134,6 +140,7 @@ pub enum Cursor {
 /// The shared state of one document's stage.
 pub struct Surface {
     inner: Mutex<Inner>,
+    progress: Arc<Progress>,
 }
 
 struct Inner {
@@ -142,7 +149,10 @@ struct Inner {
     gpu: Option<GpuId>,
     spawner: Arc<dyn Spawner>,
     clock: Arc<dyn Clock>,
-    wake: Wake,
+    progress: Arc<Progress>,
+    input: Option<InputQueue>,
+    /// Why the paint worker could not start. Kept until a new graphics context is the recovery (never retried by itself).
+    fault: Option<PaintError>,
     limits: PaintLimits,
     gestures: Gestures,
     navigation: Navigation,
@@ -159,17 +169,21 @@ struct Inner {
 }
 
 impl Surface {
-    /// `host` is composed by the document's owner (the frame scheduler, the injected spawner and clock). The painter
-    /// is created later, by [`Surface::prepare`], on the device the toolkit hands over.
-    pub fn new(host: Host, spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, wake: Wake, limits: PaintLimits) -> Surface {
+    /// `host` is composed by the document's owner (the frame scheduler, the injected spawner and clock); its scheduler
+    /// wakes through `progress.wake()`, as do the painter and the input queue. The painter is created later, by
+    /// [`Surface::prepare`], on the device the toolkit hands over.
+    pub fn new(host: Host, spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, progress: Arc<Progress>, limits: PaintLimits) -> Surface {
         Surface {
+            progress: progress.clone(),
             inner: Mutex::new(Inner {
                 host,
                 painter: None,
                 gpu: None,
                 spawner,
                 clock,
-                wake,
+                progress,
+                input: None,
+                fault: None,
                 limits,
                 gestures: Gestures::default(),
                 navigation: Navigation::default(),
@@ -217,9 +231,16 @@ impl Surface {
         self.with(|inner| inner.present(pass)).unwrap_or(false)
     }
 
-    /// Whether the widget should be redrawn without further input: a picture is on its way, or the view is easing.
-    pub fn needs_frames(&self) -> bool {
-        self.with(|inner| inner.needs_frames()).unwrap_or(false)
+    /// The coalesced wake: its answers become [`Event::Progress`] (the subscription in `styk_ui::stage`).
+    pub fn progress(&self) -> Arc<Progress> {
+        self.progress.clone()
+    }
+
+    /// The platform's input queue for this stage: pen samples reach the host when [`Event::Progress`] drains it, and the
+    /// queue wakes the stage when it stops being empty.
+    pub fn set_input(&self, queue: InputQueue) {
+        queue.set_waker(self.progress.wake());
+        self.with(|inner| inner.input = Some(queue));
     }
 
     /// Whether the view is easing or a gesture's idle window is open: the widget sends [`Event::Tick`] on each redraw.
@@ -258,6 +279,11 @@ impl Surface {
 
     pub fn viewport(&self) -> Option<Viewport> {
         self.with(|inner| inner.host.viewport())
+    }
+
+    /// Why the paint worker could not start, if it could not: a new graphics context is the only retry.
+    pub fn fault(&self) -> Option<PaintError> {
+        self.with(|inner| inner.fault.clone()).flatten()
     }
 
     /// The painter's last report: `Pending` until a picture is complete, `Failed` when the newest request was refused
@@ -359,21 +385,24 @@ impl Inner {
                 self.navigation.pan_tool = on;
                 Ok(())
             }
-            Event::Pen(events) => {
-                let mut result = Ok(());
-                for event in events {
-                    match self.host.pen_navigation(event, self.navigation) {
-                        Ok(InputResult::Route(routed)) => outcome.routed.push(routed),
-                        Ok(_) => {}
-                        Err(error) => result = Err(error),
-                    }
-                }
-                result
-            }
+            Event::Pen(events) => self.pen(events, &mut outcome),
             Event::Pan(delta) => self.host.pan_by(delta),
             Event::Zoom { factor, at } => self.host.zoom_by(factor, Some(at)),
             Event::FitCanvas => self.host.fit_canvas(),
             Event::Tick => self.host.advance(now).map(drop),
+            Event::Progress => {
+                self.host.frames_mut().flush();
+                let mut events = Vec::new();
+                if let Some(queue) = &self.input {
+                    queue.drain(&mut events);
+                }
+                self.pen(events, &mut outcome)
+            }
+            Event::Blur => {
+                self.navigation.space = false;
+                self.host.cancel_gestures();
+                Ok(())
+            }
             Event::Frame(tick) => {
                 if !tick.is_finite() || tick < 0.0 {
                     return Err(Error::Invalid);
@@ -395,6 +424,18 @@ impl Inner {
         Ok(outcome)
     }
 
+    fn pen(&mut self, events: Vec<InputEvent>, outcome: &mut Outcome) -> Result<(), frames::Error> {
+        let mut result = Ok(());
+        for event in events {
+            match self.host.pen_navigation(event, self.navigation) {
+                Ok(InputResult::Route(routed)) => outcome.routed.push(routed),
+                Ok(_) => {}
+                Err(error) => result = Err(error),
+            }
+        }
+        result
+    }
+
     /// Demands the frame for the view and tick as they are now: the host's scheduler key, then the painter's ticket.
     /// Metadata only; the painter's worker does the work.
     fn request(&mut self) {
@@ -403,7 +444,7 @@ impl Inner {
         }
         #[cfg(feature = "testing")]
         self.calls.push(Call::Request);
-        if self.host.request(self.tick, self.quality, self.samples, self.scene.clone()).is_err() {
+        if self.fault.is_some() || self.host.request(self.tick, self.quality, self.samples, self.scene.clone()).is_err() {
             return;
         }
         match self.painter.as_mut() {
@@ -432,16 +473,27 @@ impl Inner {
         if !viewport.valid() {
             return;
         }
-        if self.gpu != Some(gpu.id) || self.painter.is_none() {
+        if self.gpu != Some(gpu.id) {
             #[cfg(feature = "testing")]
             self.calls.push(Call::Attach);
-            // A new context needs a new painter; the old one's pictures belong to the old device.
+            // A new context needs a new painter; the old one's pictures belong to the old device. This is the one
+            // place a painter is made, so a worker that cannot start is tried once per context, never every frame.
             if let Some(mut old) = self.painter.take() {
                 old.close();
             }
-            self.painter = Painter::new(gpu.device, gpu.queue, gpu.format, self.spawner.as_ref(), self.clock.clone(), self.wake.clone(), self.limits).ok();
             self.gpu = Some(gpu.id);
-            self.status = PaintStatus::Pending;
+            self.fault = None;
+            match Painter::new(gpu.device, gpu.queue, gpu.format, self.spawner.as_ref(), self.clock.clone(), self.progress.wake(), self.limits) {
+                Ok(painter) => {
+                    self.painter = Some(painter);
+                    self.status = PaintStatus::Pending;
+                }
+                Err(error) => {
+                    let fault = PaintError::Device(format!("the paint worker did not start: {}", error.0));
+                    self.status = PaintStatus::Failed(fault.clone());
+                    self.fault = Some(fault);
+                }
+            }
             self.dirty = true;
         }
         if self.dirty {
@@ -471,10 +523,6 @@ impl Inner {
         } else {
             Cursor::Default
         }
-    }
-
-    fn needs_frames(&self) -> bool {
-        !self.closed && (self.host.interacting() || self.dirty || self.status == PaintStatus::Pending)
     }
 
     fn close(&mut self) {

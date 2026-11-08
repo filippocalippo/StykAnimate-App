@@ -103,6 +103,11 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// The engine this renderer draws with, shared with its compositor.
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
     pub fn new(engine: Engine, settings: renderer::Settings) -> Self {
         Self {
             settings,

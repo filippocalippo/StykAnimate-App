@@ -138,8 +138,8 @@ surface is one document's `Host`, its `Painter` and the input policy; `Core` hol
   `Pointer` events (stage coordinates, one pointer identity each; middle button, Space and the Pan tool pan through
   `Host::pointer`, other presses come back as `Outcome::routed` for the tool owner, which does not exist yet), the
   wheel becomes `Wheel` (the surface converts lines to today's 100 px notch and the toolkit's sign to the browser's,
-  then picks zoom or pan from Ctrl/Cmd and the Zoom gesture setting, with the setting's smoothing), Space and the
-  pen queue's samples become `Space` and `Pen`. Events outside the stage, and moves with no button down, are not sent.
+  then picks zoom or pan from Ctrl/Cmd and the Zoom gesture setting, with the setting's smoothing), Space becomes `Space`
+  and a lost focus `Blur`; pen samples are drained from the surface's queue by `Progress`. Events outside the stage, and moves with no button down, are not sent.
   Each redraw while `Surface::moving` sends `Tick`, which advances wheel easing on the application clock.
   Automation steps (`pan`, `zoom`, `pointer`, `frame`) are the same events (`Event::from_step`).
 - **Size and density** are read where they are known: the primitive's `prepare` gives `Surface::prepare` the widget's
@@ -150,9 +150,21 @@ surface is one document's `Host`, its `Painter` and the input policy; `Core` hol
   `flush`, `Painter::update`; `draw` first records the artboard backing, then `Painter::present` into the widget's
   pass. A pending or failed candidate leaves the last complete picture on show. The surface's lock is only ever taken
   with `try_lock` and by the interface thread alone; nothing waits on it, on the worker or on the GPU.
-- **Redraws** follow the work: the widget asks for another frame (`Surface::needs_frames`) only while a demand is
-  pending or the view is easing. The painter's own wake (the event loop's coalescing wake, given to the surface by its
-  owner) is the other signal; the owner of a window turns it into a redraw.
+- **Redraws follow the work, and nothing polls.** The scheduler, the paint worker and the platform's pen queue
+  (`Surface::set_input`) wake the stage from their own threads through one coalescing `Progress` (any number of wakes
+  between two polls is one answer; `stage/progress.rs`). `styk_ui::stage::subscription` turns each answer into one
+  `Event::Progress` message, whose handling collects the scheduler's results and drains the pen queue, and the message
+  is the one redraw (`prepare` then takes the new picture). The widget itself never asks for a redraw for a pending
+  picture. Only while the view eases (`Surface::moving`, the core's decision) does each redraw send a `Tick`, which keeps
+  the redraws display-paced for exactly as long as the easing lasts.
+- **Focus.** `Event::Blur` (the window lost focus) clears Space and ends a captured pan drag; the widget forgets its own
+  held keys, modifiers and buttons with it, so nothing stays down that was released in another window.
+- **Failure and recovery.** A paint worker that cannot start is kept as `Surface::fault` and `PaintStatus::Failed`: the
+  stage shows its last picture or nothing, and nothing retries by itself. A new graphics context is the retry: the vendored
+  iced's compositor drops every custom primitive pipeline when it creates a window's surface again (a lost swap chain;
+  `vendor/iced/VENDOR.md`), the stage's `Pipeline::new` runs again with a new `GpuId`, and the surface makes a new painter.
+- **Close.** `Core::refresh` drops (and so closes) the stage of every document the documents host closed or replaced
+  (`Effect::Closed`, `ClosedSaved`, the last tab's replacement, quit), and `Core::stage` never answers for one.
 - **The artboard backing** (today's `#artboard`: an 8 px checkerboard seen where the scene is transparent, a 1 px ring
   and a soft drop) is drawn by the widget's own small pipeline (`stage/backing.wgsl`) at `Surface::artboard()`, the canvas as the picture on show has it.
 - **Not here:** tools, handles, the marquee, grids and guides, the HUD, the header and the rail. The surface keeps

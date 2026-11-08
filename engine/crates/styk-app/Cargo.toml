@@ -35,4 +35,5 @@ styk-ui = { path = "../styk-ui" }
 iced = { workspace = true, features = ["x11", "wayland", "wayland-dlopen", "wayland-decorations"] }
 
 [dev-dependencies]
+iced_renderer = { path = "../../../vendor/iced/renderer" }
 styk-core = { path = "../styk-core", features = ["testing"] }

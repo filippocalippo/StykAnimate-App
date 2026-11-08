@@ -38,7 +38,8 @@ pub struct Core {
     /// Each document's published generations, which the workers read (K-doc supplies them).
     sources: HashMap<DocumentId, Arc<dyn FrameDocument>>,
     /// Each document's stage, while it is open: the host and the painter (`docs/native/stage.md`).
-    stages: HashMap<DocumentId, Arc<Surface>>,
+    /// With the lineage of the document each belongs to: a tab replaced by another document keeps its identity.
+    stages: HashMap<DocumentId, (u64, Arc<Surface>)>,
     session: Session,
     focus: FocusState,
     presentation: Presentation,
@@ -83,22 +84,40 @@ impl Core {
         self.sources.insert(document, source);
     }
 
-    /// Gives a document its stage. A stage already attached to it is closed first.
+    /// Gives a document its stage. A stage already attached to it is closed first; a document that is not open has none.
     pub fn set_stage(&mut self, document: DocumentId, stage: Arc<Surface>) {
-        if let Some(old) = self.stages.insert(document, stage) {
+        let Some(lineage) = self.documents.get(document).map(|open| open.lineage()) else {
+            stage.close();
+            return;
+        };
+        if let Some((_, old)) = self.stages.insert(document, (lineage, stage)) {
             old.close();
         }
     }
 
-    /// The active document's stage, which the stage widget shows.
+    fn stage_of(&self, document: DocumentId) -> Option<Arc<Surface>> {
+        let (lineage, stage) = self.stages.get(&document)?;
+        self.documents.get(document).is_some_and(|open| open.lineage() == *lineage).then(|| stage.clone())
+    }
+
+    /// The active document's stage, which the stage widget shows. A closed or replaced document has none.
     pub fn stage(&self) -> Option<Arc<Surface>> {
-        self.documents.active().and_then(|document| self.stages.get(&document.id())).cloned()
+        self.stage_of(self.documents.active()?.id())
     }
 
     /// A document closed: its painter and host are closed and dropped (neither joins a worker).
     pub fn close_stage(&mut self, document: DocumentId) {
-        if let Some(stage) = self.stages.remove(&document) {
+        if let Some((_, stage)) = self.stages.remove(&document) {
             stage.close();
+        }
+    }
+
+    /// Drops the stage of every document that was closed or replaced (the documents host closes tabs on its own:
+    /// `Effect::Closed`, `ClosedSaved`, the last tab's replacement, quit), so a stage never outlives its document.
+    fn prune_stages(&mut self) {
+        let gone: Vec<DocumentId> = self.stages.keys().copied().filter(|id| self.stage_of(*id).is_none()).collect();
+        for id in gone {
+            self.close_stage(id);
         }
     }
 
@@ -147,6 +166,7 @@ impl Core {
 
     /// Rebuilds the view models whose inputs changed since the last call, and places pending fact requests.
     pub fn refresh(&mut self) {
+        self.prune_stages();
         let source = self.documents.active().and_then(|document| self.sources.get(&document.id())).cloned();
         self.inspector.refresh(&mut self.documents, &self.view, self.facts.as_mut(), source, &mut self.session);
     }

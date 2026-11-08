@@ -21,7 +21,7 @@ use styk_ui::screens::Screen;
 /// show answers the first demand (the paint worker finishes in its own time; nothing here waits for it).
 pub fn stage_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
     let clock: std::sync::Arc<dyn styk_services::Clock> = std::sync::Arc::new(styk_platform::clock::SystemClock::new());
-    let core = styk_core::screens::stage(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), clock, std::sync::Arc::new(|| {}), [f64::from(size.0), f64::from(size.1)])?;
+    let core = styk_core::screens::stage(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), clock, [f64::from(size.0), f64::from(size.1)])?;
     pollster::block_on(screenshot_async(screen.theme(), size, scale, None, None, None, Some(&core)))
 }
 
@@ -70,7 +70,7 @@ async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Opt
     let shell = band.map(|screen| styk_ui::screens::band_shell(screen, size, styk_ui::shell::measure_labels(ready)));
     let panel = inspector.and_then(|core| styk_ui::inspector::View::of(core, theme));
     let view: iced::Element<'_, ()> = match (sheet, shell.as_ref()) {
-        _ if stage.is_some() => stage.and_then(|core| styk_ui::stage::view(core, None, theme)).map_or_else(|| styk_ui::loading(theme), |stage| stage.map(|_| ()).boxed()),
+        _ if stage.is_some() => stage.and_then(|core| styk_ui::stage::view(core, theme)).map_or_else(|| styk_ui::loading(theme), |stage| stage.map(|_| ()).boxed()),
         _ if panel.is_some() => match panel {
             Some(panel) => styk_ui::dock::docked(styk_ui::inspector::view(panel), theme).map(|_| ()).boxed(),
             None => styk_ui::loading(theme),

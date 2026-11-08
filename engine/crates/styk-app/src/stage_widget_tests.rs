@@ -6,11 +6,15 @@ use iced::advanced::renderer::{self, Headless};
 use iced::advanced::shell;
 use iced::{Event, Pixels, Point, Size, keyboard, mouse, window};
 use iced_runtime::UserInterface;
-use iced_runtime::user_interface::Cache;
+use iced_runtime::user_interface::{Cache, State};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 use styk_core::app::Core;
-use styk_core::stage::{Call, PaintStatus, Surface};
+use iced::futures::StreamExt;
+use styk_core::commands::Command;
+use styk_core::stage::{Call, Event as StageEvent, PaintStatus, Surface};
 use styk_design::{Theme, warm_up, widgets};
 use styk_ui::Message;
 
@@ -24,26 +28,72 @@ struct Harness {
     theme: Theme,
     /// The last frame's picture, RGBA, top row first.
     picture: Vec<u8>,
+    /// What the widget asked of the event loop in the last frame.
+    redraw: window::RedrawRequest,
+    /// The wakes the stage's progress made, as an event loop would count them.
+    woken: Arc<Count>,
+}
+
+/// What the compositor tells the renderer's engine when it creates a window's surface again, whichever renderer the build
+/// of the toolkit selected (the GPU one alone, or the GPU one with the software fallback).
+trait Recreated {
+    fn surface_recreated(&self);
+}
+impl Recreated for iced_wgpu::Renderer {
+    fn surface_recreated(&self) {
+        self.engine().surface_recreated();
+    }
+}
+impl<B> Recreated for iced_renderer::fallback::Renderer<iced_wgpu::Renderer, B> {
+    fn surface_recreated(&self) {
+        match self {
+            iced_renderer::fallback::Renderer::Primary(gpu) => gpu.surface_recreated(),
+            iced_renderer::fallback::Renderer::Secondary(_) => panic!("the headless renderer draws with the GPU"),
+        }
+    }
+}
+
+struct Count(AtomicUsize);
+impl std::task::Wake for Count {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 impl Harness {
     fn new(size: (u32, u32), scale: f32) -> Harness {
+        let clock: Arc<dyn styk_services::Clock> = Arc::new(styk_platform::clock::SystemClock::new());
+        let core = styk_core::screens::stage(Arc::new(styk_platform::spawn::ThreadSpawner), clock, [f64::from(size.0), f64::from(size.1)]).expect("the stage fixture opens");
+        Harness::of(core, size, scale)
+    }
+
+    /// A stage whose frame is held back until the gate opens: a slow frame.
+    fn gated(size: (u32, u32), scale: f32) -> (Harness, Arc<styk_core::screens::Gate>) {
+        let clock: Arc<dyn styk_services::Clock> = Arc::new(styk_platform::clock::SystemClock::new());
+        let region = styk_core::stage::Viewport { size: [f64::from(size.0), f64::from(size.1)], ..Default::default() };
+        let (core, gate) = styk_core::screens::stage_gated(Arc::new(styk_platform::spawn::ThreadSpawner), clock, region).expect("the stage fixture opens");
+        (Harness::of(core, size, scale), gate)
+    }
+
+    fn of(core: Core, size: (u32, u32), scale: f32) -> Harness {
         let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
         let renderer = pollster::block_on(<iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None)).expect("a graphics adapter is required; a missing one must not pass");
         let _ready = warm_up::install_bundled(styk_platform::font_smoothing::current());
-        let clock: Arc<dyn styk_services::Clock> = Arc::new(styk_platform::clock::SystemClock::new());
-        let core = styk_core::screens::stage(Arc::new(styk_platform::spawn::ThreadSpawner), clock, Arc::new(|| {}), [f64::from(size.0), f64::from(size.1)]).expect("the stage fixture opens");
         let surface = core.stage().expect("the active document has a stage");
-        Harness { renderer, core, surface, cache: Cache::default(), size: Size::new(size.0 as f32, size.1 as f32), scale, theme: Theme::Light, picture: Vec::new() }
+        Harness { renderer, core, surface, cache: Cache::default(), size: Size::new(size.0 as f32, size.1 as f32), scale, theme: Theme::Light, picture: Vec::new(), redraw: window::RedrawRequest::Wait, woken: Arc::new(Count(AtomicUsize::new(0))) }
     }
 
     /// The toolkit's frame: the widget is built from the core, takes `events` and the cursor, its messages go to the core
     /// as the application would send them, and the frame is drawn (prepare, then the pass that presents).
     fn frame(&mut self, events: &[Event], cursor: mouse::Cursor) -> Vec<Message> {
-        let view = styk_ui::stage::view(&self.core, None, self.theme).expect("the stage widget");
+        let view = styk_ui::stage::view(&self.core, self.theme).expect("the stage widget");
         let mut interface: UserInterface<'_, Message, iced::Theme, iced::Renderer> = UserInterface::build(view, self.size, std::mem::take(&mut self.cache), &mut self.renderer);
         let mut bus = shell::Bus::new();
-        let _ = interface.update(&window::Headless, &shell::Waker::noop(), events, cursor, &mut self.renderer, &mut bus);
+        let (state, _) = interface.update(&window::Headless, &shell::Waker::noop(), events, cursor, &mut self.renderer, &mut bus);
+        self.redraw = match state {
+            State::Updated { redraw_request, .. } => redraw_request,
+            _ => window::RedrawRequest::Wait,
+        };
         let messages: Vec<Message> = bus.into_iter().collect();
         interface.draw(&mut self.renderer, &styk_ui::base_theme(self.theme), &renderer::Style { text_color: iced::Color::BLACK }, cursor);
         let physical = Size::new((self.size.width * self.scale).round() as u32, (self.size.height * self.scale).round() as u32);
@@ -55,18 +105,37 @@ impl Harness {
         messages
     }
 
-    /// Frames until the picture on show answers the newest demand, as the toolkit's redraws do while it is pending.
+    fn redraw_frame(&mut self) -> Vec<Message> {
+        self.frame(&[Event::Window(window::Event::RedrawRequested(iced::time::Instant::now()))], mouse::Cursor::Unavailable)
+    }
+
+    /// The runtime's answer to a wake of the stage: its progress message, handled, and the one redraw that follows.
+    fn deliver_progress(&mut self) {
+        let _ = styk_ui::message::update(&mut self.core, Message::Command(Command::Stage(StageEvent::Progress)));
+        self.redraw_frame();
+    }
+
+    /// Whether the stage's progress has been woken since the last answer (and registers this harness for the next).
+    fn woken(&self) -> bool {
+        self.surface.progress().poll(&Waker::from(self.woken.clone()))
+    }
+
+    /// An event loop that redraws only on the stage's wakes, until the picture on show answers the newest demand.
     fn settle(&mut self) {
         let began = std::time::Instant::now();
+        self.redraw_frame();
         loop {
-            self.frame(&[Event::Window(window::Event::RedrawRequested(iced::time::Instant::now()))], mouse::Cursor::Unavailable);
             match self.surface.status() {
                 PaintStatus::Ready => return,
                 PaintStatus::Failed(error) => panic!("the stage failed: {error:?}"),
                 _ => {}
             }
             assert!(began.elapsed() < Duration::from_secs(45), "the stage did not settle");
-            std::thread::sleep(Duration::from_millis(5));
+            if self.woken() {
+                self.deliver_progress();
+            } else {
+                std::thread::sleep(Duration::from_millis(2));
+            }
         }
     }
 
@@ -164,4 +233,106 @@ fn space_held_over_the_stage_makes_a_left_drag_pan_and_events_outside_it_are_not
     // A wheel with the cursor outside the stage is not its.
     let none = stage.frame(&[Event::Mouse(mouse::Event::WheelScrolled { delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 } })], at(-10.0, 300.0));
     assert!(none.is_empty());
+}
+
+#[test]
+fn a_slow_frame_with_no_input_asks_for_no_redraw_until_its_wake_and_then_gets_one_message() {
+    let (mut stage, gate) = Harness::gated((900, 560), 1.0);
+    let mut messages = Box::pin(styk_ui::stage::progress(stage.surface.progress()));
+    let count = Arc::new(Count(AtomicUsize::new(0)));
+    let waker = Waker::from(count.clone());
+    let mut context = Context::from_waker(&waker);
+    assert!(messages.poll_next_unpin(&mut context).is_pending());
+    // The first frame places the painter and the demand. The frame is slow: for as long as it is, redraws that nothing asked
+    // for ask for nothing, and the stage's progress stays silent.
+    stage.redraw_frame();
+    // The scheduler may report once that the document is not published yet: that is one message, handled.
+    std::thread::sleep(Duration::from_millis(300));
+    while let Poll::Ready(Some(_)) = messages.poll_next_unpin(&mut context) {
+        stage.deliver_progress();
+    }
+    for _ in 0..25 {
+        assert!(stage.redraw_frame().is_empty(), "no input, no message");
+        assert_eq!(stage.redraw, window::RedrawRequest::Wait, "a pending picture is not polled for");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_ne!(stage.surface.status(), PaintStatus::Ready);
+    // The frame completes: the wake comes from the worker, and the answer is one message for the redraw to follow.
+    // The document is published, and the person goes to the next frame: a new demand, which the scheduler can now serve.
+    gate.open();
+    let _ = styk_ui::message::update(&mut stage.core, Message::Command(Command::Stage(StageEvent::Frame(1.0))));
+    let began = std::time::Instant::now();
+    let mut delivered = 0;
+    while stage.surface.status() != PaintStatus::Ready {
+        assert!(began.elapsed() < Duration::from_secs(45), "the stage did not settle");
+        match messages.poll_next_unpin(&mut context) {
+            Poll::Ready(Some(message)) => {
+                assert_eq!(message, Message::Command(Command::Stage(StageEvent::Progress)));
+                delivered += 1;
+                stage.deliver_progress();
+                assert_eq!(stage.redraw, window::RedrawRequest::Wait, "the message is the redraw; the widget asks for no other");
+            }
+            Poll::Ready(None) => panic!("the stream ended"),
+            Poll::Pending => std::thread::sleep(Duration::from_millis(2)),
+        }
+    }
+    assert!(delivered >= 1, "the wake became a message");
+    // Settled: quiet again, however long it is left.
+    std::thread::sleep(Duration::from_millis(100));
+    while let Poll::Ready(Some(_)) = messages.poll_next_unpin(&mut context) {}
+    assert!(messages.poll_next_unpin(&mut context).is_pending());
+    assert!(stage.redraw_frame().is_empty());
+    assert_eq!(stage.redraw, window::RedrawRequest::Wait);
+}
+
+fn key_down(modifiers: keyboard::Modifiers) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: keyboard::Key::Named(keyboard::key::Named::Space),
+        modified_key: keyboard::Key::Named(keyboard::key::Named::Space),
+        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Space),
+        location: keyboard::Location::Standard,
+        modifiers,
+        text: None,
+        repeat: false,
+    })
+}
+
+#[test]
+fn losing_focus_forgets_a_held_space_and_a_held_modifier_in_the_widget_and_in_the_core() {
+    let mut stage = Harness::new((900, 560), 1.0);
+    stage.settle();
+    let before = stage.surface.view().expect("view");
+    // Hold Space over the stage, switch windows, release Space elsewhere, come back and drag with the left button.
+    stage.frame(&[key_down(keyboard::Modifiers::empty())], at(300.0, 300.0));
+    assert_eq!(stage.surface.cursor(), styk_core::stage::Cursor::Grab);
+    stage.frame(&[Event::Window(window::Event::Unfocused)], mouse::Cursor::Unavailable);
+    assert_eq!(stage.surface.cursor(), styk_core::stage::Cursor::Default, "the core forgot the held Space");
+    stage.frame(&[Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))], at(300.0, 300.0));
+    stage.frame(&[Event::Mouse(mouse::Event::CursorMoved { position: Point::new(340.0, 320.0) })], at(340.0, 320.0));
+    stage.frame(&[Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))], at(340.0, 320.0));
+    assert_eq!(stage.surface.view(), Some(before), "the drag is not a pan");
+    // The widget forgot its own: a released Space that it never saw cannot turn into a stuck key, and a Ctrl pressed before
+    // the focus left does not make the next plain wheel a zoom.
+    stage.frame(&[Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::CTRL))], at(450.0, 280.0));
+    stage.frame(&[Event::Window(window::Event::Unfocused)], mouse::Cursor::Unavailable);
+    stage.frame(&[Event::Mouse(mouse::Event::WheelScrolled { delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 } })], at(450.0, 280.0));
+    let after = stage.surface.view().expect("view");
+    assert_eq!(after.zoom, before.zoom, "the cached Ctrl did not zoom");
+    assert_eq!(after.pan[1], before.pan[1] - 100.0, "the wheel panned");
+}
+
+#[test]
+fn a_recreated_surface_gives_the_stage_a_new_painter_and_its_picture_comes_back() {
+    let mut stage = Harness::new((900, 560), 1.0);
+    stage.settle();
+    stage.surface.take_calls();
+    // What the toolkit's compositor does when it makes a window's surface again after the swap chain was lost.
+    stage.renderer.surface_recreated();
+    stage.redraw_frame();
+    let calls = stage.surface.take_calls();
+    assert!(calls.contains(&Call::Attach), "a new surface, a new painter: {calls:?}");
+    assert_ne!(stage.surface.status(), PaintStatus::Ready, "the new painter has not painted yet");
+    stage.settle();
+    let blue = (0..560).flat_map(|y| (0..900).map(move |x| (x, y))).filter(|&(x, y)| stage.pixel(x, y) == [13, 153, 255, 255]).count();
+    assert!(blue > 2000, "the picture is back after recovery: {blue} pixels");
 }

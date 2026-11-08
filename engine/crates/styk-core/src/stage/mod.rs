@@ -2,12 +2,14 @@
 pub mod input;
 mod painter;
 pub mod picking;
+mod progress;
 mod surface;
 mod view;
 use crate::engine::wgpu;
 pub use painter::{PaintError, PaintLimits, PaintStatus, Painter};
 #[cfg(feature = "testing")]
 pub use surface::Call;
+pub use progress::Progress;
 pub use surface::{Cursor, Error as SurfaceError, Event, Gestures, Gpu, GpuId, LINE_PIXELS, Outcome, Place, Surface, Wheel, WheelDelta};
 pub use view::{MAX_ZOOM, MIN_ZOOM, View, Viewport, WheelZoom, ZOOM_STEP};
 

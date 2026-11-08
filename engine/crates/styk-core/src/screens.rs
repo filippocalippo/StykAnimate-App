@@ -170,19 +170,61 @@ const STAGE_INSETS: [f64; 4] = [24.0, 28.0, 24.0, 72.0];
 /// The core the Stage screen shows: the startup document (`engine/tests/edit/startup.document.json`, as the Properties
 /// panel's screens open it), fitted at tick 0 into a stage of `size` logical pixels, its painter made later by the
 /// widget on the toolkit's own device. Config of the frame scheduler is the defaults.
-pub fn stage(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, wake: crate::frames::Wake, size: [f64; 2]) -> Result<Core, String> {
-    stage_in(spawner, clock, wake, crate::stage::Viewport { size, insets: STAGE_INSETS, ..Default::default() })
+pub fn stage(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, size: [f64; 2]) -> Result<Core, String> {
+    stage_in(spawner, clock, crate::stage::Viewport { size, insets: STAGE_INSETS, ..Default::default() })
 }
 
 /// The same in a stage region the caller states (the tests' is as large as the canvas, without clearances).
-pub fn stage_in(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, wake: crate::frames::Wake, viewport: crate::stage::Viewport) -> Result<Core, String> {
-    let (mut core, publication) = core_with_document(STARTUP, "Reference.styk", spawner.clone(), wake.clone())?;
+pub fn stage_in(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, viewport: crate::stage::Viewport) -> Result<Core, String> {
+    build_stage(spawner, clock, viewport, None)
+}
+
+/// A fixture document's publication that holds back its generations until it is opened: a stage whose frame is slow.
+#[derive(Default)]
+pub struct Gate {
+    open: std::sync::atomic::AtomicBool,
+}
+
+impl Gate {
+    /// The held generations are served from now on.
+    pub fn open(&self) {
+        self.open.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+struct Gated {
+    inner: Arc<dyn FrameDocument>,
+    gate: Arc<Gate>,
+}
+
+impl FrameDocument for Gated {
+    fn picture_engine(&self) -> Option<Engine> {
+        self.inner.picture_engine()
+    }
+    fn snapshot(&self, revision: u64, epoch: u64) -> Option<Arc<styk_engine::Generation>> {
+        self.gate.open.load(std::sync::atomic::Ordering::Acquire).then(|| self.inner.snapshot(revision, epoch)).flatten()
+    }
+}
+
+/// The stage of [`stage_in`] with its frame held back until the returned gate is opened.
+pub fn stage_gated(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, viewport: crate::stage::Viewport) -> Result<(Core, Arc<Gate>), String> {
+    let gate = Arc::new(Gate::default());
+    Ok((build_stage(spawner, clock, viewport, Some(gate.clone()))?, gate))
+}
+
+fn build_stage(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, viewport: crate::stage::Viewport, gate: Option<Arc<Gate>>) -> Result<Core, String> {
+    let progress = crate::stage::Progress::new();
+    let (mut core, publication) = core_with_document(STARTUP, "Reference.styk", spawner.clone(), Arc::new(|| {}))?;
     let document = core.documents.active().ok_or("no document is open")?;
     let (id, lineage, revision) = (document.id(), document.lineage(), document.revision());
-    let source: Arc<dyn FrameDocument> = publication;
-    let frames = crate::frames::Frames::new(lineage, revision, 0, &source, crate::frames::Config::default(), spawner.as_ref(), clock.clone(), wake.clone()).map_err(|error| error.0)?;
+    let published: Arc<dyn FrameDocument> = publication;
+    let source: Arc<dyn FrameDocument> = match gate {
+        Some(gate) => Arc::new(Gated { inner: published, gate }),
+        None => published,
+    };
+    let frames = crate::frames::Frames::new(lineage, revision, 0, &source, crate::frames::Config::default(), spawner.as_ref(), clock.clone(), progress.wake()).map_err(|error| error.0)?;
     let canvas = core.documents.active().ok_or("no document is open")?.with_document(|document| document.canvas).map_err(|error| error.to_string())?;
     let host = crate::stage::Host::new(frames, canvas, viewport).map_err(|error| format!("{error:?}"))?;
-    core.set_stage(id, Arc::new(crate::stage::Surface::new(host, spawner, clock, wake, crate::stage::PaintLimits::default())));
+    core.set_stage(id, Arc::new(crate::stage::Surface::new(host, spawner, clock, progress, crate::stage::PaintLimits::default())));
     Ok(core)
 }
