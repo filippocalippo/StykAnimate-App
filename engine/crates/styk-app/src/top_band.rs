@@ -310,7 +310,9 @@ impl TopBand {
                 _ => None,
             }));
         }
-        if self.run.is_some() || self.shell.next_deadline().is_some() || !self.idle() {
+        // Readiness gates automation, not redraws. Slow workers wake this subscription
+        // through Progress; a script samples its finite settling frames only when ready.
+        if (self.run.is_some() && self.idle()) || self.shell.next_deadline().is_some() || self.core.timeline().playing() {
             subscriptions.push(window::frames().map(|_| Message::Frame));
         }
         Subscription::batch(subscriptions)
@@ -882,6 +884,22 @@ mod tests {
             let _ = top.update(message);
         }
     }
+    #[test]
+    fn pending_document_work_keeps_progress_subscription_without_polling_frames() {
+        use iced::advanced::subscription::into_recipes;
+        let (mut top, _) = band();
+        let idle_subscriptions = into_recipes(top.subscription()).len();
+        top.open_all(&[fixture()]);
+        let _ = top.pump();
+        assert!(!top.idle(), "automation must still wait for the pending document");
+        assert_eq!(into_recipes(top.subscription()).len(), idle_subscriptions, "pending workers must not install window::frames");
+        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
+        assert_eq!(into_recipes(top.subscription()).len(), idle_subscriptions, "automation also waits for Progress during work");
+        top.run = None;
+        settle_from_workers(&mut top);
+        assert!(top.core.stage().is_some(), "the production Progress handler completes opening without frame polling");
+    }
+
     #[test]
     fn mounted_stage_keyboard_uses_registry_and_worker_wake_without_frame_polling() {
         use styk_design::widgets::testing::Driver;

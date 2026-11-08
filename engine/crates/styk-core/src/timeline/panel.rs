@@ -396,9 +396,6 @@ impl Panel {
         self.call_identity = None;
     }
     pub fn finish(&mut self, documents: &mut Documents, session: &mut answers::Session, stage: Option<&Surface>) -> Result<(), Msg> {
-        if self.range_pending {
-            return Err(Msg::new("app.preparing"));
-        }
         let was_playing = self.playing();
         self.pause();
         self.scrub = None;
@@ -406,19 +403,26 @@ impl Panel {
             if let Some(stage) = stage {
                 stage.end_transport();
             }
+            if self.flight.is_none() && self.calls.is_empty() && self.pending_seek.is_none()
+                && let Some(document) = documents.active().filter(|document| document.view().is_ok())
+            {
+                // Preserve today's immediate finish when the session is already ready.
+                answers::call(documents, document.id(), "endFrameDraftPreview", &[], session)?;
+            } else {
+                // The exclusive session may still be seeking. Its existing queue retains
+                // terminal cleanup until completion; another finish must not enqueue it again.
+                self.call("endFrameDraftPreview", &[]);
+            }
         }
         // Busy keeps the final scrub target and the initiating command in Core's deferred slot.
         self.flush_seek(documents, session, stage)?;
         self.flush_calls(documents)?;
-        if self.pending_seek.is_some() || self.flight.is_some() || !self.calls.is_empty() {
+        if self.range_pending || self.pending_seek.is_some() || self.flight.is_some() || !self.calls.is_empty() {
             return Err(Msg::new("app.preparing"));
         }
         if let Some(document) = documents.active() {
             if document.view().is_err() {
                 return Err(Msg::new("app.preparing"));
-            }
-            if was_playing {
-                answers::call(documents, document.id(), "endFrameDraftPreview", &[], session)?;
             }
         }
         Ok(())
@@ -450,14 +454,14 @@ impl Panel {
     }
     fn select_layer(
         &mut self,
-        id: String,
+        mut id: String,
         modifiers: Modifiers,
         documents: &mut Documents,
         view: &mut ViewState,
         session: &mut answers::Session,
     ) -> Result<usize, Msg> {
         let p = self.projection.as_ref().ok_or_else(invalid)?;
-        let index = *p.row_index.get(&id).ok_or_else(invalid)?;
+        let mut index = *p.row_index.get(&id).ok_or_else(invalid)?;
         if p.rows[index].folder {
             return Err(invalid());
         } // Folder interactions belong to part 2.
@@ -467,7 +471,11 @@ impl Panel {
             let first = self.anchor.map_or(index, |(row, _)| row).min(p.rows.len().saturating_sub(1));
             selected.extend(p.rows[first.min(index)..=first.max(index)].iter().filter(|r| !r.folder).map(|r| r.id.clone()));
         } else if let Some(at) = selected.iter().position(|s| *s == id) {
-            selected.remove(at);
+            if selected.len() > 1 {
+                selected.remove(at);
+                id = selected.last().cloned().ok_or_else(invalid)?;
+                index = *p.row_index.get(&id).ok_or_else(invalid)?;
+            }
         } else {
             selected.push(id.clone());
         }
@@ -544,10 +552,12 @@ impl Panel {
         {
             return Err(invalid());
         }
-        if self.model.pending && !matches!(id, TimelineSeek | TimelineGoToFrame | TimelineSetFps | TimelineScrub) {
+        let terminal = id == Cancel || (matches!(id, Play | PlayPan) && self.playing());
+        if self.model.pending && !terminal && !matches!(id, TimelineSeek | TimelineGoToFrame | TimelineSetFps | TimelineScrub) {
             return Err(Msg::new("app.preparing"));
         }
         let modifiers = if let Payload::Modifiers(modifiers) = &payload { *modifiers } else { Modifiers::default() };
+        let global = payload == Payload::GlobalNavigation;
         match (id, payload) {
             (Play | PlayPan, _) => {
                 if self.playing() {
@@ -690,6 +700,13 @@ impl Panel {
             ) => {
                 let p = self.projection.as_ref().ok_or_else(invalid)?;
                 let tick = self.model.tick;
+                // Global transport actions preserve the timeline's selection. Only
+                // focused cell navigation may move beyond the document's last tick.
+                if global && self.model.mode == TimelineMode::Advanced && matches!(id, FirstFrame | PreviousFrame | NextFrame | LastFrame) {
+                    let end = p.total.saturating_sub(1) as f64;
+                    let next = match id { FirstFrame => 0., LastFrame => end, PreviousFrame => (tick - 1.).max(0.), _ => (tick + 1.).min(end) };
+                    return self.seek(next, documents, session, stage);
+                }
                 if self.model.mode == TimelineMode::Simple {
                     let at = p.cards.partition_point(|card| card.tick as f64 <= tick).saturating_sub(1);
                     // Today's shared hotkey adapter treats both layer arrows as +1 in Simple mode.

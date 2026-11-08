@@ -131,10 +131,13 @@ fn merge(into: &mut Value, patch: &Value) {
     }
 }
 pub fn change_patch(change: &Change) -> Value {
+    value_patch(change.id, change.new.clone())
+}
+fn value_patch(id: super::SettingId, value: Value) -> Value {
     let mut section = Value::object(Obj::new());
-    put(&mut section, change.id.key(), change.new.clone());
+    put(&mut section, id.key(), value);
     let mut patch = Value::object(Obj::new());
-    put(&mut patch, change.id.section(), section);
+    put(&mut patch, id.section(), section);
     patch
 }
 
@@ -207,8 +210,7 @@ impl Store {
         normalized.loaded(envelope.clone());
         for &id in super::SettingId::ALL {
             if old.get(id.key()).is_some() {
-                let change = super::Change { id, old: Value::Null, new: normalized.value(id), effects: Vec::new() };
-                merge(&mut envelope, &change_patch(&change));
+                merge(&mut envelope, &value_patch(id, normalized.value(id)));
             }
         }
         let mut provenance = Value::object(Obj::new());

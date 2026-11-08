@@ -457,7 +457,10 @@ impl Core {
             }
         } else if matches!(invocation.phase, Phase::Release { .. }) { Vec::new() }
         else if invocation.command.info().owner == Owner::Timeline {
-            self.timeline_event(crate::timeline::Event::Action { id: invocation.command, payload: crate::timeline::Payload::Modifiers(crate::timeline::Modifiers { extend: invocation.shift, toggle: false }), now: self.now })
+            let payload = if self.focus.area() != Some(crate::focus::FocusArea::Timeline) && matches!(invocation.command, CommandId::FirstFrame | CommandId::PreviousFrame | CommandId::NextFrame | CommandId::LastFrame) {
+                crate::timeline::Payload::GlobalNavigation
+            } else { crate::timeline::Payload::Modifiers(crate::timeline::Modifiers { extend: invocation.shift, toggle: false }) };
+            self.timeline_event(crate::timeline::Event::Action { id: invocation.command, payload, now: self.now })
         } else { self.run(invocation.command) }
     }
     fn timeline_event(&mut self, event: crate::timeline::Event) -> Vec<Effect> {
@@ -471,7 +474,7 @@ impl Core {
                 return self.settings_event(crate::settings::Event::Set { id, value, now: *now });
             }
             let continuing = matches!(payload, Payload::Scrub { phase: Phase::Move | Phase::End | Phase::Cancel, .. });
-            if (!continuing && !matches!(id, CommandId::Play | CommandId::PlayPan)) || (!self.timeline.playing() && matches!(id, CommandId::Play | CommandId::PlayPan)) {
+            if *id != CommandId::Cancel && ((!continuing && !matches!(id, CommandId::Play | CommandId::PlayPan)) || (!self.timeline.playing() && matches!(id, CommandId::Play | CommandId::PlayPan))) {
                 if !self.finish_panels(&mut effects) { effects.extend(self.defer(Command::Timeline(event))); return effects; }
             }
         }
@@ -586,8 +589,9 @@ impl Core {
 
     /// Routes a registry command to its owner, after the panels finish what they have open.
     fn run(&mut self, id: CommandId) -> Vec<Effect> {
-        if id.info().owner == Owner::Timeline || (matches!(id, CommandId::SelectAll | CommandId::Cancel) && self.focus.area() == Some(crate::focus::FocusArea::Timeline) && self.focus.text_entry().is_none()) {
-            return self.timeline_event(crate::timeline::Event::Action { id, payload: crate::timeline::Payload::None, now: self.now });
+        if id.info().owner == Owner::Timeline || (id == CommandId::Cancel && self.timeline.playing()) || (matches!(id, CommandId::SelectAll | CommandId::Cancel) && self.focus.area() == Some(crate::focus::FocusArea::Timeline) && self.focus.text_entry().is_none()) {
+            let payload = if matches!(id, CommandId::FirstFrame | CommandId::PreviousFrame | CommandId::NextFrame | CommandId::LastFrame) { crate::timeline::Payload::GlobalNavigation } else { crate::timeline::Payload::None };
+            return self.timeline_event(crate::timeline::Event::Action { id, payload, now: self.now });
         }
         let mut effects = Vec::new();
         if !self.finish_panels(&mut effects) { effects.extend(self.defer(Command::Run(id))); return effects; }

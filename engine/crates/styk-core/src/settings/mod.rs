@@ -78,6 +78,8 @@ pub struct Change {
     pub old: Value,
     pub new: Value,
     pub effects: Vec<Effect>,
+    /// Identity of this mutation, independent of its value (including ABA changes).
+    mutation: std::sync::Arc<()>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -100,6 +102,7 @@ pub struct Settings {
     /// Unknown values survive load/save and are available to future owners without a migration.
     envelope: Value,
     touched: std::collections::BTreeSet<SettingId>,
+    mutations: std::collections::BTreeMap<SettingId, std::sync::Arc<()>>,
     read_only: bool,
 }
 impl Default for Settings {
@@ -109,6 +112,7 @@ impl Default for Settings {
             view: ViewMemory::default(),
             envelope: Value::Null,
             touched: Default::default(),
+            mutations: Default::default(),
             read_only: false,
         }
     }
@@ -154,16 +158,19 @@ impl Settings {
         let old = self.value(id);
         self.assign(id, &value)?;
         self.touched.insert(id);
+        let mutation = std::sync::Arc::new(());
+        self.mutations.insert(id, mutation.clone());
         Ok(Change {
             id,
             old,
             new: self.value(id),
             effects: vec![if id == SettingId::PlaybackQuality { Effect::PlaybackQuality } else { Effect::Timeline }, Effect::Persist],
+            mutation,
         })
     }
     pub fn revert(&mut self, change: &Change) -> Result<Change, Error> {
         // A late failed apply cannot revert a more recent user choice.
-        if self.value(change.id) != change.new {
+        if !self.mutations.get(&change.id).is_some_and(|current| std::sync::Arc::ptr_eq(current, &change.mutation)) {
             return Err(Error::Invalid);
         }
         self.set(change.id, change.old.clone())
@@ -215,11 +222,14 @@ impl Settings {
             if let Some(value) = envelope.path(&[id.section(), id.key()]) {
                 let old = self.value(id);
                 if self.assign(id, value).is_ok() && old != self.value(id) {
+                    let mutation = std::sync::Arc::new(());
+                    self.mutations.insert(id, mutation.clone());
                     changes.push(Change {
                         id,
                         old,
                         new: self.value(id),
                         effects: vec![if id == SettingId::PlaybackQuality { Effect::PlaybackQuality } else { Effect::Timeline }],
+                        mutation,
                     });
                 }
             }

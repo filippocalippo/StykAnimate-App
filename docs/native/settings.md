@@ -27,6 +27,9 @@ The imported filename is recorded; unavailable old application version/time meta
 One worker parses and writes. Edits coalesce for 200 ms and failures use the existing layout
 SaveQueue's 200/400/800/.../10000 ms retry backoff. New edits remain pending during an earlier write;
 only acknowledged values retire. Refused worker admission retains its request and a retry deadline.
+Each setting also owns its latest mutation identity. A Change can revert only that mutation,
+including after an ABA value sequence; changing another setting does not invalidate it. These
+identities are transient and never enter the settings file.
 Close flush waits for the transaction and retries failures while notices remain visible. Corrupt-file
 backup/recovery actions and Settings controls arrive with later design chunks, using this same owner.
 

@@ -151,6 +151,8 @@ pub enum Phase {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Payload {
     None,
+    /// Registry transport navigation outside the timeline's cell context.
+    GlobalNavigation,
     Modifiers(Modifiers),
     Number(f64),
     Range { first: f64, last: f64 },

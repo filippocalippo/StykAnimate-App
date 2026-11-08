@@ -101,6 +101,66 @@ impl Rig {
     }
 }
 #[test]
+fn layer_toggle_keeps_one_member_and_activates_the_last_remaining_member() {
+    let mut rig = Rig::new();
+    let select = |rig: &mut Rig, id: &str, toggle| {
+        rig.action(Id::TimelineSelectLayer, Payload::Layer { id: id.into(), modifiers: Modifiers { toggle, extend: false } });
+    };
+    select(&mut rig, "scene", false);
+    select(&mut rig, "scene", true);
+    assert_eq!(rig.core.view_state().layers(), &["scene"]);
+    assert_eq!(rig.core.timeline().model().active_layer, "scene");
+    select(&mut rig, "camera", true);
+    select(&mut rig, "one", true);
+    select(&mut rig, "one", true);
+    assert_eq!(rig.core.view_state().layers(), &["scene", "camera"]);
+    assert_eq!(rig.core.timeline().model().active_layer, "camera");
+    assert_eq!(rig.core.documents.active().unwrap().view().unwrap().sheet_selection, Some(("camera", false)));
+    assert_eq!(testing::undo_depth(&rig.core), 0);
+}
+
+#[test]
+fn global_period_clamps_and_preserves_selection_but_timeline_period_moves_cells() {
+    use styk_core::focus::{FocusArea, FocusId, FocusTarget, ScopeId, TargetKind};
+    let mut rig = Rig::new();
+    rig.action(Id::TimelineSelectCell, Payload::Cell { point: [248., 81.], modifiers: Modifiers::default() });
+    let selection = rig.core.view_state().range().clone();
+    let layers = rig.core.view_state().layers().to_vec();
+    let end = rig.core.timeline().model().total.saturating_sub(1) as f64;
+    rig.action(Id::TimelineSeek, Payload::Number(end));
+    for (area, expected) in [(FocusArea::Stage, end), (FocusArea::Timeline, end + 1.)] {
+        rig.core.focus_mut().register(ScopeId::ROOT, vec![FocusTarget::new(987, area, TargetKind::Control)]);
+        rig.core.focus_mut().focus(FocusId(987));
+        rig.core.dispatch(Command::KeyPressed { chord: styk_core::text_entry::Chord::new("Period", false, false, false), repeat: false, prevented: false });
+        rig.core.dispatch(Command::KeyReleased { key: "Period".into(), cancelled: false });
+        rig.settle();
+        assert_eq!(rig.tick(), expected, "{area:?}");
+        if area == FocusArea::Stage {
+            assert_eq!(rig.core.view_state().range(), &selection);
+            assert_eq!(rig.core.view_state().layers(), layers);
+        } else {
+            assert_eq!(rig.core.view_state().range(), &Selection::Span { first: expected as usize, last: expected as usize });
+        }
+    }
+}
+
+#[test]
+fn settings_revert_rejects_aba_and_tracks_each_setting_independently() {
+    let mut core = Core::default();
+    let set = |core: &mut Core, id, value| core.dispatch(Command::Settings(settings::Event::Set { id, value: Value::Bool(value), now: 0 }))
+        .into_iter().find_map(|effect| if let Effect::SettingsChanged(change) = effect { Some(change) } else { None }).unwrap();
+    let old = set(&mut core, SettingId::FitViewOnPlayback, false);
+    set(&mut core, SettingId::FitViewOnPlayback, true);
+    let current = set(&mut core, SettingId::FitViewOnPlayback, false);
+    assert!(core.dispatch(Command::Settings(settings::Event::Revert { change: old, now: 1 })).is_empty());
+    assert!(!core.settings().animation().fit_view_on_playback);
+    set(&mut core, SettingId::LoopPlayback, false);
+    assert!(core.dispatch(Command::Settings(settings::Event::Revert { change: current, now: 2 })).iter().any(|effect| matches!(effect, Effect::SettingsChanged(_))));
+    assert!(core.settings().animation().fit_view_on_playback);
+    assert!(!core.settings().animation().loop_playback);
+}
+
+#[test]
 fn accepted_exit_fences_commands_and_document_requests_until_window_teardown() {
     let mut rig = Rig::new();
     let revision = rig.core.documents.active().unwrap().revision();

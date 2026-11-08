@@ -508,6 +508,79 @@ fn transport_acknowledges_the_matching_rendered_submission_once_and_rejects_repl
 #[path = "support/audio.rs"]
 mod audio_support;
 #[test]
+fn space_and_cancel_stop_playback_while_the_document_seek_worker_is_held() {
+    use styk_core::{commands::CommandId, timeline::{Event as Timeline, Payload, transport::State}};
+    struct Release(std::sync::mpsc::Sender<()>);
+    impl Drop for Release {
+        fn drop(&mut self) { let _ = self.0.send(()); }
+    }
+    let gpu = gpu(); let size = [960, 540]; let output = target(&gpu, size);
+    for key in ["Space", "Escape"] {
+        let spawner = Arc::new(platform_spawn::ThreadSpawner);
+        let clock = Arc::new(FixedClock::new()); let progress = styk_core::stage::Progress::new();
+        let (release, receive) = std::sync::mpsc::channel(); let release = Release(release);
+        let receive = std::sync::Mutex::new(receive);
+        let arm = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let armed = arm.clone();
+        let held = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let holding = held.clone();
+        let wake = progress.wake();
+        // Arm only after a real rendered submission enters Playing. Hold the lane's
+        // next completion/retirement notification, leaving Core's seek unsettled.
+        let notify = Arc::new(move || {
+            wake();
+            if std::thread::current().name() == Some("styk-documents") && armed.swap(false, Ordering::SeqCst) {
+                holding.store(true, Ordering::SeqCst);
+                receive.lock().unwrap().recv().unwrap();
+            }
+        });
+        let (mut core, publication) = screens::core_with_document(include_bytes!("../../../tests/edit/property-sheet.document.json"), "Held.styk", spawner.clone(), notify).unwrap();
+        let doc = core.documents.active().unwrap(); let id = doc.id();
+        let source: Arc<dyn styk_core::frames::FrameDocument> = publication;
+        let frames = styk_core::frames::Frames::new(doc.lineage(), doc.revision(), 0, &source, Default::default(), spawner.as_ref(), clock.clone(), progress.wake()).unwrap();
+        let surface = Arc::new(Surface::new(styk_core::stage::Host::new(frames, size, region()).unwrap(), spawner.clone(), clock, progress.clone(), Default::default()));
+        core.set_stage(id, surface.clone()); core.start_timeline(spawner.as_ref(), progress.wake()).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        while core.timeline().model().pending { core.refresh(); assert!(std::time::Instant::now() < until); std::thread::yield_now(); }
+        core.dispatch(Command::Timeline(Timeline::Action { id: CommandId::Play, payload: Payload::None, now: 0 }));
+        while core.timeline().model().transport.state != State::Playing {
+            while core.poll_document().is_some() {}
+            core.dispatch(Command::Wake { now: 0 }); frame(&gpu, &surface, 1, &output, size);
+            assert!(std::time::Instant::now() < until, "the first real picture must start playback"); std::thread::yield_now();
+        }
+        arm.store(true, Ordering::SeqCst);
+        while core.documents.active().unwrap().view().is_ok() {
+            core.dispatch(Command::Wake { now: 100 }); frame(&gpu, &surface, 1, &output, size);
+            assert!(std::time::Instant::now() < until, "playback must dispatch its real seek to the held worker"); std::thread::yield_now();
+        }
+        while !held.load(Ordering::SeqCst) { assert!(std::time::Instant::now() < until, "the document lane must reach the hold"); std::thread::yield_now(); }
+        assert!(core.timeline().playing()); assert!(core.timeline().model().pending);
+        core.dispatch(Command::KeyPressed { chord: styk_core::text_entry::Chord::new(key, false, false, false), repeat: false, prevented: false });
+        core.dispatch(Command::KeyReleased { key: key.into(), cancelled: false });
+        assert_eq!(core.timeline().model().transport.state, State::Paused, "{key} must stop before the seek completes");
+        assert!(core.documents.active().unwrap().view().is_err(), "the seek is still held");
+        drop(release);
+        let mut calls = 0;
+        while core.timeline().model().pending {
+            loop {
+                let unavailable = core.documents.active().unwrap().view().is_err();
+                if core.poll_document().is_none() { break; }
+                if unavailable && core.documents.active().unwrap().view().is_ok() { calls += 1; }
+            }
+            core.dispatch(Command::Wake { now: 1000 }); frame(&gpu, &surface, 1, &output, size);
+            assert!(std::time::Instant::now() < until, "stop settlement must complete"); std::thread::yield_now();
+        }
+        assert_eq!(calls, 2, "the seek and the retained preview cleanup both complete on the real session lane");
+        for now in [1001, 2000, 3000] {
+            core.dispatch(Command::Wake { now }); frame(&gpu, &surface, 1, &output, size);
+            assert!(!core.timeline().playing(), "the completed seek must not restart playback");
+        }
+        assert_eq!(core.timeline().deadline(), None);
+        assert_eq!(surface.take_submission(), None, "a paused seek cannot submit an old transport demand");
+    }
+}
+
+#[test]
 fn audible_playback_starts_only_after_real_picture_submission_and_pause_stops_it() {
     use styk_core::{commands::CommandId, timeline::{Event as Timeline,Payload,transport::State}};
     use styk_services::audio::fake::{FakeOutput,FakeConfig};

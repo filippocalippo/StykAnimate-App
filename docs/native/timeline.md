@@ -47,6 +47,15 @@ FPS readout interval (the original plan said 200 ms).
 The app shares one coalesced Progress stream among document, timeline, settings, facts, audio and
 stage workers. Core exposes deadlines; idle transport has none. Raw keys pass through K-cmd with
 field/IME/overlay gates; Space release plays only when it did not pan. Existing stage widget input
+keeps global frame navigation distinct from focused timeline cell navigation: global Advanced
+actions clamp at the document end and preserve the timeline selection; cell navigation may pass
+the end. Ctrl-toggle retains one layer and activates the last remaining selected member.
+Stop and Cancel pass pending-work gates. They stop transport immediately and retain preview
+cleanup on the existing session call queue until an in-flight seek completes. That seek cannot
+restart playback or acknowledge an obsolete transport demand.
+Pending workers wake through Progress, independently of automation readiness. Continuous frames
+are subscribed for playback and shell animation; automation requests its finite settling frames
+only when ready, never while waiting for a worker. Existing stage widget input
 and automation FPS edits use the same command path. App close first settles the new owners and
 flushes settings. Once exit is accepted, commands and document requests stay fenced until window
 teardown. Document save/close/quit requests use the same lifecycle barrier. Existing document
