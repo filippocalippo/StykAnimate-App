@@ -226,6 +226,8 @@ impl Core {
     pub fn dispatch(&mut self, command: Command) -> Vec<Effect> {
         self.session = Session::default();
         match command {
+            #[cfg(feature = "devtools")]
+            Command::Developer(event) => self.dev_extension_dispatch(event),
             Command::Overlay { event, now } => self.overlay_event(event, now),
             Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event),
             Command::Run(id) => self.run(id),
@@ -310,11 +312,23 @@ impl Core {
         effects
     }
 
+    #[cfg(feature = "devtools")]
+    fn dev_extension_dispatch(&mut self,event:crate::dev_extension::Event)->Vec<Effect>{
+        let mut effects=Vec::new();
+        if let crate::dev_extension::Event::Panel{panel,open}=&event{
+            let asked=self.dock.developer_panel(*panel,*open,self.overlays.now());
+            effects.extend(self.dock_effects(asked));
+        }
+        effects.extend(crate::dev_extension::route(event));effects
+    }
+
     /// Routes a registry command to its owner, after the panels finish what they have open.
     fn run(&mut self, id: CommandId) -> Vec<Effect> {
         let mut effects = Vec::new();
         self.finish_panels(&mut effects);
         match id.info().owner {
+            #[cfg(feature = "devtools")]
+            Owner::Developer => { effects.extend(self.dev_extension_dispatch(crate::dev_extension::command(id))); return effects; },
             Owner::Dock => {
                 let focused = self.focus.focused().filter(|id| self.dock.panel_of(*id).is_some())
                     .or_else(|| self.focus.focused_area().and_then(|area| self.dock.region_panel_target(area)));
@@ -331,6 +345,8 @@ impl Core {
         }
         let mut context = Context { documents: &mut self.documents, view: &mut self.view, session: &mut self.session };
         let result = match id.info().owner {
+            #[cfg(feature = "devtools")]
+            Owner::Developer => return effects,
             Owner::History => crate::history::run(&mut context, id),
             Owner::Selection => crate::selection_actions::run(&mut context, id),
             Owner::Camera => crate::camera_actions::run(&mut context, id),
@@ -356,9 +372,16 @@ impl Core {
     /// Shared resolver and field/IME gates for the registered dock/focus commands. Other features
     /// remain with their existing host; an unmodified/extra-modifier chord never starts a layout edit.
     pub fn dock_shortcut(&mut self, chord: &crate::text_entry::Chord, input: crate::shortcuts::Input) -> Option<Vec<Effect>> {
-        let activation = self.shortcuts.resolve(chord, &[])?;
-        if !matches!(activation.command.info().owner, Owner::Dock | Owner::Focus) { return None; }
-        match self.shortcuts.press(&self.focus, chord, &[], input, |_| true) {
+        #[cfg(feature="devtools")]
+        let scopes = &[crate::shortcuts::Scope::Developer][..];
+        #[cfg(not(feature="devtools"))]
+        let scopes = &[][..];
+        let activation = self.shortcuts.resolve(chord, scopes)?;
+        let accepted = matches!(activation.command.info().owner, Owner::Dock | Owner::Focus);
+        #[cfg(feature = "devtools")]
+        let accepted = accepted || activation.command.info().owner == Owner::Developer;
+        if !accepted { return None; }
+        match self.shortcuts.press(&self.focus, chord, scopes, input, |_| true) {
             crate::shortcuts::Press::Run(activation) => Some(self.dispatch(Command::Run(activation.command))),
             crate::shortcuts::Press::Consumed => Some(Vec::new()),
             _ => None,

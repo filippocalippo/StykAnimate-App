@@ -264,6 +264,8 @@ impl Painter {
             return false;
         };
         picture.frame.present(pass);
+        #[cfg(feature = "devtools")]
+        styk_trace::mark!("stage.present");
         true
     }
     pub fn shown_key(&self) -> Option<&PaintKey> {
@@ -432,6 +434,8 @@ fn paint(
     limits: PaintLimits,
     shared: &Arc<Shared>,
 ) -> Result<RenderedFrame, PaintError> {
+    #[cfg(feature = "devtools")]
+    let _trace = styk_trace::span!("stage.paint");
     let input = &ticket.key.view;
     let scene = &ready.key.inputs.scene;
     let bytes = u64::from(input.size[0]) * u64::from(input.size[1]) * 4;

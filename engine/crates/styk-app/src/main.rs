@@ -218,6 +218,8 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        #[cfg(feature = "devtools")]
+        let _trace = styk_trace::span!("ui.dispatch");
         match message {
             Message::Sheet(message) => match self.sheet.as_mut() {
                 Some(sheet) => sheet.update(message).map(Message::Sheet),
@@ -534,7 +536,10 @@ impl App {
             (Some(ready), None) => {
                 // The docked window fills the window under the band; the band's own area holds nothing below it.
                 let below_band = iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed();
-                iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.dock_wake(), self.band.overlay_wake(), self.band.overlay_layer(self.theme)].map(Message::Band).boxed()
+                let layers=iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.dock_wake(), self.band.overlay_wake(), self.band.overlay_layer(self.theme)];
+                #[cfg(feature = "devtools")]
+                let layers=layers.push(self.band.developer_wake());
+                layers.map(Message::Band).boxed()
             }
             (None, _) => styk_ui::prepaint(),
         }
@@ -594,8 +599,22 @@ fn main() -> ExitCode {
         }
     };
     #[cfg(feature = "devtools")]
+    let developer_runtime = {
+        let spawner:Arc<dyn styk_services::Spawner>=Arc::new(styk_platform::spawn::ThreadSpawner);
+        let storage=match styk_platform::storage::LocalStorage::dev_extension_params(spawner.as_ref()) {Ok(s)=>Arc::new(s),Err(e)=>{eprintln!("developer storage: {e}");return ExitCode::FAILURE;}};
+        let clock=match styk_trace::clock::current(){Some(clock)=>clock,None=>{eprintln!("developer clock missing");return ExitCode::FAILURE;}};
+        let services=styk_devtools::runtime::Services{spawner,clock,files:Arc::new(styk_platform::files::LocalFiles),output:Arc::new(styk_platform::files::LocalFiles),storage,memory:Arc::new(styk_platform::diagnostics::NativeDiagnostics)};
+        let startup=styk_devtools::runtime::Startup{profiles:launch.params.iter().cloned().map(styk_services::files::FileTarget::new).collect(),overrides:launch.param.clone()};
+        match styk_devtools::runtime::Runtime::start(services,startup){Ok(runtime)=>runtime,Err(e)=>{eprintln!("developer runtime: {e}");return ExitCode::FAILURE;}}
+    };
+    #[cfg(feature = "devtools")]
+    {
+        let logs=developer_runtime.logs.clone();
+        if let Err(e)=iced_winit::dev_extension::install(Arc::new(move |level,module,args| logs.record(styk_trace::now_ns(),level,module,args))) {eprintln!("developer logs: {e}");return ExitCode::FAILURE;}
+    }
+    #[cfg(feature = "devtools")]
     let _control = if launch.control {
-        match styk_devtools::channel::shell_reader() {
+        match styk_devtools::channel::runtime_reader(developer_runtime.clone()) {
             Ok(reader) => Some(reader),
             Err(error) => {
                 eprintln!("control channel: {error}");
@@ -661,6 +680,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    #[cfg(feature = "devtools")]
+    // The process retains the registry even if its current window is dropped.
+    built.band.attach_developer(developer_runtime.clone());
     let _automation_deadline = match built.launch.automation.clone() {
         Some(script) => {
             if let Err(error) = built.band.run_script(&script) {

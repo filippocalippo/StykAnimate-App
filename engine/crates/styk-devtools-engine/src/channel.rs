@@ -46,6 +46,32 @@ impl Channel {
 pub struct Reader {
     stop: std::sync::mpsc::SyncSender<()>,
 }
+/// The control server and panels share the process runtime's captures and registry.
+pub fn runtime_reader(runtime: crate::runtime::Runtime) -> Result<Reader,String> {
+    struct Proxy(crate::runtime::Runtime);
+    impl Host for Proxy {
+        fn request(&mut self,op:&str,args:&Value)->Result<Value,String> {
+            if op=="param.set" {return self.0.bridge.set(args["name"].as_str().ok_or("param.set needs name")?.into(),args["value"].clone());}
+            let pending=self.0.submit(crate::runtime::Request::Protocol{op:op.into(),args:args.clone()},Arc::new(||{}))?;
+            match pending.wait()? {
+                crate::runtime::Reply::Value(v)=>Ok(v),
+                crate::runtime::Reply::Stopped{bytes,dropped,summary}=>Ok(json!({"stopped":true,"bytes":bytes,"dropped":dropped,"summary":summary})),
+                _=>Err("unexpected control response".into()),
+            }
+        }
+    }
+    let spawner=styk_platform::spawn::ThreadSpawner;
+    let channel=Channel::start(&styk_platform::LocalControl,&spawner,&format!("stykanimate-dev-{}",std::process::id()))?;
+    let (stop,receiver)=std::sync::mpsc::sync_channel(1);
+    spawner.spawn("devtools.control",Box::new(move || {
+        let mut host=Proxy(runtime);
+        loop {
+            let _=channel.poll(&mut host);
+            match receiver.recv_timeout(std::time::Duration::from_millis(10)) { Err(std::sync::mpsc::RecvTimeoutError::Timeout)=>{},_=>break }
+        }
+    })).map_err(|e|e.to_string())?;
+    Ok(Reader{stop})
+}
 impl Drop for Reader {
     fn drop(&mut self) {
         let _ = self.stop.try_send(());
@@ -118,6 +144,12 @@ impl ReadHost {
     }
     pub fn take_capture(&mut self) -> Option<crate::capture::Capture> {
         self.capture.take()
+    }
+    pub(crate) fn capture(&self) -> Option<&crate::capture::Capture> { self.capture.as_ref() }
+    pub(crate) fn clear(&mut self) { self.drain = None; self.capture = None; }
+    pub(crate) fn note(&self,value:&Value)->Result<(),String>{
+        if let Some(drain)=&self.drain {drain.note(&serde_json::to_vec(value).map_err(|e|e.to_string())?)?;}
+        Ok(())
     }
 }
 impl Host for ReadHost {

@@ -1,0 +1,141 @@
+# First developer panels: core handoff
+
+This is the implemented core for K-dev panels step 2. The visible panels, badge,
+menus and overlay drawing belong to step 3. The only mounted element added here
+is the existing deadline wake adapter; it paints nothing and takes no input.
+
+## Ownership and the view API
+
+`styk-devtools::panels::Host` owns `OverlayModel`, `ProfilerModel`, `LogsModel`,
+`ParametersModel`, `error`, argument request `input`, and `availability()`.
+`DESCRIPTORS` supplies each panel's title key, icon and developer mark. Core's
+gated catalogue resolves these keys. Views borrow these values and send
+`styk_ui::Message::Command(Command::Developer(event))`; they never call Host or
+Runtime. Registered command identities also reach this route through `Run`.
+
+`Event` includes panel open/close, overlay toggle, capture Start/Stop/Export,
+typed Set/Reset, SaveProfile/LoadProfile, ParametersPage and log Filter. Commands
+needing arguments expose `Host.input`; a subsequent typed event supplies the
+value, profile name or opaque export target. `Input(None)` cancels the argument
+request through Core. Accepted submissions clear it in Host; admission refusals retain it
+for correction, and an unrelated channel setter does not dismiss it.
+Argument fields/file chooser views
+come in step 3; output I/O already belongs to the worker's `StreamFiles` service.
+`Poll` and injected-millisecond `Tick` are adapter events, not view timers.
+
+The path is **app handler → Core::dispatch → Effect::Developer → app handler →
+Host**. The handler also reconciles accepted dock membership after workspace
+switches, undo and close. Dock owns all three panels' placement and persistence;
+the gated fixed descriptor slice extends its existing spec lookup. There is no
+second layout registry or panel placement state.
+
+The performance overlay is **outside the dock and input-transparent**. Host owns
+requested visibility. `TopBand::reconcile_developer` supplies the dock's solved
+stage rectangle, translated by the top-band height into window coordinates.
+`OverlayModel.visible` and `.bounds` are the complete placement decision; no
+stage means hidden. A view must use those bounds and must not register an overlay
+panel, hit region or independent timer. F11 uses the normal shortcut adapter.
+
+## Worker, bounds and teardown
+
+One process Runtime owns the registry, log ring and shared capture controller.
+Each window Host has a capture lease. The explicit control channel uses the same
+Runtime, so another client cannot stop, export or discard its capture. Closing
+the profiler drops only its own capture action; unrelated parameter actions stay
+intact. Closing all panels stops sampling, without reverting setters. Dropping a
+window detaches its command bridge and wakes capture reclamation. Runtime ends
+on process teardown; no UI path joins the worker or frees a capture buffer.
+
+- Eight admitted requests, each at most 8 KiB including payload allocations;
+  a ninth queue slot wakes lifecycle work. Admission remains held by pending
+  callbacks and unread replies. Full queues report a retryable error.
+- A Host holds one action reply, one sample reply and one MP reply; each update
+  adopts at most one of each. Response payloads fit 64 KiB: log rows use 48 KiB,
+  parameter pages 7 KiB, MP keeps at most 16 adapter/segment rows. Strings use the
+  existing 2 KiB truncation helper. Control replies retain their existing budget.
+- Sampling deadlines are injected: at most 4 Hz, MP at most 2 Hz. Missed periods
+  coalesce. An open Logs panel requests only log pages when the overlay is closed.
+  Each timing sample reserves the trace snapshot ceiling plus 512 KiB scratch
+  before copying; at most two reductions are admitted process-wide. Each of four
+  timing streams retains at most 4,096 records over 10 seconds; sparkline 240.
+  Present timestamps retain the newest records even when thread snapshots arrive
+  unordered or the stream saturates.
+- `stage.present` intervals describe stage submission cadence, not scanout or GPU
+  time. `ui.dispatch`, `frame.prepare`, `stage.paint` measure their named owners.
+  A UI span of at least 50 ms is counted as a stall (display convention, not a
+  benchmark threshold). Missing producers remain `None`. Truncation is explicit.
+- Logs use the existing `log` facade via an opt-in iced_winit adapter, 8,192
+  entries/2 MiB including ring storage, oldest eviction, nonblocking producers,
+  UTF-8-safe formatting capped at 2 KiB; the formatter returns an error at the cap
+  to stop further writes while retaining the truncated prefix. Filtering is worker-only; pages contain
+  at most 50 rows, total matching rows and cumulative drops. Offset plus returned
+  row count is the next cursor; eviction counts warn that this is a live window.
+- Capture uses existing Drain/Capture admission, 100 ms drain and Perfetto export.
+  Initial parameters and acknowledged changes are bounded metadata notes; overflow
+  appears in `capture.accounting.metadata_dropped`. Summary describes all captured
+  duration spans, at most 100,000 values, with `truncated` if further values exist.
+  It is not a per-site flame graph. Stop completion retries at injected 50 ms
+  deadlines. Streaming replacement shares LocalFiles staging/flush/commit logic;
+  failure preserves both the old destination and the stopped capture for retry.
+
+## Parameters and persistence
+
+`params::Registry` owns finite float/integer, bool and enum descriptors, defaults,
+units, numeric ranges and acknowledged setters. Numeric values clamp; bad types,
+unknown names/options and nonfinite values refuse. Setter failure retains the old
+effective value. Restart-required changes have a separate pending value. Reset
+uses the default. The first installed owner is `capture.cap_mb` (1–256 MiB).
+
+Registry admission is 256 entries/64 KiB, descriptor at most 4 KiB, enum at most
+64 choices of 128 bytes. `ParametersModel` contains rows, total, offset and next
+cursor. No document mutation/history is involved. Runtime startup and later
+mutations are serialized on one worker:
+
+1. Registered defaults.
+2. `--params <file>` profiles in their argument order.
+3. `--param name=value` overrides in their argument order; last value wins.
+4. Accepted panel and channel mutations, through the same acknowledged setter.
+
+Profiles are JSON `{name,params,flags}`. Nonempty flags explicitly refuse until
+their owner exists. All assignments in one profile validate before setters run;
+a setter failure names the failed assignment and reports earlier acknowledgements.
+Explicit saves use a scoped LocalStorage at `%LOCALAPPDATA%/StykAnimate/devtools/params`
+and safe `<name>.json` filenames. Load runs in the same ordered worker as edits.
+CLI files are read through Files, with a combined 64 KiB startup payload ceiling.
+
+The optional channel's `param.set` queues one bounded mutation, wakes the existing
+app subscription and passes Core::dispatch before reaching Runtime. Closed panels
+do not disable it. With no attached window, it explicitly reports that no command
+route is available; the process registry remains alive for a later window. Startup
+validation errors are retained and returned by requests; they cannot silently
+fall back to defaults.
+
+An acknowledged channel change refreshes an open parameter page from the same
+registry; the model never applies a second copy of the setter or validation rule.
+
+## Release isolation and verification
+
+Every production extension seam is gated by `devtools`, independently of `inspect`.
+`check-shipping-features` rejects resolved developer features in production crates
+as well as developer crates and enabled styk-trace. `check-release` first checks
+PE/map identity and linked developer symbols, then scans bounded chunks of the
+executable for all developer catalogue keys and the installed parameter name,
+catching inlined data without a
+developer symbol. The separate release examples deliberately retain an actual
+Core dispatch route and the actual catalogue data; their ignored integration test
+builds both optimized and requires rejection.
+
+Tests cover real app handler/effect/worker wake routes, mounted deadline wake and
+injected clock, F11 and dock undo, registry precedence and refusal, bounds,
+callback admission lifetime, capture ownership and streamed atomic replacement.
+Frozen fixtures and performance thresholds are unchanged.
+
+F11 already names Camera Copy in the product catalogue. The developer-only
+window supplies a gated Developer shortcut scope before Global, as required by
+design 3.5.2. The product-only resolver and its frozen Camera Copy fixtures remain
+unchanged, as does shipping F11.
+
+The toolkit-free Host is exposed by `styk-devtools/panels`; `ui` forwards that
+feature and `styk-ui/devtools` together. The default headless tools dependency
+only enables `inspect` in Core. This prevents a combined default guard build
+from enabling Core extension variants without their UI adapter.

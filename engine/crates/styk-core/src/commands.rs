@@ -20,6 +20,8 @@ use crate::{i18n::Msg, inspector};
 /// What the interface asks the core to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    #[cfg(feature = "devtools")]
+    Developer(crate::dev_extension::Event),
     Overlay { event: crate::overlay::host::Event, now: u64 },
     /// A registry command (a button, a menu item, a shortcut, a quick action, an automation step).
     Run(CommandId),
@@ -52,6 +54,8 @@ pub enum Severity {
 /// change). Effects carry plain data, never a borrowed document.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
+    #[cfg(feature = "devtools")]
+    Developer(crate::dev_extension::Event),
     Overlay(crate::overlay::Effect),
     OverlayChoice { invoker: crate::focus::FocusId, index: usize },
     MessageDismissed(u64),

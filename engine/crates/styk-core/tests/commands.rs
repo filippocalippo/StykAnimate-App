@@ -11,6 +11,14 @@ use styk_core::shortcuts::{self, Activation, Input, Platform, Press, Release, Sc
 use styk_core::text_entry::Chord;
 
 fn entry(id: &str) -> &'static Info { CommandId::from_id(id).unwrap().info() }
+// Today's catalogue remains exact; developer-only additions have their own dispatch/catalogue tests.
+fn product_commands() -> Vec<CommandId> {
+    CommandId::ALL.iter().copied().filter(|id| {
+        #[cfg(feature="devtools")]
+        if matches!(id,CommandId::DevOverlay|CommandId::DevProfiler|CommandId::DevLogs|CommandId::DevParameters|CommandId::DevCaptureStart|CommandId::DevCaptureStop|CommandId::DevCaptureExport|CommandId::DevParameterSet|CommandId::DevParameterReset|CommandId::DevProfileSave|CommandId::DevProfileLoad|CommandId::DevPanelClose|CommandId::DevLogsFilter){return false;}
+        let _=id; true
+    }).collect()
+}
 fn text<'a>(value: &'a Value, key: &str) -> &'a str { value.get(key).and_then(Value::as_str).unwrap_or("") }
 fn flag(value: &Value, key: &str) -> bool { value.get(key).and_then(Value::as_bool).unwrap_or(false) }
 fn strings(value: &Value, key: &str) -> Vec<String> {
@@ -32,9 +40,9 @@ fn registry_is_appendix_a_plus_the_native_layout_undo_command() {
     let appendix = include_str!("../../../../docs/native/INVENTORY.md").split("## Appendix A:").nth(1).unwrap().split("## Appendix B:").next().unwrap();
     let mut expected: BTreeSet<_> = appendix.lines().filter(|line| line.starts_with("| CMD-")).map(|line| line.split('`').nth(1).unwrap()).collect();
     expected.insert("layout-undo"); // Design 3.12 adds independent layout history to the native command set.
-    let actual: BTreeSet<_> = CommandId::ALL.iter().map(|id| id.id()).collect();
+    let actual: BTreeSet<_> = product_commands().iter().map(|id| id.id()).collect();
     assert_eq!(actual, expected);
-    assert_eq!(actual.len(), CommandId::ALL.len());
+    assert_eq!(actual.len(), product_commands().len());
     assert_eq!(actual.len(), 277);
     for entry in CommandId::ALL.iter().map(|id| id.info()) {
         assert_eq!(CommandId::from_id(entry.id.id()), Some(entry.id));
@@ -84,8 +92,8 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let reference = json::parse(&output.stdout).unwrap();
     let commands = reference.get("commands").unwrap().as_arr().unwrap();
-    assert_eq!(commands.len() + 1, CommandId::ALL.len());
-    let native_only: BTreeSet<_> = CommandId::ALL.iter().map(|id| id.id()).filter(|id| !commands.iter().any(|c| text(c, "id") == *id)).collect();
+    assert_eq!(commands.len() + 1, product_commands().len());
+    let native_only: BTreeSet<_> = product_commands().iter().map(|id| id.id()).filter(|id| !commands.iter().any(|c| text(c, "id") == *id)).collect();
     assert_eq!(native_only, BTreeSet::from(["layout-undo"]));
     let safe = strings(&reference, "polygonActions");
     let keys = strings(&reference, "polygonKeys");

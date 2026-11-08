@@ -59,7 +59,9 @@ fn imports(path: &Path) -> Result<(), String> {
                         && owner == "styk_core"
                         && ["drawing", "services"].contains(&module);
                     let automation = owner == "styk_core" && module == "automation";
-                    if module != "inspect" && !existing_pen && !automation {
+                    // Plain developer messages and presentation labels, not engine access.
+                    let panel_contract = owner == "styk_core" && ["dev_extension", "i18n"].contains(&module);
+                    if module != "inspect" && !existing_pen && !automation && !panel_contract {
                         return Err(format!(
                             "{}: tools may import {owner} only through its inspect or core automation API",
                             path.display()

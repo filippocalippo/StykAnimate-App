@@ -1,5 +1,31 @@
 // Appendix A and today's executable catalogue; the parity tests check every field.
 commands! {
+    #[cfg(feature = "devtools")]
+    DevCaptureExport => "dev.export", Info { owner: Owner::Developer, ..Info::new(CommandId::DevCaptureExport, "dev.export", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevParameterSet => "dev.set", Info { owner: Owner::Developer, ..Info::new(CommandId::DevParameterSet, "dev.set", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevParameterReset => "dev.reset", Info { owner: Owner::Developer, ..Info::new(CommandId::DevParameterReset, "dev.reset", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevProfileSave => "dev.saveProfile", Info { owner: Owner::Developer, ..Info::new(CommandId::DevProfileSave, "dev.saveProfile", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevProfileLoad => "dev.loadProfile", Info { owner: Owner::Developer, ..Info::new(CommandId::DevProfileLoad, "dev.loadProfile", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevPanelClose => "dev.close", Info { owner: Owner::Developer, ..Info::new(CommandId::DevPanelClose, "dev.close", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevLogsFilter => "dev.filter", Info { owner: Owner::Developer, ..Info::new(CommandId::DevLogsFilter, "dev.filter", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevOverlay => "dev.overlay", Info { owner: Owner::Developer, shortcut: Some(Shortcut { keys: &["F11"], mac_keys: &["F11"], desktop_only: false, scope: Scope::Developer, hold: false, repeat: false, extra_shift: false, order: 500 }), ..Info::new(CommandId::DevOverlay, "dev.overlay", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevProfiler => "dev.profiler", Info { owner: Owner::Developer, ..Info::new(CommandId::DevProfiler, "dev.profiler", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevLogs => "dev.logs", Info { owner: Owner::Developer, ..Info::new(CommandId::DevLogs, "dev.logs", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevParameters => "dev.parameters", Info { owner: Owner::Developer, ..Info::new(CommandId::DevParameters, "dev.parameters", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevCaptureStart => "dev.start", Info { owner: Owner::Developer, ..Info::new(CommandId::DevCaptureStart, "dev.start", "dev.mark", History::None) };
+    #[cfg(feature = "devtools")]
+    DevCaptureStop => "dev.stop", Info { owner: Owner::Developer, ..Info::new(CommandId::DevCaptureStop, "dev.stop", "dev.mark", History::None) };
     Home => "home", Info { icon: Some("home"), keywords: &["projects", "start", "welcome", "recent"], stays_on_home: true, key_on_home: true, ..Info::new(CommandId::Home, "commands.home", "file", History::None) };
     New => "new", Info { icon: Some("new-file"), keywords: &["create", "blank", "project"], shortcut: Some(Shortcut { keys: &["Mod+KeyN"], mac_keys: &["Mod+KeyN"], desktop_only: false, scope: Scope::Global, hold: false, repeat: false, extra_shift: false, order: 0 }), polygon: Polygon::CancelDraft, polygon_key: true, key_on_home: true, ..Info::new(CommandId::New, "menu.newAnimation", "file", History::None) };
     NewWindow => "new-window", Info { icon: Some("plus"), requires: &[Requirement::NewWindow], stays_on_home: true, key_on_home: true, ..Info::new(CommandId::NewWindow, "commands.newWindow", "file", History::None) };

@@ -49,4 +49,5 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Di
 tiny_http = "0.12"
 
 [features]
+devtools = ["styk-services/devtools"]
 dev-control = []

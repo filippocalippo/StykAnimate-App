@@ -9,17 +9,20 @@ use crate::text_entry::Chord;
 pub enum Platform { Control, Command }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Scope { Drawing, Polygon, Hover, Canvas, Builder, Timeline, Simple, Library, Global }
+pub enum Scope { Drawing, Polygon, Hover, Canvas, Builder, Timeline, Simple, Library, Global, #[cfg(feature="devtools")] Developer }
 
 impl Scope {
     pub fn name(self) -> &'static str {
-        match self { Self::Drawing => "drawing", Self::Polygon => "polygon", Self::Hover => "hover",
+        match self { #[cfg(feature="devtools")] Self::Developer=>"developer", Self::Drawing => "drawing", Self::Polygon => "polygon", Self::Hover => "hover",
             Self::Canvas => "canvas", Self::Builder => "builder", Self::Timeline => "timeline",
             Self::Simple => "simple", Self::Library => "library", Self::Global => "global" }
     }
     pub fn parse(name: &str) -> Option<Self> {
         Self::ALL.iter().find(|scope| scope.name() == name).copied()
     }
+    #[cfg(feature="devtools")]
+    pub const ALL: [Self;10] = [Self::Drawing,Self::Polygon,Self::Hover,Self::Canvas,Self::Builder,Self::Timeline,Self::Simple,Self::Library,Self::Global,Self::Developer];
+    #[cfg(not(feature="devtools"))]
     pub const ALL: [Self; 9] = [Self::Drawing, Self::Polygon, Self::Hover, Self::Canvas, Self::Builder,
         Self::Timeline, Self::Simple, Self::Library, Self::Global];
     pub fn rank(self) -> usize { self as usize }

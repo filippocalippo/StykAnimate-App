@@ -20,6 +20,8 @@ use styk_design::widgets::focus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
+    #[cfg(feature = "devtools")]
+    DeveloperEffect(styk_core::dev_extension::Event),
     /// A command for the core.
     Command(Command),
     /// Focus a number field's input (a click on its scrub label).
@@ -78,6 +80,8 @@ impl From<Command> for Message {
 #[cfg(feature = "engine")]
 pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     match message {
+        #[cfg(feature = "devtools")]
+        Message::DeveloperEffect(_) => Task::none(), // consumed by the application extension adapter
         Message::Command(command) => {
             let effects = core.dispatch(command);
             core.refresh();
@@ -150,6 +154,8 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
 #[cfg(feature = "engine")]
 fn effect(effect: Effect) -> Task<Message> {
     match effect {
+        #[cfg(feature = "devtools")]
+        Effect::Developer(event) => Task::done(Message::DeveloperEffect(event)),
         Effect::Overlay(styk_core::overlay::Effect::Focus(id)) => match id { Some(id) => operate(focus::focus(id)).discard(), None => operate(focus::unfocus()).discard() },
         Effect::Overlay(effect) => Task::done(Message::OverlayEffect(effect)),
         Effect::OverlayChoice { invoker, index } => Task::done(Message::OverlayChoice { invoker, index }),
@@ -198,6 +204,8 @@ pub fn dock_shortcut_at(core: &mut Core, event: &iced::Event, ignored: bool, now
         // Synthetic/headless inputs have no hardware code. The spelling is adapted, never matched to a command here.
         Physical::Unidentified(_) => match key.as_ref() {
             Key::Named(Named::F6) => "F6".into(),
+            #[cfg(feature = "devtools")]
+            Key::Named(Named::F11) => "F11".into(),
             Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_alphabetic() => format!("Key{}", c.to_uppercase()),
             Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_digit() => format!("Digit{c}"),
             _ => return None,
