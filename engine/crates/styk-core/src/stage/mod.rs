@@ -4,11 +4,21 @@ pub mod input;
 mod painter;
 #[cfg(feature = "engine")]
 pub mod picking;
+mod event;
+mod progress;
+#[cfg(feature = "engine")]
+mod surface;
 mod view;
 #[cfg(feature = "engine")]
 use crate::engine::wgpu;
 #[cfg(feature = "engine")]
 pub use painter::{PaintError, PaintLimits, PaintStatus, Painter};
+pub use event::{Cursor, Error as SurfaceError, Event, Gestures, GpuId, LINE_PIXELS, Outcome, Wheel, WheelDelta};
+pub use progress::Progress;
+#[cfg(all(feature = "engine", feature = "testing"))]
+pub use surface::Call;
+#[cfg(feature = "engine")]
+pub use surface::{Gpu, Place, Surface};
 pub use view::{MAX_ZOOM, MIN_ZOOM, View, Viewport, WheelZoom, ZOOM_STEP};
 
 /// Startup wiring for the toolkit's generic instance-policy hook. The engine

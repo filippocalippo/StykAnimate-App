@@ -18,6 +18,8 @@
 //! and what later starts ask of it. `--shell-check` asks the real window about it, in process.
 
 mod headless;
+#[cfg(test)]
+mod stage_widget_tests;
 #[cfg(feature = "devtools")]
 mod input_check;
 use styk_platform::{screenshot, shell, shell_check};
@@ -769,6 +771,7 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
     let scale = launch.scale.unwrap_or(1.0) as f32;
     let result = match screen {
         Some(screen @ Screen::Inspector(..)) => headless::inspector_screenshot(screen, size, scale),
+        Some(screen @ Screen::Stage(..)) => headless::stage_screenshot(screen, size, scale),
         _ => headless::screenshot(theme, size, scale, sheet.as_ref(), screen.filter(|screen| screen.is_band())),
     }
     .and_then(|image| {

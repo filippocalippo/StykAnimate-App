@@ -97,6 +97,11 @@ impl Host {
         Ok(InputResult::Route(pointer))
     }
 
+    /// The window lost focus: a captured pan drag ends where it stands (the view keeps what it had).
+    pub fn cancel_gestures(&mut self) {
+        self.pan_gesture = None;
+    }
+
     pub fn pen_sample(
         &self,
         sample: PenSample,

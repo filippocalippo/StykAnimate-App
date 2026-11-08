@@ -126,7 +126,56 @@ semantics, request supersession and frozen browser picking answers. `stage_paint
 draws through the real production worker and presenter to an offscreen target,
 compares vector, cel and effect fixtures with `styk export` pixels, exercises repeated replacements, refuses output
 and working-byte budgets, and observes worker resource reclamation after close.
-No frozen fixture or parity threshold is changed. N2 owns visible screenshots.
+No frozen fixture or parity threshold is changed. N2 owns visible screenshots (see "The stage widget").
+
+## The stage widget
+
+`styk_ui::stage` is the iced shader widget; `styk_core::stage::Surface` is everything it would otherwise decide. A
+surface is one document's `Host`, its `Painter` and the input policy; `Core` holds one per open document
+(`set_stage`, `stage`, `close_stage`) and runs its events as `Command::Stage(Event)` through `Core::dispatch`.
+
+- **Input.** The widget turns toolkit events into `Event`s and publishes them as messages: the mouse and fingers become
+  `Pointer` events (stage coordinates, one pointer identity each; middle button, Space and the Pan tool pan through
+  `Host::pointer`, other presses come back as `Outcome::routed` for the tool owner, which does not exist yet), the
+  wheel becomes `Wheel` (the surface converts lines to today's 100 px notch and the toolkit's sign to the browser's,
+  then picks zoom or pan from Ctrl/Cmd and the Zoom gesture setting, with the setting's smoothing), Space becomes `Space`
+  and a lost focus `Blur`; pen samples are drained from the surface's queue by `Progress`. Events outside the stage, and moves with no button down, are not sent.
+  Each redraw while `Surface::moving` sends `Tick`, which advances wheel easing on the application clock.
+  Automation steps (`pan`, `zoom`, `pointer`, `frame`) are the same events (`Event::from_step`).
+- **Size and density** are read where they are known: the primitive's `prepare` gives `Surface::prepare` the widget's
+  logical bounds and the window's scale factor, and the surface resizes the host (a fitted view follows).
+- **The frame loop** is the contract of "Painter integration": `prepare` is called after the previous frame's encoder was
+  submitted and does, in order, resize, painter creation for a new graphics context (a new `Pipeline` has a new
+  `GpuId`: surface recreation means a new painter), the demand (`Host::request`, `Painter::request`), scheduler
+  `flush`, `Painter::update`; `draw` first records the artboard backing, then `Painter::present` into the widget's
+  pass. A pending or failed candidate leaves the last complete picture on show. The surface's lock is only ever taken
+  with `try_lock` and by the interface thread alone; nothing waits on it, on the worker or on the GPU.
+- **Redraws follow the work, and nothing polls.** The scheduler, the paint worker and the platform's pen queue
+  (`Surface::set_input`) wake the stage from their own threads through one coalescing `Progress` (any number of wakes
+  between two polls is one answer; `stage/progress.rs`). `styk_ui::stage::subscription` turns each answer into one
+  `Event::Progress` message, whose handling collects the scheduler's results and drains the pen queue, and the message
+  is the one redraw (`prepare` then takes the new picture). The widget itself never asks for a redraw for a pending
+  picture. Only while the view eases (`Surface::moving`, the core's decision) does each redraw send a `Tick`, which keeps
+  the redraws display-paced for exactly as long as the easing lasts.
+- **Focus.** `Event::Blur` (the window lost focus) clears Space and ends a captured pan drag; the widget forgets its own
+  held keys, modifiers and buttons with it, so nothing stays down that was released in another window.
+- **Failure and recovery.** A paint worker that cannot start is kept as `Surface::fault` and `PaintStatus::Failed`: the
+  stage shows its last picture or nothing, and nothing retries by itself. A new graphics context is the retry: the vendored
+  iced's compositor drops every custom primitive pipeline when it creates a window's surface again (a lost swap chain;
+  `vendor/iced/VENDOR.md`), the stage's `Pipeline::new` runs again with a new `GpuId`, and the surface makes a new painter.
+- **Close.** `Core::refresh` drops (and so closes) the stage of every document the documents host closed or replaced
+  (`Effect::Closed`, `ClosedSaved`, the last tab's replacement, quit), and `Core::stage` never answers for one.
+- **The artboard backing** (today's `#artboard`: an 8 px checkerboard seen where the scene is transparent, a 1 px ring
+  and a soft drop) is drawn by the widget's own small pipeline (`stage/backing.wgsl`) at `Surface::artboard()`, the canvas as the picture on show has it.
+- **Not here:** tools, handles, the marquee, grids and guides, the HUD, the header and the rail. The surface keeps
+  the stage's tick (`Event::Frame`) until the timeline owns it.
+
+`tests/stage_surface.rs` (styk-core) covers the input policy through `Core::dispatch`, the render path on a real device
+(call order, one update and one present per frame, the picture kept while a demand is pending, a new painter for a new
+context) and the automated interaction `docs/native/scenarios/stage-interaction.styk-auto`, whose last frame equals
+`styk export`'s byte for byte. `styk-app/src/stage_widget_tests.rs` drives the widget itself in the toolkit's headless
+renderer. Screens `stage-fit` and `stage-fit-dark` (`styk_core::screens::stage`) are compared with today's stage by
+`engine/crates/styk-app/automation/stage-reference/screens.mjs`.
 
 ## Inventory boundary
 

@@ -27,11 +27,13 @@ pub enum Screen {
     BandBuild,
     /// The Properties panel in a context (`styk_core::screens`), docked at today's default size; dark when `true`.
     Inspector(InspectorScreen, bool),
+    /// The stage: a repository fixture fitted into the stage region at tick 0; dark when `true`.
+    Stage(bool),
 }
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 23] = [
+    pub const ALL: [Screen; 25] = [
         Screen::ComponentSheet,
         Screen::Band,
         Screen::BandDark,
@@ -55,6 +57,8 @@ impl Screen {
         Screen::Inspector(InspectorScreen::Layer, true),
         Screen::Inspector(InspectorScreen::Frame, false),
         Screen::Inspector(InspectorScreen::Frame, true),
+        Screen::Stage(false),
+        Screen::Stage(true),
     ];
 
     /// The ID the command line uses.
@@ -83,20 +87,31 @@ impl Screen {
             Screen::Inspector(InspectorScreen::Layer, true) => "inspector-layer-dark",
             Screen::Inspector(InspectorScreen::Frame, false) => "inspector-frame",
             Screen::Inspector(InspectorScreen::Frame, true) => "inspector-frame-dark",
+            Screen::Stage(false) => "stage-fit",
+            Screen::Stage(true) => "stage-fit-dark",
+        }
+    }
+
+    /// Why the engine-free preview (`styk-screens`) does not draw this screen, for the screens that show a frame the engine
+    /// makes: only the app does (`None`: the preview draws it, and `cargo xtask check` compares both captures).
+    pub const fn app_only(self) -> Option<&'static str> {
+        match self {
+            Screen::Stage(_) => Some("a stage screen shows a frame the engine draws, and the preview is built without the engine"),
+            _ => None,
         }
     }
 
     /// The theme the screen is drawn in.
     pub const fn theme(self) -> Theme {
         match self {
-            Screen::BandDark | Screen::Inspector(_, true) => Theme::Dark,
+            Screen::BandDark | Screen::Inspector(_, true) | Screen::Stage(true) => Theme::Dark,
             _ => Theme::Light,
         }
     }
 
     /// Whether the screen is the top band over its window (the band screens need the shell's layout).
     pub const fn is_band(self) -> bool {
-        !matches!(self, Screen::ComponentSheet | Screen::Inspector(..))
+        !matches!(self, Screen::ComponentSheet | Screen::Inspector(..) | Screen::Stage(..))
     }
 
     /// The screen with this ID.

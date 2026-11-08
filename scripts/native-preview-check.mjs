@@ -1,5 +1,5 @@
 // Separate Cargo invocations keep the preview's model-only graph independent of the app.
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {readFileSync, mkdtempSync, rmSync, rmdirSync} from 'node:fs';
 import {resolve, join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -21,6 +21,11 @@ export function previewGraphCheck(root) {
   console.log('preview: model-only graph; layout value store only; no evaluation/render/edit engine or core export/audio modules');
 }
 
+// The exit status with which the preview declares a screen app-only (Screen::app_only in styk-ui: a screen that shows a frame the
+// engine draws, which the engine-free preview does not link). It names the reason on stderr; the real app still captures the screen
+// and compares it with its reference. Any other failure of the preview fails the check.
+export const APP_ONLY_STATUS = 3;
+
 export function previewParityCheck(root, target) {
   const ids = catalogueIds(readFileSync(resolve(root, 'engine/crates/styk-ui/src/screens.rs'), 'utf8'));
   const specs = parseLimits(readFileSync(resolve(root, 'docs/native/screens/limits.toml'), 'utf8'));
@@ -31,11 +36,22 @@ export function previewParityCheck(root, target) {
     for (const id of ids) {
       const spec = specs.get(id);
       if (!spec) throw new Error(`missing dimensions for ${id}`);
+      let skipped = null;
       const captures = ['stykanimate', 'styk-screens'].map(binary => {
         const path = join(out, `${binary}-${id}.png`); files.push(path, path.replace(/\.png$/, '.png.partial'));
-        execFileSync(resolve(target, `debug/${binary}.exe`), ['--screen', id, '--size', `${spec.width}x${spec.height}`, '--scale', '1', '--screenshot', path], {cwd: root, stdio: 'inherit', timeout: 45000, env: {...process.env, STYK_BACKGROUND_WINDOW: 'headless'}});
+        const args = ['--screen', id, '--size', `${spec.width}x${spec.height}`, '--scale', '1', '--screenshot', path];
+        const options = {cwd: root, timeout: 45000, env: {...process.env, STYK_BACKGROUND_WINDOW: 'headless'}};
+        if (binary === 'styk-screens') {
+          const run = spawnSync(resolve(target, `debug/${binary}.exe`), args, {...options, encoding: 'utf8'});
+          const reason = /^app-only: (.+)$/m.exec(run.stderr ?? '');
+          if (run.status === APP_ONLY_STATUS && reason) { skipped = reason[1]; return null; }
+          if (run.status !== 0) throw new Error(`${id}: the preview failed (status ${run.status}): ${run.stderr}`);
+          return readFileSync(path);
+        }
+        execFileSync(resolve(target, `debug/${binary}.exe`), args, {...options, stdio: 'inherit'});
         return readFileSync(path);
       });
+      if (skipped) { console.log(`preview parity: ${id}: app-only, not compared (${skipped})`); continue; }
       // Both hosts use the same deterministic PNG encoder (no timestamps or metadata).
       // Byte identity is stronger than pixel identity; even a single channel bit fails.
       if (!captures[0].equals(captures[1])) throw new Error(`${id}: preview capture differs from the real app`);

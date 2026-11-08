@@ -410,9 +410,12 @@ impl graphics::Compositor for Compositor {
     }
 
     fn create_surface(&mut self, window: impl compositor::Window) -> Self::Surface {
-        self.instance
+        let surface = self.instance
             .create_surface(wgpu::SurfaceTarget::Window(Box::new(window)))
-            .expect("Create surface")
+            .expect("Create surface");
+        // The surface may have been lost and made again: primitives that hold graphics state tied to it start afresh.
+        self.engine.surface_recreated();
+        surface
     }
 
     fn configure_surface(&mut self, surface: &mut Self::Surface, width: u32, height: u32) {

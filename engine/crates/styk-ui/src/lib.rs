@@ -14,6 +14,9 @@ pub mod inspector;
 pub mod message;
 pub mod screens;
 pub mod shell;
+// The stage widget draws a frame the engine made (its painter), like the ink pad: engine builds only.
+#[cfg(feature = "engine")]
+pub mod stage;
 
 pub use message::Message;
 

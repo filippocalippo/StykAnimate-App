@@ -215,6 +215,11 @@ impl Storage {
             .map(|pipeline| pipeline.as_mut() as &mut dyn Any)
     }
 
+    /// Drops every pipeline in the [`Storage`]: each is made again, on the next frame that needs it.
+    pub fn clear(&mut self) {
+        self.pipelines.clear();
+    }
+
     /// Trims the cache of all the pipelines in the [`Storage`].
     pub fn trim(&mut self) {
         for pipeline in self.pipelines.values_mut() {

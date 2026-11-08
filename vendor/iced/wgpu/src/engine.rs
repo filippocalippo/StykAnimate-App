@@ -66,4 +66,13 @@ impl Engine {
             .expect("primitive storage should be writable")
             .trim();
     }
+
+    /// A window's surface was created again (the first one, or after the swap chain was lost): every custom primitive
+    /// pipeline is dropped, so its owner builds a new one and sees that its graphics context changed.
+    pub fn surface_recreated(&self) {
+        self.primitive_storage
+            .write()
+            .expect("primitive storage should be writable")
+            .clear();
+    }
 }

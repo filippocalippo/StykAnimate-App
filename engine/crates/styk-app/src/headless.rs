@@ -4,23 +4,32 @@
 //! `styk_platform::unattended`) it opens none. The interface is built and drawn by the same `iced_wgpu` renderer a
 //! window uses, into a picture of the requested size.
 
+use iced::Widget as _;
 use styk_design::Theme;
 use styk_platform::window::Image;
 use styk_ui::component_sheet::Sheet;
 use styk_ui::screens::Screen;
 
+/// A stage screen: its fixture's core, the toolkit's device handed to the painter by the widget, redrawn until the picture on
+/// show answers the first demand (the paint worker finishes in its own time; nothing here waits for it).
+pub fn stage_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
+    let clock: std::sync::Arc<dyn styk_services::Clock> = std::sync::Arc::new(styk_platform::clock::SystemClock::new());
+    let core = styk_core::screens::stage(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), clock, [f64::from(size.0), f64::from(size.1)])?;
+    pollster::block_on(screenshot_async(screen.theme(), size, scale, None, None, None, Some(&core)))
+}
+
 /// Draws the interface in `theme`, `size` logical pixels at `scale`, and returns the picture (RGBA, top row first).
 ///
 /// Fails when the machine has no graphics adapter the renderer can use.
 pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>) -> Result<Image, String> {
-    pollster::block_on(screenshot_async(theme, size, scale, sheet, band, None))
+    pollster::block_on(screenshot_async(theme, size, scale, sheet, band, None, None))
 }
 
 /// A Properties panel screen: its fixture's core, refreshed (never waited on) until the facts lane made what it shows.
 pub fn inspector_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
     let Screen::Inspector(context, _) = screen else { return Err("not a Properties panel screen".into()) };
     let core = pollster::block_on(prepared_core(context))?;
-    pollster::block_on(screenshot_async(screen.theme(), size, scale, None, None, Some(&core)))
+    pollster::block_on(screenshot_async(screen.theme(), size, scale, None, None, Some(&core), None))
 }
 
 pub async fn prepared_core(context: styk_core::screens::InspectorScreen) -> Result<styk_core::app::Core, String> {
@@ -43,8 +52,14 @@ async fn pause() -> Result<(), String> {
     receive.await.map_err(|error| error.to_string())
 }
 
-async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>, inspector: Option<&styk_core::app::Core>) -> Result<Image, String> {
-    let image = styk_ui::headless::screenshot(theme, size, scale, sheet, band, inspector.and_then(|core| styk_ui::inspector::View::of(core, theme)), styk_platform::font_smoothing::current(), iced::time::Instant::now(), pause).await?;
+async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>, inspector: Option<&styk_core::app::Core>, stage: Option<&styk_core::app::Core>) -> Result<Image, String> {
+    // The stage is the engine's: the widget and the surface that says when its picture answers the first demand are built here, and
+    // the shared renderer (which links no engine) only draws them and waits for `ready`.
+    let scene = stage.and_then(|core| {
+        let view = styk_ui::stage::view(core, theme)?;
+        Some(styk_ui::headless::Scene { view: view.map(|_| ()).boxed(), ready: Box::new(move || core.stage().is_some_and(|surface| surface.ready())) })
+    });
+    let image = styk_ui::headless::screenshot(theme, size, scale, sheet, band, inspector.and_then(|core| styk_ui::inspector::View::of(core, theme)), scene, styk_platform::font_smoothing::current(), iced::time::Instant::now(), pause).await?;
     Ok(Image { width: image.width, height: image.height, rgba: image.rgba })
 }
 
