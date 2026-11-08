@@ -284,8 +284,8 @@ impl Core {
         }
         effects.extend(update.effects.into_iter().map(Effect::Overlay));
         if let Some(id) = update.dismissed { effects.push(Effect::MessageDismissed(id)); }
-        if let Some(command) = update.run { effects.extend(self.run(command)); }
-        if let Some(event) = update.act { effects.extend(self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus)); }
+        if let Some(command) = update.run { effects.extend(self.dispatch(Command::Run(command))); }
+        if let Some(event) = update.act { effects.extend(self.dispatch(Command::Recovery(event))); }
         if let Some(command) = command { effects.extend(self.dispatch(command)); }
         effects
     }
@@ -293,6 +293,10 @@ impl Core {
     /// Runs one command.
     pub fn dispatch(&mut self, command: Command) -> Vec<Effect> {
         self.session = Session::default();
+        // Freeze every input owner, including stage gestures, drawing and text drafts, as soon as
+        // the documents host accepts quit. Overlay housekeeping must still drive the shared wake;
+        // its command/action callbacks re-enter this gate. Progress and save replies have separate APIs.
+        if (self.documents.edits_locked() || self.session_end_expired()) && !matches!(command, Command::Overlay { .. }) { return Vec::new(); }
         match command {
             Command::Overlay { event, now } => self.overlay_event(event, now),
             Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event),

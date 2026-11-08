@@ -128,6 +128,7 @@ pub(super) struct Host {
     pending: Option<Pending>,
     prompt: Option<Prompt>,
     after_save: Option<AfterSave>,
+    pub(super) quit_committed: bool,
     continue_save: Option<(Stamp, bool)>,
     retired: Vec<Box<dyn Send>>,
     startup: Value,
@@ -271,8 +272,14 @@ impl Documents {
             tab.prepared.set_clock(clock);
             for scope in &mut tab.scopes { scope.parent.set_clock(clock); }
         }
-        self.host = Some(Host { options: saved_options, lifetime, worker: Some(worker), pending: None, prompt: None, after_save: None, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
+        self.host = Some(Host { options: saved_options, lifetime, worker: Some(worker), pending: None, prompt: None, after_save: None, quit_committed: false, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
         Ok(())
+    }
+
+    /// Once a quit answer is accepted, only its save continuation may mutate sessions.
+    /// Save failure/cancellation clears `after_save`; cleanup and final window teardown never reopen input.
+    pub fn edits_locked(&self) -> bool {
+        self.host.as_ref().is_some_and(|host| host.quit_committed || matches!(host.after_save, Some(AfterSave::All { quit: true, .. })))
     }
 
     pub fn recency(&self) -> impl Iterator<Item = &Document> { self.recent.iter().filter_map(|id| self.get(*id)) }
@@ -293,6 +300,7 @@ impl Documents {
         Some(self.tabs[(at as isize + step.rem_euclid(self.tabs.len() as isize)).rem_euclid(self.tabs.len() as isize) as usize].id)
     }
     pub fn reorder(&mut self, id: DocumentId, index: usize) -> bool {
+        if self.edits_locked() { return false; }
         let Some(from) = self.tabs.iter().position(|tab| tab.id == id) else { return false; };
         let to = index.min(self.tabs.len() - 1);
         if from == to { return false; }
@@ -312,6 +320,11 @@ impl Documents {
 
     /// Every heavy operation is queued. Refused input is returned, never decoded or dropped behind the caller's back.
     pub fn dispatch(&mut self, request: Request) -> Dispatch {
+        // Save dialog replies and explicit cancellation belong to the accepted continuation.
+        // Return every other payload intact: no new session work may race quit cleanup.
+        if self.edits_locked() && !matches!(request, Request::Cancel(_) | Request::SaveTarget { .. }) {
+            return Err((DocumentsError::Busy.into(), request));
+        }
         // Validate before moving payloads. Control replies/cancel are admitted while a prompt/job is outstanding.
         let validation = match &request {
             Request::Cancel(_) | Request::Respond { .. } | Request::SaveTarget { .. } => self.host().map(|_| ()),
@@ -769,6 +782,8 @@ mod close_wiring_regression {
         core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Save)));
         assert!(core.recovery().closing().is_some(), "Busy must not consume the visible prompt");
         assert!(matches!(core.documents.host.as_ref().unwrap().prompt, Some(Prompt::Quit { .. })));
+        assert!(!core.documents.edits_locked(), "a refused answer never acquired the fence");
+        core.documents.call(id, "setFPS", &[Value::Num(31.0)], &Value::Null).unwrap().result.unwrap();
     }
 
     struct Threads;
@@ -789,24 +804,29 @@ mod close_wiring_regression {
         crate::app::Core::new(documents)
     }
     #[test]
-    fn cancelled_save_releases_quit_intent_and_preserves_work() {
+    fn failed_or_cancelled_save_releases_quit_intent_and_edit_fence_preserving_work() {
         use styk_services::files::fake::Failure;
-        let files = Arc::new(MemoryFiles::default());
-        let target = FileTarget::new("Project.styk");
-        files.put(target.clone(), Arc::from(b"previous complete file".as_slice()));
-        files.fail(Failure::CancelBeforeCommit);
-        let (send, receive) = std::sync::mpsc::sync_channel(1);
-        let mut core = saving_core(files.clone(), Arc::new(move || { let _ = send.try_send(()); }));
-        core.request_quit();
-        core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Save)));
-        receive.recv_timeout(std::time::Duration::from_secs(15)).unwrap();
-        let answer = core.documents.poll().expect("the real worker notified its answer");
-        assert!(matches!(answer, Effect::Cancelled(_)), "{answer:?}");
-        core.document_effect(&answer);
-        assert!(core.documents.active().unwrap().dirty());
-        assert_eq!(&*files.get(&target).unwrap(), b"previous complete file");
-        core.request_quit();
-        assert!(core.recovery().closing().is_some(), "a cancelled save must allow a fresh quit");
+        for failure in [Failure::ReadOnly, Failure::Full, Failure::CancelBeforeCommit] {
+            let files = Arc::new(MemoryFiles::default());
+            let target = FileTarget::new("Project.styk");
+            files.put(target.clone(), Arc::from(b"previous complete file".as_slice()));
+            files.fail(failure);
+            let (send, receive) = std::sync::mpsc::sync_channel(1);
+            let mut core = saving_core(files.clone(), Arc::new(move || { let _ = send.try_send(()); }));
+            core.request_quit();
+            core.dispatch(crate::commands::Command::Recovery(crate::recovery::model::Event::Respond(crate::recovery::model::Choice::Save)));
+            receive.recv_timeout(std::time::Duration::from_secs(15)).unwrap();
+            let answer = core.documents.poll().expect("the real worker notified its answer");
+            assert!(matches!(answer, Effect::Cancelled(_) | Effect::Failed { .. }), "{answer:?}");
+            core.document_effect(&answer);
+            assert!(!core.documents.edits_locked());
+            let id = core.documents.active().unwrap().id();
+            core.documents.call(id, "setFPS", &[Value::Num(31.0)], &Value::Null).unwrap().result.unwrap();
+            assert!(core.documents.active().unwrap().dirty());
+            assert_eq!(&*files.get(&target).unwrap(), b"previous complete file");
+            core.request_quit();
+            assert!(core.recovery().closing().is_some(), "a failed or cancelled save must allow a fresh quit");
+        }
     }
     #[test]
     fn stale_response_retires_the_invalid_prompt_and_allows_a_fresh_quit() {

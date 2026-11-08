@@ -162,6 +162,7 @@ impl RecoveryHost {
 
 impl Documents {
     pub(super) fn finish_quit(&mut self) -> Effect {
+        if let Some(host) = self.host.as_mut() { host.quit_committed = true; }
         let Some(host) = self.recovery.as_mut() else { return Effect::QuitReady; };
         host.quitting = true; host.quit_ready = false;
         if let Some(pending) = &host.pending { pending.cancel.cancel(); }

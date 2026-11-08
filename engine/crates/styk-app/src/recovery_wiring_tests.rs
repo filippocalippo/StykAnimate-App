@@ -207,6 +207,68 @@ impl Runtime {
         self.app.band.core.documents.call(id, "setFPS", &[styk_core::engine::Value::Num(30.0)], &styk_core::engine::Value::Null).unwrap().result.unwrap();
     }
     fn prompt(&mut self) { self.until(|app| app.band.core.recovery().closing().is_some()); }
+    fn inspector_input(&mut self, scrub: bool) {
+        use styk_core::inspector::property::PropertyKey::Fps;
+        use styk_ui::inspector::{self, View};
+        let element = |app: &App| styk_ui::dock::docked(inspector::view(View::of(&app.band.core, Theme::Light).expect("the live inspector")), Theme::Light)
+            .map(|message| Message::Band(top_band::Message::Editor(message))).boxed();
+        let mut driver = Driver::new(element(&self.app), Size::new(320.0, 900.0), &styk_design::fonts::ALL);
+        driver.redraw();
+        if scrub {
+            let bounds = driver.snapshot().bounds_of(inspector::label_id(Fps)).expect("the live FPS scrub label");
+            let start = bounds.center(); driver.point_at(start);
+            driver.events(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left))]);
+            for delta in [8.0, 24.0] {
+                let position = Point::new(start.x + delta, start.y); driver.point_at(position);
+                driver.events(&[iced::Event::Mouse(iced::mouse::Event::CursorMoved { position })]);
+            }
+            driver.events(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left))]);
+        } else {
+            driver.focus(inspector::input_id(Fps)); driver.events(&[]);
+        }
+        let sent = driver.messages(); assert!(!scrub || !sent.is_empty(), "the mounted scrub must publish");
+        for message in sent { self.message(message); }
+        if scrub { return; }
+        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(Fps));
+        for _ in 0..12 { driver.press(iced::keyboard::key::Named::Backspace); }
+        driver.typewrite("42");
+        let sent = driver.messages(); assert!(!sent.is_empty()); for message in sent { self.message(message); }
+        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(Fps)); driver.press(iced::keyboard::key::Named::Enter);
+        let sent = driver.messages(); assert!(!sent.is_empty()); for message in sent { self.message(message); }
+    }
+}
+
+#[test]
+fn accepted_quit_answer_fences_edits_before_quit_ready_is_processed() {
+    use styk_core::{commands::{Command, CommandId}, engine::Value};
+    let mut leaked = Vec::new();
+    for save in [false, true] {
+        for input in ["edit", "undo", "drag", "text"] {
+            let mut rt = Runtime::new(); rt.settled(); rt.dirty(true);
+            let id = rt.app.band.core.documents.active().unwrap().id();
+            rt.app.band.core.documents.call(id, "setFPS", &[Value::Num(31.0)], &Value::Null).unwrap().result.unwrap();
+            rt.app.band.core.documents.call(id, "select", &[Value::Null, Value::Num(-1.0)], &Value::Null).unwrap().result.unwrap();
+            rt.app.band.core.documents.active().unwrap().frame_records().unwrap();
+            rt.close(); rt.prompt(); rt.settle_prompt_animation();
+            let revision = rt.app.band.core.documents.active().unwrap().revision();
+            rt.click(if save { ids::SAVE } else { ids::DONT_SAVE });
+            assert!(rt.app.band.core.recovery().closing().is_none(), "the answer was accepted");
+            assert!(!rt.app.quit_cleared && !rt.app.closing, "returned tasks have not delivered QuitReady yet");
+            match input {
+                "edit" => { let _ = rt.app.band.core.documents.call(id, "setFPS", &[Value::Num(32.0)], &Value::Null); }
+                "undo" => rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(Command::Run(CommandId::Undo))))),
+                "drag" => rt.inspector_input(true),
+                "text" => rt.inspector_input(false),
+                _ => unreachable!(),
+            }
+            let tab = rt.app.band.core.documents.active().unwrap();
+            if tab.revision() != revision || tab.view().unwrap().editing { leaked.push((save, input)); }
+            if leaked.last() == Some(&(save, input)) { continue; }
+            rt.until(|app| app.closing);
+            assert_eq!(rt.app.band.core.documents.active().unwrap().revision(), revision);
+        }
+    }
+    assert!(leaked.is_empty(), "accepted quit answers allowed edits before QuitReady: {leaked:?}");
 }
 #[test]
 fn settled_idle_app_close_gets_its_first_poll() {

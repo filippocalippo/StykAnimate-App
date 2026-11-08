@@ -176,9 +176,10 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
   owners do not yet report `set_recovery_activity`.
 
 **Quit order.** The documents host decides first: Busy keeps the intent, the close prompt stays until its answer is
-accepted, and Save/Discard/Cancel and recovery finish before `QuitReady` grants window exit. Input is then fenced so it cannot
-create new unsaved work while preferences drain. An ordinary quit flushes the layout `SaveQueue` without its debounce, waits
-for its worker receipt, then saves window placement and ends. A refused final layout write abandons the proposal while atomic
+accepted, and Save/Discard/Cancel and recovery finish before `QuitReady` grants window exit. The documents host fences edits
+from accepted Save/Discard through cleanup and window teardown; the core uses that permission for all input commands. A failed
+or cancelled save releases the fence with its continuation. The fence also covers the later preference drain. An ordinary quit
+flushes the layout `SaveQueue` without its debounce, waits for its worker receipt, then saves window placement and ends. A refused final layout write abandons the proposal while atomic
 storage preserves the last complete file, including layouts a later launch needs. Session end retains its identity after the
 checkpoint: once documents grant `QuitReady` (including bound expiry), the app cancels and detaches layout work, skips placement
 persistence, releases the shutdown block and ends immediately. A session request during an already approved ordinary quit

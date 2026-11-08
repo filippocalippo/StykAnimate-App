@@ -90,6 +90,15 @@ tab, asks Save/Discard/Cancel when dirty and selects its most recently used pred
 Closing the last tab or replacing an untouched blank keeps that tab's identity. Close Saved keeps the
 front and dirty tabs. Save All visits other dirty tabs in band order, then the original front tab; a
 cancel/failure ends the sequence. Quit uses the same saving sequence after one confirmation.
+An accepted quit Save locks input for the existing `after_save` continuation; failure, cancellation or
+refusal clears that continuation and releases the lock. Discard, a completed quit-save sequence and
+clean quit commit the host's terminal quit state before recovery cleanup starts. `Documents::edits_locked`
+then remains true through `QuitReady` and window teardown, even without a recovery service. The synchronous
+session seam and asynchronous request seam refuse new work; save-target replies and cancellation still run.
+`Core::dispatch` uses that same permission to silently fence commands, stage/pen gestures, drawing and text
+drafts. Overlay housekeeping continues, and its action callbacks re-enter the command gate. Save's private
+continuations alone may settle scopes and mark the committed snapshot saved. No revision can arrive after
+the approved Save/Discard snapshot while cleanup or preference storage drains.
 Renaming trims the name, uses `Untitled` for an empty input and marks an edit without adding history.
 
 `published()` is the accepted stored-document generation for the stage, guarded by the current tab
