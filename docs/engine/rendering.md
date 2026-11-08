@@ -958,6 +958,11 @@ layout's whole size for a document of four pages or fewer, else a few layers of 
 error or a lost device retries the frame with half the tile side, then once with a new worker
 and device (the export renderer's ladder), then fails; nothing is written.
 
+Native tools retire each tile through one readback slot before starting the next,
+and use a two-page soft sprite working set for larger layouts. The visible set may
+grow above it; no needed page is evicted. See [native export ownership](memory.md#native-export-ownership)
+for decoded copies, exact scratch lifetimes and allocator diagnostics.
+
 **Read-back.** A browser hands a mapped buffer over only when its GPU process gets to it. In
 Electron under Xvfb that took 3–5 ms a frame while the page was still and 60–320 ms while the
 page repainted (the export dialog's progress repaints every frame), against well under a

@@ -72,3 +72,34 @@ fn a_native_device_reserves_small_memory_blocks_for_small_work() {
     assert!(report.total_reserved_bytes <= 96 << 20,
         "small work reserved {} bytes", report.total_reserved_bytes);
 }
+
+#[test]
+fn exact_primitive_capacity_follows_the_current_frame() {
+    let mut renderer = make_renderer();
+    let bytes = |r: &Renderer| r.device().generate_allocator_report().unwrap().allocations.iter()
+        .filter(|a| a.name == "styk prims").map(|a| a.size).sum::<u64>();
+    // Reports include backend allocation alignment (DX12 adds padding). Compare
+    // the real empty owner's allocation, rather than assuming zero padding.
+    let empty_bytes = bytes(&renderer);
+    let mut large = (*scene(1)).clone();
+    large.prims = vec![large.prims[1]; 131_073];
+    renderer.set_list(&Arc::new(large));
+    renderer.queue().submit([]);
+    renderer.device().poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(bytes(&renderer) >= 8 << 20);
+    assert!(draw(&mut renderer, &scene(0)).iter().all(|&b| b == 0));
+    assert_eq!(bytes(&renderer), empty_bytes, "empty artwork must return to a fresh owner's capacity");
+}
+
+#[test]
+fn exact_effect_slots_leave_with_the_last_filtered_frame() {
+    let renderer = make_renderer();
+    let mut effects = styk_render::effects::executor::Executor::new(renderer.device());
+    effects.set_exact(true);
+    effects.prepare(renderer.device(), renderer.queue(), [256, 256]);
+    effects.slot_texture(renderer.device(), 0);
+    assert_eq!(effects.stats.slot_bytes, 256 * 256 * 4);
+    effects.begin();
+    effects.prepare(renderer.device(), renderer.queue(), [0, 0]);
+    assert_eq!(effects.stats.slot_bytes, 0, "an exact frame without effects retains no working slots");
+}

@@ -234,8 +234,11 @@ impl Renderer {
         }
         let prims: &[GpuPrim] = bytemuck::cast_slice(prims_bytes(&list.prims));
         let need = std::mem::size_of_val(prims) as u64;
-        if need > self.prims.size() {
-            self.prims = buffer(&self.device, "styk prims", need.next_power_of_two(), wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
+        let capacity = need.max(65536).next_power_of_two();
+        if need > self.prims.size() || (self.exact_sizes && capacity < self.prims.size()) {
+            let next = buffer(&self.device, "styk prims", capacity, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
+            let old = std::mem::replace(&mut self.prims, next);
+            if self.exact_sizes { old.destroy(); }
         }
         if !prims.is_empty() {
             self.queue.write_buffer(&self.prims, 0, bytemuck::cast_slice(prims));

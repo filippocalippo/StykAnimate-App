@@ -22,14 +22,18 @@ loss also wakes a pending upload batch. A frame never draws partial residency.
 Native devices requested by `native_gpu` and the video tool use wgpu's
 `MemoryHints::MemoryUsage`; the backend, compiler and render calculations are
 unchanged. Live GPU allocations and reserved allocator blocks are separate measures.
-Native readback slots are capped by one frame's tile count, since native frames
-complete before another begins. Browser hosts still pipeline multiple frames.
+Native exports keep one tile in flight: its readback retires temporary glyph masks
+and replaced targets before the next tile is encoded. Browser hosts still pipeline
+tiles and frames to hide mapping latency across processes.
 
 Exact-size renderers size isolation arrays once for the maximum of all depths of
 each parity in the current frame. Unused parities return to 1x1 placeholders and an
 unused isolation MSAA target is released. Array textures retain the two-layer
 minimum required by D11. Stage admission counts those current requirements plus the
 old owners during replacement, without changing its memory limit.
+Exact primitive buffers follow the current frame's power-of-two capacity (64 KiB
+minimum); unchanged capacities are reused. Exact effect slots leave when a frame
+has no filtered layers. Pipelines and effect uniforms remain reusable.
 
 `styk video --memory-report <report.jsonl>` records process private bytes, counted
 Rust heap bytes and peak, and wgpu allocator totals and allocation labels. It also

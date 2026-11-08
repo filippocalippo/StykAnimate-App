@@ -158,9 +158,10 @@ impl Executor {
     /// Prepares the frame's recorded runs: slots of at least `largest`, uniforms written.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, largest: [u32; 2]) {
         if largest[0] == 0 || largest[1] == 0 {
-            // No effect this frame: release the slots after a while (a quiet period).
+            // Exact frames own only their own working slots. Interactive caches
+            // keep their existing quiet-period policy.
             self.idle += 1;
-            if self.idle > 240 && self.slots.iter().any(Option::is_some) {
+            if (self.exact || self.idle > 240) && self.slots.iter().any(Option::is_some) {
                 self.release();
             }
             return;

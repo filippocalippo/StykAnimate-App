@@ -45,7 +45,8 @@ impl FrameRenderer {
         loop {
             let images = frames.take_images(crate::resident::UPLOAD_BYTES);
             count += images.len();
-            if !images.is_empty() {
+            let progressed = !images.is_empty();
+            if progressed {
                 match self {
                     Self::Gpu(gpu, _) => {
                         gpu.upload_images(&generation.assets, images.iter().map(|image| &**image));
@@ -58,7 +59,9 @@ impl FrameRenderer {
             }
             drop(images);
             if frames.images_pending() == 0 { return Ok(count); }
-            if !engine.step() { return Err("export pictures are pending without runnable decoding work".into()); }
+            // One cel can leave several ready batches after its final decoder
+            // finishes. Draining a batch is progress even without another task.
+            if !engine.step() && !progressed { return Err("export pictures are pending without runnable decoding work".into()); }
         }
     }
 
