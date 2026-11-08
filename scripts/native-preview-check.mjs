@@ -6,6 +6,8 @@ import {tmpdir} from 'node:os';
 import {catalogueIds, parseLimits} from './native-screen-guards.mjs';
 
 export function previewGraphCheck(root) {
+  // Separate invocation: the app must not unify engine into the view-model-only UI check.
+  execFileSync('cargo', ['check', '--locked', '--manifest-path', 'engine/Cargo.toml', '-p', 'styk-ui', '--lib', '--no-default-features'], {cwd: root, stdio: 'inherit'});
   const tree = execFileSync('cargo', ['tree', '--manifest-path', 'engine/Cargo.toml', '--locked', '--offline', '-p', 'styk-screens', '--edges', 'normal,build', '--prefix', 'none', '--format', '{p}'], {cwd: root, encoding: 'utf8'});
   const allowed = new Set(['styk-screens', 'styk-ui', 'styk-design', 'styk-core', 'styk-services', 'styk-platform']);
   const lines = tree.split(/\r?\n/);

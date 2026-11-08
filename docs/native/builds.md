@@ -81,3 +81,26 @@ app/remaining measurement logs. These generated outputs are ignored, not release
   check with that linker. Release linker settings remain unchanged here.
 
 See [patterns.md](patterns.md) for the preview command and model boundary.
+
+## Reference-slice Inspector follow-up
+
+The merge target was `69cf1827` (containing the accepted `466d5c27` slice). The same heavy
+queue, default MSVC dev settings and checkout measured `inspector-figure`, 320x502 at scale 1.
+Each sample builds the original source first, changes only `FOOTER_HEIGHT` from 46 to 47 in
+`styk-ui/src/inspector.rs`, rebuilds the selected host and captures its PNG. Sources are restored
+before verification. One warm-up per host is excluded; three samples per host alternate order.
+
+| Host | Rebuild samples (s) | Edit-to-PNG samples (s) | Median edit-to-PNG (s) |
+| --- | --- | --- | ---: |
+| stykanimate | 7.955, 28.590, 11.158 | 9.358, 31.623, 12.391 | 12.391 |
+| styk-screens | 79.354, 5.747, 103.430 | 84.449, 6.930, 104.443 | 84.449 |
+
+This batch does **not** demonstrate a preview speedup. The heavy queue shares the machine,
+and the preview samples span 6.930–104.443 s. All measured samples are retained; their build
+logs contain only the edited UI and selected host. These observations do not isolate a cause
+for the variance, and do not justify a linker or profile change. The earlier band timings
+were a different batch and are not a controlled baseline for these Inspector results.
+
+Evidence: `artifacts/fastui/inspector-timings.json` and the `inspector-*-build.log`/capture logs.
+The app independently prepares its document while the preview consumes generated plain models;
+the gate compares all 23 captures byte-for-byte and keeps the existing reference checks.

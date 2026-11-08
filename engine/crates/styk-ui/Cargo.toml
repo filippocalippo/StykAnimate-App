@@ -19,7 +19,7 @@ engine = ["styk-core/engine"]
 headless = ["dep:iced_runtime"]
 
 [dev-dependencies]
-styk-core = { path = "../styk-core" }
+styk-core = { path = "../styk-core", features = ["testing"] }
 png = "0.18"
 pollster = "0.4"
 styk-platform = { path = "../styk-platform" }

@@ -13,7 +13,7 @@ use crate::screens::Screen;
 /// An RGBA capture, top row first.
 pub struct Image { pub width: u32, pub height: u32, pub rgba: Vec<u8> }
 
-pub async fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>, smoothing: styk_core::services::text_environment::FontSmoothing, now: iced::time::Instant, mut pause: impl AsyncFnMut() -> Result<(), String>) -> Result<Image, String> {
+pub async fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>, panel: Option<crate::inspector::View<'_>>, smoothing: styk_core::services::text_environment::FontSmoothing, now: iced::time::Instant, mut pause: impl AsyncFnMut() -> Result<(), String>) -> Result<Image, String> {
     let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
     let mut renderer = <iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None).await.ok_or("no graphics adapter is available to draw offscreen")?;
     // Nothing here is an event loop to keep responsive: the font system is built and the bundled fonts installed in place.
@@ -24,6 +24,7 @@ pub async fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Optio
     // A band screen: the band over its window, laid out for this size with its words measured.
     let shell = band.map(|screen| crate::screens::band_shell(screen, size, crate::shell::measure_labels(ready)));
     let view: iced::Element<'_, ()> = match (sheet, shell.as_ref()) {
+        _ if panel.is_some() => match panel { Some(panel) => crate::dock::docked(crate::inspector::view(panel), theme).map(|_| ()).boxed(), None => crate::loading(theme) },
         (Some(sheet), _) => sheet.view().map(|_| ()).boxed(),
         (None, Some(shell)) => crate::shell::window(crate::shell::Params { shell, theme, ready, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, crate::loading(theme)).map(|_| ()).boxed(),
         (None, None) => crate::view(theme, ready),

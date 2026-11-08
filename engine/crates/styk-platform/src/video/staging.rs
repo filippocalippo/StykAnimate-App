@@ -21,7 +21,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, SystemTime};
 
@@ -241,9 +241,16 @@ enum Flush {
 /// before the commit boundary (`Cancel::begin_commit`): an edit or a close during it still cancels, and once the boundary
 /// is crossed a cancel is too late and changes nothing. `after_flush` runs between the two (tests hold the flush there).
 pub fn commit_gated(artifact: &Path, destination: &Path, cancel: &Cancel, after_flush: &dyn Fn()) -> Result<u64, CommitError> {
+    commit_with_flush(artifact, destination, cancel, after_flush, |file| file.sync_all().and_then(|_| file.metadata()).map(|m| m.len()), |events| events.recv())
+}
+
+fn commit_with_flush(artifact: &Path, destination: &Path, cancel: &Cancel, after_flush: &dyn Fn(), flush: impl FnOnce(&File) -> std::io::Result<u64> + Send + 'static, wait: impl FnOnce(&mpsc::Receiver<Flush>) -> Result<Flush, mpsc::RecvError>) -> Result<u64, CommitError> {
     let file = OpenOptions::new().write(true).open(artifact).map_err(CommitError::Io)?;
     let stage = artifact.parent().map(Path::to_path_buf);
-    let abandoned = Arc::new(AtomicBool::new(false));
+    // The second participant owns cleanup. A one-way abandoned flag loses the stage
+    // if the helper finishes before the receiver processes an already queued cancellation.
+    // 0 = flushing, 1 = abandoned, 2 = closed.
+    let flush_state = Arc::new(AtomicU8::new(0));
     let (sender, events) = mpsc::channel();
     {
         let sender = sender.clone();
@@ -252,14 +259,15 @@ pub fn commit_gated(artifact: &Path, destination: &Path, cancel: &Cancel, after_
         });
     }
     {
-        let abandoned = abandoned.clone();
+        let flush_state = flush_state.clone();
+        let stage = stage.clone();
         std::thread::Builder::new()
             .name("styk video flush".into())
             .spawn(move || {
-                let result = file.sync_all().and_then(|_| file.metadata()).map(|m| m.len());
+                let result = flush(&file);
                 drop(file);
                 // The commit gave up on this flush: the stage is this thread's to remove, now that its file is closed.
-                if abandoned.load(Ordering::SeqCst)
+                if flush_state.swap(2, Ordering::SeqCst) == 1
                     && let Some(stage) = stage
                 {
                     let _ = fs::remove_dir_all(stage);
@@ -268,10 +276,14 @@ pub fn commit_gated(artifact: &Path, destination: &Path, cancel: &Cancel, after_
             })
             .map_err(CommitError::Io)?;
     }
-    let bytes = match events.recv() {
+    let bytes = match wait(&events) {
         Ok(Flush::Done(result)) => result.map_err(CommitError::Io)?,
         Ok(Flush::Cancelled) | Err(_) => {
-            abandoned.store(true, Ordering::SeqCst);
+            if flush_state.swap(1, Ordering::SeqCst) == 2
+                && let Some(stage) = stage
+            {
+                let _ = fs::remove_dir_all(stage);
+            }
             return Err(CommitError::Cancelled);
         }
     };
@@ -458,7 +470,8 @@ mod tests {
     /// 373 MB). The flush runs on a helper; a cancel returns at once, the destination is untouched, and the helper removes
     /// the stage when it has finished.
     #[test]
-    fn a_cancel_during_the_flush_of_a_large_output_returns_at_once_and_leaves_the_destination() {
+    #[ignore = "quiet-machine latency gate: cargo test -p styk-platform quiet_gate_large_flush -- --ignored --test-threads=1"]
+    fn quiet_gate_large_flush() {
         use std::io::Write;
         let dir = scratch("flush");
         let stage = dir.join(format!("{PREFIX}{:x}-flush{SUFFIX}", std::process::id()));
@@ -497,4 +510,72 @@ mod tests {
         assert_eq!(fs::read(&destination).unwrap(), b"the previous export");
         fs::remove_dir_all(dir).unwrap();
     }
+    #[test]
+    fn a_cancel_during_the_flush_of_a_large_output_returns_at_once_and_leaves_the_destination() {
+        let dir = scratch("flush-order");
+        let stage = dir.join("held.stage");
+        fs::create_dir(&stage).unwrap();
+        let artifact = stage.join("video.avi");
+        let destination = dir.join("out.avi");
+        fs::write(&artifact, b"new").unwrap();
+        fs::write(&destination, b"the previous export").unwrap();
+        let cancel = Cancel::new();
+        let (entered, waiting) = mpsc::channel();
+        let (release, held) = mpsc::channel();
+        let (done, result) = mpsc::channel();
+        let worker_cancel = cancel.clone();
+        let output = destination.clone();
+        let worker = std::thread::spawn(move || {
+            let answer = commit_with_flush(&artifact, &output, &worker_cancel, &|| panic!("cancel cannot reach commit"), move |file| {
+                entered.send(()).unwrap();
+                held.recv_timeout(Duration::from_secs(120)).expect("release flush helper");
+                file.sync_all().and_then(|_| file.metadata()).map(|m| m.len())
+            }, |events| events.recv());
+            done.send(answer).unwrap();
+        });
+        waiting.recv_timeout(Duration::from_secs(120)).unwrap();
+        cancel.cancel();
+        let terminal = result.recv_timeout(Duration::from_secs(60));
+        // The terminal response must precede release of the flush, regardless of scheduling speed.
+        release.send(()).unwrap();
+        assert!(matches!(terminal.unwrap(), Err(CommitError::Cancelled)));
+        worker.join().unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"the previous export");
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        while stage.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!stage.exists(), "helper closes the file and removes the abandoned stage");
+        assert_eq!(fs::read(&destination).unwrap(), b"the previous export");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_flush_finished_before_the_cancel_receiver_runs_still_removes_the_stage() {
+        let dir = scratch("flush-receiver-order");
+        let stage = dir.join("done.stage");
+        fs::create_dir(&stage).unwrap();
+        let artifact = stage.join("video.avi");
+        let destination = dir.join("out.avi");
+        fs::write(&artifact, b"new").unwrap();
+        fs::write(&destination, b"old").unwrap();
+        let cancel = Cancel::new();
+        let (release, held) = mpsc::channel();
+        let answer = commit_with_flush(&artifact, &destination, &cancel, &|| panic!("cancelled"), move |file| {
+            held.recv_timeout(Duration::from_secs(120)).unwrap();
+            file.sync_all().and_then(|_| file.metadata()).map(|m| m.len())
+        }, |events| {
+            cancel.cancel();
+            let cancellation = events.recv_timeout(Duration::from_secs(120)).unwrap();
+            assert!(matches!(cancellation, Flush::Cancelled));
+            release.send(()).unwrap();
+            assert!(matches!(events.recv_timeout(Duration::from_secs(120)).unwrap(), Flush::Done(Ok(3))));
+            Ok(cancellation)
+        });
+        assert!(matches!(answer, Err(CommitError::Cancelled)));
+        assert!(!stage.exists(), "completion before cancellation delivery must not lose stage cleanup");
+        assert_eq!(fs::read(&destination).unwrap(), b"old");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
 }

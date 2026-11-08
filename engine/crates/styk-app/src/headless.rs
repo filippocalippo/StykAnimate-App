@@ -1,16 +1,50 @@
-//! The platform adapter for the shared headless renderer.
+//! Drawing the interface without a window.
+//!
+//! Where an unattended run cannot keep a window off the person's desktop (Wayland, macOS: see
+//! `styk_platform::unattended`) it opens none. The interface is built and drawn by the same `iced_wgpu` renderer a
+//! window uses, into a picture of the requested size.
+
 use styk_design::Theme;
 use styk_platform::window::Image;
-use styk_ui::{component_sheet::Sheet, screens::Screen};
+use styk_ui::component_sheet::Sheet;
+use styk_ui::screens::Screen;
 
+/// Draws the interface in `theme`, `size` logical pixels at `scale`, and returns the picture (RGBA, top row first).
+///
+/// Fails when the machine has no graphics adapter the renderer can use.
 pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>) -> Result<Image, String> {
-    let image = pollster::block_on(styk_ui::headless::screenshot(theme, size, scale, sheet, band, styk_platform::font_smoothing::current(), iced::time::Instant::now(), async || {
-        let (send, receive) = iced::futures::channel::oneshot::channel();
-        styk_platform::diagnostics::after(std::time::Duration::from_millis(5), move || {
-            if send.send(()).is_err() { eprintln!("headless capture timer receiver closed"); }
-        })?;
-        receive.await.map_err(|error| error.to_string())
-    }))?;
+    pollster::block_on(screenshot_async(theme, size, scale, sheet, band, None))
+}
+
+/// A Properties panel screen: its fixture's core, refreshed (never waited on) until the facts lane made what it shows.
+pub fn inspector_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
+    let Screen::Inspector(context, _) = screen else { return Err("not a Properties panel screen".into()) };
+    let core = pollster::block_on(prepared_core(context))?;
+    pollster::block_on(screenshot_async(screen.theme(), size, scale, None, None, Some(&core)))
+}
+
+pub async fn prepared_core(context: styk_core::screens::InspectorScreen) -> Result<styk_core::app::Core, String> {
+    let mut core = styk_core::screens::inspector(context, std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(|| {}))?;
+    for _ in 0..400 {
+        core.refresh();
+        let panel = core.inspector();
+        if panel.model().is_some() && !panel.pending() && (context != styk_core::screens::InspectorScreen::Figures || panel.shown().bounds.is_some()) { return Ok(core); }
+        pause().await?;
+    }
+    Err("Inspector facts were not ready after 400 refreshes".into())
+}
+
+/// Five milliseconds, on the platform's timer.
+async fn pause() -> Result<(), String> {
+    let (send, receive) = iced::futures::channel::oneshot::channel();
+    styk_platform::diagnostics::after(std::time::Duration::from_millis(5), move || {
+        if send.send(()).is_err() { eprintln!("headless capture timer receiver closed"); }
+    })?;
+    receive.await.map_err(|error| error.to_string())
+}
+
+async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>, inspector: Option<&styk_core::app::Core>) -> Result<Image, String> {
+    let image = styk_ui::headless::screenshot(theme, size, scale, sheet, band, inspector.and_then(|core| styk_ui::inspector::View::of(core, theme)), styk_platform::font_smoothing::current(), iced::time::Instant::now(), pause).await?;
     Ok(Image { width: image.width, height: image.height, rgba: image.rgba })
 }
 

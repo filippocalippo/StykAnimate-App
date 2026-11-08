@@ -34,6 +34,7 @@ pub struct FfmpegAudioDecoder {
     program: PathBuf,
     temp_root: PathBuf,
     timeout: Duration,
+    child_started: Option<Arc<dyn Fn(process::ChildGuard) + Send + Sync>>,
 }
 
 /// A private folder, removed when dropped.
@@ -49,13 +50,20 @@ impl FfmpegAudioDecoder {
     /// Decodes with `program` (the bundled `ffmpeg`), working in folders under `temp_root`. Folders left by an earlier run that
     /// ended badly are removed now.
     pub fn new(program: impl Into<PathBuf>, temp_root: impl Into<PathBuf>) -> FfmpegAudioDecoder {
-        let decoder = FfmpegAudioDecoder { program: program.into(), temp_root: temp_root.into(), timeout: TIMEOUT };
+        let decoder = FfmpegAudioDecoder { program: program.into(), temp_root: temp_root.into(), timeout: TIMEOUT, child_started: None };
         decoder.sweep();
         decoder
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> FfmpegAudioDecoder {
         self.timeout = timeout;
+        self
+    }
+
+    /// Observes the child before its timeout starts (test synchronization).
+    #[doc(hidden)]
+    pub fn with_child_started(mut self, observer: impl Fn(process::ChildGuard) + Send + Sync + 'static) -> Self {
+        self.child_started = Some(Arc::new(observer));
         self
     }
 
@@ -124,6 +132,7 @@ impl AudioDecoder for FfmpegAudioDecoder {
                 String::from_utf8_lossy(&tail).into_owned()
             })
         });
+        if let Some(observer) = &self.child_started { observer(child.clone()); }
         let timed_out = Arc::new(AtomicBool::new(false));
         let (done, finished) = channel::<()>();
         let timer = {

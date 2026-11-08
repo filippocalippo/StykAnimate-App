@@ -9,11 +9,18 @@
 //! iced, `styk-ui` or `styk-devtools` (`cargo xtask deps` fails the build if it does).
 
 #[cfg(feature = "engine")]
+pub mod answers;
+#[cfg(feature = "engine")]
+pub mod app;
+#[cfg(feature = "engine")]
 pub mod audio;
 #[cfg(feature = "engine")]
 pub mod automation;
 #[cfg(feature = "engine")]
+pub mod camera_actions;
+#[cfg(feature = "engine")]
 pub mod clipboard;
+pub mod commands;
 pub mod controls;
 #[cfg(feature = "engine")]
 pub mod documents;
@@ -23,18 +30,33 @@ pub mod engine;
 pub mod drawing;
 #[cfg(feature = "engine")]
 pub mod export;
+#[cfg(feature = "engine")]
+pub mod facts;
 pub mod field;
 pub mod focus;
 #[cfg(feature = "engine")]
 pub mod frames;
+#[cfg(feature = "engine")]
+pub mod history;
+pub mod i18n;
+pub mod inspector;
 pub mod launch;
 pub mod limits;
 pub mod number;
+#[cfg(feature = "engine")]
+pub mod range;
 pub mod roving;
+pub mod screens;
+#[cfg(feature = "engine")]
+pub mod selection_actions;
 pub mod shell;
 pub mod text_entry;
 #[cfg(feature = "engine")]
 pub mod text;
+#[cfg(feature = "testing")]
+pub mod testing;
+#[cfg(feature = "engine")]
+pub mod view_state;
 
 pub use launch::{ClockMode, Launch, LaunchError, USAGE};
 
@@ -43,5 +65,4 @@ pub mod inspect;
 /// Service contracts exposed to views through the application core.
 pub use styk_services as services;
 
-/// Engine-independent document identities and tab geometry.
 pub mod identity;
