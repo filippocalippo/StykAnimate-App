@@ -5,6 +5,8 @@ use styk_doc::{Obj, Value};
 pub const VERSION: u32 = 3;
 pub const MAX_BYTES: usize = 256 * 1024;
 pub const SAVE_DELAY_MS: u64 = 200;
+const MAX_RETRY_MS: u64 = 10_000;
+pub(super) const FILE_NAME: &str = "layouts.json";
 fn obj(items: Vec<(&str, Value)>) -> Value {
     Value::object(
         items
@@ -743,6 +745,7 @@ fn sizes_v1(n: &mut Node, v: &Value) {
 pub struct SaveQueue {
     pending: Option<(u64, Vec<u8>)>,
     in_flight: Option<Vec<u8>>,
+    retry_ms: u64,
 }
 impl SaveQueue {
     pub fn changed(&mut self, now: u64, bytes: Vec<u8>) -> Result<(), LayoutError> {
@@ -750,6 +753,7 @@ impl SaveQueue {
             return Err(LayoutError::Limit);
         }
         self.pending = Some((now.saturating_add(SAVE_DELAY_MS), bytes));
+        self.retry_ms = 0;
         Ok(())
     }
     pub fn take_due(&mut self, now: u64) -> Option<Vec<u8>> {
@@ -761,11 +765,15 @@ impl SaveQueue {
         Some(bytes)
     }
     pub fn complete(&mut self, success: bool, now: u64) {
-        if let Some(bytes) = self.in_flight.take()
-            && !success
-            && self.pending.is_none()
-        {
-            self.pending = Some((now.saturating_add(SAVE_DELAY_MS), bytes));
+        let Some(bytes) = self.in_flight.take() else {
+            return;
+        };
+        if success {
+            self.retry_ms = 0;
+        } else if self.pending.is_none() {
+            let delay = self.retry_ms.max(SAVE_DELAY_MS);
+            self.pending = Some((now.saturating_add(delay), bytes));
+            self.retry_ms = (delay * 2).min(MAX_RETRY_MS);
         }
     }
 }
@@ -958,7 +966,7 @@ impl LayoutFile {
         let proposed = self.clone();
         storage
             .update(
-                "layouts.json",
+                FILE_NAME,
                 MAX_BYTES,
                 Box::new(move |bytes| {
                     let current = match bytes {

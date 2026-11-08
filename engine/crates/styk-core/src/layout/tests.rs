@@ -755,6 +755,49 @@ fn drag_cancellation_leaves_the_owner_byte_equal() {
 }
 
 use styk_services::storage::fake::MemoryStorage;
+
+#[test]
+fn save_queue_retry_doubles_caps_and_resets() {
+    let mut queue = store::SaveQueue::default();
+    queue.changed(0, vec![1]).unwrap();
+    assert_eq!(queue.take_due(200), Some(vec![1]));
+    let mut now = 200;
+    for delay in [200, 400, 800, 1600, 3200, 6400, 10_000, 10_000] {
+        queue.complete(false, now);
+        assert_eq!(queue.take_due(now + delay - 1), None, "retry delay {delay}");
+        now += delay;
+        assert_eq!(queue.take_due(now), Some(vec![1]));
+    }
+    queue.complete(true, now);
+    queue.changed(now, vec![2]).unwrap();
+    now += 200;
+    assert_eq!(queue.take_due(now), Some(vec![2]));
+    queue.complete(false, now);
+    assert_eq!(queue.take_due(now + 199), None);
+    assert_eq!(queue.take_due(now + 200), Some(vec![2]));
+    queue.complete(false, now + 200);
+    queue.changed(now + 201, vec![3]).unwrap();
+    assert_eq!(queue.take_due(now + 400), None);
+    assert_eq!(queue.take_due(now + 401), Some(vec![3]));
+    // An edit during an older write resets the backoff, even if that write fails.
+    queue.changed(now + 402, vec![4]).unwrap();
+    queue.complete(false, now + 403);
+    assert_eq!(queue.take_due(now + 602), Some(vec![4]));
+    queue.complete(false, now + 602);
+    assert_eq!(queue.take_due(now + 801), None);
+    assert_eq!(queue.take_due(now + 802), Some(vec![4]));
+}
+
+#[test]
+fn save_queue_retry_saturates_deadlines_and_refused_edits_keep_pending_work() {
+    let mut queue = store::SaveQueue::default();
+    queue.changed(u64::MAX - 100, vec![1]).unwrap();
+    assert_eq!(queue.take_due(u64::MAX - 1), None);
+    assert_eq!(queue.take_due(u64::MAX), Some(vec![1]));
+    queue.complete(false, u64::MAX);
+    assert!(queue.changed(0, vec![0; store::MAX_BYTES + 1]).is_err());
+    assert_eq!(queue.take_due(u64::MAX), Some(vec![1]));
+}
 fn ready<F: std::future::Future>(f: F) -> F::Output {
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
     match std::pin::pin!(f).poll(&mut cx) {

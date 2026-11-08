@@ -17,6 +17,8 @@ pub trait Storage: Send + Sync {
     /// the existing file byte-for-byte and removes only this transaction's staging. A dropped future
     /// must cancel its worker and wake blocking waits; dropping a handle must not detach an uncancelled write.
     /// A process crash releases the OS lock; no existence-based lock files. Completion is ordered per service.
+    /// Use a fresh Cancel for each operation (begin_commit is one-shot). A saturated bounded worker
+    /// may return an error; the caller retains its proposed state and decides when to retry.
     fn update<'a>(
         &'a self,
         name: &'a str,

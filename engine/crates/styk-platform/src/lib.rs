@@ -55,6 +55,8 @@ pub use control_unavailable::LocalControl;
 #[cfg(windows)]
 pub mod files;
 #[cfg(windows)]
+pub mod storage;
+#[cfg(windows)]
 pub mod recovery;
 pub mod memory;
 
