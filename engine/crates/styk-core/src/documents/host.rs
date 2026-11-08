@@ -10,7 +10,7 @@ pub struct JobId(u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PromptId(u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CloseChoice { Save, Discard, Cancel }
+pub enum CloseChoice { Save, Discard, Cancel, RetryRecovery }
 
 pub struct HostOptions {
     pub engine: Engine,
@@ -80,8 +80,8 @@ pub enum Effect {
     Called { document: DocumentId, answer: CallAnswer },
     Saved { document: DocumentId, current: bool, repairs: usize, warning: Option<String> },
     SaveDialog { prompt: PromptId, document: DocumentId, name: String },
-    ConfirmClose { prompt: PromptId, document: DocumentId, name: String },
-    ConfirmQuit { prompt: PromptId, names: Vec<String> },
+    ConfirmClose { prompt: PromptId, document: DocumentId, name: String, recovery_error: Option<String> },
+    ConfirmQuit { prompt: PromptId, names: Vec<String>, recovery_error: Option<String> },
     ScopeChanged(DocumentId), Imported(DocumentId), Failed { job: JobId, error: HostError }, Stale(JobId),
 }
 
@@ -605,7 +605,7 @@ impl Documents {
         let (stamp, name) = (Stamp::of(tab), tab.project_name().to_string());
         let host = self.host()?; let prompt = PromptId(host.next()?);
         host.prompt = Some(Prompt::Close { id: prompt, stamp });
-        Ok(Effect::ConfirmClose { prompt, document: id, name })
+        Ok(Effect::ConfirmClose { prompt, document: id, name, recovery_error: None })
     }
     fn finish_close(&mut self, id: DocumentId) -> Result<Effect, HostError> {
         if self.tabs.len() == 1 {
@@ -641,7 +641,7 @@ impl Documents {
         let names = self.tabs.iter().filter(|tab| tab.dirty()).map(|tab| tab.project_name().to_string()).collect();
         let host = self.host()?; let prompt = PromptId(host.next()?);
         host.prompt = Some(Prompt::Quit { id: prompt, stamps });
-        Ok(Effect::ConfirmQuit { prompt, names })
+        Ok(Effect::ConfirmQuit { prompt, names, recovery_error: None })
     }
     fn respond(&mut self, prompt: PromptId, choice: CloseChoice) -> Result<Effect, HostError> {
         let matched = match self.host.as_ref().and_then(|host| host.prompt.as_ref()) {
@@ -653,6 +653,9 @@ impl Documents {
         match question {
             Prompt::Close { stamp, .. } => {
                 if !self.matches(stamp) { return Err(HostError::Stale); }
+                if choice == CloseChoice::RetryRecovery {
+                    return self.recovery_close(recovery::CloseIntent::Close(stamp.id)).map(|effect| effect.unwrap_or(Effect::None));
+                }
                 let result = if choice == CloseChoice::Discard { self.finish_close(stamp.id) } else {
                     self.host()?.after_save = Some(AfterSave::Close(stamp.id)); self.begin_save(stamp.id, false)
                 };
@@ -664,6 +667,9 @@ impl Documents {
             }
             Prompt::Quit { stamps, .. } => {
                 if stamps.iter().any(|stamp| !self.matches(*stamp)) || self.tabs.iter().filter(|tab| tab.dirty()).count() != stamps.len() { return Err(HostError::Stale); }
+                if choice == CloseChoice::RetryRecovery {
+                    return self.recovery_close(recovery::CloseIntent::Quit).map(|effect| effect.unwrap_or(Effect::None));
+                }
                 let result = if choice == CloseChoice::Discard { Ok(self.finish_quit()) } else { self.save_next_for_all(self.active, true) };
                 if matches!(result, Err(HostError::Documents(DocumentsError::Busy))) { self.host()?.prompt = Some(Prompt::Quit { id: prompt, stamps }); }
                 result

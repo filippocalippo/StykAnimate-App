@@ -151,7 +151,7 @@ fn stale_publications_are_not_reported_as_the_current_stage() {
 fn quit_save_all_preserves_tab_order_and_stops_on_a_cancelled_picker() {
     let mut rig = Rig::new(); let a = rig.open("A.styk"); rig.fps(a, 30.0); let b = rig.open("B.styk"); rig.fps(b, 60.0);
     assert!(rig.docs.reorder(b, 0)); assert_eq!(rig.docs.successor(b), Some(a));
-    let Effect::ConfirmQuit { prompt, names } = rig.dispatch(Request::Quit) else { panic!("quit prompt") };
+    let Effect::ConfirmQuit { prompt, names, .. } = rig.dispatch(Request::Quit) else { panic!("quit prompt") };
     assert_eq!(names.len(), 2);
     let Effect::SaveDialog { prompt, document, .. } = rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Save }) else { panic!("save first") };
     assert_eq!(document, a);

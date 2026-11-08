@@ -48,7 +48,7 @@ struct Pending { action: Action, cancel: Cancel }
 type Reply = Result<Output, HostError>;
 #[derive(Clone, Copy)]
 pub(super) enum CloseIntent { Close(DocumentId), Quit }
-struct Closing { intent: CloseIntent, stamps: Vec<Stamp>, done: Vec<DocumentId> }
+struct Closing { intent: CloseIntent, stamps: Vec<Stamp>, done: Vec<DocumentId>, failure: Option<String> }
 
 pub(super) struct RecoveryHost {
     worker: Option<Worker<Work, Reply>>,
@@ -229,7 +229,7 @@ impl Documents {
         let stamps: Vec<_> = self.tabs.iter().filter(|tab| tab.dirty() && match intent { CloseIntent::Close(id) => tab.id == id, CloseIntent::Quit => true }).map(Stamp::of).collect();
         if stamps.is_empty() { return Ok(None); }
         if self.tabs.iter().any(|tab| stamps.iter().any(|stamp| stamp.id == tab.id) && tab.view().map_or(true, |view| view.editing)) { return Err(DocumentsError::FinishEdit.into()); }
-        host.closing = Some(Closing { intent, stamps, done: Vec::new() });
+        host.closing = Some(Closing { intent, stamps, done: Vec::new(), failure: None });
         Ok(Some(Effect::Recovery(Event::Started)))
     }
     pub(super) fn recovery_command(&mut self, command: &Command) -> Result<Effect, HostError> {
@@ -286,15 +286,24 @@ impl Documents {
         if let Some(stamp) = forced && !self.tabs.iter().any(|tab| Stamp::of(tab) == stamp) {
             host.closing = None; return Some(Effect::Recovery(Event::Failed(RecoveryError::Changed)));
         }
-        if host.closing.as_ref().is_some_and(|closing| closing.done.len() == closing.stamps.len()) {
+        if host.closing.as_ref().is_some_and(|closing| closing.failure.is_some() || closing.done.len() == closing.stamps.len()) {
             let closing = host.closing.take()?;
-            if closing.stamps.iter().any(|stamp| !self.tabs.iter().any(|tab| Stamp::of(tab) == *stamp)) { return Some(Effect::Recovery(Event::Failed(RecoveryError::Changed))); }
+            if closing.stamps.iter().any(|stamp| !self.tabs.iter().any(|tab| Stamp::of(tab) == *stamp))
+                || matches!(closing.intent, CloseIntent::Quit) && self.tabs.iter().filter(|tab| tab.dirty()).count() != closing.stamps.len() {
+                return Some(Effect::Recovery(Event::Failed(RecoveryError::Changed)));
+            }
             let result = match closing.intent { CloseIntent::Close(id) => self.begin_close(id), CloseIntent::Quit => self.begin_quit() };
             if matches!(result, Err(HostError::Documents(DocumentsError::Busy))) {
                 if let Some(host) = self.recovery.as_mut() { host.closing = Some(closing); }
                 return None;
             }
-            return Some(match result { Ok(effect) => effect, Err(error) => Effect::Recovery(Event::Failed(RecoveryError::Unavailable(error.to_string()))) });
+            return Some(match result {
+                Ok(mut effect) => {
+                    if let Effect::ConfirmClose { recovery_error, .. } | Effect::ConfirmQuit { recovery_error, .. } = &mut effect { *recovery_error = closing.failure; }
+                    effect
+                }
+                Err(error) => Effect::Recovery(Event::Failed(RecoveryError::Unavailable(error.to_string()))),
+            });
         }
         let front_due = host.checkpoint || host.deadline.due.is_some_and(|due| now >= due);
         let resting_due = host.resting.is_some_and(|due| now >= due);
@@ -344,7 +353,14 @@ impl Documents {
                 Err(error) => Some(error),
                 Ok(output) => { host.retired.push(Box::new(output)); Some(HostError::Stale) }
             };
-            if let Some(closing) = host.closing.as_mut() && kind == Kind::Forced { closing.done.push(stamp.id); }
+            if let Some(closing) = host.closing.as_mut() && kind == Kind::Forced && closing.stamps.contains(&stamp) {
+                if current && failure.is_none() { closing.done.push(stamp.id); }
+                else {
+                    // Failure is not completion. Carry it into the close/quit prompt, which retains
+                    // its intent and offers RetryRecovery, Save, Cancel, or explicit Discard.
+                    closing.failure = Some(format!("Recovery copy could not be written: {}", failure.as_ref().map_or_else(|| "the checkpoint was interrupted".into(), ToString::to_string)));
+                }
+            }
             let cancelled = pending.cancel.is_cancelled() || matches!(failure, Some(HostError::Save(ref error)) if matches!(**error, styk_engine::save::SaveError::Cancelled));
             if kind == Kind::Resting {
                 let delay = if failure.is_some() && !cancelled {

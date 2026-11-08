@@ -47,11 +47,18 @@ start another front deadline. Revisions, mutation epochs, root lineage and scope
 replacement of a tab with the same tab ID cannot adopt the old project's copy.
 
 Close and Quit checkpoint affected dirty projects before returning their existing confirmation effects,
-including with timed autosave off. A failed copy is reported and does not consume the close intent.
+including with timed autosave off. Only a successful, current copy for a tab in that close intent
+completes its checkpoint; an unrelated in-flight copy cannot satisfy it. A failed
+attempt first reports `Event::Failed`, then the confirmation carries `recovery_error`, including the
+failure reason. Its retained prompt offers `CloseChoice::RetryRecovery`, Save, Cancel or explicit
+Discard; failure never silently becomes a successful checkpoint. Retry starts the retained Close/Quit
+intent again, and a successful retry clears the prompt's warning.
 A changed project invalidates that close intent. Cancel retains both tab and copy. Successful current
 manual saves remove the exact copy; stale/failed saves retain it. Save cleanup retains the tab's slot
-lease for later edits, and a cleanup failure retains its record/ownership. Closing or discarding a tab
-releases its copy; QuitReady follows completion of queued copy cleanup.
+lease for later edits, and a failed data removal retains its record/ownership. A committed data removal
+always acknowledges success, even if optional metadata deletion fails, so the host never reinstates an
+obsolete data record. Closing or discarding a tab releases its copy; QuitReady follows completion of
+queued copy cleanup.
 
 ## Disk compatibility and selection safety
 
@@ -68,14 +75,21 @@ replacement and 180 UTF-16-unit limit; metadata is the optional `{name,savedAt}`
 flushed and atomically renamed through K-doc's `LocalFiles`, then metadata is independently replaced.
 A failure or process exit before data commit leaves the old file; afterwards the complete new file
 is readable even if metadata is missing or old. Optional metadata/pruning failure does not retract an
-already committed copy. Crash-left staging files are not guessed to belong to this process or deleted.
+already committed copy. A write returns a receipt computed from the committed bytes without a
+post-commit read; optional sidecar replacement/read failure cannot poison the next autosave's identity.
+Crash-left staging files are not guessed to belong to this process or deleted.
 
-Each lease is a uniquely created deny-sharing `.lock` file with Windows delete-on-close: another native
-process cannot claim it, and process death releases it. Records include a SHA-256 identity over the
-data, write time and sidecar; restore and discard revalidate under the lease. Data reads hold a handle
-that denies writes/renames. Discard marks the verified data and metadata handles for deletion, never
-deletes a path after releasing the checked handles. Reparse-point files are refused. Listing skips
-owned/unreadable copies and keeps them on disk. After commit, named copies beyond sixteen are pruned
+Each lease opens or creates the same `.lock` file with no sharing and holds the OS handle for the
+session. A sharing violation means another process owns it; successful opening reclaims an orphaned
+file. Delete-on-close is only housekeeping: a leftover file after power loss never establishes ownership.
+Records include a SHA-256 data identity. Chooser records additionally seal data attributes and the
+sidecar; restore and discard revalidate that selection under the lease. Write receipts identify the
+committed data independently of optional metadata. Data reads hold a handle that denies writes/renames.
+Discard marks verified handles for deletion, never deletes paths after releasing the checked handles.
+A failed optional sidecar deletion retains its fingerprint in the lease and retries before later
+writes/removals; a changed sidecar is left alone. Releasing the lease can leave an inert sidecar behind.
+Reparse-point files are refused. Listing skips owned/unreadable copies and keeps them on disk.
+After commit, named copies beyond sixteen are pruned
 oldest-unowned first; the legacy copy and owned copies are never pruned.
 
 Restore opens a dirty project beside the front tab, adopts the lease and removes that record from the
@@ -92,6 +106,10 @@ cover the surrounding lifecycle. `styk-platform/tests/recovery.rs` exercises rea
 pruning, legacy metadata and selection changes. Platform unit tests terminate a child test process at
 each of ten data/metadata staging, write, flush, commit and rename points; the surviving file must equal
 one of the complete repository projects. Workspace tests adopt only a sandboxed simulated dead process.
+Review regressions first failed on `d24e7793`: an orphaned lock hid a complete copy, read-only metadata
+retracted a committed removal, a post-commit sharing violation retracted a write, and failed Close/Quit
+checkpoints produced unqualified confirmations. Further checks hold a lease in another process, kill
+only that child by handle, exercise cleanup with changed metadata, and retry failed close intents.
 
 `node --test tests/native-recovery-reference.test.mjs` checks that the writer is unchanged from
 `99c62189`, writes a public repository fixture twice through that recovery code, and compares every

@@ -29,8 +29,11 @@ pub struct Record {
     /// Today's ISO-8601 UTC timestamp, also used to order the chooser newest first.
     pub saved_at: String,
     pub size: usize,
-    /// Opaque content/metadata identity. Callers must return it unchanged, never reconstruct it.
+    /// Committed data's digest. Callers must return identities unchanged, never reconstruct them.
     pub version: [u8; 32],
+    /// Listings also seal the file attributes and optional metadata the person saw. A write receipt
+    /// has no selection seal: its data is committed even if optional metadata cannot be accessed.
+    pub selection: Option<[u8; 32]>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecoveryError { File(FileError), Changed, Owned, Missing, Invalid, Unavailable(String) }
@@ -54,6 +57,8 @@ pub trait RecoveryCopy: Send + Sync {
     /// `previous == None` requires an empty slot. A successful write returns its new identity.
     /// Data commits before optional display metadata; never publish partial data or a failed save.
     fn write<'a>(&'a self, previous: Option<&'a Record>, bytes: &'a [u8], name: &'a str, cancel: &'a Cancel) -> RecoveryFuture<'a, Record>;
+    /// Success acknowledges data removal. Optional sidecar cleanup cannot undo that commit and is
+    /// retried on later lease operations; an error means the data record must still be retained.
     fn remove<'a>(&'a self, record: &'a Record, cancel: &'a Cancel) -> RecoveryFuture<'a, ()>;
 }
 

@@ -22,7 +22,7 @@ impl Store {
     fn insert(&self, slot: Slot, bytes: Arc<[u8]>, name: &str) -> Record {
         let mut state = self.state.lock().unwrap(); state.serial += 1;
         let mut version = [0; 32]; version[..8].copy_from_slice(&state.serial.to_le_bytes());
-        let record = Record { slot: slot.clone(), name: name.into(), saved_at: format!("2026-11-08T00:00:{:02}.000Z", state.serial), size: bytes.len(), version };
+        let record = Record { slot: slot.clone(), name: name.into(), saved_at: format!("2026-11-08T00:00:{:02}.000Z", state.serial), size: bytes.len(), version, selection: Some(version) };
         state.entries.insert(slot, Entry { record: record.clone(), bytes, owned: false }); record
     }
     fn records(&self) -> Vec<Entry> { self.state.lock().unwrap().entries.values().cloned().collect() }
@@ -198,7 +198,7 @@ fn a_damaged_copy_preserves_the_front_and_releases_its_claim_for_retry() {
 fn quit_checkpoint_covers_all_dirty_tabs_and_discard_finishes_cleanup_before_quit_ready() {
     let mut rig = Rig::new(Store::default()); rig.docs.set_autosave_seconds(0.0); rig.edit(30.0); rig.open("Other.styk"); rig.edit(40.0); rig.drain();
     assert!(matches!(rig.send(Request::Quit), Effect::Recovery(Event::Started)));
-    let Effect::ConfirmQuit { prompt, names } = rig.wait(|e| matches!(e, Effect::ConfirmQuit { .. })) else { unreachable!() };
+    let Effect::ConfirmQuit { prompt, names, .. } = rig.wait(|e| matches!(e, Effect::ConfirmQuit { .. })) else { unreachable!() };
     assert_eq!(names.len(), 2); assert_eq!(rig.store.records().len(), 2);
     rig.send(Request::Respond { prompt, choice: CloseChoice::Discard }); rig.wait(|e| matches!(e, Effect::QuitReady)); assert!(rig.store.records().is_empty());
     rig.advance(100_000); assert!(rig.store.records().is_empty()); assert_eq!(rig.docs.recovery_deadline(), None);
@@ -264,6 +264,49 @@ fn close_checkpoints_with_autosave_off_cancel_preserves_and_discard_deletes_only
     rig.send(Request::Close(a)); let Effect::ConfirmClose { prompt, .. } = rig.wait(|e| matches!(e, Effect::ConfirmClose { .. })) else { unreachable!() };
     rig.send(Request::Respond { prompt, choice: CloseChoice::Discard }); rig.wait(|e| matches!(e, Effect::Closed(_))); rig.drain();
     assert!(rig.store.records().is_empty()); assert!(!rig.docs.active().unwrap().dirty());
+}
+
+#[test]
+fn review_failed_close_checkpoint_is_explicit_in_the_prompt() {
+    let mut rig = Rig::new(Store::default()); rig.docs.set_autosave_seconds(0.0); rig.edit(30.0);
+    rig.store.fail.store(true, Ordering::SeqCst); let id = rig.active();
+    rig.send(Request::Close(id)); rig.wait(|e| matches!(e, Effect::Recovery(Event::Failed(_))));
+    let Effect::ConfirmClose { prompt, recovery_error, .. } = rig.wait(|e| matches!(e, Effect::ConfirmClose { .. })) else { unreachable!() };
+    assert!(recovery_error.unwrap().contains("Full"), "the close prompt must report the failed checkpoint");
+    assert!(rig.docs.get(id).unwrap().dirty()); assert_eq!(rig.store.writes(), 0);
+    rig.store.fail.store(false, Ordering::SeqCst);
+    assert!(matches!(rig.send(Request::Respond { prompt, choice: CloseChoice::RetryRecovery }), Effect::Recovery(Event::Started)));
+    let Effect::ConfirmClose { prompt, recovery_error, .. } = rig.wait(|e| matches!(e, Effect::ConfirmClose { .. })) else { unreachable!() };
+    assert_eq!(recovery_error, None); assert_eq!(rig.store.writes(), 1);
+    rig.send(Request::Respond { prompt, choice: CloseChoice::Cancel }); assert!(rig.docs.get(id).unwrap().dirty());
+}
+
+#[test]
+fn review_failed_quit_checkpoint_is_explicit_in_the_prompt() {
+    let mut rig = Rig::new(Store::default()); rig.docs.set_autosave_seconds(0.0); rig.edit(30.0);
+    rig.store.fail.store(true, Ordering::SeqCst);
+    rig.send(Request::Quit); rig.wait(|e| matches!(e, Effect::Recovery(Event::Failed(_))));
+    let Effect::ConfirmQuit { prompt, recovery_error, .. } = rig.wait(|e| matches!(e, Effect::ConfirmQuit { .. })) else { unreachable!() };
+    assert!(recovery_error.unwrap().contains("Full"), "the quit prompt must report the failed checkpoint");
+    assert!(rig.docs.active().unwrap().dirty()); assert_eq!(rig.store.writes(), 0);
+    rig.store.fail.store(false, Ordering::SeqCst);
+    rig.send(Request::Respond { prompt, choice: CloseChoice::RetryRecovery });
+    let Effect::ConfirmQuit { prompt, recovery_error, .. } = rig.wait(|e| matches!(e, Effect::ConfirmQuit { .. })) else { unreachable!() };
+    assert_eq!(recovery_error, None); assert_eq!(rig.store.writes(), 1);
+    rig.send(Request::Respond { prompt, choice: CloseChoice::Cancel }); assert!(rig.docs.active().unwrap().dirty());
+}
+
+#[test]
+fn review_another_tabs_in_flight_checkpoint_cannot_complete_a_close() {
+    let mut rig = Rig::new(Store::default()); rig.docs.set_autosave_seconds(0.0); rig.edit(30.0); let closing = rig.active();
+    rig.open("Other.styk"); rig.edit(40.0); rig.drain();
+    rig.store.hold.store(true, Ordering::SeqCst); rig.send(Request::Recovery(Command::Checkpoint)); rig.drain();
+    assert!(rig.store.entered.load(Ordering::SeqCst));
+    rig.send(Request::Close(closing)); rig.store.unblock();
+    let Effect::ConfirmClose { document, prompt, recovery_error, .. } = rig.wait(|e| matches!(e, Effect::ConfirmClose { .. })) else { unreachable!() };
+    assert_eq!(document, closing); assert_eq!(recovery_error, None);
+    assert_eq!(rig.store.records().len(), 2, "the closing tab needs its own current checkpoint");
+    rig.send(Request::Respond { prompt, choice: CloseChoice::Cancel });
 }
 
 #[test]

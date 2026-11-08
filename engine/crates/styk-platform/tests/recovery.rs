@@ -32,7 +32,10 @@ fn real_store_is_atomic_owned_and_conditional_and_preserves_invalid_copies() {
     assert!(run_future(copy.write(Some(&record), b"", "bad", &Cancel::new())).is_err());
     let cancelled = Cancel::new(); cancelled.cancel(); assert!(run_future(copy.write(Some(&record), b"bad", "bad", &cancelled)).is_err());
     assert_eq!(&*run_future(copy.read(&record, MAX_BYTES, &Cancel::new())).unwrap(), PROJECT);
-    drop(copy); assert_eq!(run_future(store.list(&Cancel::new())).unwrap(), vec![record.clone()]);
+    drop(copy); let listed = run_future(store.list(&Cancel::new())).unwrap(); assert_eq!(listed.len(), 1);
+    let mut expected = record.clone(); expected.selection = listed[0].selection;
+    assert!(expected.selection.is_some()); assert_eq!(listed, vec![expected]);
+    let record = listed[0].clone(); // Chooser records also seal the displayed metadata.
     let meta = folder.path.join(format!("{}.json", record.slot.stem())); fs::write(&meta, br#"{"name":"different","savedAt":"2026-01-01T00:00:00.000Z"}"#).unwrap();
     assert!(matches!(run_future(store.claim(&record, &Cancel::new())), Err(RecoveryError::Changed)));
     let record = run_future(store.list(&Cancel::new())).unwrap().remove(0);
