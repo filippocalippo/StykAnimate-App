@@ -3,7 +3,7 @@
 //! While a text field has focus no shortcut is a command, except the chords documented as working from fields; while an
 //! input method composes, none. AltGraph chords type characters and are never commands.
 
-use crate::focus::FocusState;
+use crate::focus::{FocusState, InputRole};
 
 /// A key chord as the interface decodes it from a key event.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,13 +55,13 @@ pub fn command_allowed_on(focus: &FocusState, chord: &Chord, command_modifier: b
     if chord.alt_graph || focus.composing() {
         return false;
     }
-    focus.text_entry().is_none() || chord.works_in_text_fields_on(command_modifier)
+    focus.input_role() == InputRole::None || chord.works_in_text_fields_on(command_modifier)
 }
 
 /// Whether the document's undo and redo are reachable: never while a text field has focus (its own history owns
 /// Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y, whether or not the field has anything to undo).
 pub fn document_undo_reachable(focus: &FocusState) -> bool {
-    focus.text_entry().is_none()
+    focus.input_role() == InputRole::None
 }
 
 #[cfg(test)]

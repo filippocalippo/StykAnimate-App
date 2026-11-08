@@ -332,12 +332,16 @@ fn native_menu_preserves_text_history_and_modal_document_gates() {
     use shortcuts::{FieldAction as F, NativeRoute as N, native_route};
     let text = field(TargetKind::TextEntry);
     for (id, action) in [("cut", F::Cut), ("copy", F::Copy), ("paste", F::Paste), ("select-all", F::SelectAll), ("undo", F::Undo), ("redo", F::Redo), ("delete", F::Delete)] {
-        assert_eq!(native_route(entry(id), &text, false, false), N::Field(action));
-        assert_eq!(native_route(entry(id), &text, true, false), N::Field(action));
-        assert_eq!(native_route(entry(id), &FocusState::new(), true, false), N::Blocked);
+        assert_eq!(native_route(entry(id), &text, false), N::Field(action));
+        assert_eq!(native_route(entry(id), &text, true), N::Field(action));
+        assert_eq!(native_route(entry(id), &FocusState::new(), true), N::Blocked);
     }
-    assert_eq!(native_route(entry("undo"), &text, false, true), N::FeatureHistory(F::Undo));
-    assert_eq!(native_route(entry("undo"), &text, true, true), N::Field(F::Undo));
-    assert_eq!(native_route(entry("delete"), &FocusState::new(), false, false), N::Run);
-    assert_eq!(native_route(entry("save"), &text, true, false), N::Blocked);
+    let mut vfx = FocusTarget::new(1, FocusArea::Panels, TargetKind::TextEntry);
+    vfx.history_owner = styk_core::focus::HistoryOwner::Vfx;
+    let mut focus = text.clone();
+    focus.register(ScopeId::ROOT, vec![vfx]);
+    assert_eq!(native_route(entry("undo"), &focus, false), N::FeatureHistory { owner: vfx.history_owner, action: F::Undo });
+    assert_eq!(native_route(entry("undo"), &focus, true), N::Field(F::Undo));
+    assert_eq!(native_route(entry("delete"), &FocusState::new(), false), N::Run);
+    assert_eq!(native_route(entry("save"), &text, true), N::Blocked);
 }

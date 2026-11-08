@@ -50,6 +50,8 @@ impl Invocation {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Activity {
     pub gesture: bool,
+    /// The document whose keyboard-handle owner already has an open gesture.
+    pub keyboard_handles: Option<DocumentId>,
     pub stroke: bool,
     pub loading: bool,
     pub selection: bool,
@@ -58,10 +60,16 @@ pub struct Activity {
 }
 
 impl Activity {
+    fn continues(self, invocation: Invocation) -> bool {
+        self.keyboard_handles.is_some() && invocation.document == self.keyboard_handles
+            && invocation.source == Source::Keyboard
+            && matches!(invocation.entry.id, "handle-left" | "handle-right" | "handle-up" | "handle-down")
+    }
+
     fn blocks(self, invocation: Invocation) -> bool {
         if invocation.terminal() { return false; }
         if invocation.source == Source::Keyboard && matches!(invocation.entry.id, "cancel" | "play-pan") { return false; }
-        self.gesture || self.stroke || self.loading || self.operation
+        (self.gesture && !self.continues(invocation)) || self.stroke || self.loading || self.operation
             || if invocation.source == Source::Action { self.selection } else { self.selection_committing }
     }
 }
@@ -124,6 +132,7 @@ impl GestureQueue {
         let reserved = invocation.terminal() && awaiting;
         // Cancel/play-pan and a live key's release must reach their owner even while the queue is full.
         if (invocation.terminal() && !awaiting)
+            || (!awaiting && activity.continues(invocation) && !activity.blocks(invocation))
             || (invocation.source == Source::Keyboard && matches!(invocation.entry.id, "cancel" | "play-pan"))
             || (self.is_empty() && !activity.blocks(invocation)) {
             return Submitted::Ready(invocation);
@@ -139,12 +148,19 @@ impl GestureQueue {
         Submitted::Queued
     }
 
-    fn pop(&mut self) -> Option<Invocation> {
-        if self.is_empty() { return None; }
-        let item = self.pending[self.head]?;
+    fn remove(&mut self, index: usize) -> Option<Invocation> {
+        if index >= self.len { return None; }
+        let item = self.pending[(self.head + index) % CAPACITY]?;
         let awaiting = item.held_press() && self.awaits_release(item.key);
-        self.pending[self.head] = None;
-        self.head = (self.head + 1) % CAPACITY;
+        if index == 0 {
+            self.pending[self.head] = None;
+            self.head = (self.head + 1) % CAPACITY;
+        } else {
+            for offset in index..self.len - 1 {
+                self.pending[(self.head + offset) % CAPACITY] = self.pending[(self.head + offset + 1) % CAPACITY];
+            }
+            self.pending[(self.head + self.len - 1) % CAPACITY] = None;
+        }
         self.len -= 1;
         if awaiting && !self.awaits_release(item.key) { self.reserved_releases -= 1; }
         Some(item)
@@ -154,10 +170,16 @@ impl GestureQueue {
     pub fn next(&mut self, document: Option<DocumentId>, activity: Activity, settlement: Settlement) -> Next {
         let Some(front) = self.pending[self.head] else { return Next::Empty; };
         if front.document != document || settlement == Settlement::Failed {
-            return self.pop().map_or(Next::Empty, Next::Cancelled);
+            return self.remove(0).map_or(Next::Empty, Next::Cancelled);
         }
-        if activity.blocks(front) { return Next::Blocked; }
-        self.pop().map_or(Next::Empty, Next::Ready)
+        let index = if activity.blocks(front) {
+            // A waiting action must not trap the live gesture's repeats or release.
+            // Scan in queue order, so an unstarted press still precedes its terminal.
+            let Some(index) = self.records().position(|item| item.document == document
+                && activity.continues(item) && !activity.blocks(item)) else { return Next::Blocked; };
+            index
+        } else { 0 };
+        self.remove(index).map_or(Next::Empty, Next::Ready)
     }
 }
 

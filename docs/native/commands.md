@@ -26,9 +26,18 @@ Control+Tab variant are preserved. The tests execute `src/hotkeys.mjs` on Window
 they do not build or run another OS or the web app.
 
 `Shortcuts::press` observes prevented events, IME provenance (including key 229), AltGraph, focus, Home and overlay
-gates, polygon keyboard permissions and repeat rules. It reuses S2a's `text_entry` gate. The only default field chords
+gates, polygon keyboard permissions and repeat rules. The focus snapshot carries an `InputRole` independently of
+`TargetKind`: selects, checkboxes, radios and other inputs suppress editor shortcuts as text fields do; buttons do not.
+Only checkbox/radio inputs permit the reference's `builder-*` commands in the builder scope (not every build command).
+It reuses S2a's exact field-chord check. The four default shell field chords
 are F6, Mod+F6, Mod+Alt+M and Mod+Alt+L, with exactly those modifiers. Shift+F6 remains Remove keyframes and cannot escape
-a field. The resolved command must also be one of the four field-safe commands. Held keys release by their physical
+a field. The capture path runs these four commands, including repeated events, before the ordinary repeat and command
+gates; outside an input their regular repeat policy still applies. The capture path is off on Home and under overlays.
+Both keyboard and native-menu routing read the same focused `HistoryOwner`; a VFX-owned input returns a typed
+`FeatureHistory` route so its owner finishes the edit before undo/redo. Ordinary fields retain their own history.
+With an active drag, an unmatched modified chord tries its unmodified Cancel binding after the input and overlay gates.
+It returns `CancelDrag`, not the broader Cancel command, and never replaces a real modified binding.
+Held keys release by their physical
 key after modifiers or focus change; blur/teardown uses `release_all`. A refused start uses `reject` and dispatches its
 terminal cancellation, so no held-key bookkeeping survives a refused submission.
 
@@ -50,6 +59,13 @@ The queue holds at most 256 records, with a release slot reserved for every queu
 bookkeeping. Terminals of already live keys and Cancel still reach their owner when full. A key released before its
 queued press executes is queued behind that press, using its reservation. Nothing silently drops a terminal event.
 The capacity is an explicit native admission bound, not a performance claim or a changed document limit.
+
+The keyboard-handle owner supplies its live document in `Activity::keyboard_handles`. Its nudges and releases do not
+wait on their own gesture: live continuations may pass waiting actions, and `next` can take the next continuation from
+behind an action blocked by that gesture. This bounded scan preserves the order of the remaining records and of
+unstarted presses and releases. Other documents and drawing/load/operation barriers do not acquire that exception.
+The owner keeps its existing edit session open for all nudges and commits once on the final release; the queue never
+starts, commits or splits history itself.
 
 Every queued command is bound to its document identity. A different active document or failed settlement returns
 `Next::Cancelled`, never an edit of another tab. The host keeps failed settlement in force until its affected queue
@@ -80,3 +96,6 @@ equivalent “Zoom to {percent}%” message when attaching to the slice's native
 `tests/commands.rs` reads appendix A and executes `tests/support/command-reference.mjs` against today's catalogues.
 It checks all metadata and default shortcut cases, field modifiers, repeat and held-key behavior, requirements,
 queue release/capacity/document identity, both polygon gates and each error outcome. Frozen fixtures are unchanged.
+`tests/command_routing.rs` enters the production router/queue and executes the actual JS capture and bubble handlers
+for control, VFX history, modified Cancel and repeat cases. Its live/queued nudge regressions use a real edit session
+and verify that a single undo restores the gesture's baseline and a single redo restores its result.

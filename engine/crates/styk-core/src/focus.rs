@@ -36,12 +36,34 @@ pub enum TargetKind {
     TextEntry,
 }
 
+/// The input role is independent of focusability: a select is a control but owns editor keys.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InputRole {
+    #[default]
+    None,
+    Text,
+    Select,
+    Checkbox,
+    Radio,
+    Other,
+}
+
+/// Who must finish the focused edit before an undo/redo command runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HistoryOwner {
+    #[default]
+    Field,
+    Vfx,
+}
+
 /// One focusable target, as registered in a view pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusTarget {
     pub id: FocusId,
     pub area: FocusArea,
     pub kind: TargetKind,
+    pub input_role: InputRole,
+    pub history_owner: HistoryOwner,
     pub enabled: bool,
     /// Whether Tab stops here. A roving group's inactive children are focusable by arrows and by `focus` but not stops.
     pub tab_stop: bool,
@@ -50,7 +72,8 @@ pub struct FocusTarget {
 impl FocusTarget {
     /// An enabled Tab stop.
     pub fn new(id: u64, area: FocusArea, kind: TargetKind) -> FocusTarget {
-        FocusTarget { id: FocusId(id), area, kind, enabled: true, tab_stop: true }
+        FocusTarget { id: FocusId(id), area, kind, input_role: if kind == TargetKind::TextEntry { InputRole::Text } else { InputRole::None },
+            history_owner: HistoryOwner::Field, enabled: true, tab_stop: true }
     }
 
     fn focusable(&self) -> bool {
@@ -136,6 +159,14 @@ impl FocusState {
     pub fn text_entry(&self) -> Option<FocusId> {
         let id = self.focused?;
         self.find(id).filter(|(_, t)| t.kind == TargetKind::TextEntry).map(|_| id)
+    }
+
+    pub fn input_role(&self) -> InputRole {
+        self.focused.and_then(|id| self.find(id)).map_or(InputRole::None, |(_, target)| target.input_role)
+    }
+
+    pub fn history_owner(&self) -> HistoryOwner {
+        self.focused.and_then(|id| self.find(id)).map_or(HistoryOwner::Field, |(_, target)| target.history_owner)
     }
 
     /// Whether an input method has a composition open in the focused text field.
