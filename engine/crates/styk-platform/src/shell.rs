@@ -59,6 +59,8 @@ pub enum Wake {
     Instance,
     /// The quiet period after a window change may have passed.
     SaveCheck,
+    /// A window-state save completed or needs another admission attempt.
+    WindowState,
     /// The documents host's workers have something for the core (a finished open, save or recovery job).
     Documents,
     /// The layout storage lane has a completed load or save.
@@ -72,8 +74,8 @@ impl Wakes {
     pub fn send(&self, wake: Wake) { (self.0)(wake); }
 }
 
-pub type SaveCompletion = Box<dyn FnOnce(Result<(), String>) + Send>;
-pub type SaveJob = Box<dyn FnOnce(SaveCompletion) + Send>;
+mod save_lane;
+use save_lane::SaveLane;
 
 /// The OS's application shutdown budget, sampled when session end is requested.
 pub fn session_end_timeout() -> std::time::Duration {
@@ -109,6 +111,9 @@ pub enum Start {
 /// The shell of one running program.
 pub struct Shell {
     state_path: Option<PathBuf>,
+    saves: Option<SaveLane>,
+    saving_stopped: bool,
+    flushing: bool,
     /// The frame the window opens at, when state is used.
     pub restore: Option<WindowFrame>,
     /// The recovery directory of an independent editor.
@@ -129,6 +134,9 @@ pub fn start(arguments: &[String], unattended: bool, wakes: &Wakes) -> Start {
     let requests = launch_requests(arguments);
     let mut shell = Shell {
         state_path: None,
+        saves: None,
+        saving_stopped: false,
+        flushing: false,
         restore: None,
         workspace: Ok(None),
         pending: PendingRequests::new(requests.clone()),
@@ -200,7 +208,7 @@ impl Shell {
 
     /// The window changed; a save is due after the quiet period.
     pub fn changed(&mut self, wakes: &Wakes) {
-        if self.state_path.is_some() {
+        if !self.saving_stopped && !self.flushing && (self.state_path.is_some() || self.saves.is_some()) {
             self.debounce.changed(self.started.elapsed().as_millis() as u64);
             self.schedule_check(wakes);
         }
@@ -217,46 +225,70 @@ impl Shell {
         }
     }
 
-    /// The quiet period may have passed: save if it has, else look again later.
+    /// Install an explicitly supplied preference store; this shell owns the one save lane.
+    pub fn set_window_state_storage(&mut self, storage: std::sync::Arc<dyn styk_services::storage::Storage>, spawner: &dyn styk_services::Spawner, wakes: &Wakes) -> Result<(), String> {
+        self.saves = Some(SaveLane::new(storage, "window-state.txt".into(), spawner, wakes)?);
+        Ok(())
+    }
+
+    fn queue_snapshot(&mut self, wakes: &Wakes) -> Result<(), String> {
+        if self.saving_stopped { return Ok(()); }
+        #[cfg(windows)]
+        {
+            let Some(frame) = self.tracker.frame() else { return Ok(()); };
+            if self.saves.is_none() {
+                let Some(path) = &self.state_path else { return Ok(()); };
+                let directory = path.parent().ok_or("missing profile directory")?;
+                let storage = crate::storage::LocalStorage::new(directory, &crate::spawn::ThreadSpawner).map_err(|e| format!("could not save window state: {e}"))?;
+                let name = path.file_name().and_then(|s| s.to_str()).ok_or("invalid window state name")?.to_owned();
+                self.saves = Some(SaveLane::new(std::sync::Arc::new(storage), name, &crate::spawn::ThreadSpawner, wakes)?);
+            }
+            if let Some(lane) = &mut self.saves { lane.queue((SetupKey::of(&monitors::monitors()), frame)); }
+        }
+        #[cfg(not(windows))]
+        let _ = wakes;
+        Ok(())
+    }
+
+    /// A debounce timer elapsed. Storage completion has its own wake and never resets this timer.
     pub fn save_check(&mut self, wakes: &Wakes) {
         self.check_scheduled = false;
-        if self.debounce.due(self.started.elapsed().as_millis() as u64) {
-            self.save_in_background();
-        } else if self.debounce.pending() {
-            self.schedule_check(wakes);
-        }
-    }
-
-    /// The window is closing: a worker saves what is pending, and the receiver says when it is written (the program must
-    /// not end before; the interface thread must not do the writing). `None` when there is nothing to save.
-    pub fn save_for_close(&mut self) -> Option<SaveJob> {
-        if !self.debounce.pending() {
-            return None;
-        }
-        let _ = self.debounce.due(u64::MAX);
-        match self.snapshot() {
-            Some((path, frame)) => {
-                Some(Box::new(move |done| {
-                    std::thread::spawn(move || done(write_state(&path, frame)));
-                }))
+        if self.saving_stopped { return; }
+        let mut due = self.debounce;
+        if due.due(self.started.elapsed().as_millis() as u64) {
+            match self.queue_snapshot(wakes) {
+                Ok(()) => self.debounce = due,
+                Err(error) => eprintln!("{error}"),
             }
-            None => None,
         }
+        self.window_state_progress(wakes);
+        if self.debounce.pending() { self.schedule_check(wakes); }
     }
 
-    fn snapshot(&self) -> Option<(PathBuf, WindowFrame)> {
-        #[cfg(windows)]
-        return Some((self.state_path.clone()?, self.tracker.frame()?));
-        #[cfg(not(windows))]
-        None
+    pub fn window_state_progress(&mut self, wakes: &Wakes) {
+        if let Some(lane) = &mut self.saves { lane.poll(!self.debounce.pending(), wakes); }
     }
 
-    fn save_in_background(&self) {
-        if let Some((path, frame)) = self.snapshot() {
-            std::thread::spawn(move || {
-                if let Err(error) = write_state(&path, frame) { eprintln!("{error}"); }
-            });
+    /// Final maintenance after layout flush. True waits for a receipt; false is drained.
+    pub fn flush_window_state(&mut self, wakes: &Wakes) -> Result<bool, String> {
+        if self.saving_stopped { return Ok(false); }
+        self.flushing = true;
+        if self.debounce.pending() {
+            self.queue_snapshot(wakes)?;
+            let _ = self.debounce.due(u64::MAX);
         }
+        if let Some(lane) = &mut self.saves {
+            lane.poll(true, wakes);
+            if lane.busy() { return Ok(true); }
+            if let Some(error) = lane.error() { return Err(error); }
+        }
+        Ok(false)
+    }
+
+    /// Cancel on session end; worker destruction never joins on the interface thread.
+    pub fn cancel_window_state(&mut self) {
+        self.saving_stopped = true;
+        self.saves = None;
     }
 
     /// A sample of the window was taken.
@@ -277,6 +309,7 @@ impl Shell {
 }
 
 /// Save on the shell's background task; K-store owns the complete preference transaction.
+#[cfg(test)]
 fn write_state(path: &std::path::Path, frame: WindowFrame) -> Result<(), String> {
     #[cfg(windows)]
     return write_state_for_setup(path, SetupKey::of(&monitors::monitors()), frame, &styk_services::Cancel::new());
@@ -284,7 +317,7 @@ fn write_state(path: &std::path::Path, frame: WindowFrame) -> Result<(), String>
     { let _ = (path, frame); Ok(()) }
 }
 
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 fn write_state_for_setup(path: &std::path::Path, setup: SetupKey, frame: WindowFrame, cancel: &styk_services::Cancel) -> Result<(), String> {
     use styk_services::{storage::Storage, worker::run_future};
     use styk_services::shell::window_state::MAX_FILE;
@@ -292,13 +325,7 @@ fn write_state_for_setup(path: &std::path::Path, setup: SetupKey, frame: WindowF
         let directory = path.parent().ok_or_else(|| styk_services::files::FileError::Io("missing profile directory".into()))?;
         let name = path.file_name().and_then(|s| s.to_str()).ok_or_else(|| styk_services::files::FileError::Io("invalid window state name".into()))?;
         let storage = crate::storage::LocalStorage::new(directory, &crate::spawn::ThreadSpawner)?;
-        run_future(storage.update(name, MAX_FILE, Box::new(move |current| {
-            let mut file = current.and_then(|bytes| std::str::from_utf8(bytes).ok()).map(WindowStateFile::parse).unwrap_or_default();
-            // Read and merge under Storage's OS lock: never replace other windows' setup entries
-            // with an earlier snapshot. The existing codec owns retention and the last-frame fallback.
-            file.record(setup, frame);
-            Ok(file.to_text().into_bytes())
-        }), cancel))
+        run_future(storage.update(name, MAX_FILE, save_lane::update(setup, frame), cancel))
     };
     save().map_err(|error| format!("could not save window state: {error}"))
 }
@@ -403,33 +430,38 @@ mod tests {
     fn closing_saves_on_a_worker_and_says_when_the_file_is_written() {
         let dir = temp("close");
         let path = dir.join("window-state.txt");
-        let wakes = Wakes(std::sync::Arc::new(|_| {}));
-        let Start::Run(mut shell) = start(&[], true, &wakes) else { panic!("an unattended start runs") };
+        let (send, receive) = std::sync::mpsc::channel();
+        let wakes = Wakes(std::sync::Arc::new(move |_| { let _ = send.send(()); }));
+        let Start::Run(mut shell) = start(&[], true, &wakes) else { panic!("unattended") };
         shell.state_path = Some(path.clone());
         shell.assume(&frame(321));
-        assert!(shell.save_for_close().is_none(), "nothing changed: nothing to save");
+        assert!(!shell.flush_window_state(&wakes).unwrap(), "nothing changed");
+        shell.flushing = false;
         shell.changed(&wakes);
-        let done = shell.save_for_close().expect("a change is pending");
-        let (send, receive) = std::sync::mpsc::channel();
-        done(Box::new(move |result| send.send(result).unwrap()));
-        receive.recv().unwrap().unwrap();
+        while shell.flush_window_state(&wakes).unwrap() { receive.recv_timeout(std::time::Duration::from_secs(60)).unwrap(); }
         let file = WindowStateFile::parse(&std::fs::read_to_string(&path).unwrap());
         assert_eq!(file.last, Some(frame(321)));
-        assert!(shell.save_for_close().is_none(), "saved once");
+        assert!(!shell.flush_window_state(&wakes).unwrap(), "saved once");
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn closing_reports_a_failed_state_write() {
         let dir = temp("failed-close");
-        let wakes = Wakes(std::sync::Arc::new(|_| {}));
+        let (send, receive) = std::sync::mpsc::channel();
+        let wakes = Wakes(std::sync::Arc::new(move |_| { let _ = send.send(()); }));
         let Start::Run(mut shell) = start(&[], true, &wakes) else { panic!("unattended") };
-        shell.state_path = Some(dir.clone()); // A directory cannot be replaced by a file.
+        shell.state_path = Some(dir.clone());
         shell.assume(&frame(123));
         shell.changed(&wakes);
-        let (send, receive) = std::sync::mpsc::channel();
-        shell.save_for_close().unwrap()(Box::new(move |result| send.send(result).unwrap()));
-        assert!(receive.recv().unwrap().unwrap_err().contains("could not save window state"));
+        let error = loop {
+            match shell.flush_window_state(&wakes) {
+                Ok(true) => { receive.recv_timeout(std::time::Duration::from_secs(60)).unwrap(); }
+                Ok(false) => panic!("directory write must fail"),
+                Err(error) => break error,
+            }
+        };
+        assert!(error.contains("could not save window state"));
         assert!(dir.is_dir());
         std::fs::remove_dir(dir).unwrap();
     }

@@ -256,6 +256,7 @@ impl App {
                 Task::none()
             }
             Message::Attached(Err(error)) => self.finish(Outcome::Failed(format!("could not attach the window's chrome: {error}"))),
+            Message::Sampled(_) if self.quit_cleared => Task::none(),
             Message::Sampled(sample) => {
                 self.shell.observe(sample);
                 self.shell.changed(&self.wakes.callback());
@@ -423,7 +424,11 @@ impl App {
             }
             shell::Wake::SaveCheck => {
                 self.shell.save_check(&self.wakes.callback());
-                Task::none()
+                if self.quit_cleared { self.close() } else { Task::none() }
+            }
+            shell::Wake::WindowState => {
+                self.shell.window_state_progress(&self.wakes.callback());
+                if self.quit_cleared { self.close() } else { Task::none() }
             }
             shell::Wake::Documents => self.band_update(top_band::Message::Documents),
             shell::Wake::Layouts => self.band_update(top_band::Message::Layouts),
@@ -445,20 +450,22 @@ impl App {
         // Documents granted QuitReady. Flush the layout queue once; worker
         // receipts continue this sequence through the shared wake stream.
         if self.band.flush_layouts() { return Task::none(); }
-        self.closing = true;
-        match self.shell.save_for_close() {
-            Some(job) => Task::perform(async move {
-                let (send, receive) = iced::futures::channel::oneshot::channel();
-                job(Box::new(move |result| { if send.send(result).is_err() { eprintln!("window save receiver closed"); } }));
-                receive.await.map_err(|error| error.to_string())?
-            }, Message::OutputSaved),
-            None => self.finish(Outcome::Done),
+        match self.shell.flush_window_state(&self.wakes.callback()) {
+            Ok(true) => Task::none(),
+            result => {
+                self.closing = true;
+                match result {
+                    Err(error) => self.finish(Outcome::Failed(error)),
+                    Ok(_) => self.finish(Outcome::Done),
+                }
+            }
         }
     }
 
     fn finish_session_quit(&mut self) -> Task<Message> {
         // Document clearance still comes first. Preferences must never extend
         // an OS shutdown: cancellation leaves the last atomic commit intact.
+        self.shell.cancel_window_state();
         self.band.abandon_layouts();
         self.closing = true;
         if let Some(chrome) = &self.chrome { chrome.allow_session_end(); }
