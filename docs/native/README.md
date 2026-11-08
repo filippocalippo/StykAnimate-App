@@ -13,7 +13,7 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
-**Updated 2026-11-08 19:00.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
+**Updated 2026-11-08 21:00.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
 tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had only merged N0). Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
@@ -31,7 +31,7 @@ seed store `wt/shared-target` is back (crates.io dependencies; `node perf/make-s
 Windows only (the architecture stays portable). GPT-6 Astra implements back-end and logic, Sonnet the screens, one Opus
 implementer the reference slice (the interface architecture and the Inspector, `docs/native/patterns.md`); GPT-6.1 Sol is
 the only reviewer, by risk; logic stays out of the views; `cargo xtask check` guards the rules. In-flight chunks finish with
-no new review round unless a finding is a blocker.
+no new review round unless a finding is a blocker. **Process additions of 2026-11-08** (N8): a self-check against `native-common.md`'s Known findings before every hand-in; a half-page plan checked by Sol before coding for high-risk and new-owner chunks; only purely cosmetic findings in screen chunks may merge, each recorded in the workspace's polish list below and cleared before that workspace's gate; no idle implementers. Screen chunks with new behaviour are two steps: Astra's core part, then Sonnet's views.
 
 **In flight.**
 
@@ -103,6 +103,11 @@ The automation mode is one language, `styk_core::automation` (merged with K-shel
 K-stage's steps and R-slice's panel test move onto it. Then the skeleton gate (full suites, parity, the native smokes, screenshots, the benchmark, `cargo xtask check --wasm`, and
 the quiet-machine latency checks, `#[ignore]`d with their commands: the export's flush cancel 250 ms, the audio-pass cancel
 1 s, the decoder timeout 3 s, the counting allocator's measured cost).
+
+**Polish lists** (cosmetic findings merged with an entry; one fixer clears each list before its workspace's gate, which never passes with it non-empty):
+
+- Skeleton: empty.
+- Animate: empty.
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
 decision, unmerged. `t3/speed-joint-drag-frame` is an unfinished optimisation with no measured gain: not this phase's.

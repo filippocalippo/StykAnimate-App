@@ -67,3 +67,15 @@ and export bytes, evaluation, the parity suites) stays exact.
 **Proof** proportionate to risk (no exhaustive sweeps unless a real failure calls for one; representative scenes; full
 suites at gates). **Reports** of about 30 lines (what changed, checks and results, screenshot scores, departures from the
 brief, risks). Short Handoff updates at merges; decision records only for real decisions.
+
+**Process additions** (the owner, 2026-11-08, to cut rework without lowering the bar; the time went into rework, not
+reviews, and the findings repeated the same types): (1) every implementer checks its diff against the "Known findings"
+list in `perf/briefs/native-common.md` before handing in and reports `Self-check: done`; the list grows when Sol finds a
+new recurring type; (2) high-risk and new-owner chunks write a half-page plan first (ownership, data flow, commands and
+routing, persistence, close and quit), which Sol (high) checks before coding; plain screens on an existing core API need
+none; (3) blockers and every finding about logic, ownership, routing, persistence, focus or keyboard, input, tests,
+performance or the risk list are fixed before the merge; only purely cosmetic findings in screen chunks may merge with an
+entry in the workspace's polish list in the Handoff, which one fixer clears before that workspace's gate (when in doubt,
+not cosmetic); (4) no idle implementers: while a fixer works on one chunk, the next independent chunk starts. Screen
+chunks with new behaviour stay two steps (Astra's core part, then Sonnet's views). Sol stays the only reviewer, blockers
+block, high-risk chunks get xhigh and the orchestrator's full read.
