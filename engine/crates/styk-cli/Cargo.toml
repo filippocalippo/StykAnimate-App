@@ -24,6 +24,8 @@ styk-export = { path = "../styk-export" }
 pollster = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 sha2 = "0.10"
+styk-alloc = { path = "../styk-alloc" }
+styk-trace = { path = "../styk-trace" }
 styk-core = { path = "../styk-core", optional = true }
 styk-services = { path = "../styk-services", optional = true }
 styk-platform = { path = "../styk-platform", optional = true }

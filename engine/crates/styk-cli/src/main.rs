@@ -26,6 +26,12 @@ use rayon::prelude::*;
 use styk_eval::eval::Prepared;
 use styk_eval::geometry::build;
 
+#[global_allocator]
+static ALLOCATOR: styk_alloc::Counting = styk_alloc::Counting;
+
+#[cfg(feature = "app-tools")]
+mod memory;
+
 #[cfg(feature = "app-tools")]
 mod audio;
 #[cfg(feature = "app-tools")]
@@ -44,6 +50,8 @@ mod raster_parity;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
+        #[cfg(feature = "app-tools")]
+        Some("stage-memory") => memory::stage(&args[1..]),
         #[cfg(feature = "app-tools")]
         Some("audio") if args.len() >= 3 => audio::audio(&args[1], &args[2], &args[3..]),
         #[cfg(not(feature = "app-tools"))]

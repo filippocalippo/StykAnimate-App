@@ -11,6 +11,9 @@
 //! slot keeps the tile copied into it whatever is drawn afterwards.
 
 use std::mem::ManuallyDrop;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "lifetime_tests.rs"]
+mod lifetime_tests;
 use std::sync::Arc;
 
 use styk_draw::DrawList;
@@ -24,7 +27,7 @@ use crate::settings::Settings;
 use crate::tiles::{tiles, Tile};
 use crate::view::tile_view;
 
-/// Read-back slots hold at most this many bytes together (at least two slots).
+/// Read-back slots hold at most this many bytes together (at least two where frames overlap).
 pub const READBACK_BYTES: u64 = 64 << 20;
 /// Read-back slots at most.
 pub const MAX_SLOTS: usize = 8;
@@ -45,6 +48,7 @@ pub struct GpuExport {
     atlas: Option<(u64, u32, usize)>,
     /// The last resolved tile, straight RGBA.
     resolved: Vec<u8>,
+    uploaded_bytes: u64,
     /// Ends a frame's wait for the GPU from any thread ([`GpuExport::interrupt`]).
     interrupt: Interrupt,
     /// Asks the poller thread to wait for the GPU (the frame's wait is on the interrupt, not on the GPU).
@@ -68,6 +72,10 @@ impl GpuExport {
         let stride = (size[0] * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let bytes = stride as u64 * size[1] as u64;
         let slots = ((READBACK_BYTES / bytes.max(1)) as usize).clamp(2, MAX_SLOTS);
+        // Native frame_into finishes one frame before starting another. Keep
+        // its tiles pipelined, but never allocate slots no tile can occupy.
+        #[cfg(not(target_arch = "wasm32"))]
+        let slots = slots.min(tiles.len());
         let readbacks = (0..slots)
             .map(|_| device.create_buffer(&wgpu::BufferDescriptor { label: Some("styk export read-back"), size: bytes, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }))
             .collect();
@@ -91,6 +99,7 @@ impl GpuExport {
             stride,
             atlas: None,
             resolved: Vec::new(),
+            uploaded_bytes: 0,
             interrupt,
             #[cfg(not(target_arch = "wasm32"))]
             poller,
@@ -108,6 +117,19 @@ impl GpuExport {
     /// does every later one, and the exporter is to be dropped.
     pub fn interrupt(&self) -> Interrupt {
         self.interrupt.clone()
+    }
+
+    /// Finishes an upload batch on the export worker, releasing its staging
+    /// copies. Cancellation and device loss wake this wait just like readback.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn flush_uploads(&self) -> Result<(), String> {
+        if self.interrupt.is_interrupted() { return Err(crate::interrupt::INTERRUPTED.into()); }
+        self.queue.submit([]);
+        self.interrupt.expect(1);
+        let latch = self.interrupt.clone();
+        self.queue.on_submitted_work_done(move || latch.completed(Ok(())));
+        self.poller.as_ref().ok_or("the export has no thread to wait for the GPU")?.send(()).map_err(|e| e.to_string())?;
+        self.interrupt.wait()
     }
 
     pub fn settings(&self) -> &Settings {
@@ -179,8 +201,14 @@ impl GpuExport {
     }
 
     pub fn upload_images<'a>(&mut self, assets: &Assets, images: impl IntoIterator<Item = &'a DecodedImage>) {
-        self.renderer.upload_images(assets, images);
+        let bytes = &mut self.uploaded_bytes;
+        self.renderer.upload_images(assets, images.into_iter().inspect(|image| {
+            *bytes = bytes.saturating_add(image.rgba.len() as u64);
+        }));
     }
+
+    /// Cumulative picture bytes handed to the renderer, including prefetch.
+    pub fn uploaded_bytes(&self) -> u64 { self.uploaded_bytes }
 
     /// Draws tile `index` of `list` seen through `camera`, and copies it into read-back `slot`.
     pub fn draw(&mut self, doc: &Document, list: &Arc<DrawList>, camera: Option<&Camera>, index: usize, slot: usize) {
@@ -251,6 +279,15 @@ impl GpuExport {
     /// are those of [`GpuExport::frame_blocking`].
     #[cfg(not(target_arch = "wasm32"))]
     pub fn frame_into(&mut self, doc: &Document, list: &Arc<DrawList>, camera: Option<&Camera>, matte: bool, out: &mut Vec<u8>) -> Result<(), String> {
+        self.frame_into_with(doc, list, camera, matte, out, |_| Ok(()))
+    }
+
+    /// Run worker preparation after every tile has been submitted, while the GPU
+    /// draws it, before arming the readback latch. The callback may submit uploads
+    /// and use the upload latch; no current tile can see those later queue writes.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn frame_into_with(&mut self, doc: &Document, list: &Arc<DrawList>, camera: Option<&Camera>, matte: bool, out: &mut Vec<u8>, submitted: impl FnOnce(&mut Self) -> Result<(), String>) -> Result<(), String> {
+        let mut submitted = Some(submitted);
         let (width, height) = (self.settings.width as usize, self.settings.height as usize);
         let factor = self.settings.smoothing.factor();
         out.clear();
@@ -264,6 +301,9 @@ impl GpuExport {
             let batch = slots.min(self.tiles.len() - first);
             for k in 0..batch {
                 self.draw(doc, list, camera, first + k, k);
+            }
+            if first + batch == self.tiles.len() && let Some(submitted) = submitted.take() {
+                submitted(self)?;
             }
             self.interrupt.expect(batch);
             for k in 0..batch {

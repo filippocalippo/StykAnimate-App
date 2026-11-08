@@ -51,7 +51,7 @@ impl Renderer {
             .saturating_add(self.target_bytes())
             .saturating_add(self.stats.depth_bytes)
             .saturating_add(self.executor.as_ref().map_or(0, |e| e.retained_bytes()));
-        let mut pages = [self.layers[0].pages, self.layers[1].pages];
+        let mut pages = [0; 2];
         let mut passes = 1u64;
         for round in &frame.rounds {
             for (depth, &count) in round.pages_per_depth.iter().enumerate().skip(1) {
@@ -61,13 +61,16 @@ impl Renderer {
         }
         let records = &frame.records;
         let effect_size = frame.biggest;
-        // Both layer parities may be replaced; each array has at least two layers.
-        let mut prospective =
-            pixels(page).saturating_mul(u64::from(pages[0].max(2)) + u64::from(pages[1].max(2)));
+        // Inactive owners are already counted in retained. Active replacements
+        // keep their page-count high-water mark, with old/new overlap admitted.
+        let mut prospective = pages.iter().enumerate().map(|(parity,&count)| {
+            if count == 0 { 0 } else { pixels(page).saturating_mul(u64::from(count.max(self.layers[parity].pages).max(2))) }
+        }).sum::<u64>();
+        let layer_target = if pages == [0; 2] { 0 } else { pixels(page) };
         if self.samples > 1 {
             prospective = prospective.saturating_add(
                 pixels(size)
-                    .saturating_add(pixels(page))
+                    .saturating_add(layer_target)
                     .saturating_mul(self.samples as u64),
             );
         }
@@ -96,6 +99,7 @@ impl Renderer {
             .saturating_add(power(passes.max(8)).saturating_mul(UNIFORM_STRIDE));
         if !records.is_empty() {
             let bucket = effect_size.map(|n| n.saturating_add(255) / 256 * 256);
+            let bucket = self.executor.as_ref().map_or(bucket, |e| e.required_size(effect_size));
             prospective = prospective
                 .saturating_add(pixels(bucket).saturating_mul(recipe::SLOTS as u64))
                 .saturating_add(power((records.len() as u64).max(64)).saturating_mul(768));

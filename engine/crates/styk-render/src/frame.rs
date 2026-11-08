@@ -30,7 +30,6 @@ pub struct FramePlan {
     pub(crate) size: [u32; 2],
     pub(crate) planned: Vec<plan::Placement>,
     pub(crate) page: [u32; 2],
-    page_small: u32,
     pub(crate) rounds: Vec<crate::isolation::Round>,
     work: Vec<Work>,
     pub(crate) records: Vec<recipe::Uniform>,
@@ -245,14 +244,12 @@ impl Renderer {
         }, self.drawing_grid);
         let sizes: Vec<[u32; 2]> = planned.iter().map(plan::Placement::size).collect();
         let largest = sizes.iter().skip(1).fold([0u32, 0u32], |a, s| [a[0].max(s[0]), a[1].max(s[1])]);
-        // Pages hold the frame and grow for larger layers (effect layers at the editor's density, the
-        // camera image); after 240 frames that all fit the frame they shrink back to it.
+        // Keep stage capacity until the view size changes or the document closes.
+        // Frame counts are not an injected-clock idle deadline.
         let wanted = page_size(size, largest);
-        let mut page_small = if wanted == size { self.page_small + 1 } else { 0 };
         let mut page = self.page;
-        if self.page_frame != size || page_small > 240 {
+        if self.page_frame != size {
             page = size;
-            page_small = 0;
         }
         // An export sizes its pages by the frame alone (a frame must not depend on the frames drawn before it); the stage grows them.
         page = if self.exact_sizes { wanted } else { [page[0].max(wanted[0]), page[1].max(wanted[1])] };
@@ -275,7 +272,7 @@ impl Renderer {
                     work.push(Work { group: g, round: r, depth: list.groups[g].depth, page: slot.page, at: [slot.offset[0] as u32, slot.offset[1] as u32], size: at, run });
                 }
             }
-        FramePlan { list: list.clone(), view: *view, size, planned, page, page_small, rounds, work, records, biggest }
+        FramePlan { list: list.clone(), view: *view, size, planned, page, rounds, work, records, biggest }
     }
 
     /// Renders the current draw list into the offscreen frame.
@@ -293,12 +290,11 @@ impl Renderer {
     /// Consumes precisely the plan admitted by the caller. The same Arc reaches
     /// set_list, preserving pointer-based geometry upload reuse during navigation.
     pub fn render_planned(&mut self, encoder: &mut wgpu::CommandEncoder, plan: FramePlan) {
-        let FramePlan { list, view, size, planned, page, page_small, rounds, work, records, biggest } = plan;
+        let FramePlan { list, view, size, planned, page, rounds, work, records, biggest } = plan;
         let view = &view;
         self.set_list(&list);
         self.page = page;
         self.page_frame = size;
-        self.page_small = page_small;
         self.root_gpu_source = false;
         let foreground = matches!(self.paint_context, crate::paint::PaintContext::CanvasForeground { .. });
         self.ensure_output(size);
@@ -407,12 +403,20 @@ impl Renderer {
         uniform_data[o..o + std::mem::size_of::<GpuView>()].copy_from_slice(bytemuck::bytes_of(&v));
         self.queue.write_buffer(&self.uniforms, 0, &uniform_data);
 
+        // An atlas is shared by every depth of its parity. Size it once for
+        // this frame, not once per depth (which would discard earlier capacity).
+        let mut layer_pages = [0; 2];
         for depth in 1..=max_depth {
-            let pages = rounds.iter().map(|round| round.pages_per_depth[depth as usize]).max().unwrap_or(0);
+            let parity = depth as usize % 2;
+            layer_pages[parity] = layer_pages[parity].max(rounds.iter().map(|round| round.pages_per_depth[depth as usize]).max().unwrap_or(0));
+        }
+        for (parity, pages) in layer_pages.into_iter().enumerate() {
             if pages > 0 {
-                self.ensure_layers(depth as usize % 2, page, pages);
+                self.ensure_layers(parity, page, pages);
             }
         }
+        // An unused frame is not the end of the document/export. Keep its
+        // isolation arrays and MSAA for the next frame; the owner releases them.
         // Where the frame stops for the next round: before the first composite of a group the next round draws.
         let mut round_of = vec![usize::MAX; n];
         for (r, round) in rounds.iter().enumerate() {

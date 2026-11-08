@@ -19,7 +19,7 @@ pub struct PaintLimits {
     pub output_bytes: u64,
     /// Resident sprite pixels; a whole visible working set is admitted or refused.
     pub sprite_bytes: u64,
-    /// Layer, effect, glyph and geometry resources, including replacement overlap.
+    /// Layer, effect, glyph, geometry and upload resources, including replacement overlap.
     pub working_bytes: u64,
 }
 impl Default for PaintLimits {
@@ -123,11 +123,15 @@ struct Shared {
     changed: Condvar,
     idle: Mutex<()>,
     wake: frames::Wake,
+    #[cfg(test)]
+    probe: tests::Probe,
 }
 impl Shared {
     // Only the worker waits; the timeout covers notify-before-wait and scheduler
     // progress without adding a callback/lock to every scheduler completion.
     fn wait(&self) {
+        #[cfg(test)]
+        self.probe.waiting();
         if let Ok(guard) = self.idle.lock() {
             drop(self.changed.wait_timeout(guard, Duration::from_millis(4)));
         }
@@ -163,6 +167,8 @@ impl Painter {
             changed: Condvar::new(),
             idle: Mutex::new(()),
             wake,
+            #[cfg(test)]
+            probe: tests::Probe::default(),
         });
         let worker = shared.clone();
         let device = device.clone();
@@ -310,15 +316,15 @@ fn run(
     clock: Arc<dyn Clock>,
     limits: PaintLimits,
 ) {
-    let mut renderer = Renderer::new(&device, &queue, format);
-    // Exact sizes also make a stage frame independent of prior views, like export.
-    renderer.set_exact_sizes(true);
+    let mut renderer: Option<Renderer> = None;
     let mut pictures = pictures::Pictures::default();
     let mut request = None;
     let mut awaiting_ack = false;
     while !shared.closed.load(Ordering::Acquire) {
         if let Some(delivery) = shared.returned.take() {
-            if let Ok(picture) = delivery.picture {
+            if let Ok(picture) = delivery.picture
+                && let Some(renderer) = &mut renderer
+            {
                 renderer.recycle_frame(picture.frame);
             }
             awaiting_ack = false;
@@ -352,8 +358,16 @@ fn run(
             }
         };
         let start = clock.now();
+        let active = renderer.get_or_insert_with(|| {
+            let mut renderer = Renderer::new(&device, &queue, format);
+            renderer.set_exact_sizes(true);
+            // The constructor stages its initial picture table. A refusal
+            // before picture preparation must flush that real write once too.
+            pictures.queued_bytes = renderer.picture_upload_bound();
+            renderer
+        });
         let mut result = paint(
-            &mut renderer,
+            active,
             &mut pictures,
             &ready,
             ticket,
@@ -365,11 +379,16 @@ fn run(
             frame,
             paint_ms: clock.now().saturating_sub(start).as_secs_f64() * 1000.0,
         });
-        // An interrupted/refused decode may already have enqueued sprite writes.
-        // Flush and complete them too, so failures cannot accumulate staging data.
-        if result.is_err() && !shared.closed.load(Ordering::Acquire) {
-            renderer.queue().submit([]);
-            if let Err(error) = finish_gpu(&renderer, &shared) {
+        // Retire cancelled/refused owners promptly, including under a GPU stall.
+        // Drain the single admitted batch before creating another renderer; a
+        // cancellation must not turn the next request into another upload slot.
+        if result.is_err() {
+            submit_uploads(active, &mut pictures, &shared);
+            drop(renderer.take());
+            pictures = pictures::Pictures::default();
+            #[cfg(test)]
+            shared.probe.retired();
+            if let Err(error) = finish_gpu(&device, &queue, &shared, None) {
                 result = Err(error);
             }
         }
@@ -388,6 +407,8 @@ fn run(
     drop(shared.shutdown_frame.take());
     drop(renderer);
     drop(pictures);
+    #[cfg(test)]
+    shared.probe.retired();
     drop(queue);
     drop(device);
     shared.exited.store(true, Ordering::Release);
@@ -409,7 +430,7 @@ fn paint(
     ready: &WorkerFrame,
     ticket: &Ticket,
     limits: PaintLimits,
-    shared: &Shared,
+    shared: &Arc<Shared>,
 ) -> Result<RenderedFrame, PaintError> {
     let input = &ticket.key.view;
     let scene = &ready.key.inputs.scene;
@@ -482,13 +503,14 @@ fn paint(
                 ..limits
             },
         )?;
-        if complete {
-            break;
-        }
         // Bound upload staging while decodes run on the engine's workers. The
         // admitted rendering plan stays owned here throughout resource readiness.
-        renderer.queue().submit([]);
-        finish_gpu(renderer, shared)?;
+        if submit_uploads(renderer, pictures, shared) {
+            finish_gpu(renderer.device(), renderer.queue(), shared, Some(ticket))?;
+            pictures.queued_bytes = 0;
+            pictures.submitted = false;
+        }
+        if complete { break; }
         shared.wait();
     }
     if !ticket.current() || shared.closed.load(Ordering::Acquire) {
@@ -502,27 +524,69 @@ fn paint(
         });
     renderer.render_planned(&mut encoder, plan);
     renderer.queue().submit([encoder.finish()]);
-    finish_gpu(renderer, shared)?;
+    #[cfg(test)]
+    shared.probe.draw_submitted();
+    // One cached successor, in the scheduler's playback order. Decode workers
+    // already run independently. Use only the time this submitted frame needs;
+    // speculation must not delay its publication waiting for a future decode.
+    if let Some(next_ticket) = ticket.frame.next_playback()
+        && let Ok(Some(next)) = next_ticket.read()
+    {
+        pictures.begin();
+        if ticket.current() && next_ticket.current() && !shared.closed.load(Ordering::Acquire) {
+            // One upload slice only. Its bytes are admitted by Pictures against
+            // the remaining working budget before write_texture. Atlas growth
+            // can add one copy submission; no further slice starts until both
+            // complete. Missing decode output never creates an empty submission.
+            match pictures.prefetch(renderer,&next.generation,next.pictures.as_ref(),&ready.frame.list,&next.frame.list,
+                PaintLimits { working_bytes:limits.working_bytes-required,..limits }) {
+                Ok(_) | Err(PaintError::Budget { .. } | PaintError::Decode) => {},
+                Err(error) => return Err(error),
+            }
+            // Refusal belongs to the future frame; already staged work is drained.
+            submit_uploads(renderer, pictures, shared);
+        }
+    }
+    finish_gpu(renderer.device(), renderer.queue(), shared, Some(ticket))?;
+    pictures.queued_bytes = 0;
+    pictures.submitted = false;
     renderer
         .take_frame()
         .ok_or_else(|| PaintError::Device("renderer produced no frame".into()))
 }
 
-fn finish_gpu(renderer: &Renderer, shared: &Shared) -> Result<(), PaintError> {
+fn submit_uploads(renderer: &Renderer, pictures: &mut pictures::Pictures, shared: &Shared) -> bool {
+    if pictures.queued_bytes == 0 || pictures.submitted { return false; }
+    #[cfg(test)]
+    shared.probe.upload_submitted(pictures.queued_bytes);
+    #[cfg(not(test))]
+    let _ = shared;
+    renderer.queue().submit([]);
+    pictures.submitted = true;
+    true
+}
+
+fn finish_gpu(device: &wgpu::Device, queue: &wgpu::Queue, shared: &Arc<Shared>, ticket: Option<&Ticket>) -> Result<(), PaintError> {
     let completed = Arc::new(AtomicBool::new(false));
     let done = completed.clone();
-    renderer.queue().on_submitted_work_done(move || {
+    let wake = Arc::downgrade(shared);
+    queue.on_submitted_work_done(move || {
+        if let Some(shared) = wake.upgrade() {
+            #[cfg(test)]
+            if shared.probe.hold_completion(done.clone()) { return; }
+            done.store(true, Ordering::Release);
+            shared.changed.notify_one();
+            return;
+        }
         done.store(true, Ordering::Release);
     });
     // Only this worker services GPU completion. No blocking poll, no growing
     // submission queue, no partial/deadline publication.
     while !completed.load(Ordering::Acquire) {
-        if shared.closed.load(Ordering::Acquire) {
+        if shared.closed.load(Ordering::Acquire) || ticket.is_some_and(|ticket| !ticket.current()) {
             return Err(PaintError::Closed);
         }
-        renderer
-            .device()
-            .poll(wgpu::PollType::Poll)
+        device.poll(wgpu::PollType::Poll)
             .map_err(|e| PaintError::Device(e.to_string()))?;
         if !completed.load(Ordering::Acquire) {
             shared.wait();

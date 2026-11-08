@@ -21,8 +21,17 @@ pub(super) struct Pictures {
     requested_cels: HashSet<usize>,
     refused: HashSet<u64>,
     pub uploaded_bytes: u64,
+    /// One admitted batch, retained until its submission completes. Includes
+    /// decoded pixels and padded staging plus concrete metadata copies.
+    pub queued_bytes: u64,
+    pub submitted: bool,
 }
 impl Pictures {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn prefetch(&mut self, renderer: &mut Renderer, generation: &Arc<Generation>, engine: Option<&Engine>,
+        current: &DrawList, next: &DrawList, limits: PaintLimits) -> Result<bool,PaintError> {
+        self.prepare_for(renderer,generation,engine,next,limits,Some(current))
+    }
     pub(super) fn begin(&mut self) {
         self.requested_images.clear();
         self.requested_cels.clear();
@@ -38,12 +47,34 @@ impl Pictures {
         list: &DrawList,
         limits: PaintLimits,
     ) -> Result<bool, PaintError> {
+        self.prepare_for(renderer,generation,engine,list,limits,None)
+    }
+
+    fn needed(&self, list: &DrawList) -> (Vec<u32>, HashSet<usize>) {
+        let images = pictures_of(list, &self.index);
+        let cels = list.prims.iter().filter(|p| p.kind & 255 == styk_eval::drawlist::K_IMAGE && p.kind & styk_eval::drawlist::F_DRAWING != 0)
+            .filter_map(|p| self.cel_at.get(&(p.b[2] as u32,(p.c[0]*PAGE as f32).round() as u32,(p.c[1]*PAGE as f32).round() as u32)).copied()).collect();
+        (images,cels)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_for(&mut self, renderer: &mut Renderer, generation: &Arc<Generation>, engine: Option<&Engine>,
+        list: &DrawList, limits: PaintLimits, protect: Option<&DrawList>) -> Result<bool, PaintError> {
         let assets = &generation.assets;
         let budget = limits.sprite_bytes;
+        let table_budget = limits.working_bytes.saturating_sub(64 << 10) / 5;
+        if table_budget < 16 << 10 {
+            return Err(PaintError::Budget { required: (64 + 5 * 16) << 10, limit: limits.working_bytes });
+        }
+        if self.assets == Some(assets.id()) && renderer.picture_upload_bound() > limits.working_bytes {
+            return Err(PaintError::Budget { required: renderer.picture_upload_bound(), limit: limits.working_bytes });
+        }
         if self.lineage != Some(generation.lineage) {
             *self = Self {
                 lineage: Some(generation.lineage),
                 uploaded_bytes: self.uploaded_bytes,
+                queued_bytes: self.queued_bytes,
+                submitted: self.submitted,
                 ..Self::default()
             };
         }
@@ -63,7 +94,7 @@ impl Pictures {
                 pages.dedup();
                 self.cel_pages.insert(id, pages);
             }
-            if self.residency.is_none() {
+            let staged = if self.residency.is_none() {
                 if assets.pages == 0 {
                     renderer.prepare_sprites(assets);
                 } else {
@@ -75,16 +106,17 @@ impl Pictures {
                         });
                     }
                     renderer
-                        .prepare_sprites_export_bounded(assets, 2, limits.working_bytes)
+                        .prepare_sprites_export_bounded(assets, 2, table_budget)
                         .map_err(|required| PaintError::Budget {
                             required,
                             limit: limits.working_bytes,
                         })?;
                     self.residency = Some(Residency::new(assets.pages, 2));
                 }
+                true
             } else {
-                renderer
-                    .sync_pictures_bounded(assets, limits.working_bytes)
+                let staged = renderer
+                    .sync_pictures_bounded(assets, table_budget)
                     .map_err(|required| PaintError::Budget {
                         required,
                         limit: limits.working_bytes,
@@ -92,34 +124,21 @@ impl Pictures {
                 if let Some(residency) = &mut self.residency {
                     residency.extend(assets.pages);
                 }
-            }
+                staged
+            };
             // The assets owner assigns stable serials to unchanged cel payloads.
             // Only new placements invalidate their previous texels, not revisions
             // or resource epochs (bounds changes have no new image pixels).
             self.uploaded.observe(assets);
             self.assets = Some(assets.id());
+            if staged { self.queued_bytes = renderer.picture_upload_bound(); }
         }
         if assets.pages == 0 {
             return Ok(true);
         }
         let engine = engine
             .ok_or_else(|| PaintError::Device("document picture service unavailable".into()))?;
-        let images = pictures_of(list, &self.index);
-        let mut cels = HashSet::new();
-        for prim in &list.prims {
-            if prim.kind & 255 == styk_eval::drawlist::K_IMAGE
-                && prim.kind & styk_eval::drawlist::F_DRAWING != 0
-            {
-                let place = (
-                    prim.b[2] as u32,
-                    (prim.c[0] * PAGE as f32).round() as u32,
-                    (prim.c[1] * PAGE as f32).round() as u32,
-                );
-                if let Some(&cel) = self.cel_at.get(&place) {
-                    cels.insert(cel);
-                }
-            }
-        }
+        let (images,cels) = self.needed(list);
         let mut pages: Vec<u32> = images
             .iter()
             .filter_map(|&i| assets.atlas.get(i as usize).map(|a| a.layer))
@@ -128,16 +147,21 @@ impl Pictures {
                     .flat_map(|id| self.cel_pages.get(id).into_iter().flatten().copied()),
             )
             .collect();
+        if let Some(protect) = protect {
+            let (images,cels) = self.needed(protect);
+            pages.extend(images.iter().filter_map(|&i|assets.atlas.get(i as usize).map(|a|a.layer)));
+            pages.extend(cels.iter().flat_map(|id|self.cel_pages.get(id).into_iter().flatten().copied()));
+        }
         pages.sort_unstable();
         pages.dedup();
-        let required = (pages.len() as u64).max(2) * u64::from(PAGE).pow(2) * 4;
+        let wanted_layers = (pages.len() as u32).max(2).max(self.residency.as_ref().map_or(0,Residency::layers));
+        let required = u64::from(wanted_layers) * u64::from(PAGE).pow(2) * 4;
         if required > budget {
             return Err(PaintError::Budget {
                 required,
                 limit: budget,
             });
         }
-        let wanted_layers = (pages.len() as u32).max(2);
         if wanted_layers > renderer.device().limits().max_texture_array_layers
             || pages.iter().any(|&page| page >= styk_render::MAX_PAGES)
         {
@@ -147,6 +171,10 @@ impl Pictures {
         }
         // Grow once, not once per page: only one old/new array pair can be in
         // flight, and it is completed before another candidate starts.
+        let overhead = renderer.picture_upload_bound().saturating_add(renderer.sprite_growth_bytes(wanted_layers));
+        if overhead > limits.working_bytes {
+            return Err(PaintError::Budget { required: overhead, limit: limits.working_bytes });
+        }
         renderer.resize_sprite_layers(wanted_layers);
         let Some(residency) = self.residency.as_mut() else {
             return Err(PaintError::Decode);
@@ -154,10 +182,12 @@ impl Pictures {
         // Previously shown pixels are in a detached output, not dependent on the
         // sprite atlas. Protect the entire candidate set throughout all uploads.
         residency.hold(&pages);
+        let mut mapped = false;
         for &page in &pages {
             match residency.acquire(page, &pages, true) {
                 Acquired::Resident(_) => {}
                 Acquired::Given { layer, evicted } => {
+                    mapped = true;
                     if let Some(old) = evicted {
                         renderer.map_sprite_page(old, None);
                         self.uploaded.forget_page(old);
@@ -177,10 +207,19 @@ impl Pictures {
                 }
             }
         }
-        renderer.flush_sprite_map();
-        renderer.flush_pictures();
-
+        if mapped {
+            renderer.flush_sprite_map();
+            self.queued_bytes = overhead;
+        }
         let batch = engine.take_picture_batch(4 << 20);
+        let pixels = batch.images.iter().map(|image| {
+            let stride = (u64::from(image.width) * 4).div_ceil(256) * 256;
+            (image.rgba.len() as u64).saturating_add(stride.saturating_mul(u64::from(image.height)))
+        }).fold(0u64, u64::saturating_add);
+        let required = self.queued_bytes.max(overhead).saturating_add(pixels);
+        if required > limits.working_bytes {
+            return Err(PaintError::Budget { required, limit: limits.working_bytes });
+        }
         self.refused.extend(batch.refused);
         for image in batch.images {
             if image.soft {
@@ -204,6 +243,7 @@ impl Pictures {
                 continue;
             }
             renderer.upload_images(assets, std::iter::once(image.as_ref()));
+            self.queued_bytes = required;
             self.uploaded_bytes = self.uploaded_bytes.saturating_add(image.rgba.len() as u64);
             if !self.refused.contains(&image.placement) {
                 self.uploaded.record(assets, &image);
@@ -256,7 +296,9 @@ impl Pictures {
             for &image in &missing_images {
                 if !self.requested_images.insert(image) {
                     self.blank_images.insert(image);
-                    renderer.set_picture(&assets.atlas[image as usize], None);
+                    if renderer.set_picture(&assets.atlas[image as usize], None) {
+                        self.queued_bytes = self.queued_bytes.max(overhead);
+                    }
                 }
             }
             if missing_cels

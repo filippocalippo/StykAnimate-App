@@ -102,8 +102,8 @@ struct Timings {
 }
 
 struct Producer {
+    engine: Engine,
     frames: styk_engine::export::ExportFrames,
-    generation: Arc<styk_engine::Generation>,
     renderer: FrameRenderer,
     order: Vec<u32>,
     pause: Option<(u32, f64)>,
@@ -112,6 +112,7 @@ struct Producer {
     child: Arc<AtomicU32>,
     timings: Arc<Mutex<Timings>>,
     transparent: bool,
+    memory: Option<crate::memory::Log>,
 }
 
 impl FrameProducer for Producer {
@@ -131,13 +132,26 @@ impl FrameProducer for Producer {
         let started = Instant::now();
         let frame = self.frames.take(tick).ok_or("no frame")?;
         let drawing = Instant::now();
-        let doc = &self.generation.prepared.doc;
         let list = if self.transparent { styk_export::without_background(&frame.list) } else { frame.list.clone() };
-        self.renderer.frame_into(doc, &list, frame.camera.as_ref(), layout.matte, out)?;
+        self.renderer.prepare_frame(&self.engine, &self.frames, &list)?;
+        let next_tick = self.order.get(index as usize + 1).copied();
+        let interrupt = self.renderer.interrupt();
+        self.renderer.frame_with_prefetch(&self.engine, &self.frames, &list, frame.camera.as_ref(), layout.matte, out, || {
+            let Some(tick) = next_tick else { return Ok(None) };
+            self.frames.prefetch([tick]);
+            loop {
+                if interrupt.is_interrupted() { return Err(styk_export::interrupt::INTERRUPTED.into()); }
+                if let Some(next) = self.frames.ready(tick) {
+                    return Ok(Some(if self.transparent { styk_export::without_background(&next.list) } else { next.list.clone() }));
+                }
+                if !self.engine.step() { return Err("next export frame has no runnable preparation".into()); }
+            }
+        })?;
         finish_frame(layout, out);
         let mut timings = self.timings.lock().unwrap();
         timings.evaluate_ms += (drawing - started).as_secs_f64() * 1000.0;
         timings.draw_ms += drawing.elapsed().as_secs_f64() * 1000.0;
+        crate::memory::sample(&mut self.memory, "frame", Some(tick), crate::memory::renderer_device(&self.renderer), || serde_json::json!({"frame_buffer":out.capacity(),"draw_ms":drawing.elapsed().as_secs_f64()*1000.}))?;
         if self.sample.contains(&index) {
             let child = self.child.load(Ordering::Relaxed);
             timings.samples.push((index, win::private_bytes(None), if child != 0 { win::private_bytes(Some(child)) } else { 0 }));
@@ -224,24 +238,24 @@ fn leftovers(destination: &Path) -> Vec<String> {
 
 /// A renderer for `generation`'s pictures: decoded by the engine's tasks (here on this thread), uploaded, and the decoded
 /// copies dropped (the exporter holds what it needs).
-fn make_renderer(engine: &Engine, frames: &styk_engine::export::ExportFrames, generation: &Arc<styk_engine::Generation>, settings: Settings, cpu: bool, tile: u32) -> Result<(FrameRenderer, String), String> {
-    frames.decode_images();
-    while engine.step() {}
-    let images = frames.take_images(usize::MAX);
+fn make_renderer(engine: &Engine, frames: &styk_engine::export::ExportFrames, settings: Settings, cpu: bool, tile: u32, memory: &mut Option<crate::memory::Log>) -> Result<(FrameRenderer, String), String> {
     if cpu {
-        let mut exporter = CpuExport::new(settings, tile);
-        exporter.use_assets(generation.assets.clone());
-        exporter.upload_images(&generation.assets, images.iter().cloned());
-        Ok((FrameRenderer::Cpu(exporter), "CPU (styk-raster)".to_string()))
+        let mut renderer = FrameRenderer::Cpu(CpuExport::new(settings, tile));
+        renderer.load_images(engine, frames).map_err(fail)?;
+        Ok((renderer, "CPU (styk-raster)".to_string()))
     } else {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| fail(format!("No GPU adapter: {e}")))?;
         let adapter_name = adapter.get_info().name;
+        crate::memory::sample(memory, "adapter", None, None, || serde_json::json!({"backend":format!("{:?}",adapter.get_info().backend)})).map_err(fail)?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk video export"), required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).map_err(|e| fail(e.to_string()))?;
-        let mut exporter = GpuExport::new(&device, &queue, settings, tile);
-        exporter.prepare_sprites(generation.lineage, &generation.assets);
-        exporter.upload_images(&generation.assets, images.iter().map(|image| &**image));
-        Ok((FrameRenderer::Gpu(exporter), adapter_name))
+        crate::memory::sample(memory, "device", None, Some(&device), || serde_json::json!({})).map_err(fail)?;
+        let exporter = GpuExport::new(&device, &queue, settings, tile);
+        crate::memory::sample(memory, "exporter", None, Some(&device), || serde_json::json!({})).map_err(fail)?;
+        let mut renderer = FrameRenderer::Gpu(exporter, None);
+        renderer.load_images(engine, frames).map_err(fail)?;
+        crate::memory::sample(memory, "uploaded", None, Some(&device), || serde_json::json!({})).map_err(fail)?;
+        Ok((renderer, adapter_name))
     }
 }
 
@@ -257,25 +271,30 @@ struct Other {
 fn open_other(path: &str, settings: Settings, cpu: bool) -> Result<Other, String> {
     let bytes = std::fs::read(path).map_err(|e| fail(format!("{path}: {e}")))?;
     let extension = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("styk").to_ascii_lowercase();
-    let engine = Engine::new(clock, Budgets::for_device(None));
+    let engine = Engine::for_export(clock, Budgets { picture_bytes: 32 << 20, ..Budgets::for_device(None) });
     engine.open(&bytes, &extension, "other").map_err(|e| fail(format!("{path}: {e}")))?;
+    drop(bytes);
     let frames = engine.export_frames(0).map_err(fail)?;
     let generation = frames.generation().clone();
-    let (renderer, _) = make_renderer(&engine, &frames, &generation, settings, cpu, styk_export::TILE_SIDE)?;
+    let (renderer, _) = make_renderer(&engine, &frames, settings, cpu, styk_export::TILE_SIDE, &mut None)?;
     Ok(Other { _engine: engine, frames, generation, renderer })
 }
 
 fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, String> {
+    let mut memory = crate::memory::Log::open(option(rest, "--memory-report")).map_err(fail)?;
+    crate::memory::sample(&mut memory, "start", None, None, || serde_json::json!({})).map_err(fail)?;
     let baseline = win::private_bytes(None);
     let started = Instant::now();
     let bytes = std::fs::read(path).map_err(|e| fail(format!("{path}: {e}")))?;
     let extension = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("styk").to_ascii_lowercase();
-    let engine = Engine::new(clock, Budgets::for_device(None));
+    let engine = Engine::for_export(clock, Budgets { picture_bytes: 32 << 20, ..Budgets::for_device(None) });
     let name = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("export").to_string();
     engine.open(&bytes, &extension, &name).map_err(|e| fail(format!("{path}: {e}")))?;
     let frames = engine.export_frames(0).map_err(fail)?;
     let generation = frames.generation().clone();
     let after_open = win::private_bytes(None);
+    crate::memory::sample(&mut memory, "document", None, None, || serde_json::json!({"input_bytes":bytes.len()})).map_err(fail)?;
+    drop(bytes);
     let doc = &generation.prepared.doc;
     let (first, last) = match ticks.split_once('-') {
         Some((a, b)) => (a.parse::<u32>().map_err(fail)?, b.parse::<u32>().map_err(fail)?),
@@ -355,7 +374,8 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let smoothing = Smoothing::parse(smoothing_name).ok_or_else(|| fail("--smoothing is edges, none or sprites"))?;
     let settings = Settings::new(width, height, smoothing, styk_export::settings::MAX_PIXELS).map_err(fail)?;
 
-    let (renderer, adapter_name) = make_renderer(&engine, &frames, &generation, settings, flag(rest, "--cpu"), number(rest, "--tile").map_err(fail)?.unwrap_or(styk_export::TILE_SIDE))?;
+    let (renderer, adapter_name) = make_renderer(&engine, &frames, settings, flag(rest, "--cpu"), number(rest, "--tile").map_err(fail)?.unwrap_or(styk_export::TILE_SIDE), &mut memory)?;
+    crate::memory::sample(&mut memory, "ready", None, crate::memory::renderer_device(&renderer), || serde_json::json!({})).map_err(fail)?;
     let after_renderer = win::private_bytes(None);
     // A cancel also ends a wait for the GPU.
     {
@@ -384,8 +404,8 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let cancel_when = Arc::new(Mutex::new(None::<Instant>));
     let sample: Vec<u32> = option(rest, "--sample-frames").map(|s| s.split(',').filter_map(|n| n.parse().ok()).collect()).unwrap_or_default();
     let mut producer = Producer {
+        engine: engine.clone(),
         frames,
-        generation: generation.clone(),
         renderer,
         order,
         pause: number(rest, "--pause-producer-at-frame").map_err(fail)?.zip(number(rest, "--pause-secs").map_err(fail)?),
@@ -394,6 +414,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
         child: child.clone(),
         timings: timings.clone(),
         transparent: flag(rest, "--transparent"),
+        memory,
     };
 
     if flag(rest, "--no-encode") {
@@ -413,6 +434,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
                 // A frame of the other document between this document's frames.
                 let tick = (index * 7 + 3) % other.frames.ticks();
                 let frame = other.frames.take(tick).ok_or_else(|| fail("no frame of the other document"))?;
+                other.renderer.prepare_frame(&other._engine, &other.frames, &frame.list).map_err(fail)?;
                 other.renderer.frame_into(&other.generation.prepared.doc, &frame.list, frame.camera.as_ref(), layout.matte, &mut scratch).map_err(fail)?;
             }
             let tick = producer.order[index as usize];
@@ -499,6 +521,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let result = run_video_export(&*service, Path::new(out), &request, &mut producer, mix.as_mut().map(|m| m as &mut dyn AudioSource), &cancel, &on_start);
     let finished = Instant::now();
     done.store(true, Ordering::Relaxed);
+    crate::memory::sample(&mut producer.memory, "end", None, crate::memory::renderer_device(&producer.renderer), || serde_json::json!({})).map_err(fail)?;
     let export_ms = (finished - exporting).as_secs_f64() * 1000.0;
     let cancel_latency = cancel_when.lock().unwrap().map(|at| (finished - at).as_secs_f64() * 1000.0);
     let timings = timings.lock().unwrap();

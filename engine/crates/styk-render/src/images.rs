@@ -199,26 +199,43 @@ impl Renderer {
 
     /// Extend a native resident-only table without replacing unchanged sprite
     /// placements or allocating a soft atlas. Admission precedes replacement.
-    pub fn sync_pictures_bounded(&mut self, assets: &Assets, table_bytes: u64) -> Result<(), u64> {
-        if assets.atlas.len() == self.pictures.known { return Ok(()); }
+    /// Returns whether replacement staged a new table upload.
+    pub fn sync_pictures_bounded(&mut self, assets: &Assets, table_bytes: u64) -> Result<bool, u64> {
+        if assets.atlas.len() == self.pictures.known { return Ok(false); }
         let values = self.pictures.values();
         let device_limit = u64::from(self.device.limits().max_texture_dimension_2d) * u64::from(crate::resources::TABLE_WIDTH) * 16;
         let held = PictureState::new_bounded(&self.device, &self.queue, assets, 0, false,
             |entry| values.get(&(entry.layer, entry.y << 12 | entry.x)).and_then(|v| v.checked_sub(1)), table_bytes.min(device_limit))?;
         std::mem::replace(&mut self.pictures, held).destroy();
         self.rebind_sprites();
-        Ok(())
+        Ok(true)
     }
 
     /// The picture at `entry` is in layer `layer` of the sprite texture (`None`: it is not, its soft copy draws). Takes
-    /// effect with [`Renderer::flush_pictures`].
-    pub fn set_picture(&mut self, entry: &styk_eval::assets::AtlasEntry, layer: Option<u32>) {
-        self.pictures.set(entry, layer);
+    /// effect with [`Renderer::flush_pictures`]. Returns whether a write is needed.
+    pub fn set_picture(&mut self, entry: &styk_eval::assets::AtlasEntry, layer: Option<u32>) -> bool {
+        self.pictures.set(entry, layer)
     }
 
     /// Writes the pictures put in or taken out since the last call to the table shaders read.
     pub fn flush_pictures(&mut self) {
         self.pictures.flush(&self.queue);
+    }
+
+    /// Conservative stage upload reservation: the picture table's GPU owner,
+    /// CPU entries and at most three staged table writes (initialise, remap,
+    /// upload), plus page-map and small texture warm-up writes. Pixel batches
+    /// are admitted separately before write_texture copies them.
+    pub fn picture_upload_bound(&self) -> u64 {
+        self.pictures.bytes().saturating_mul(5).saturating_add(64 << 10)
+    }
+
+    /// Old atlas backing held by a growth copy, in addition to the new resident
+    /// atlas. The stage admits this overlap with its upload working reservation.
+    pub fn sprite_growth_bytes(&self, layers: u32) -> u64 {
+        if layers <= self.sprites.depth_or_array_layers() { return 0; }
+        u64::from(self.sprites.width()) * u64::from(self.sprites.height())
+            * u64::from(self.sprites.depth_or_array_layers()) * 4
     }
 
     /// Gives `page` of the layout the layer `layer` of the sprite texture (`None`: takes its layer away, the page

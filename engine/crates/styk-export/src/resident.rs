@@ -125,6 +125,9 @@ pub struct Resident {
     cels_asked: HashMap<usize, u64>,
     /// The number of the last attempt asked for.
     attempts: u64,
+    /// Native sequential exports protect the last complete frame while loading
+    /// its successor. None keeps the browser's existing look-ahead policy.
+    previous: Option<Vec<u32>>,
 }
 
 impl Resident {
@@ -150,7 +153,15 @@ impl Resident {
             cels_in: HashSet::new(),
             cels_asked: HashMap::new(),
             attempts: 0,
+            previous: None,
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn begin_native(gpu: &mut GpuExport, frames: &ExportFrames) -> Resident {
+        let mut resident = Self::begin_with_layers(gpu, frames, 2);
+        resident.previous = Some(Vec::new());
+        resident
     }
 
     /// Maps the pages the residency just gave layers; the pictures and cels of the pages that left are no longer in.
@@ -325,8 +336,15 @@ impl Resident {
         let cels = self.cels.of(list);
         let pages = self.pages_of(assets, &wanted, &cels);
         self.residency.touch(&pages);
-        self.residency.hold(&pages);
         let mut keep = pages.clone();
+        if let Some(previous) = &self.previous {
+            keep.extend(previous);
+            keep.sort_unstable();
+            keep.dedup();
+        }
+        // Capacity grows only for the union of two complete adjacent frames,
+        // never for the whole history. Other pages remain eligible for eviction.
+        self.residency.hold(&keep);
         self.load(gpu, frames, &generation, &wanted, &cels, &mut keep, true);
         let missing = |this: &Resident| {
             wanted.iter().any(|picture| assets.atlas.get(*picture as usize).is_some_and(|entry| entry.valid) && !this.uploaded.contains(picture) && !this.lost.contains(picture))
@@ -350,7 +368,9 @@ impl Resident {
                 }
             }
         }
-        !missing(self)
+        let ready = !missing(self);
+        if ready && let Some(previous) = &mut self.previous { *previous = pages; }
+        ready
     }
 
     /// Layers of the sprite texture the export may hold pages in, the pages in it now, the pages given a layer and the pages that left.

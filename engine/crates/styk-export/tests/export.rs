@@ -379,6 +379,33 @@ fn cel_document(pictures: u32) -> Vec<u8> {
     format!("{}{}{}", &text[..end], extra, &text[end..]).into_bytes()
 }
 
+/// The default native frame source must use the existing resident exporter,
+/// even when most pages in the document are never drawn by the requested frame.
+#[test]
+fn headless_frame_source_allocates_only_resident_sprite_pages() {
+    let gpu = gpu().expect("GPU required for native memory regression");
+    let engine = Engine::for_export(clock, Budgets { picture_bytes: 32 << 20, ..Budgets::for_device(None) });
+    engine.open(&cel_document(3), "json", "memory regression").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    assert!(frames.generation().assets.pages > 2);
+    let settings = Settings::new(960, 540, Smoothing::Edges, MAX_PIXELS).unwrap();
+    let mut source = styk_export::FrameRenderer::Gpu(GpuExport::new(&gpu.device, &gpu.queue, settings, styk_export::TILE_SIDE), None);
+    source.load_images(&engine, &frames).unwrap();
+    let styk_export::FrameRenderer::Gpu(exporter, _) = &source else { unreachable!() };
+    assert_eq!(exporter.sprite_layers(), 2, "unused pictures must not allocate their whole-document pages");
+    assert_eq!(frames.images_pending(), 0);
+    assert_eq!(engine.images_pending(), 0, "no second stage decode queue");
+    let frame = frames.take(0).unwrap();
+    source.prepare_frame(&engine, &frames, &frame.list).unwrap();
+    let mut actual = Vec::new();
+    source.frame_into(&frames.generation().prepared.doc, &frame.list, frame.camera.as_ref(), true, &mut actual).unwrap();
+    let (_, reference) = open("engine/crates/styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+    assert_eq!(actual, export(&gpu, &reference, settings, styk_export::TILE_SIDE, 0, true).0,
+        "the cel equals the original whole-atlas path, with no missing or stale tiles");
+    source.interrupt().interrupt();
+    assert_eq!(source.prepare_frame(&engine, &frames, &frame.list).unwrap_err(), styk_export::interrupt::INTERRUPTED);
+}
+
 /// A list that draws only `picture` of the document's images (a record naming its place, as the encoder writes one).
 fn picture_list(assets: &styk_eval::assets::Assets, picture: usize) -> std::sync::Arc<styk_draw::DrawList> {
     use styk_draw::{DrawList, Group, Pass, Prim, K_IMAGE, NO_LAYER, NO_PAINT};
@@ -386,6 +413,90 @@ fn picture_list(assets: &styk_eval::assets::Assets, picture: usize) -> std::sync
     let prim = Prim { kind: K_IMAGE, group: 0, color: 0xffff_ffff, paint: NO_PAINT, a: [0.0, 0.0, 10.0, 0.0], b: [0.0, 0.0, entry.layer as f32, 0.0], c: entry.uv() };
     let list = DrawList { prims: vec![prim], groups: vec![Group { parent: 0, depth: 0, opacity: 1.0, bounds: [0.0, 0.0, 960.0, 540.0], layer: NO_LAYER }], passes: vec![Pass { depth: 0, start: 0, end: 1 }], ..Default::default() };
     std::sync::Arc::new(list)
+}
+
+#[test]
+fn native_adjacent_frames_keep_their_sprite_pages_until_export_end() {
+    let gpu = gpu().expect("GPU required");
+    let engine = Engine::for_export(clock,Budgets::for_device(None));
+    engine.open(&cel_document(3),"json","adjacent pages").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    let settings = Settings::new(64,64,Smoothing::Edges,MAX_PIXELS).unwrap();
+    let mut source = styk_export::FrameRenderer::Gpu(GpuExport::new(&gpu.device,&gpu.queue,settings,64),None);
+    source.load_images(&engine,&frames).unwrap();
+    let lists: Vec<_> = [[0,1],[1,2]].into_iter().map(|indices| {
+        let mut list = (*picture_list(&frames.generation().assets,indices[0])).clone();
+        list.prims.extend_from_slice(&picture_list(&frames.generation().assets,indices[1]).prims);
+        list.passes[0].end = list.prims.len() as u32;
+        std::sync::Arc::new(list)
+    }).collect();
+    for list in &lists { source.prepare_frame(&engine,&frames,list).unwrap(); }
+    let stats = |source: &styk_export::FrameRenderer| {
+        let styk_export::FrameRenderer::Gpu(gpu,Some(resident)) = source else { panic!("default native residency") };
+        (gpu.sprite_layers(),resident.stats())
+    };
+    let held = stats(&source);
+    assert_eq!(held.1.2,3);
+    assert_eq!(held.1.3,0,"the previous completed frame stays resident");
+    let mut pixels = Vec::new();
+    for i in [0,1,0,1] {
+        source.prepare_frame(&engine,&frames,&lists[i]).unwrap();
+        assert_eq!(stats(&source),held,"no page allocation or re-upload for the adjacent working set");
+        assert_eq!(frames.pictures_in_flight(),0);
+        source.frame_into(&frames.generation().prepared.doc,&lists[i],None,true,&mut pixels).unwrap();
+    }
+    struct Finished(std::sync::mpsc::Sender<()>);
+    impl Drop for Finished { fn drop(&mut self) { let _ = self.0.send(()); } }
+    let (tx,rx) = std::sync::mpsc::channel();
+    let styk_export::FrameRenderer::Gpu(export,_) = &mut source else { unreachable!() };
+    export.retain(Box::new(Finished(tx)));
+    drop(source);
+    rx.recv_timeout(std::time::Duration::from_secs(30)).expect("disposal completed");
+    gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(!gpu.device.generate_allocator_report().unwrap().allocations.iter().any(|a| a.name == "styk sprites"));
+}
+
+#[test]
+fn prefetched_frame_draws_without_uploading_again() {
+    let gpu = gpu().unwrap();
+    let engine = Engine::for_export(clock,Budgets::for_device(None));
+    engine.open(&cel_document(3),"json","prefetch").unwrap();
+    let frames = engine.export_frames(0).unwrap();
+    let settings = Settings::new(64,64,Smoothing::Edges,MAX_PIXELS).unwrap();
+    let mut source = styk_export::FrameRenderer::Gpu(GpuExport::new(&gpu.device,&gpu.queue,settings,64),None);
+    source.load_images(&engine,&frames).unwrap();
+    let pair = |a,b| {
+        let mut list = (*picture_list(&frames.generation().assets,a)).clone();
+        list.prims.extend_from_slice(&picture_list(&frames.generation().assets,b).prims);
+        list.passes[0].end = list.prims.len() as u32;
+        std::sync::Arc::new(list)
+    };
+    let current = pair(0,1);
+    let next = pair(1,2);
+    source.prepare_frame(&engine,&frames,&current).unwrap();
+    let uploaded = |source: &styk_export::FrameRenderer| {
+        let styk_export::FrameRenderer::Gpu(gpu,_) = source else { unreachable!() }; gpu.uploaded_bytes()
+    };
+    let cold = uploaded(&source);
+    assert!(cold > 0);
+    let mut reference = Vec::new();
+    source.frame_into(&frames.generation().prepared.doc,&current,None,true,&mut reference).unwrap();
+    let mut pixels = Vec::new();
+    source.frame_with_prefetch(&engine,&frames,&current,None,true,&mut pixels,||Ok(Some(next.clone()))).unwrap();
+    assert_eq!(pixels,reference,"future uploads cannot change the submitted frame");
+    assert!(uploaded(&source)>cold,"the next frame must upload while the current frame is submitted");
+    let warm = uploaded(&source);
+    source.prepare_frame(&engine,&frames,&next).unwrap();
+    source.frame_into(&frames.generation().prepared.doc,&next,None,true,&mut pixels).unwrap();
+    assert_eq!(uploaded(&source),warm,"a prefetched frame records no upload in its draw");
+    let styk_export::FrameRenderer::Gpu(gpu,Some(resident)) = &source else { unreachable!() };
+    assert_eq!(gpu.sprite_layers(),3,"only the adjacent-frame union grows the atlas");
+    assert_eq!(resident.stats().3,0);
+    let interrupt = source.interrupt();
+    let error = source.frame_with_prefetch(&engine,&frames,&current,None,true,&mut pixels,|| {
+        interrupt.interrupt(); Ok(Some(next))
+    }).unwrap_err();
+    assert_eq!(error,styk_export::interrupt::INTERRUPTED,"cancellation during prefetch ends the frame before arming readback");
 }
 
 /// An export of the cel document in two layers, with the pictures and the cel it is driven by.

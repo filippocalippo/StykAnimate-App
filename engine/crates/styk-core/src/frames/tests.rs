@@ -71,6 +71,27 @@ fn drain(frames: &Frames) {
 }
 
 #[test]
+fn painter_prefetch_follows_playback_order_and_rejects_retired_requests() {
+    for ticks in [[0.,1.,2.],[2.,1.,0.],[2.,0.,1.]] {
+        let (mut frames,jobs) = frames(document(),Config::default());
+        let inputs = Arc::new(Inputs::default());
+        frames.request(Consumer::Stage,ticks[0],inputs.clone()).unwrap();
+        for (i,tick) in ticks.into_iter().enumerate() {
+            frames.request(Consumer::Playback(i as u8),tick,inputs.clone()).unwrap();
+        }
+        drain(&frames);
+        let current = frames.stage_ticket().unwrap();
+        let next = current.next_playback().expect("next frame in requested playback order");
+        assert_eq!(next.read().unwrap().unwrap().key.tick,ticks[1]);
+        frames.cancel(Consumer::Playback(1)).unwrap();
+        assert!(!next.current());
+        frames.revise(1,0).unwrap();
+        assert!(current.next_playback().is_none());
+        drop(frames); while jobs.run_next() {}
+    }
+}
+
+#[test]
 fn navigation_reuses_the_prepared_list_without_preparation_or_an_upload_identity_change() {
     let (frames, jobs) = frames(document(), Config::default());
     let mut host = crate::stage::Host::new(frames, [960, 540], Default::default()).unwrap();
