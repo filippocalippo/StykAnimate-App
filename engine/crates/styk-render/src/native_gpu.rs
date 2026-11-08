@@ -74,11 +74,18 @@ pub struct NativeGpu {
     pub attempt: Attempt,
 }
 
+/// Small buffers share 8–16 MiB blocks. Larger targets get dedicated allocations
+/// rather than pinning a mostly empty 64 MiB pool after the frame retires them.
+/// This sizes allocator blocks, not resources: it never limits artwork.
+pub fn memory_hints() -> wgpu::MemoryHints {
+    wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: (8 << 20)..(16 << 20) }
+}
+
 /// Opens one attempt: an instance, the high-performance adapter and a device with `limits(adapter)`.
 pub fn open_attempt(attempt: &Attempt, label: &str, limits: &impl Fn(&wgpu::Adapter) -> wgpu::Limits) -> Result<(wgpu::Instance, wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
     let instance = wgpu::Instance::new(attempt.descriptor());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| format!("no adapter ({e})"))?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some(label), required_limits: limits(&adapter), memory_hints: wgpu::MemoryHints::MemoryUsage, ..Default::default() })).map_err(|e| format!("no device ({e})"))?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some(label), required_limits: limits(&adapter), memory_hints: memory_hints(), ..Default::default() })).map_err(|e| format!("no device ({e})"))?;
     Ok((instance, adapter, device, queue))
 }
 

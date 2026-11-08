@@ -74,6 +74,44 @@ fn a_native_device_reserves_small_memory_blocks_for_small_work() {
 }
 
 #[test]
+fn a_large_transient_target_returns_its_allocator_reservation() {
+    // The headless video path uses wgpu's default backend choice.
+    let gpu = styk_render::native_gpu::native_gpu(false,
+        "transient reservation", |a| wgpu::Limits::default().using_resolution(a.limits())).expect("GPU required");
+    let reserved = || gpu.device.generate_allocator_report().unwrap().total_reserved_bytes;
+    let before = reserved();
+    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("transient 32 MiB target"),
+        size: wgpu::Extent3d { width:4096, height:2048, depth_or_array_layers:1 },
+        mip_level_count:1, sample_count:1, dimension:wgpu::TextureDimension::D2,
+        format:wgpu::TextureFormat::Rgba8Unorm,
+        usage:wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats:&[],
+    });
+    assert!(reserved() >= before + (32 << 20));
+    texture.destroy();
+    drop(texture);
+    gpu.queue.submit([]);
+    gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert_eq!(reserved(), before, "a retired large target must not leave a pooled allocation behind");
+}
+
+#[test]
+fn small_native_owners_do_not_grow_large_allocator_blocks() {
+    let gpu = styk_render::native_gpu::native_gpu(false,
+        "pooled reservation", |a| wgpu::Limits::default().using_resolution(a.limits())).expect("GPU required");
+    let buffers: Vec<_> = (0..32).map(|_| gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label:Some("small pooled owner"), size:2 << 20,
+        usage:wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation:false,
+    })).collect();
+    let report = gpu.device.generate_allocator_report().unwrap();
+    assert!(report.total_allocated_bytes >= 64 << 20);
+    assert!(report.blocks.iter().all(|b| b.size <= 16 << 20),
+        "small owners must share blocks no larger than 16 MiB: {:?}", report.blocks.iter().map(|b| b.size).collect::<Vec<_>>());
+    drop(buffers);
+}
+
+#[test]
 fn exact_primitive_capacity_follows_the_current_frame() {
     let mut renderer = make_renderer();
     let bytes = |r: &Renderer| r.device().generate_allocator_report().unwrap().allocations.iter()
