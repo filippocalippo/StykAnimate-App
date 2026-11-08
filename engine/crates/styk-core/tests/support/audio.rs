@@ -2,7 +2,7 @@
 //! transport on the fake device.
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -45,21 +45,18 @@ pub enum Behavior {
     Silence,
     /// Wait until the gate opens, then as `Silence`.
     Gated,
-    /// Block until cancelled.
-    UntilCancelled,
 }
 
 pub struct TestDecoder {
     pub behavior: Behavior,
     pub gate: (Mutex<bool>, Condvar),
     pub calls: AtomicUsize,
-    pub cancelled: AtomicBool,
     pub reserved: Mutex<Vec<u64>>,
 }
 
 impl TestDecoder {
     pub fn new(behavior: Behavior) -> Arc<TestDecoder> {
-        Arc::new(TestDecoder { behavior, gate: (Mutex::new(false), Condvar::new()), calls: AtomicUsize::new(0), cancelled: AtomicBool::new(false), reserved: Mutex::new(Vec::new()) })
+        Arc::new(TestDecoder { behavior, gate: (Mutex::new(false), Condvar::new()), calls: AtomicUsize::new(0), reserved: Mutex::new(Vec::new()) })
     }
 
     pub fn open_gate(&self) {
@@ -88,23 +85,9 @@ pub fn decoded_wav(seconds: f64) -> Vec<u8> {
 }
 
 impl AudioDecoder for TestDecoder {
-    fn decode(&self, _original: &[u8], seconds: f64, reserve: &mut dyn FnMut(u64) -> Result<(), AudioError>, cancel: &Cancel) -> Result<Vec<u8>, AudioError> {
+    fn decode(&self, _original: &[u8], seconds: f64, reserve: &mut dyn FnMut(u64) -> Result<(), AudioError>, _cancel: &Cancel) -> Result<Vec<u8>, AudioError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         match self.behavior {
-            Behavior::UntilCancelled => {
-                let pair = Arc::new((Mutex::new(false), Condvar::new()));
-                let waker = pair.clone();
-                cancel.on_cancel(move || {
-                    *waker.0.lock().unwrap() = true;
-                    waker.1.notify_all();
-                });
-                let mut woken = pair.0.lock().unwrap();
-                while !*woken {
-                    woken = pair.1.wait(woken).unwrap();
-                }
-                self.cancelled.store(true, Ordering::SeqCst);
-                return Err(AudioError::Cancelled);
-            }
             Behavior::Gated => {
                 let mut open = self.gate.0.lock().unwrap();
                 while !*open {

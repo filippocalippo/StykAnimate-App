@@ -3,14 +3,14 @@
 //! wakes a blocked decoder, reclamation off the output thread, scrub, device loss and memory under oversubscription.
 //! The fake runs the real stream driver; only time and the device are the test's.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use styk_core::audio::wav::parse_wave;
-use styk_core::audio::{pcm_wave, Budget, AudioState, CACHE_BYTES, AudioTransport, Event, MediaClock, MixPlan, PlanClip, SourceBytes, Then, WavSource, WallClock};
+use styk_core::audio::{Budget, AudioState, CACHE_BYTES, AudioTransport, Event, MediaClock, MixPlan, PlanClip, SourceBytes, Then, WavSource, WallClock};
 use styk_services::audio::clock::Reading;
-use styk_services::audio::fake::{FakeConfig, FakeHandle, FakeOutput};
+use styk_services::audio::fake::{FakeConfig, FakeOutput};
 use styk_services::audio::{AudioDecoder, AudioError, HostClock};
 use styk_services::Cancel;
 
@@ -310,23 +310,68 @@ fn a_newer_prepare_cancels_that_one_job_and_the_older_result_is_dropped() {
 
 #[test]
 fn cancelling_wakes_a_decoder_that_is_blocked() {
-    let decoder = TestDecoder::new(Behavior::UntilCancelled);
-    let audio = state(&[("a", b"not a wav", 1.0)], &[("a", 0.0, 0.0, 1.0, 1.0)]);
-    let mut rig = rig_with(config(), decoder.clone(), BIG, true);
-    rig.transport.prepare(&audio, 0.0, 1.0, Then::Hold);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while decoder.calls.load(Ordering::SeqCst) == 0 {
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(1));
+    cancellation_handshake();
+}
+
+#[test]
+#[ignore = "quiet-machine latency gate: cargo test -p styk-core quiet_gate_transport_cancel -- --ignored --test-threads=1"]
+fn quiet_gate_transport_cancel() {
+    let elapsed = cancellation_handshake();
+    assert!(elapsed < Duration::from_millis(100), "stop does not wait for the decoder: {elapsed:?}");
+}
+
+fn cancellation_handshake() -> Duration {
+    use std::sync::mpsc::{channel, Receiver, Sender};
+    const GUARD: Duration = Duration::from_secs(120);
+    struct Decoder {
+        entered: Sender<()>,
+        cancelled: Sender<()>,
+        release: Mutex<Receiver<()>>,
     }
+    impl AudioDecoder for Decoder {
+        fn decode(&self, _: &[u8], _: f64, _: &mut dyn FnMut(u64) -> Result<(), AudioError>, cancel: &Cancel) -> Result<Vec<u8>, AudioError> {
+            let (wake, woken) = channel();
+            cancel.on_cancel(move || { wake.send(()).unwrap(); });
+            self.entered.send(()).unwrap();
+            woken.recv_timeout(GUARD).expect("stop wakes the blocked decoder");
+            self.cancelled.send(()).unwrap();
+            // Observing cancellation is not completion: the store still owns the reservation.
+            self.release.lock().unwrap().recv_timeout(GUARD).expect("allow decoder to return");
+            Err(AudioError::Cancelled)
+        }
+    }
+    let (entered, ready) = channel();
+    let (cancelled, observed) = channel();
+    let (release, gate) = channel();
+    let decoder = Arc::new(Decoder { entered, cancelled, release: Mutex::new(gate) });
+    let audio = state(&[("a", b"not a wav", 1.0)], &[("a", 0.0, 0.0, 1.0, 1.0)]);
+    let mut rig = rig_with(config(), decoder, BIG, true);
+    rig.transport.prepare(&audio, 0.0, 1.0, Then::Hold);
+    ready.recv_timeout(GUARD).expect("decoder registered its cancellation wake");
+    let reserved = rig.transport.store().budget().used();
+    assert!(reserved > 0);
     let started = Instant::now();
     rig.transport.stop();
-    assert!(started.elapsed() < Duration::from_millis(100), "stop does not wait for the decoder");
-    while !decoder.cancelled.load(Ordering::SeqCst) {
-        assert!(Instant::now() < deadline + Duration::from_secs(5), "the blocked decoder was not woken");
-        std::thread::sleep(Duration::from_millis(1));
+    let elapsed = started.elapsed();
+    observed.recv_timeout(GUARD).expect("decoder acknowledged cancellation");
+    assert_eq!(rig.transport.store().budget().used(), reserved, "bytes remain accounted until decode returns");
+    // An empty prepare on the same serial worker acknowledges that the cancelled call has unwound.
+    // No decode/allocation is needed, and the old job must never be reported as Ready.
+    let sentinel = rig.transport.prepare(&state(&[], &[]), 0.0, 1.0, Then::Hold);
+    release.send(()).unwrap();
+    let deadline = Instant::now() + GUARD;
+    loop {
+        let events = rig.transport.poll();
+        if !events.is_empty() {
+            assert_eq!(events.len(), 1);
+            assert!(matches!(&events[0], Event::Ready { job, .. } if *job == sentinel), "{events:?}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "the worker did not acknowledge cleanup");
+        std::thread::yield_now();
     }
     assert_eq!(rig.transport.store().budget().used(), 0, "the cancelled decode gave its reservation back");
+    elapsed
 }
 
 // ---- scrub, loss, no sound ---------------------------------------------------------------------------------------------
