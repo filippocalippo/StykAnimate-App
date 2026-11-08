@@ -640,15 +640,15 @@ pub fn preset(
             {
                 right.size = Sz::Px(320. + 40. + 8.);
             }
-            set_timeline_height(&mut l, window_height * 0.4);
+            set_timeline(&mut l, (window_height * 0.4).max(168.));
         }
         Preset::Drawing => {
             l.apply(Operation::Close(PanelId::new("vfx")), workspace)?;
-            set_timeline_height(&mut l, 168.);
+            set_timeline(&mut l, 168.);
         }
         Preset::LargeTimeline => {
             l.apply(Operation::Collapse(2, true), workspace)?;
-            set_timeline_height(&mut l, window_height * 0.55);
+            set_timeline(&mut l, (window_height * 0.55).max(168.));
         }
         Preset::Review => {
             for kind in ["properties", "vfx", "library"] {
@@ -659,24 +659,6 @@ pub fn preset(
     }
     l.validate(workspace)?;
     Ok(l)
-}
-fn set_timeline_height(l: &mut Layout, height: f64) {
-    fn visit(n: &mut Node, h: f64) {
-        if let Node::Split { axis, kids, .. } = n {
-            for k in kids {
-                if *axis == Axis::Vertical
-                    && matches!(&k.node,Node::Tabs(g) if g.tabs.iter().any(|p|p.kind=="timeline"))
-                {
-                    k.size = Sz::Px(h.max(168.));
-                } else {
-                    visit(&mut k.node, h);
-                }
-            }
-        }
-    }
-    if let Some(n) = &mut l.main {
-        visit(n, height);
-    }
 }
 impl LayoutState {
     pub fn apply_preset(
@@ -693,5 +675,56 @@ impl LayoutState {
     pub fn reset(&mut self, workspace: Workspace) -> Result<(), LayoutError> {
         self.focus_snapshot = None;
         self.commit(self.base.clone(), workspace)
+    }
+}
+
+/// The island chrome the timeline carries above today's stored body height (`timelineDefaultHeight` is the body: the
+/// panel's island is 16 px taller, as the window shows it).
+const TIMELINE_CHROME: f64 = 16.0;
+
+/// Today's default timeline height for a window `height` tall (`timelineDefaultHeight` in `src/shell/layout-solver.mjs`,
+/// plus the island's chrome): 280 above 800 px, 264 from 641, 240 from 600, 212 below that, and the 40 px header at the low
+/// tier (568 px and under). It is a function of the window height only; the layout stores it once.
+pub fn default_timeline_height(height: f64) -> f64 {
+    const HEADER: f64 = 40.0;
+    const PINNED: f64 = 2.0 * 24.0;
+    let low = height <= 568.0;
+    let short = height <= 640.0;
+    let (ruler, row) = if short { (24.0, 28.0) } else { (32.0, 32.0) };
+    let slots = if height >= 801.0 {
+        4.5
+    } else if height >= 600.0 {
+        4.0
+    } else {
+        3.0
+    };
+    if low {
+        return HEADER + TIMELINE_CHROME;
+    }
+    (HEADER + ruler + PINNED + slots * row).round() + TIMELINE_CHROME
+}
+
+/// The arrangement a workspace starts with in a window `height` tall: its Essentials with today's timeline height.
+pub fn default_layout(workspace: Workspace, height: f64) -> Result<Layout, LayoutError> {
+    let mut layout = preset(workspace, Preset::Essentials, height)?;
+    set_timeline(&mut layout, default_timeline_height(height));
+    Ok(layout)
+}
+
+/// Gives the timeline's allocation under the stage (and any other vertical split of it) `height`.
+pub fn set_timeline(layout: &mut Layout, height: f64) {
+    fn visit(node: &mut Node, height: f64) {
+        if let Node::Split { axis, kids, .. } = node {
+            for kid in kids {
+                if *axis == Axis::Vertical && matches!(&kid.node, Node::Tabs(g) if g.tabs.iter().any(|p| p.kind == "timeline")) {
+                    kid.size = Sz::Px(height);
+                } else {
+                    visit(&mut kid.node, height);
+                }
+            }
+        }
+    }
+    if let Some(node) = &mut layout.main {
+        visit(node, height);
     }
 }

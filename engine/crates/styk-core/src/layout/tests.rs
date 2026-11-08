@@ -5,6 +5,41 @@ fn p(k: &str) -> PanelId {
 fn apply(l: &mut Layout, o: Operation) {
     l.apply(o, Workspace::Animate).unwrap();
 }
+
+#[test]
+fn solver_places_the_tool_rail_on_the_visible_stage_and_removes_it_with_the_overlay() {
+    for (w, h, compact) in [(1560., 1000., false), (1440., 900., false), (800., 800., true), (801., 800., false), (1440., 568., true), (1440., 569., false)] {
+        let mut l = default_layout(Workspace::Animate, h).unwrap();
+        for side in [Side::Left, Side::Right] {
+            apply(&mut l, Operation::Move(p("tools"), Zone::StageTools { side }));
+            let solution = solve(&l, &Env::new(w, h));
+            let rail = solution.tool_rail.expect("the solver supplies the tools overlay rectangle");
+            let stage = solution.stages[&p("stage")];
+            assert_eq!((rail.w, rail.h), if compact { (44., 187.) } else { (52., 220.) });
+            assert_eq!(if side == Side::Left { rail.x - stage.x } else { stage.x + stage.w - rail.x - rail.w }, 12.);
+            assert_eq!(rail.y, (stage.y + (stage.h - rail.h) / 2.).round());
+        }
+        apply(&mut l, Operation::Move(p("tools"), Zone::Tab { group: 2, index: 0 }));
+        assert_eq!(solve(&l, &Env::new(w, h)).tool_rail, None, "docked Tools has no stage overlay");
+    }
+    let mut l = default_layout(Workspace::Animate, 1000.).unwrap();
+    let env = Env::new(1560., 1000.);
+    assert_eq!(solve(&l, &env).tool_rail, Some(Rect { x: 20., y: 295., w: 52., h: 220. }), "today's measured placement");
+    apply(&mut l, Operation::Move(p("vfx"), Zone::Tab { group: 1, index: 1 }));
+    apply(&mut l, Operation::Activate(1, 1));
+    assert_eq!(solve(&l, &env).tool_rail, None, "an inactive stage tab has no overlay");
+    apply(&mut l, Operation::Activate(1, 0));
+    assert!(solve(&l, &env).tool_rail.is_some(), "the overlay returns when the stage becomes visible");
+    apply(&mut l, Operation::NewStage);
+    let solution = solve(&l, &env);
+    assert_eq!(solution.stages.len(), 2);
+    assert_eq!(solution.tool_rail.unwrap().x, solution.stages[&p("stage")].x + 12., "the primary visible stage owns the rail");
+    apply(&mut l, Operation::Activate(1, 1));
+    let solution = solve(&l, &env);
+    assert_eq!(solution.stages.len(), 1);
+    assert_eq!(solution.tool_rail.unwrap().x, solution.stages[&PanelId { kind: "stage".into(), n: 1 }].x + 12., "a secondary visible stage can own the rail");
+}
+
 #[test]
 fn transactional_moves_overlay_and_last_stage() {
     let mut l = essentials(Workspace::Animate);

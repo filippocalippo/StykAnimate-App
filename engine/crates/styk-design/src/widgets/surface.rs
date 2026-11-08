@@ -40,6 +40,7 @@ impl Look {
 #[derive(Default)]
 struct State {
     pressed: bool,
+    middle: bool,
 }
 
 /// The surface.
@@ -48,6 +49,7 @@ pub struct Surface<'a, Message> {
     hover: Option<Element<'a, Message>>,
     look: Box<dyn Fn(Interaction) -> Look + 'a>,
     on_press: Option<Message>,
+    on_middle: Option<Message>,
     preview: Option<Preview>,
     /// The radius of each corner (top left, top right, bottom right, bottom left) where they differ from the look's.
     corners: Option<[f32; 4]>,
@@ -58,7 +60,7 @@ pub struct Surface<'a, Message> {
 impl<'a, Message: Clone + 'a> Surface<'a, Message> {
     /// A surface showing `face`, drawn as `look` says for each interaction.
     pub fn new(face: Element<'a, Message>, look: impl Fn(Interaction) -> Look + 'a) -> Self {
-        Surface { rest: face, hover: None, look: Box::new(look), on_press: None, preview: None, corners: None, width: Length::Shrink, height: Length::Shrink }
+        Surface { rest: face, hover: None, look: Box::new(look), on_press: None, on_middle: None, preview: None, corners: None, width: Length::Shrink, height: Length::Shrink }
     }
 
     /// The face shown while hovered or pressed, when it differs from the rest face (the same size).
@@ -70,6 +72,12 @@ impl<'a, Message: Clone + 'a> Surface<'a, Message> {
     /// Published when a press that began here is released here. A surface with none is inert (disabled).
     pub fn on_press_maybe(mut self, message: Option<Message>) -> Self {
         self.on_press = message;
+        self
+    }
+
+    /// Published when a middle press that began here is released here (a tab closes with it).
+    pub fn on_middle_maybe(mut self, message: Option<Message>) -> Self {
+        self.on_middle = message;
         self
     }
 
@@ -170,7 +178,23 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Surface<'a, M
                 }
                 shell.capture_event();
             }
-            Event::Window(iced::window::Event::Unfocused) | Event::Touch(touch::Event::FingerLost { .. }) => state.pressed = false,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle)) if self.on_middle.is_some() && cursor.is_over(bounds) && !shell.is_event_captured() => {
+                state.middle = true;
+                shell.capture_event();
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)) if state.middle => {
+                state.middle = false;
+                if cursor.is_over(bounds)
+                    && let Some(message) = &self.on_middle
+                {
+                    shell.publish(message.clone());
+                }
+                shell.capture_event();
+            }
+            Event::Window(iced::window::Event::Unfocused) | Event::Touch(touch::Event::FingerLost { .. }) => {
+                state.pressed = false;
+                state.middle = false;
+            }
             _ => {}
         }
         if self.on_press.is_none() {

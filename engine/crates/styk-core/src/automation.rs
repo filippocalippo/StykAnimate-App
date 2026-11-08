@@ -100,6 +100,35 @@ pub enum Expect {
     Property(String, String),
     /// How many entries the active project's undo history holds.
     History(usize),
+    /// Something about the docked window.
+    Dock(DockExpect),
+}
+
+/// What a script says about the docked window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DockExpect {
+    /// A panel's group is at this rectangle (x, y, width, height in logical window pixels, within a pixel).
+    Rect { panel: String, rect: [i32; 4] },
+    /// Whether the arrangement differs from the one it began from.
+    Modified(bool),
+    /// How many tabs the panel's group holds.
+    Tabs { panel: String, count: usize },
+}
+
+/// What a script does in the docked window, through the dock's own events: the pointer's press, moves and release.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum DockStep {
+    /// Drag a panel's tab to a place: `edge-left`, `edge-right`, `edge-top`, `edge-bottom`, another panel (a tab of its
+    /// group), or another panel and a side (`stage:below`: the quarter of its group on that side).
+    Drag { panel: String, to: String },
+    /// Hold the first column divider and move it this many pixels along its axis.
+    Resize(f64),
+    /// Double-click a panel's group header: collapse or expand it.
+    Collapse(String),
+    /// Undo the last layout change.
+    Undo,
 }
 
 /// What a script does in the Properties panel, through its widgets.
@@ -175,6 +204,8 @@ pub enum Step {
     Select { uids: Vec<u32>, joint: i64 },
     /// A step in the Properties panel.
     Inspector(InspectorStep),
+    /// A step in the docked window.
+    Dock(DockStep),
     /// Check something.
     Expect(Expect),
     /// Write the window to a PNG (relative to the script).
@@ -332,7 +363,13 @@ fn expectation(words: &[&str], line: usize) -> Result<Expect, ScriptError> {
         ["width", n] => Expect::Width(n.parse().map_err(|_| bad("width wants a number"))?),
         ["property", key, value] if value.parse::<f64>().is_ok() => Expect::Property((*key).to_string(), (*value).to_string()),
         ["history", n] => Expect::History(n.parse().map_err(|_| bad("history wants a count"))?),
-        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost>, width <n>, property <name> <number> or history <count>")),
+        ["dock", "rect", panel, x, y, w, h] => {
+            let number = |text: &str| text.parse::<i32>().map_err(|_| bad("dock rect wants four whole numbers"));
+            Expect::Dock(DockExpect::Rect { panel: (*panel).to_string(), rect: [number(x)?, number(y)?, number(w)?, number(h)?] })
+        }
+        ["dock", "modified", answer @ ("yes" | "no")] => Expect::Dock(DockExpect::Modified(*answer == "yes")),
+        ["dock", "tabs", panel, n] => Expect::Dock(DockExpect::Tabs { panel: (*panel).to_string(), count: n.parse().map_err(|_| bad("dock tabs wants a count"))? }),
+        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost>, width <n>, property <name> <number>, history <count>, dock rect <panel> <x> <y> <w> <h>, dock modified <yes|no> or dock tabs <panel> <count>")),
     })
 }
 
@@ -536,6 +573,13 @@ impl Script {
                     ["step", key, direction @ ("up" | "down")] => InspectorStep::Step { key: (*key).to_string(), up: *direction == "up" },
                     ["context", name @ ("auto" | "scene" | "camera" | "layer" | "frame")] => InspectorStep::Context((*name).to_string()),
                     _ => return Err(wants("scrub <property> <pixels>, type <property> <text>, step <property> <up|down> or context <auto|scene|camera|layer|frame>")),
+                }),
+                "dock" => Step::Dock(match words.as_slice() {
+                    ["drag", panel, to] => DockStep::Drag { panel: (*panel).to_string(), to: (*to).to_string() },
+                    ["resize", delta] => DockStep::Resize(delta.parse().ok().filter(|n: &f64| n.is_finite()).ok_or_else(|| wants("resize <pixels>"))?),
+                    ["collapse", panel] => DockStep::Collapse((*panel).to_string()),
+                    ["undo"] => DockStep::Undo,
+                    _ => return Err(wants("drag <panel> <place>, resize <pixels>, collapse <panel> or undo")),
                 }),
                 "screenshot" if !rest.is_empty() => Step::Screenshot(PathBuf::from(rest)),
                 "screenshot" => return Err(wants("a path")),

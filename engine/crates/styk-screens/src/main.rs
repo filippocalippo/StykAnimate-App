@@ -29,7 +29,7 @@ fn run() -> Result<ExitCode, String> {
     let panel = model.as_ref().map(|model| styk_ui::inspector::View::model(model, &presentation, screen.theme()));
     let image = iced::futures::executor::block_on(styk_ui::headless::screenshot(
         screen.theme(), launch.size.unwrap_or((1560, 1000)), launch.scale.unwrap_or(1.0) as f32,
-        sheet.as_ref(), screen.is_band().then_some(screen), panel, None, styk_platform::font_smoothing::current(), iced::time::Instant::now(), async || {
+        sheet.as_ref(), screen.has_band().then_some(screen), panel, None, styk_platform::font_smoothing::current(), iced::time::Instant::now(), async || {
             let (send, receive) = iced::futures::channel::oneshot::channel();
             styk_platform::diagnostics::after(std::time::Duration::from_millis(5), move || {
                 if send.send(()).is_err() { eprintln!("headless capture timer receiver closed"); }

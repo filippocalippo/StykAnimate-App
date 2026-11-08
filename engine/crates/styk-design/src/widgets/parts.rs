@@ -324,12 +324,14 @@ pub struct Tabs<'a, Message> {
     selected: usize,
     rule: bool,
     on_select: Box<dyn Fn(usize) -> Message + 'a>,
+    /// A tab closes with its x (on the tab in front and on a hovered one) and with a middle click.
+    on_close: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     preview: Option<(usize, Preview)>,
 }
 
 impl<'a, Message: Clone + 'a> Tabs<'a, Message> {
     pub fn new(first: FocusId, area: FocusArea, palette: &'static Palette, tabs: Vec<Tab>, selected: usize, on_select: impl Fn(usize) -> Message + 'a) -> Self {
-        Tabs { first, area, palette, tabs, selected, rule: false, on_select: Box::new(on_select), preview: None }
+        Tabs { first, area, palette, tabs, selected, rule: false, on_select: Box::new(on_select), on_close: None, preview: None }
     }
 
     /// `data-variant="rule"`: no track.
@@ -343,8 +345,14 @@ impl<'a, Message: Clone + 'a> Tabs<'a, Message> {
         self
     }
 
+    /// Tabs that close: the owner decides whether one may (the last stage stays) and what closing means.
+    pub fn closable(mut self, on_close: impl Fn(usize) -> Message + 'a) -> Self {
+        self.on_close = Some(Box::new(on_close));
+        self
+    }
+
     pub fn into_element(self) -> Element<'a, Message> {
-        let Tabs { first, area, palette, tabs, selected, rule, on_select, preview } = self;
+        let Tabs { first, area, palette, tabs, selected, rule, on_select, on_close, preview } = self;
         let track = scale::CONTROL_MD;
         let height = track - 2.0 * scale::SPACE_0_5;
         let radius = pill(height);
@@ -355,14 +363,27 @@ impl<'a, Message: Clone + 'a> Tabs<'a, Message> {
             .enumerate()
             .map(|(index, tab)| {
                 let on = index == selected;
-                let face = |ink: Rgba| -> Element<'a, Message> {
+                // The x sits in the tab's right padding, so a tab is as wide with it as without. The rest face holds the pressable x
+                // (a tab not hovered draws it clear, and cannot be pressed); the hover face draws it.
+                let close = on_close.as_ref().map(|close| close(index));
+                let face = |ink: Rgba, x: Option<Rgba>| -> Element<'a, Message> {
                     let mut parts: Vec<Element<'a, Message>> = Vec::new();
                     if let Some(icon) = tab.icon {
                         parts.push(super::icon(icon, scale::ICON_MD, ink).boxed());
                     }
                     parts.push(words(tab.label.clone(), style, ink));
-                    container(Row::with_children(parts).spacing(scale::SPACE_1_5).align_y(Alignment::Center)).height(Length::Fixed(height)).center_y(Length::Fixed(height)).padding(Padding { top: 0.0, right: scale::SPACE_3, bottom: 0.0, left: scale::SPACE_3 }).boxed()
+                    let label = container(Row::with_children(parts).spacing(scale::SPACE_1_5).align_y(Alignment::Center)).height(Length::Fixed(height)).center_y(Length::Fixed(height)).padding(Padding { top: 0.0, right: scale::SPACE_3, bottom: 0.0, left: scale::SPACE_3 });
+                    match (&close, x) {
+                        (Some(message), Some(ink)) => {
+                            let glyph = container(super::icon("close", scale::ICON_SM - 2.0, ink)).center_x(Length::Fixed(scale::ICON_SM + 2.0)).center_y(Length::Fixed(height));
+                            let x = Surface::new(glyph.boxed(), |_| Look::plain(scale::RADIUS_SM)).on_press_maybe(Some(message.clone())).height(Length::Fixed(height));
+                            let at_end = container(x).width(Length::Fill).height(Length::Fixed(height)).align_right(Length::Fill);
+                            iced::widget::stack![label, at_end].height(Length::Fixed(height)).boxed()
+                        }
+                        _ => label.boxed(),
+                    }
                 };
+                let clear = Rgba { a: 0.0, ..palette.text_3 };
                 let held = preview.filter(|(at, _)| *at == index).map(|(_, preview)| preview);
                 let look = move |_: Interaction| {
                     if on {
@@ -372,9 +393,9 @@ impl<'a, Message: Clone + 'a> Tabs<'a, Message> {
                     }
                 };
                 let message = choose(index);
-                let mut surface = Surface::new(face(if on { palette.text_1 } else { palette.text_2 }), look).on_press_maybe(Some(message.clone())).preview(held).height(Length::Fixed(height));
+                let mut surface = Surface::new(face(if on { palette.text_1 } else { palette.text_2 }, Some(if on { palette.text_3 } else { clear })), look).on_press_maybe(Some(message.clone())).on_middle_maybe(close.clone()).preview(held).height(Length::Fixed(height));
                 if !on {
-                    surface = surface.hover_face(face(palette.text_1));
+                    surface = surface.hover_face(face(palette.text_1, Some(palette.text_3)));
                 }
                 RovingItem { id: FocusId(first.0 + index as u64), content: surface.boxed(), enabled: true, on_activate: Some(message) }
             })

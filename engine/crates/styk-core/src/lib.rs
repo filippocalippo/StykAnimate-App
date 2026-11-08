@@ -26,6 +26,7 @@ pub mod commands;
 pub mod controls;
 #[cfg(feature = "engine")]
 pub mod documents;
+pub mod dock;
 #[cfg(feature = "engine")]
 pub mod engine;
 #[cfg(feature = "engine")]

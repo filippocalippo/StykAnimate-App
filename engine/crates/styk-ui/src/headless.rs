@@ -27,11 +27,24 @@ pub async fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Optio
     let iced_theme = crate::base_theme(theme);
     // A band screen: the band over its window, laid out for this size with its words measured.
     let shell = band.map(|screen| crate::screens::band_shell(screen, size, crate::shell::measure_labels(ready)));
+    // A window screen: the docked default layout under the band, with the Properties panel's prepared model in its group.
+    let dock = band.filter(|screen| screen.is_dock()).map(|_| styk_core::dock::Dock::new(styk_core::layout::Size { w: f64::from(size.0), h: f64::from(size.1) }, 1.0, "preview"));
+    let fixture = dock.as_ref().map(|_| crate::screens::inspector_model(styk_core::screens::InspectorScreen::Figure));
+    let presentation = styk_core::i18n::Presentation::english();
     let (scene_view, scene_ready) = match scene { Some(scene) => (Some(scene.view), Some(scene.ready)), None => (None, None) };
     let view: iced::Element<'_, ()> = match (sheet, shell.as_ref()) {
         _ if scene_view.is_some() => scene_view.unwrap_or_else(|| crate::loading(theme)),
         _ if panel.is_some() => match panel { Some(panel) => crate::dock::docked(crate::inspector::view(panel), theme).map(|_| ()).boxed(), None => crate::loading(theme) },
         (Some(sheet), _) => sheet.view().map(|_| ()).boxed(),
+        (None, Some(shell)) if dock.is_some() => match (dock.as_ref(), fixture.as_ref()) {
+            (Some(dock), Some(model)) => {
+                let params = crate::dock::Params { dock, theme, presentation: &presentation, top: shell.layout().height };
+                let docked = crate::dock::window(&params, Some(crate::inspector::View::model(model, &presentation, theme)), None);
+                let band = crate::shell::window(crate::shell::Params { shell, theme, ready, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed());
+                iced::widget::stack![docked.map(|_| ()), band.map(|_| ())].boxed()
+            }
+            _ => crate::loading(theme),
+        },
         (None, Some(shell)) => crate::shell::window(crate::shell::Params { shell, theme, ready, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, crate::loading(theme)).map(|_| ()).boxed(),
         (None, None) => crate::view(theme, ready),
     };

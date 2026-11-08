@@ -756,6 +756,11 @@ impl SaveQueue {
         self.retry_ms = 0;
         Ok(())
     }
+    /// When the runtime must wake to take the next write: the debounce or the retry delay of the newest pending edit.
+    /// `None` while a write is in flight (its completion is the wake) or nothing is pending.
+    pub fn deadline(&self) -> Option<u64> {
+        self.in_flight.is_none().then(|| self.pending.as_ref().map(|(due, _)| *due)).flatten()
+    }
     pub fn take_due(&mut self, now: u64) -> Option<Vec<u8>> {
         if self.in_flight.is_some() || self.pending.as_ref().is_none_or(|(due, _)| *due > now) {
             return None;

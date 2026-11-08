@@ -29,6 +29,8 @@ pub enum Command {
     Activate(crate::identity::DocumentId),
     /// The stage: pointer, wheel, key, pen and frame demands for the active document's stage (`docs/native/stage.md`).
     Stage(crate::stage::Event),
+    /// The docked window: panels, groups, dividers and drags (`styk_core::dock`).
+    Dock(crate::dock::Event),
 }
 
 /// How a refusal or a failure reaches the person (the error policy: a message key and scalar parameters).
@@ -68,4 +70,6 @@ pub enum Effect {
     Blur,
     /// Move focus where a panel asks (the rename field as it opens, the name as it closes).
     Focus(inspector::FocusRequest),
+    /// Move focus to this target (a tab the dock activated, the group a closing flyout returns to).
+    FocusTarget(crate::focus::FocusId),
 }
