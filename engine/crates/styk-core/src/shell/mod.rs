@@ -16,11 +16,15 @@ pub mod strip;
 pub mod switcher;
 pub mod workspace;
 
-use crate::documents::{DocumentId, Documents, DocumentsError};
+use crate::identity::DocumentId;
+#[cfg(feature = "engine")]
+use crate::documents::{Documents, DocumentsError};
 use crate::focus::{FocusArea, FocusId, FocusState};
 use band::{Frame, Input, Item, Labels, Layout, Metrics, TabFacts};
 use session::{Done, Session};
-use strip::{Dropped, KeyOutcome, Side, Strip, TabKey, TabState};
+use strip::{Side, Strip, TabKey, TabState};
+#[cfg(feature = "engine")]
+use strip::{Dropped, KeyOutcome};
 use workspace::{Workspace, Workspaces};
 
 /// The band's focus targets. Everything but the tabs has a fixed number; a tab's follows its project.
@@ -272,6 +276,7 @@ pub enum Effect {
     /// A command the shell does not own. The document commands answer it.
     Command(Command),
     /// A project cannot be switched to, as `Documents` says.
+    #[cfg(feature = "engine")]
     Refused(DocumentsError),
 }
 
@@ -310,6 +315,7 @@ pub const HOME_COMMANDS: &[&str] = &[
 /// The name today's command wrapper gives what an event does, for the events that are commands (`data-action` of the
 /// band's buttons). The workspace switch and Build's Done are not commands there (`changeMode`), and neither are the
 /// tabs' own clicks: they do not run it.
+#[cfg(feature = "engine")]
 fn command_name(event: &Event) -> Option<&'static str> {
     Some(match event {
         Event::Home => "home",
@@ -372,7 +378,7 @@ impl Shell {
             tabs: Vec::new(),
             preview: None,
         };
-        shell.sync(&Documents::new());
+        shell.layout_tabs(Vec::new());
         shell
     }
 
@@ -446,11 +452,19 @@ impl Shell {
     /// have no engine to open projects with. `sync` keeps them until the next call to this with `None`.
     pub fn preview(&mut self, tabs: Option<Vec<TabView>>) {
         self.preview = tabs;
-        self.sync(&Documents::new());
+        self.history = History::default();
+        self.layout_tabs(self.preview.clone().unwrap_or_default());
+    }
+
+    /// Select a catalogue session without opening an engine document.
+    pub fn preview_session(&mut self, session: Session) {
+        self.session = session;
+        self.layout_tabs(self.preview.clone().unwrap_or_default());
     }
 
     /// Takes the open projects' state into the band and lays it out. Call after any event, and after the documents
     /// change (an edit, a save, a rename).
+    #[cfg(feature = "engine")]
     pub fn sync(&mut self, documents: &Documents) {
         let front = documents.active().map(|document| document.id());
         let tabs: Vec<TabView> = documents
@@ -475,6 +489,10 @@ impl Shell {
             Some(document) => document.view().map_or(History { open: true, undo: false, redo: false }, |view| History { open: true, undo: view.history.undo > 0, redo: view.history.redo > 0 }),
             None => History::default(),
         };
+        self.layout_tabs(tabs);
+    }
+
+    fn layout_tabs(&mut self, tabs: Vec<TabView>) {
         let facts: Vec<TabFacts> = tabs.iter().map(|tab| TabFacts { id: tab.id, front: tab.front, marked: tab.state.is_some() }).collect();
         self.layout = band::solve(&Input {
             width: self.window.width,
@@ -491,6 +509,7 @@ impl Shell {
     }
 
     /// Handles one event, then lays the band out again.
+    #[cfg(feature = "engine")]
     pub fn handle(&mut self, documents: &mut Documents, event: Event) -> Vec<Effect> {
         let mut effects = Vec::new();
         // The one place Home is sent away by a command (`home.before` in `src/app.mjs`'s command wrapper).
@@ -605,12 +624,14 @@ impl Shell {
     }
 
     /// `home.before(command)`: a command that works on the animation sends Home away; the ones in [`HOME_COMMANDS`] leave it.
+    #[cfg(feature = "engine")]
     fn before_command(&mut self, command: &str) {
         if !HOME_COMMANDS.contains(&command) {
             self.home = false;
         }
     }
 
+    #[cfg(feature = "engine")]
     fn activate(&mut self, documents: &mut Documents, id: DocumentId, effects: &mut Vec<Effect>) {
         match documents.activate(id) {
             Ok(true) => {
@@ -623,6 +644,7 @@ impl Shell {
         }
     }
 
+    #[cfg(feature = "engine")]
     fn switched(&mut self, documents: &mut Documents, outcome: switcher::Outcome, effects: &mut Vec<Effect>) {
         if let switcher::Outcome::Activate(id) = outcome {
             // The project may have closed while the board showed.
@@ -656,7 +678,7 @@ impl Shell {
     pub const AREA: FocusArea = FocusArea::TopBand;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "engine"))]
 mod tests {
     use super::*;
 

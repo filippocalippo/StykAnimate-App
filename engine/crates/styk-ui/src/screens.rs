@@ -3,12 +3,12 @@
 //! A screen is how a part of the interface is looked at, tested and screenshotted without the rest of the application
 //! (`docs/native/text-input.md` section 8). The catalogue grows with the interface.
 
-use styk_core::documents::{DocumentId, Documents};
+use styk_core::identity::DocumentId;
 use styk_core::shell::band::Labels;
 use styk_core::shell::session::Session;
 use styk_core::shell::strip::TabState;
 use styk_core::shell::workspace::{Report, Workspace};
-use styk_core::shell::{Event, Shell, TabView, Window};
+use styk_core::shell::{Shell, TabView, Window};
 use styk_design::Theme;
 
 /// A screen of the catalogue.
@@ -78,11 +78,10 @@ pub fn band_shell(screen: Screen, size: (u32, u32), labels: Labels) -> Shell {
         .collect();
     shell.preview(Some(tabs));
     if screen == Screen::BandBuild {
-        let mut documents = Documents::new();
         // Build is entered and the band becomes its session, as the sessions will report.
-        shell.handle(&mut documents, Event::Workspace(Workspace::Build));
-        shell.handle(&mut documents, Event::Report(Report::BuildEntered));
-        shell.handle(&mut documents, Event::Session(Session::Build));
+        shell.workspaces.choose(Workspace::Build);
+        shell.workspaces.report(Report::BuildEntered);
+        shell.preview_session(Session::Build);
     }
     shell
 }
@@ -90,6 +89,23 @@ pub fn band_shell(screen: Screen, size: (u32, u32), labels: Labels) -> Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_fixture_matches_document_shell_events() {
+        let labels = Labels { animate: 52.0, draw: 32.0, build: 31.0, export: 38.0, cancel: 40.0, test_rig: 43.0, done: 31.0 };
+        let fixture = band_shell(Screen::BandBuild, (1000, 900), labels);
+        let mut original = band_shell(Screen::Band, (1000, 900), labels);
+        let mut documents = styk_core::documents::Documents::new();
+        use styk_core::shell::Event;
+        original.handle(&mut documents, Event::Workspace(Workspace::Build));
+        original.handle(&mut documents, Event::Report(Report::BuildEntered));
+        original.handle(&mut documents, Event::Session(Session::Build));
+        assert_eq!(fixture.tabs(), original.tabs());
+        assert_eq!(fixture.session(), original.session());
+        assert_eq!(fixture.pressed(), original.pressed());
+        assert_eq!(fixture.history(), original.history());
+        assert_eq!(fixture.layout(), original.layout());
+    }
 
     #[test]
     fn every_screen_is_found_by_its_id() {

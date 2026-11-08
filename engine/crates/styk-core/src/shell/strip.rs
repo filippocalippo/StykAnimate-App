@@ -8,7 +8,7 @@
 //! along the tabs without switching, as switching is not free.
 
 use super::band::Layout;
-use crate::documents::{DocumentId, drop_index};
+use crate::identity::{DocumentId, drop_index};
 use crate::roving::{NavKey, Orientation, next_index};
 
 /// How long "Saved" shows after a save lands (`SAVED_MS`).

@@ -5,7 +5,7 @@
 //! modifier switches, Escape stays. A card can be clicked. Run with no held modifier (the command palette, a menu, a
 //! rebound key) there is nothing to release, so it switches at once. It needs two or more projects.
 
-use crate::documents::DocumentId;
+use crate::identity::DocumentId;
 
 /// What a key does on the open board.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

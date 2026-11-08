@@ -26,7 +26,7 @@ styk-devtools = { path = "../styk-devtools", optional = true, features = ["ui"] 
 styk-platform = { path = "../styk-platform" }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace" }
-styk-ui = { path = "../styk-ui" }
+styk-ui = { path = "../styk-ui", features = ["headless"] }
 
 # winit has no display backend until one is enabled: without these, a Linux build stops at its compile_error. Both are
 # on, so one binary runs under X11 and Wayland (the libraries are loaded at run time, not linked).

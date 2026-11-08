@@ -1,0 +1,14 @@
+[package]
+name = "styk-screens"
+description = "Developer-only catalogue preview without the document engine."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+iced.workspace = true
+styk-core = { path = "../styk-core", default-features = false }
+styk-design = { path = "../styk-design", features = ["widgets"] }
+styk-ui = { path = "../styk-ui", default-features = false, features = ["headless"] }
+styk-platform = { path = "../styk-platform" }
