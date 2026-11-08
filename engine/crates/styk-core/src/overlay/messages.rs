@@ -1,4 +1,5 @@
 //! One bounded stage-message slot. Times are caller-supplied monotonic milliseconds.
+use crate::commands::CommandId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Hint,
@@ -17,7 +18,7 @@ pub enum Tone {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Action {
-    pub command: String,
+    pub command: CommandId,
     pub label: String,
     pub dismiss: bool,
 }

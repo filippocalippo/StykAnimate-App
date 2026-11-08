@@ -18,21 +18,27 @@ pub(crate) enum WriteStep { Created, Written, Flushed, Commit, Renamed }
 type Observer = Box<dyn Fn(WriteStep, &Path, &Path)>;
 #[cfg(test)]
 thread_local! { pub(crate) static WRITE_OBSERVER: std::cell::RefCell<Option<Observer>> = const { std::cell::RefCell::new(None) }; }
-fn observe(step: WriteStep, target: &Path, stage: &Path) {
+#[cfg(test)]
+thread_local! { pub(crate) static WRITE_FAILURE: std::cell::Cell<Option<WriteStep>> = const { std::cell::Cell::new(None) }; }
+fn observe(step: WriteStep, target: &Path, stage: &Path) -> Result<(), FileError> {
     #[cfg(test)]
     WRITE_OBSERVER.with(|observer| { if let Some(observer) = observer.borrow().as_ref() { observer(step, target, stage); } });
     #[cfg(not(test))]
     let _ = (step, target, stage);
+    #[cfg(test)]
+    if matches!(step, WriteStep::Created | WriteStep::Written | WriteStep::Flushed)
+        && WRITE_FAILURE.with(|failure| failure.get() == Some(step)) { return Err(FileError::Full); }
+    Ok(())
 }
 
-fn io(error: std::io::Error) -> FileError {
+pub(crate) fn io(error: std::io::Error) -> FileError {
     match error.kind() {
         std::io::ErrorKind::PermissionDenied => FileError::ReadOnly,
         std::io::ErrorKind::StorageFull => FileError::Full,
         _ => FileError::Io(error.to_string()),
     }
 }
-fn cancelled(cancel: &Cancel) -> Result<(), FileError> {
+pub(crate) fn cancelled(cancel: &Cancel) -> Result<(), FileError> {
     if cancel.is_cancelled() { Err(FileError::Cancelled) } else { Ok(()) }
 }
 struct Stage { path: PathBuf, committed: bool }
@@ -40,26 +46,33 @@ impl Drop for Stage {
     fn drop(&mut self) { if !self.committed { let _ = fs::remove_file(&self.path); } }
 }
 
+/// Shared bounded reader for documents and small preference files; worker-only.
+pub(crate) fn read_bounded(mut file: File, maximum: usize, cancel: &Cancel) -> Result<Arc<[u8]>, FileError> {
+    cancelled(cancel)?;
+    let length = usize::try_from(file.metadata().map_err(io)?.len()).map_err(|_| FileError::TooLarge)?;
+    if length > maximum { return Err(FileError::TooLarge); }
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(length).map_err(|_| FileError::TooLarge)?;
+    let mut buffer = vec![0; PIECE.min(maximum.saturating_add(1))];
+    loop {
+        cancelled(cancel)?;
+        // At most one excess byte, even if the file grows after its metadata was read.
+        let remaining = buffer.len().min(maximum.saturating_sub(bytes.len()).saturating_add(1));
+        let count = file.read(&mut buffer[..remaining]).map_err(io)?;
+        if count == 0 { break; }
+        if count > maximum.saturating_sub(bytes.len()) { return Err(FileError::TooLarge); }
+        bytes.try_reserve_exact(count).map_err(|_| FileError::TooLarge)?;
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    cancelled(cancel)?;
+    Ok(Arc::from(bytes))
+}
+
 impl Files for LocalFiles {
     fn read<'a>(&'a self, target: &'a FileTarget, maximum: usize, cancel: &'a Cancel) -> FileFuture<'a, Arc<[u8]>> {
         Box::pin(async move {
             cancelled(cancel)?;
-            let mut file = File::open(target.path()).map_err(io)?;
-            let length = usize::try_from(file.metadata().map_err(io)?.len()).map_err(|_| FileError::TooLarge)?;
-            if length > maximum { return Err(FileError::TooLarge); }
-            let mut bytes = Vec::new();
-            bytes.try_reserve_exact(length).map_err(|_| FileError::TooLarge)?;
-            let mut buffer = vec![0; PIECE];
-            loop {
-                cancelled(cancel)?;
-                let count = file.read(&mut buffer).map_err(io)?;
-                if count == 0 { break; }
-                if count > maximum.saturating_sub(bytes.len()) { return Err(FileError::TooLarge); }
-                bytes.try_reserve_exact(count).map_err(|_| FileError::TooLarge)?;
-                bytes.extend_from_slice(&buffer[..count]);
-            }
-            cancelled(cancel)?;
-            Ok(Arc::from(bytes))
+            read_bounded(File::open(target.path()).map_err(io)?, maximum, cancel)
         })
     }
 
@@ -87,22 +100,22 @@ impl Files for LocalFiles {
                     Err(error) => return Err(io(error)),
                 }
             };
-            observe(WriteStep::Created, destination, &stage.path);
+            observe(WriteStep::Created, destination, &stage.path)?;
             for piece in bytes.chunks(PIECE) {
                 cancelled(cancel)?;
                 file.write_all(piece).map_err(io)?;
-                observe(WriteStep::Written, destination, &stage.path);
+                observe(WriteStep::Written, destination, &stage.path)?;
             }
             cancelled(cancel)?;
             file.sync_all().map_err(io)?;
-            observe(WriteStep::Flushed, destination, &stage.path);
+            observe(WriteStep::Flushed, destination, &stage.path)?;
             drop(file);
-            observe(WriteStep::Commit, destination, &stage.path);
+            observe(WriteStep::Commit, destination, &stage.path)?;
             if !cancel.begin_commit() { return Err(FileError::Cancelled); }
             // On Windows std::fs::rename uses a replacing move on the same volume. No copy/delete fallback.
             fs::rename(&stage.path, destination).map_err(io)?;
             stage.committed = true;
-            observe(WriteStep::Renamed, destination, &stage.path);
+            observe(WriteStep::Renamed, destination, &stage.path)?;
             Ok(())
         })
     }

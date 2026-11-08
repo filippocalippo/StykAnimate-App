@@ -11,7 +11,7 @@ use iced::keyboard::{self, Key, key::Named};
 use iced::widget::{container, text_input};
 use iced::{Background, Border, Element, Length, Padding, Pixels, Theme, Widget as _};
 use styk_core::field::{EnterAction, EscapeAction, Role};
-use styk_core::focus::{FocusArea, FocusId, TargetKind};
+use styk_core::focus::{FocusArea, FocusId, HistoryOwner, TargetKind};
 use styk_core::limits::{Context, Limits};
 
 /// The `Intake` that applies a field's [`Limits`] to incoming text.
@@ -32,6 +32,7 @@ pub struct EditField<'a, Message> {
     id: FocusId,
     area: FocusArea,
     role: Role,
+    history_owner: HistoryOwner,
     value: std::borrow::Cow<'a, str>,
     placeholder: std::borrow::Cow<'a, str>,
     limits: Limits,
@@ -67,6 +68,7 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             id,
             area,
             role,
+            history_owner: HistoryOwner::Field,
             value,
             placeholder: std::borrow::Cow::Borrowed(""),
             limits,
@@ -92,6 +94,11 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
 
     pub fn placeholder(mut self, placeholder: impl Into<std::borrow::Cow<'a, str>>) -> Self {
         self.placeholder = placeholder.into();
+        self
+    }
+
+    pub fn history_owner(mut self, owner: HistoryOwner) -> Self {
+        self.history_owner = owner;
         self
     }
 
@@ -238,6 +245,7 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             id,
             area,
             role,
+            history_owner,
             value,
             placeholder,
             limits,
@@ -358,7 +366,7 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             element = container(element).width(width).boxed();
         }
 
-        let mut anchor = Anchor::new(id, area, TargetKind::TextEntry, enabled, element);
+        let mut anchor = Anchor::new(id, area, TargetKind::TextEntry, enabled, element).history_owner(history_owner);
         if let Some(message) = on_step_end {
             anchor = anchor.on_key_release(move |event| match event {
                 keyboard::Event::KeyReleased { key: Key::Named(Named::ArrowUp | Named::ArrowDown), .. } => Some(message.clone()),

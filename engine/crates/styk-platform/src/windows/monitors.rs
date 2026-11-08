@@ -1,4 +1,5 @@
 //! Monitors, and reading and restoring the window's frame in screen coordinates.
+//! Raw HWND helpers stay inside this crate; hosts use the shell's HasWindowHandle facade.
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::mem::{size_of, zeroed};
@@ -59,12 +60,12 @@ pub fn monitors() -> Vec<MonitorInfo> {
 }
 
 /// The monitor a window is mostly on.
-pub fn monitor_of(hwnd: HWND) -> Option<MonitorInfo> {
+pub(crate) fn monitor_of(hwnd: HWND) -> Option<MonitorInfo> {
     // SAFETY: a window handle in, a monitor handle out.
     unsafe { info(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)) }
 }
 
-pub fn hwnd_of(window: &dyn HasWindowHandle) -> Option<HWND> {
+pub(crate) fn hwnd_of(window: &dyn HasWindowHandle) -> Option<HWND> {
     match window.window_handle().ok()?.as_raw() {
         RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as HWND),
         _ => None,
@@ -83,7 +84,7 @@ pub struct Sample {
 }
 
 /// Looks at the window now.
-pub fn sample(hwnd: HWND) -> Sample {
+pub(crate) fn sample(hwnd: HWND) -> Sample {
     // SAFETY: reads of a window's state.
     unsafe {
         let maximized = IsZoomed(hwnd) != 0;
@@ -124,7 +125,7 @@ impl FrameTracker {
 }
 
 /// The window's current outer rectangle in screen coordinates.
-pub fn window_rect(hwnd: HWND) -> Option<Rect> {
+pub(crate) fn window_rect(hwnd: HWND) -> Option<Rect> {
     // SAFETY: a read of a window's state.
     unsafe {
         let mut r: RECT = zeroed();
@@ -135,7 +136,7 @@ pub fn window_rect(hwnd: HWND) -> Option<Rect> {
 /// Puts the window at the frame's rectangle with screen-coordinate calls only: the move is done twice, so a
 /// `WM_DPICHANGED` that the first one causes (the window changed monitors of another scale) cannot leave the window at a
 /// rectangle the system rescaled; then the window is shown (activated only if asked) or maximized. Returns the rectangle the window ended with.
-pub fn apply_frame(hwnd: HWND, frame: &WindowFrame, activate: bool) -> Option<Rect> {
+pub(crate) fn apply_frame(hwnd: HWND, frame: &WindowFrame, activate: bool) -> Option<Rect> {
     // SAFETY: `hwnd` is a live window of this process; the calls only move and show it.
     unsafe {
         for _ in 0..2 {
@@ -147,7 +148,7 @@ pub fn apply_frame(hwnd: HWND, frame: &WindowFrame, activate: bool) -> Option<Re
 }
 
 /// Shows the window at the place it has, activating it.
-pub fn show_normal(hwnd: HWND) {
+pub(crate) fn show_normal(hwnd: HWND) {
     // SAFETY: shows a window of this process.
     unsafe { ShowWindow(hwnd, SW_SHOWNORMAL) };
 }

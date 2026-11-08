@@ -9,6 +9,7 @@
 //! Stand-ins that go when their owners land, each marked where it is: the file open (K-doc's files service and engine
 //! host), the workspace sessions (the Draw and Build chunks), and the commands the band's buttons ask for (K-cmd).
 
+use styk_core::commands::CommandId;
 use iced::advanced::widget::operate;
 use iced::keyboard::{self, Key, key::Named};
 use iced::{Event, Size, Subscription, Task, Widget as _, event, mouse, window};
@@ -85,6 +86,9 @@ struct Run {
 pub struct TopBand {
     /// The open projects.
     pub documents: Documents,
+    /// The core's layout persistence service, ready for the docking view's host.
+    #[expect(dead_code, reason = "The docking view host is a separate chunk; retain its injected service.")]
+    pub layouts: styk_core::layout::LayoutStore,
     /// The shell.
     pub shell: shell::Shell,
     /// The projects in the order they were opened, which is how scripts number them.
@@ -158,6 +162,10 @@ impl TopBand {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
         let mut documents = Documents::new();
+        let layouts = styk_core::layout::LayoutStore::new(Arc::new(
+            styk_platform::storage::LocalStorage::for_user(spawner.as_ref())
+                .map_err(|error| format!("the layout store did not start: {error}"))?,
+        ));
         // The application's startup document, for New and for closing the last tab. Stand-in: the engine's startup fixture,
         // until the native startup document (Blue on the landscape canvas) has an owner. The band does not send New yet.
         let startup = json::parse(STARTUP).map_err(|error| format!("the startup document: {error:?}"))?;
@@ -172,7 +180,7 @@ impl TopBand {
                 notify: Arc::new(|| {}),
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
-        Ok(TopBand { documents, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
+        Ok(TopBand { documents, layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
@@ -290,7 +298,8 @@ impl TopBand {
                         Answer::Session(session) => shell::Event::Session(session),
                     })),
                     Effect::FocusTab(id) => tasks.push(TopBand::focus(ids::tab(id))),
-                    Effect::Activated(_) | Effect::Moved(..) | Effect::Edited | Effect::Command(_) | Effect::Refused(_) => {}
+                    Effect::Activated(_) | Effect::Moved(..) | Effect::Edited | Effect::Command(_)
+                    | Effect::DocumentCommand { .. } | Effect::FinishBuild | Effect::Refused(_) => {}
                 }
             }
         }
@@ -544,13 +553,13 @@ impl TopBand {
                 let frame = self.tab_frame(id)?;
                 vec![E::TabPressed(id), E::PointerMoved(frame.x + frame.width / 2.0, frame.y + frame.height / 2.0), E::PointerReleased]
             }
-            Target::New => vec![E::New],
-            Target::Home => vec![E::Home],
-            Target::Mark => vec![E::Mark],
-            Target::Undo => vec![E::Undo],
-            Target::Redo => vec![E::Redo],
-            Target::Save => vec![E::Save],
-            Target::Export => vec![E::Export],
+            Target::Command(CommandId::New) => vec![E::New],
+            Target::Command(CommandId::Home) => vec![E::Home],
+            Target::Command(CommandId::Menu) => vec![E::Mark],
+            Target::Command(CommandId::Undo) => vec![E::Undo],
+            Target::Command(CommandId::Redo) => vec![E::Redo],
+            Target::Command(CommandId::Save) => vec![E::Save],
+            Target::Command(CommandId::Export) => vec![E::Export],
             Target::Workspace(name) => vec![E::Workspace(workspace_named(&name))],
             other => return Err(format!("this build cannot click {other:?}")),
         };

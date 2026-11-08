@@ -19,7 +19,7 @@ use iced::advanced::{Shell, Widget};
 use iced::keyboard::{self, Key, key::Named};
 use iced::{Border, Color, Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, mouse, touch};
 use std::any::Any;
-use styk_core::focus::{FocusArea, FocusId, FocusState, FocusTarget, ScopeId, TargetKind};
+use styk_core::focus::{FocusArea, FocusId, FocusState, FocusTarget, HistoryOwner, InputRole, ScopeId, TargetKind};
 
 /// The widget ID a focus target answers to.
 pub fn widget_id(id: FocusId) -> widget::Id {
@@ -32,6 +32,8 @@ pub struct Meta {
     pub id: FocusId,
     pub area: FocusArea,
     pub kind: TargetKind,
+    pub input_role: InputRole,
+    pub history_owner: HistoryOwner,
     pub enabled: bool,
     pub tab_stop: bool,
 }
@@ -125,7 +127,8 @@ pub fn snapshot() -> impl Operation<Snapshot> {
                 }
             } else if let Some(meta) = state.downcast_ref::<Meta>() {
                 let scope = self.stack.last().copied().unwrap_or(ScopeId::ROOT);
-                let target = FocusTarget { id: meta.id, area: meta.area, kind: meta.kind, enabled: meta.enabled, tab_stop: meta.tab_stop };
+                let target = FocusTarget { id: meta.id, area: meta.area, kind: meta.kind, input_role: meta.input_role,
+                    history_owner: meta.history_owner, enabled: meta.enabled, tab_stop: meta.tab_stop };
                 match self.scopes.iter_mut().find(|(s, _)| *s == scope) {
                     Some((_, targets)) => targets.push(target),
                     None => self.scopes.push((scope, vec![target])),
@@ -226,6 +229,8 @@ impl operation::Focusable for State {
 pub struct Focusable<'a, Message> {
     id: FocusId,
     area: FocusArea,
+    input_role: InputRole,
+    history_owner: HistoryOwner,
     content: Element<'a, Message>,
     enabled: bool,
     tab_stop: bool,
@@ -241,6 +246,8 @@ impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
         Focusable {
             id,
             area,
+            input_role: InputRole::None,
+            history_owner: HistoryOwner::Field,
             content,
             enabled: true,
             tab_stop: true,
@@ -269,6 +276,17 @@ impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
         self
     }
 
+    /// Describe the underlying input; shortcut policy belongs to the core.
+    pub fn input_role(mut self, role: InputRole) -> Self {
+        self.input_role = role;
+        self
+    }
+
+    pub fn history_owner(mut self, owner: HistoryOwner) -> Self {
+        self.history_owner = owner;
+        self
+    }
+
     /// The keys the control answers while focused.
     pub fn keys(mut self, keys: Keys<'a, Message>) -> Self {
         self.keys = keys;
@@ -282,7 +300,8 @@ impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
     }
 
     fn meta(&self) -> Meta {
-        Meta { id: self.id, area: self.area, kind: TargetKind::Control, enabled: self.enabled, tab_stop: self.tab_stop }
+        Meta { id: self.id, area: self.area, kind: TargetKind::Control, input_role: self.input_role,
+            history_owner: self.history_owner, enabled: self.enabled, tab_stop: self.tab_stop }
     }
 }
 
@@ -482,7 +501,14 @@ pub struct Anchor<'a, Message> {
 impl<'a, Message: 'a> Anchor<'a, Message> {
     /// Wraps `content`, whose own focusable state uses [`widget_id`]`(id)`.
     pub fn new(id: FocusId, area: FocusArea, kind: TargetKind, enabled: bool, content: Element<'a, Message>) -> Self {
-        Anchor { meta: Meta { id, area, kind, enabled, tab_stop: true }, content, on_key_release: None }
+        let target = FocusTarget::new(id.0, area, kind);
+        Anchor { meta: Meta { id, area, kind, input_role: target.input_role, history_owner: target.history_owner,
+            enabled, tab_stop: true }, content, on_key_release: None }
+    }
+
+    pub fn history_owner(mut self, owner: HistoryOwner) -> Self {
+        self.meta.history_owner = owner;
+        self
     }
 
     /// A message for a key release the field's own widget does not see (the number field's arrow keys end a gesture
