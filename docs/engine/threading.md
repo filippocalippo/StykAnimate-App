@@ -11,6 +11,11 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   revision, prepared document, assets), a task queue, the frame cache and
   image decoding. Every change publishes a new generation; results computed
   for an older one are dropped.
+  Publication retires only queued decodes and redecodes of the replaced lineage.
+  Generic `Engine::spawn` jobs and work owned by another lineage survive in their
+  existing order, before new publication work and frames; idle jobs still follow
+  frames. Queue nodes are detached without allocating or disposing payloads under
+  State; retirement releases the removed nodes and generation on a worker.
 - Frame scheduler (`frames.rs`): the interface admits ticks with
   `try_request_samples`; workers evaluate and encode them (`FrameData`: draw
   list, camera, background). `Budgets::for_device` supplies the existing logical

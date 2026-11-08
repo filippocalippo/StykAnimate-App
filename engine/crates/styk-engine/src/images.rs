@@ -221,7 +221,7 @@ pub(crate) struct Store {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct DecodeScope { lineage: u64, epoch: u64 }
+pub(crate) struct DecodeScope { pub(crate) lineage: u64, pub(crate) epoch: u64 }
 impl DecodeScope {
     fn current(self, images: &Store) -> bool { (self.lineage, self.epoch) == (images.lineage, images.epoch) }
 }

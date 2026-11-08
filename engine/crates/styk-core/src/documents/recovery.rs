@@ -37,6 +37,7 @@ impl Deadline {
     }
     fn retry(&mut self, now: Duration, delay: Duration) { self.retry = now + delay; self.due = Some(self.retry); }
 }
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind { Front, Resting, Forced }
 struct Snapshot { stamp: Stamp, trees: Vec<Value>, scopes: Vec<f64>, name: String, original_first: bool, owned: Option<Owned> }
@@ -106,10 +107,15 @@ fn execute(options: &HostOptions, store: &dyn Recovery, work: Work) -> Reply {
 
 impl RecoveryHost {
     pub(super) fn start(options: Arc<HostOptions>, lifetime: Arc<EngineLifetime>, store: Arc<dyn Recovery>, clock: Arc<dyn Clock>) -> Result<Self, HostError> {
+        let engine = options.engine.clone();
+        Self::start_scheduled(options, lifetime, store, clock, move |job| engine.spawn(move |_| job()))
+    }
+
+    fn start_scheduled(options: Arc<HostOptions>, lifetime: Arc<EngineLifetime>, store: Arc<dyn Recovery>, clock: Arc<dyn Clock>, enqueue: impl Fn(styk_services::Job) + Send + 'static) -> Result<Self, HostError> {
         let job_options = options.clone();
         let worker = Worker::start(options.spawner.as_ref(), "styk-recovery", move |work| {
             let _keep = &lifetime; let options = job_options.clone(); let store = store.clone();
-            run_scheduled(|job| job_options.engine.spawn(move |_| job()), move || execute(&options, store.as_ref(), work)).unwrap_or(Err(HostError::NoHost))
+            run_scheduled(&enqueue, move || execute(&options, store.as_ref(), work)).unwrap_or(Err(HostError::ScheduledJobLost))
         }, options.notify.clone()).map_err(|error| HostError::Spawn(error.to_string()))?;
         Ok(Self { worker: Some(worker), clock, pending: None, retired: Vec::new(), cleanup: Vec::new(), interval: Duration::from_millis(2500), front: None,
             deadline: Deadline::default(), resting: None, backoff: 1, activity: Activity::default(), view: View::default(), refresh: true, closing: None, checkpoint: false, quitting: false, quit_ready: false })
@@ -404,5 +410,104 @@ impl Documents {
             }
             (_, output) => { host.retired.push(Box::new(output)); Effect::Recovery(Event::Failed(RecoveryError::Changed)) }
         }
+    }
+}
+
+#[cfg(test)]
+mod scheduling_tests {
+    use super::*;
+    use styk_services::{FixedClock, Job, ManualSpawner, SpawnError, Spawner};
+    use styk_services::recovery::RecoveryFuture;
+    use std::sync::{Mutex, atomic::{AtomicBool, Ordering}, mpsc};
+
+    const STARTUP: &[u8] = include_bytes!("../../../../tests/edit/startup.document.json");
+    struct Threads(Mutex<Vec<std::thread::JoinHandle<()>>>);
+    impl Spawner for Threads {
+        fn spawn(&self, _: &str, job: Job) -> Result<(), SpawnError> {
+            self.0.lock().unwrap().push(std::thread::spawn(job)); Ok(())
+        }
+    }
+    struct Store { records: Vec<Record>, changed: AtomicBool, panic_claim: AtomicBool }
+    impl Recovery for Store {
+        fn list<'a>(&'a self, _: &'a Cancel) -> RecoveryFuture<'a, Vec<Record>> { Box::pin(async { Ok(self.records.clone()) }) }
+        fn create<'a>(&'a self, _: &'a Cancel) -> RecoveryFuture<'a, Arc<dyn RecoveryCopy>> { Box::pin(async { Err(RecoveryError::Invalid) }) }
+        fn claim<'a>(&'a self, record: &'a Record, _: &'a Cancel) -> RecoveryFuture<'a, Arc<dyn RecoveryCopy>> {
+            Box::pin(async move {
+                assert!(!self.panic_claim.load(Ordering::SeqCst), "injected job panic");
+                if self.changed.load(Ordering::SeqCst) { return Err(RecoveryError::Changed); }
+                Ok(Arc::new(Copy(record.slot.clone())) as Arc<dyn RecoveryCopy>)
+            })
+        }
+    }
+    struct Copy(Slot);
+    impl RecoveryCopy for Copy {
+        fn slot(&self) -> &Slot { &self.0 }
+        fn read<'a>(&'a self, _: &'a Record, _: usize, _: &'a Cancel) -> RecoveryFuture<'a, Arc<[u8]>> { Box::pin(async { Ok(Arc::from(STARTUP)) }) }
+        fn write<'a>(&'a self, _: Option<&'a Record>, _: &'a [u8], _: &'a str, _: &'a Cancel) -> RecoveryFuture<'a, Record> { Box::pin(async { Err(RecoveryError::Invalid) }) }
+        fn remove<'a>(&'a self, _: &'a Record, _: &'a Cancel) -> RecoveryFuture<'a, ()> { Box::pin(async { Ok(()) }) }
+    }
+    fn received(receive: &mpsc::Receiver<()>) { receive.recv_timeout(Duration::from_secs(60)).expect("worker acknowledgement (hang guard)"); }
+
+    fn chooser(panicking: bool) -> Effect {
+        let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
+        let records: Vec<_> = [Slot::legacy(), Slot::named("00000000-0000-4000-8000-000000000002").unwrap()].into_iter().map(|slot| Record {
+            slot, name: "Recovered".into(), saved_at: String::new(), size: STARTUP.len(), version: [0; 32], selection: None,
+        }).collect();
+        let store = Arc::new(Store { records: records.clone(), changed: AtomicBool::new(false), panic_claim: AtomicBool::new(false) });
+        let mut docs = Documents::new();
+        // Hold both engine workers at their spawner gate; the test explicitly steps the real scheduler.
+        let held = Arc::new(ManualSpawner::new());
+        let (complete, completed) = mpsc::channel();
+        docs.attach_host(HostOptions { engine: engine.clone(), spawner: held.clone(), files: Arc::new(styk_services::files::fake::MemoryFiles::default()),
+            startup: styk_doc::json::parse(STARTUP).unwrap(), clock: || 0.0, notify: Arc::new(move || { complete.send(()).unwrap(); }) }).unwrap();
+        let front = PreparedDocument::open_application(&engine, Arc::from(STARTUP), "Front.styk", &|| false).unwrap();
+        docs.open(front).map_err(|(error, _)| error).unwrap();
+        let tab = docs.active().unwrap();
+        engine.activate_tree_with(tab.lineage(), tab.records().unwrap().clone(), tab.revision(), tab.prepared.session.get().unwrap().views()).unwrap();
+        while engine.step() {}
+        let threads = Arc::new(Threads(Mutex::new(Vec::new())));
+        let host = docs.host.as_ref().unwrap();
+        let options = Arc::new(HostOptions { engine: engine.clone(), spawner: threads.clone(), files: host.options.files.clone(),
+            startup: host.options.startup.clone(), clock: || 0.0, notify: host.options.notify.clone() });
+        let (queued, enqueued) = mpsc::channel();
+        let scheduler = engine.clone();
+        docs.recovery = Some(RecoveryHost::start_scheduled(options, host.lifetime.clone(), store.clone(), Arc::new(FixedClock::new()), move |job| {
+            scheduler.spawn(move |_| job()); queued.send(()).unwrap();
+        }).unwrap());
+        assert!(docs.poll_recovery().is_none());
+        received(&enqueued); while engine.step() {} received(&completed);
+        assert!(matches!(docs.poll_recovery(), Some(Effect::Recovery(Event::Listed))));
+        docs.recovery_command(&Command::Restore(records[0].slot.clone())).unwrap();
+        received(&enqueued); while engine.step() {} received(&completed);
+        assert!(matches!(docs.poll_recovery(), Some(Effect::Recovery(Event::Restored(_)))));
+        store.changed.store(true, Ordering::SeqCst);
+        store.panic_claim.store(panicking, Ordering::SeqCst);
+        docs.recovery_command(&Command::Discard(records[1].slot.clone())).unwrap();
+        received(&enqueued); // Discard is definitely queued; the restore has not published yet.
+        if !panicking {
+            let restored = docs.active().unwrap();
+            engine.activate_tree_with(restored.lineage(), restored.records().unwrap().clone(), restored.revision(), restored.prepared.session.get().unwrap().views()).unwrap();
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| while engine.step() {}));
+        assert_eq!(result.is_err(), panicking);
+        received(&completed);
+        let effect = docs.poll_recovery().expect("terminal chooser reply");
+        drop(docs);
+        for worker in threads.0.lock().unwrap().drain(..) { worker.join().unwrap(); }
+        while held.run_next() {} // Let the held lanes perform their normal shutdown reclamation.
+        effect
+    }
+
+    #[test]
+    fn discard_queued_during_restore_publication_reports_changed() {
+        let effect = chooser(false);
+        assert!(matches!(effect, Effect::Recovery(Event::Failed(RecoveryError::Changed))), "{effect:?}");
+    }
+
+    #[test]
+    fn panicking_recovery_job_reports_lost_work_instead_of_no_host() {
+        let effect = chooser(true);
+        assert!(matches!(effect, Effect::Recovery(Event::Failed(RecoveryError::Unavailable(ref message)))
+            if message == "scheduled document work ended without a result"), "{effect:?}");
     }
 }
