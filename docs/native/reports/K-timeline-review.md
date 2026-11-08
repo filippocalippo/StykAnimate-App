@@ -55,20 +55,43 @@ While the required recovery merge was still absent from origin, the completed ch
 These checks cover the independent fixes and Settings' maintenance API. They do not claim
 that the recovery integration or the drafted real-quit regression has run yet.
 
-## Integration prerequisite still absent
+## Recovery integration
 
-The final fetch still resolves `origin/native-app` to `2e63867812761407fdc8b2d5c5ae80b5957b9792`.
-`git log origin/native-app --oneline --grep='Merge K-rec views'` returns no match. Its handoff
-records that the recovery merge was withdrawn before push. No withdrawn or unpublished recovery
-commit was merged into this branch. Finding 2 therefore remains open: the Settings maintenance
-API is tested, but the shared quit fence and real Discard/Settings/layout regression still need
-the specified published recovery merge. The draft regression is retained in the ignored
-`artifacts/timeline_quit_tests.rs` for that integration; it is not claimed as compiled or passing.
+The follow-up fetched `origin/native-app` at `680a064f859465da609a451d187c583a61b1a402`, containing
+the published recovery merge `f1d97af6` and storage-load fix `7948bb11`. The merge preserves the
+document host's quit fence and replaces the separate PrepareExit/ExitReady handshake with the
+recorded quit order: panel/session settlement, documents, QuitReady, layout plus Settings drain,
+placement, exit. Final maintenance passes the fence; input and deferred edits do not. Session
+end cancels/detaches both preference lanes and retains the existing platform-derived bound.
 
-Self-check: done for the committed diff. The additional beyond-end global-navigation case was
-found and fixed; regression subscriptions now inspect actual emitted messages. Existing session
-queues, input routing and Settings ownership remain shared; frozen fixtures and thresholds are
-unchanged. The unresolved quit-order finding above is not presented as complete.
+`timeline-quit-regression.log`: **1 passed, 0 failed**, 2.23 s. The real App runtime and mounted
+Discard button cover a dirty saved project with pending Settings and layout, successful drain,
+Settings refusal, and session end while both transactions are held. Settings uses LocalStorage;
+the layout adapter holds its existing transactional save. Unknown Settings fields and the last
+complete files survive; Discard does not save the project; neither completion admits input.
+
+`timeline-quit-mutation.log`: omitting only `flush_settings()` from App's quit order produces
+**0 passed, 1 failed**, at “final Settings write starts through the quit fence: Timeout”. The
+production call was restored. The harness uses the app's actual installed subscriptions and
+the recovery harness's mounted deadline adapter, without synthetic progress ticks.
+
+Self-check: done. Merge reconciliation keeps one message catalogue and overlay notice identity;
+ordinary Settings flushes expedite the existing queue without activating layout's final-refusal
+policy. Core document polling leaves refresh effects for the app's delivery adapter. The prior
+beyond-end navigation and emitted-subscription checks remain. No frozen fixture or threshold changed.
+
+Final queued verification (`T1 final quit verification`):
+
+- `cargo build -p styk-app`: success (`timeline-quit-build.log`). The final poll-adapter
+  self-check fix landed before the tests; the default app artifact was refreshed afterwards:
+  `T1 final app artifact`, **exit 0**, 25.96 s (`timeline-quit-final-build.log`).
+- `cargo test -p styk-core -p styk-ui -p styk-app -p styk-platform -- --test-threads=1`:
+  **53 suites, 1,002 passed, 0 failed, 32 ignored** (`timeline-quit-suites.log`). This includes
+  all 45 app unit tests, the real-quit regression restored after mutation, six real Settings-storage
+  tests, the held-seek pause regression and the merged recovery/edit-fence tests.
+- `cargo xtask check`: success (`timeline-quit-guard.log`), including source/dependency and
+  clippy guards, screenshot limits and **57 identical app/preview PNGs**; two stage screens retain
+  their documented app-only exemption. The combined queue command's final exit status was **0**.
 
 ## Decisions
 
@@ -88,3 +111,9 @@ unchanged. The unresolved quit-order finding above is not presented as complete.
 - Use the recovery quit contract's existing policy for Settings: after document clearance,
   final persistence refusal safely abandons the proposal; session end detaches immediately.
   Ordinary preference saves retain their retry policy.
+- Retain only a coalesced pre-admission quit intent while panel/session work settles; recovery
+  and Documents remain the sole owners of confirmation, clearance and the final edit fence.
+- Use the existing native catalogue and overlay identity owner after the merge; remove the
+  timeline's earlier separate catalogue and notice counter.
+- Keep personal preference services absent in screens, scripts and unattended runs, matching
+  recovery's isolation. Tests supply their own storage and consume the real subscriptions.

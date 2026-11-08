@@ -30,7 +30,7 @@ pub fn layer<'a>(core: &'a styk_core::app::Core, palette: &'static Palette, top_
 /// [`layer`] from the host and the ring flag it reads (a test mounts a copy of the host it holds).
 #[cfg(feature = "engine")]
 pub fn layer_of<'a>(host: &'a styk_core::overlay::host::Host, ring: bool, palette: &'static Palette, top_inset: f32, stage: Option<Rectangle>, owned: Vec<Placed<'a, Message>>) -> Element<'a, Message> {
-    let mut extra = owned;
+    let mut extra = Vec::new();
     if let Some(current) = host.messages().current() {
         extra.push(toast::placed(palette, current, host.phase(message_animation_id(current.id)), host.phase(message_progress_id(current.id)), stage, Message::Toast));
     }
@@ -39,5 +39,6 @@ pub fn layer_of<'a>(host: &'a styk_core::overlay::host::Host, ring: bool, palett
         let anchor = Rectangle { x: at.x as f32, y: at.y as f32, width: at.width as f32, height: at.height as f32 };
         extra.push(tooltip::placed(palette, &tip.content, anchor, false, top_inset));
     }
-    menu::layer(palette, host, ring, top_inset, extra, Message::Overlay)
+    // The owner's boxes (a dialog) sit under the menus: a select inside a dialog opens its list over it.
+    menu::layer_over(palette, host, ring, top_inset, owned, extra, Message::Overlay)
 }

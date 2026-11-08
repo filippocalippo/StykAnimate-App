@@ -188,7 +188,10 @@ fn load(
     cancel: &Cancel,
 ) -> Result<Option<Arc<[u8]>>, FileError> {
     cancelled(cancel)?;
-    let file = match File::open(target.path()) {
+    let opened = File::open(target.path());
+    #[cfg(test)]
+    let opened = tests::observe_open(opened);
+    let file = match opened {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(io(error)),
@@ -201,15 +204,22 @@ fn load(
 fn acquire(directory: &Path, cancel: &Cancel) -> Result<File, FileError> {
     cancelled(cancel)?;
     fs::create_dir_all(directory).map_err(io)?;
-    let file = OpenOptions::new()
+    lock_file(open_lock(directory, true).map_err(io)?, cancel)
+}
+
+fn open_lock(directory: &Path, create: bool) -> std::io::Result<File> {
+    OpenOptions::new()
         .read(true)
         .write(true)
-        .create(true)
+        .create(create)
         .truncate(false)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(directory.join(LOCK_NAME))
-        .map_err(io)?;
+}
+
+fn lock_file(file: File, cancel: &Cancel) -> Result<File, FileError> {
+    cancelled(cancel)?;
     let meta = file.metadata().map_err(io)?;
     if !meta.is_file() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(FileError::Io("invalid storage lock file".into()));
@@ -274,7 +284,20 @@ impl Storage for LocalStorage {
         }
         let name = name.to_owned();
         self.request(Cancel::new(), move |directory, cancel| {
-            load(&FileTarget::new(directory.join(name)), maximum, cancel)
+            let target = FileTarget::new(directory.join(name));
+            let current = load(&target, maximum, cancel)?;
+            if current.is_some() { return Ok(current); }
+            // A failed path open racing Windows replacement is not evidence of an empty
+            // profile. Reopen after the writer's transaction settles, under its same lock.
+            // Never create a directory or lock file on a read: no lock means there was no
+            // writer when we checked. Writers never unlink this stable lock identity.
+            let file = match open_lock(directory, false) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(io(error)),
+            };
+            let _lock = lock_file(file, cancel)?;
+            load(&target, maximum, cancel)
         })
     }
 

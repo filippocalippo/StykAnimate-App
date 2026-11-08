@@ -22,8 +22,8 @@ use crate::{i18n::Msg, inspector};
 pub enum Command {
     /// Settle the editor before the shell performs a tab/workspace/history transition.
     Shell(crate::shell::Event),
-    /// Settle timeline/editor work and flush settings before the window's existing close path.
-    PrepareExit,
+    /// Retain quit through panel settlement, then ask the recovery/document owner for clearance.
+    Quit,
     KeyPressed { chord: crate::text_entry::Chord, repeat: bool, prevented: bool },
     KeyReleased { key: String, cancelled: bool },
     Blur,
@@ -34,12 +34,16 @@ pub enum Command {
     Overlay { event: crate::overlay::host::Event, now: u64 },
     /// A registry command (a button, a menu item, a shortcut, a quick action, an automation step).
     Run(CommandId),
+    /// A recovery view: the offer's buttons, the chooser, the close prompt (`docs/native/recovery.md`).
+    Recovery(crate::recovery::model::Event),
     /// A Properties panel control: a field's gesture, a switch, a choice, a section's toggle.
     Inspector(inspector::Event),
     /// Make another open document the active one (a project tab).
     Activate(crate::identity::DocumentId),
     /// The stage: pointer, wheel, key, pen and frame demands for the active document's stage (`docs/native/stage.md`).
     Stage(crate::stage::Event),
+    /// The docked window: panels, groups, dividers and drags (`styk_core::dock`).
+    Dock(crate::dock::Event),
 }
 
 /// How a refusal or a failure reaches the person (the error policy: a message key and scalar parameters).
@@ -62,8 +66,11 @@ pub enum Severity {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
     ShellReady(crate::shell::Event),
-    ExitReady,
     SettingsChanged(crate::settings::Change),
+    /// One bounded documents poll; subsequent progress follows host notifications/deadlines.
+    PollDocuments,
+    QuitReady,
+    SessionCheckpointFinished,
     Overlay(crate::overlay::Effect),
     OverlayChoice { invoker: crate::focus::FocusId, index: usize },
     MessageDismissed(u64),
@@ -82,4 +89,6 @@ pub enum Effect {
     Blur,
     /// Move focus where a panel asks (the rename field as it opens, the name as it closes).
     Focus(inspector::FocusRequest),
+    /// Move focus to this target (a tab the dock activated, the group a closing flyout returns to).
+    FocusTarget(crate::focus::FocusId),
 }

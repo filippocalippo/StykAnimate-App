@@ -214,6 +214,10 @@ impl Shortcuts {
     /// Current physical holds, including a press pending admission. A refused press must be rejected immediately.
     pub fn held(&self) -> &[Activation] { &self.held }
 
+    pub fn resolve(&self, chord: &Chord, scopes: &[Scope]) -> Option<Activation> {
+        resolve(chord, scopes, self.platform, self.desktop)
+    }
+
     pub fn press(&mut self, focus: &FocusState, chord: &Chord, scopes: &[Scope], input: Input, allow: impl FnOnce(CommandId) -> bool) -> Press {
         if input.composing || focus.composing() || chord.alt_graph { return Press::Ignored; }
         let resolved = resolve(chord, scopes, self.platform, self.desktop);

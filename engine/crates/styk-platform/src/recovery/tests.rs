@@ -4,6 +4,56 @@ use styk_services::worker::run_future;
 const OLD: &[u8] = include_bytes!("../../../../tests/containers/project-channels.styk");
 const NEW: &[u8] = include_bytes!("../../../../tests/containers/project-drawing.styk");
 
+#[test]
+fn live_electron_owner_allows_read_but_never_discard_or_prune() {
+    let root = Sandbox::new("legacy-owner");
+    fs::write(root.0.join("recovery.styk"), OLD).unwrap();
+    // Chromium's ProcessSingleton holds this exact file for the primary profile's lifetime.
+    let owner = OpenOptions::new().write(true).create(true).truncate(true).share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_DELETE_ON_CLOSE).open(root.0.join("lockfile")).unwrap();
+    let store = LocalRecovery::new(&root.0);
+    let record = run_future(store.list(&Cancel::new())).unwrap().remove(0);
+    let copy = run_future(store.claim(&record, &Cancel::new())).unwrap();
+    assert_eq!(&*run_future(copy.read(&record, MAX_BYTES, &Cancel::new())).unwrap(), OLD);
+    assert!(run_future(copy.remove(&record, &Cancel::new())).is_err(), "a native slot lock does not exclude Electron");
+    drop(copy);
+    assert_eq!(fs::read(root.0.join("recovery.styk")).unwrap(), OLD);
+    drop(owner);
+}
+
+#[test]
+fn orphaned_electron_copy_is_adopted_under_profile_exclusion() {
+    let root = Sandbox::new("legacy-orphan");
+    fs::write(root.0.join("recovery.styk"), OLD).unwrap();
+    let store = LocalRecovery::new(&root.0);
+    let record = run_future(store.list(&Cancel::new())).unwrap().remove(0);
+    let copy = run_future(store.claim(&record, &Cancel::new())).unwrap();
+    let racing_owner = OpenOptions::new().write(true).create(true).truncate(true).share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_DELETE_ON_CLOSE).open(root.0.join("lockfile"));
+    assert!(racing_owner.is_err(), "the orphan proof must exclude a new legacy owner until adoption ends");
+    run_future(copy.remove(&record, &Cancel::new())).unwrap();
+}
+
+#[test]
+fn live_legacy_named_copies_are_never_pruned_and_native_leases_still_exclude() {
+    let root = Sandbox::new("legacy-prune");
+    let owner = OpenOptions::new().write(true).create(true).truncate(true).share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_DELETE_ON_CLOSE).open(root.0.join("lockfile")).unwrap();
+    let names: Vec<_> = (0..18).map(|n| format!("recovery-00000000-0000-4000-8000-{n:012x}.styk")).collect();
+    for name in &names { fs::write(root.0.join(name), OLD).unwrap(); }
+    let store = LocalRecovery::new(&root.0);
+    let native = run_future(store.create(&Cancel::new())).unwrap();
+    let receipt = run_future(native.write(None, NEW, "Native", &Cancel::new())).unwrap();
+    let native_owned = matches!(run_future(store.claim(&receipt, &Cancel::new())), Err(RecoveryError::Owned));
+    let intact = names.iter().all(|name| fs::read(root.0.join(name)).is_ok_and(|bytes| bytes == OLD));
+    let listed = run_future(store.list(&Cancel::new())).unwrap();
+    run_future(native.remove(&receipt, &Cancel::new())).unwrap(); drop(native); drop(owner);
+    for name in names { let path = root.0.join(name); if path.exists() { fs::remove_file(path).unwrap(); } }
+    assert!(native_owned);
+    assert!(intact, "pruning must preserve every live legacy copy");
+    assert_eq!(listed.len(), 18); assert!(listed.iter().all(|copy| copy.read_only));
+}
+
 struct Sandbox(PathBuf);
 impl Sandbox {
     fn new(label: &str) -> Self {

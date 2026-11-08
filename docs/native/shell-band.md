@@ -75,7 +75,7 @@ Each is marked in the code and goes when its chunk does.
 - **The menus** open as placeholders (a popover with the rows set as text): the mark's menu and a tab's menu. Their
   contents come with the menu widget (K-widgets) and the registry.
 - **Tab pictures** are the scene glyph until the stage draws them.
-- **Text** is English literals in the views until the localisation chunk.
+- **Text** is catalogue labels (`styk-ui/src/shell/text.rs`, keyed as today: `chrome.*`, `projectTabs.*`, `app.*`, `common.*`, `commands.*`), formatted through the window's `Presentation` and measured with it, so the folds hold in every language. The tab menu's placeholder reads today's `Rename project…`.
 
 ## Where it differs from today's app
 
@@ -120,6 +120,6 @@ says `advance <nanoseconds>`; the engine's own clock for budgeted reads follows 
 band's wiring. Projects open through K-doc's document host (`Request::OpenFile`, one at a time, polled on the frames drawn
 while an open runs); a project the tabs refuse (the thirteenth) is the host's to dispose of on its worker and comes back as
 a failure, so the interface thread never drops a session. A script is read through `diagnostics::read_file` with a limit
-of `MAX_SCRIPT_BYTES`, which reads at most one byte past it. The band's words are English literals, each at its one
-site in `styk-ui/src/shell/text.rs`, until the localisation chunk moves them to `styk_core::i18n::Label`.
+of `MAX_SCRIPT_BYTES`, which reads at most one byte past it. The band's words are `styk_core::i18n::Label`s, each at its one
+site in `styk-ui/src/shell/text.rs`.
 

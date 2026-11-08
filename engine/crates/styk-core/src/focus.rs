@@ -25,6 +25,18 @@ pub enum FocusArea {
     Panels,
     Stage,
     Timeline,
+    DockGroup(u32),
+    StageHeader(u32),
+    StageBody(u32),
+    DockStrip(u32),
+}
+
+/// An owner's ordered F6 region and its preferred landing target (for example the selected tab).
+/// Targets keep their input roles and scopes; this changes only region navigation at the window root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusRegion {
+    pub area: FocusArea,
+    pub target: Option<FocusId>,
 }
 
 /// What a target is.
@@ -111,6 +123,7 @@ pub struct FocusState {
     keyboard_modality: bool,
     /// Targets that were registered and then were not (gone or disabled), until [`FocusState::take_removed`].
     removed: Vec<FocusId>,
+    regions: Vec<FocusRegion>,
 }
 
 impl Default for FocusState {
@@ -128,6 +141,7 @@ impl FocusState {
             composing: false,
             keyboard_modality: false,
             removed: Vec::new(),
+            regions: Vec::new(),
         }
     }
 
@@ -155,6 +169,10 @@ impl FocusState {
         self.focused
     }
     pub fn area(&self) -> Option<FocusArea> {
+        self.focused.and_then(|id| self.find(id)).map(|(_, target)| target.area)
+    }
+
+    pub fn focused_area(&self) -> Option<FocusArea> {
         self.focused.and_then(|id| self.find(id)).map(|(_, target)| target.area)
     }
 
@@ -290,7 +308,7 @@ impl FocusState {
         self.keyboard_modality = true;
         let targets = &self.top().targets;
         let mut areas: Vec<FocusArea> = targets.iter().filter(|t| t.focusable()).map(|t| t.area).collect();
-        areas.sort_unstable();
+        areas.sort_unstable_by_key(|area| (if self.top().id == ScopeId::ROOT { self.regions.iter().position(|r| r.area == *area).unwrap_or(usize::MAX) } else { usize::MAX }, *area));
         areas.dedup();
         if areas.len() < 2 {
             return None;
@@ -302,9 +320,15 @@ impl FocusState {
             (None, true) => areas[0],
             (None, false) => areas[areas.len() - 1],
         };
-        let target = targets.iter().find(|t| t.area == next && t.stops()).or_else(|| targets.iter().find(|t| t.area == next && t.focusable())).map(|t| t.id);
+        let landing = (self.top().id == ScopeId::ROOT).then(|| self.regions.iter().find(|r| r.area == next).and_then(|r| r.target)).flatten();
+        let target = targets.iter().find(|t| Some(t.id) == landing && t.area == next && t.focusable())
+            .or_else(|| targets.iter().find(|t| t.area == next && t.stops()))
+            .or_else(|| targets.iter().find(|t| t.area == next && t.focusable())).map(|t| t.id);
         self.move_to(target)
     }
+
+    /// The dock supplies tree reading order, independent of group IDs and of widget registration order.
+    pub fn set_regions(&mut self, regions: Vec<FocusRegion>) { self.regions = regions; }
 
     /// Programmatic focus of a registered target.
     pub fn focus(&mut self, id: FocusId) -> Option<FocusId> {

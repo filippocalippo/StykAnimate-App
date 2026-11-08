@@ -26,6 +26,7 @@ pub mod commands;
 pub mod controls;
 #[cfg(feature = "engine")]
 pub mod documents;
+pub mod dock;
 #[cfg(feature = "engine")]
 pub mod engine;
 #[cfg(feature = "engine")]
@@ -47,6 +48,7 @@ pub mod layout;
 pub mod limits;
 pub mod number;
 pub mod overlay;
+pub mod recovery;
 #[cfg(feature = "engine")]
 pub mod range;
 pub mod roving;

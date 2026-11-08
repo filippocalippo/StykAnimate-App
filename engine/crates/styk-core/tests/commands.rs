@@ -28,13 +28,14 @@ fn busy() -> Activity { Activity { stroke: true, ..Activity::default() } }
 fn next(queue: &mut GestureQueue) -> Next { queue.next(Some(DocumentId::preview(1)), Activity::default(), Settlement::Ready) }
 
 #[test]
-fn registry_is_exactly_appendix_a_no_missing_extra_or_duplicate_identifiers() {
+fn registry_is_appendix_a_plus_the_native_layout_undo_command() {
     let appendix = include_str!("../../../../docs/native/INVENTORY.md").split("## Appendix A:").nth(1).unwrap().split("## Appendix B:").next().unwrap();
-    let expected: BTreeSet<_> = appendix.lines().filter(|line| line.starts_with("| CMD-")).map(|line| line.split('`').nth(1).unwrap()).collect();
+    let mut expected: BTreeSet<_> = appendix.lines().filter(|line| line.starts_with("| CMD-")).map(|line| line.split('`').nth(1).unwrap()).collect();
+    expected.insert("layout-undo"); // Design 3.12 adds independent layout history to the native command set.
     let actual: BTreeSet<_> = CommandId::ALL.iter().map(|id| id.id()).collect();
     assert_eq!(actual, expected);
     assert_eq!(actual.len(), CommandId::ALL.len());
-    assert_eq!(actual.len(), 286);
+    assert_eq!(actual.len(), 287);
     for entry in CommandId::ALL.iter().map(|id| id.info()) {
         assert_eq!(CommandId::from_id(entry.id.id()), Some(entry.id));
         assert!(!entry.label.is_empty(), "{}", entry.id.id());
@@ -71,9 +72,9 @@ fn menu_and_message_actions_reach_dispatch_with_their_registry_identity() {
 
     let mut slot = messages::Messages::default();
     slot.push(messages::Message::new(1, "save-again", messages::Tone::Warning, false, vec![messages::Action {
-        command: CommandId::Save, label: "Retry".into(), dismiss: true,
+        command: CommandId::Save.into(), label: "Retry".into(), dismiss: true, outline: false,
     }]), 0);
-    let command = slot.current().unwrap().actions[0].command;
+    let messages::Do::Command(command) = slot.current().unwrap().actions[0].command.clone() else { panic!("a registry action") };
     assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Save)]);
 }
 
@@ -84,7 +85,7 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
     let reference = json::parse(&output.stdout).unwrap();
     let commands = reference.get("commands").unwrap().as_arr().unwrap();
     assert_eq!(commands.len(), 276, "the executable reference still covers every legacy command");
-    assert_eq!(CommandId::ALL.len(), commands.len() + 10, "ten explicit native timeline actions extend the registry");
+    assert_eq!(CommandId::ALL.len(), commands.len() + 11, "ten timeline actions and layout undo extend the registry");
     let safe = strings(&reference, "polygonActions");
     let keys = strings(&reference, "polygonKeys");
     let home = strings(&reference, "homeActions");

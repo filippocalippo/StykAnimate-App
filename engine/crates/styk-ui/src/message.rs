@@ -22,7 +22,10 @@ use styk_design::widgets::focus;
 pub enum Message {
     /// The core accepted the shared lifecycle barrier; the application can hand this to its shell owner.
     ShellReady(styk_core::shell::Event),
-    ExitReady,
+    PollDocuments,
+    QuitReady,
+    SessionCheckpointFinished,
+    Notice(styk_core::commands::Notice),
     /// A command for the core.
     Command(Command),
     /// Focus a number field's input (a click on its scrub label).
@@ -82,13 +85,15 @@ impl From<Command> for Message {
 pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     match message {
         Message::Command(command) => {
-            let effects = core.dispatch(command);
-            core.refresh();
-            Task::batch(effects.into_iter().map(effect))
+            let mut effects = core.dispatch(command);
+            // The views the command changed are brought in line; their effects (the recovery offer's message, a dialog that closed) go with it.
+            effects.extend(core.refresh());
+            run(effects)
         }
+        Message::Notice(notice) => run(core.show_notice(notice)),
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
         Message::Focusing(inner, id) => Task::batch([update(core, *inner), operate(focus::focus(id)).discard()]),
-        Message::Idle | Message::ShellReady(_) | Message::ExitReady => Task::none(),
+        Message::Idle | Message::ShellReady(_) => Task::none(),
         Message::Compose(composing) => {
             core.focus_mut().set_composing(composing);
             Task::none()
@@ -128,8 +133,16 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             use styk_core::overlay::host::Event;
             overlay(core, match event { View::Show { target, content, touch, keyboard } => Event::TooltipShow { target, content, touch, keyboard }, View::Hide => Event::TooltipHide })
         }
-        Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
-        Message::Snapshot(snapshot) => {
+        Message::PollDocuments | Message::QuitReady | Message::SessionCheckpointFinished | Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
+        Message::Snapshot(mut snapshot) => {
+            for (scope, targets) in &mut snapshot.scopes {
+                if *scope != styk_core::focus::ScopeId::ROOT { continue; }
+                if !targets.iter().any(|target| core.dock().panel_of(target.id).is_some()) { continue; }
+                for target in targets {
+                    let bounds = snapshot.bounds.iter().find(|(id, _)| *id == target.id).map(|(_, b)| styk_core::layout::Rect { x: f64::from(b.x), y: f64::from(b.y), w: f64::from(b.width), h: f64::from(b.height) });
+                    target.area = core.dock().focus_area(target.id, bounds, target.area);
+                }
+            }
             let synced = focus::sync(core.focus_mut(), &snapshot);
             let effects = core.dispatch(Command::Overlay { now: core.overlays().now(), event: styk_core::overlay::host::Event::Bounds(snapshot.bounds.iter().map(|(id, b)| (*id, styk_design::widgets::menu::rect_of(*b))).collect()) });
             Task::batch([Task::batch(effects.into_iter().map(effect)), match synced.unfocus {
@@ -140,26 +153,37 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     }
 }
 
+/// The tasks of the effects the core answered with: the application hands the ones it takes from the core outside a message
+/// (the documents host's effects, `Core::document_effect`) here too.
+#[cfg(feature = "engine")]
+pub fn run(effects: Vec<Effect>) -> Task<Message> {
+    Task::batch(effects.into_iter().map(effect))
+}
+
 /// One effect as a task. Notices, frame requests and the colour picker belong to the shell, the stage and the picker
 /// chunks: until they land they have no task here.
 #[cfg(feature = "engine")]
 pub fn effect(effect: Effect) -> Task<Message> {
     match effect {
         Effect::ShellReady(event) => Task::done(Message::ShellReady(event)),
-        Effect::ExitReady => Task::done(Message::ExitReady),
+        Effect::PollDocuments => Task::done(Message::PollDocuments),
+        Effect::QuitReady => Task::done(Message::QuitReady),
+        Effect::SessionCheckpointFinished => Task::done(Message::SessionCheckpointFinished),
         Effect::Overlay(styk_core::overlay::Effect::Focus(id)) => match id { Some(id) => operate(focus::focus(id)).discard(), None => operate(focus::unfocus()).discard() },
         Effect::Overlay(effect) => Task::done(Message::OverlayEffect(effect)),
         Effect::OverlayChoice { invoker, index } => Task::done(Message::OverlayChoice { invoker, index }),
         Effect::ShortcutReleased(release) => Task::done(Message::ShortcutReleased(release)),
         Effect::MessageDismissed(id) => Task::done(Message::MessageDismissed(id)),
         Effect::Blur => operate(focus::unfocus()).discard(),
+        Effect::FocusTarget(id) => operate(focus::focus(id)).discard(),
         Effect::Focus(request) => operate(focus::focus(match request {
             FocusRequest::Rename => crate::inspector::RENAME_ID,
             FocusRequest::TargetName => crate::inspector::TARGET_NAME_ID,
         }))
         .discard(),
         Effect::NotAvailable(id) => Task::done(Message::NotAvailable(id)),
-        Effect::SettingsChanged(_) | Effect::Notice(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
+        Effect::Notice(notice) => Task::done(Message::Notice(notice)),
+        Effect::SettingsChanged(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
 }
 
@@ -182,6 +206,27 @@ pub fn raw_at(core: &mut Core, event: &iced::Event, ignored: bool, now: u64) -> 
         }
         _ => None,
     }
+}
+
+/// Only a keyboard event adapter: binding selection, exact modifiers and input gates belong to Shortcuts.
+#[cfg(feature = "engine")]
+pub fn dock_shortcut_at(core: &mut Core, event: &iced::Event, ignored: bool, now: u64) -> Option<Task<Message>> {
+    use iced::keyboard::{Event, Key, key::{Named, Physical}};
+    let iced::Event::Keyboard(Event::KeyPressed { key, physical_key, modifiers, repeat, .. }) = event else { return None };
+    let code = match physical_key {
+        Physical::Code(code) => format!("{code:?}"),
+        // Synthetic/headless inputs have no hardware code. The spelling is adapted, never matched to a command here.
+        Physical::Unidentified(_) => match key.as_ref() {
+            Key::Named(Named::F6) => "F6".into(),
+            Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_alphabetic() => format!("Key{}", c.to_uppercase()),
+            Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_digit() => format!("Digit{c}"),
+            _ => return None,
+        },
+    };
+    let chord = styk_core::text_entry::Chord { key: code, ctrl: modifiers.control(), alt: modifiers.alt(), shift: modifiers.shift(), meta: modifiers.logo(), alt_graph: false };
+    let timed = core.dispatch(Command::Overlay { event: styk_core::overlay::host::Event::Time, now });
+    let effects = core.dock_shortcut(&chord, styk_core::shortcuts::Input { repeat: *repeat, prevented: !ignored, blocked_by_overlay: core.overlays().top().is_some(), ..Default::default() })?;
+    Some(Task::batch(timed.into_iter().chain(effects).map(effect)))
 }
 
 /// Runtime entry: inject the application clock before routing an input. No view reads a clock.

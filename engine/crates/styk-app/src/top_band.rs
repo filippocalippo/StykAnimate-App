@@ -30,8 +30,9 @@ use styk_design::widgets::focus;
 use styk_design::{Theme, warm_up};
 use styk_core::engine::{Budgets, Engine, json};
 use styk_services::Spawner;
-use styk_services::clock::{Clock, FixedClock};
-use styk_services::files::FileTarget;
+use styk_services::{Cancel, worker::{Worker, run_future}};
+use styk_services::clock::{Clock, FixedClock, WallClock};
+use styk_services::files::{FileTarget, Files as _};
 use styk_services::shell::Rect;
 use styk_services::shell::chrome::MaxButtonState;
 use styk_ui::screens::Screen;
@@ -56,6 +57,12 @@ pub enum Message {
     Snapshot(focus::Snapshot),
     /// A frame was drawn: time passes for the strip and the automation.
     Frame,
+    /// The documents host's workers have something (their wake), or the recovery lane's deadline is due: take it.
+    Documents,
+    /// The layout lane has a reply in its bounded exchange.
+    Layouts,
+    /// The earliest core deadline is due, on the application's injected clock.
+    Deadline,
 }
 
 /// What the wiring asks of the window.
@@ -65,7 +72,6 @@ pub enum Request {
     Minimize,
     /// Close the window.
     Close,
-    ExitReady,
     /// Resize to this logical size.
     Resize(Size),
     /// Capture the window into this file; `captured` follows.
@@ -74,6 +80,10 @@ pub enum Request {
     Theme(Theme),
     /// The script ended: `None` when every expectation held.
     Finished(Option<String>),
+    /// Every project is answered for and the recovery lane is done: the program may end.
+    QuitReady,
+    SessionCheckpointFinished,
+    PreferencesProgress,
 }
 
 /// A script being run.
@@ -89,9 +99,9 @@ struct Run {
 pub struct TopBand {
     /// The open projects.
     pub core: styk_core::app::Core,
-    /// The core's layout persistence service, ready for the docking view's host.
-    #[expect(dead_code, reason = "The docking view host is a separate chunk; retain its injected service.")]
-    pub layouts: styk_core::layout::LayoutStore,
+    /// The layout persistence service: the stored arrangements load through it and the dock's writes go through it.
+    layouts: Option<Worker<LayoutWork, LayoutReply>>,
+    layout_pending: Option<Cancel>,
     /// The shell.
     pub shell: shell::Shell,
     /// The projects in the order they were opened, which is how scripts number them.
@@ -101,6 +111,7 @@ pub struct TopBand {
     busy: bool,
     /// The one application clock: every deadline of the band and the automation's work read it.
     clock: Arc<dyn Clock>,
+    wall: Arc<dyn WallClock>,
     /// The same clock when it is the fixed one, so a script can advance it.
     fixed: Option<FixedClock>,
     run: Option<Run>,
@@ -108,6 +119,8 @@ pub struct TopBand {
     measured: bool,
     /// A band screen of the catalogue shown in place of the open projects (`--screen band`).
     screen: Option<Screen>,
+    /// The Properties panel's prepared model while a window screen of the catalogue shows (`--screen dock`).
+    fixture: Option<styk_core::inspector::model::Inspector>,
     progress: ProgressWatch,
 }
 #[derive(Clone)]
@@ -126,6 +139,29 @@ fn progress_stream(watch: &ProgressWatch) -> impl iced::futures::Stream<Item = M
 enum Answer {
     Report(workspace::Report),
     Session(Session),
+}
+
+enum LayoutWork { Load, Save(styk_core::layout::store::LayoutFile, u64, Cancel) }
+enum LayoutReply { Loaded(styk_core::dock::Stored), Saved(bool) }
+
+fn load_layouts(store: &styk_core::layout::LayoutStore) -> styk_core::dock::Stored {
+    use styk_core::{dock::Stored, layout::LayoutError};
+    match run_future(store.load()) {
+        Ok(Some(file)) => Stored::File(file),
+        Err(LayoutError::FutureVersion) => Stored::Newer,
+        Err(error) => Stored::Unreadable(format!("{error:?}")),
+        Ok(None) => {
+            let target = FileTarget::new(styk_platform::shell::profile_dir().join("workspace-preferences.json"));
+            match run_future(styk_platform::files::LocalFiles.read(&target, 256 * 1024, &Cancel::new())) {
+                Ok(bytes) => json::parse(&bytes).map_or(Stored::Nothing, Stored::Legacy),
+                Err(_) => Stored::Nothing,
+            }
+        }
+    }
+}
+
+impl Drop for TopBand {
+    fn drop(&mut self) { self.abandon_layouts(); self.abandon_settings(); }
 }
 
 /// The startup document the host is given (see `TopBand::new`).
@@ -173,16 +209,20 @@ fn workspace_named(name: &str) -> Workspace {
 impl TopBand {
     /// The band over a new, empty set of projects, with K-doc's document host attached: its worker, the local files and the
     /// one application clock.
-    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>) -> Result<TopBand, String> {
-        let storage = Arc::new(styk_platform::storage::LocalStorage::for_user(spawner.as_ref()).map_err(|error| format!("the preferences store did not start: {error}"))?);
-        Self::with_storage(window_size, clock, fixed, spawner, storage)
-    }
-    fn with_storage(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, storage: Arc<dyn styk_services::storage::Storage>) -> Result<TopBand, String> {
+    /// `wakes` carries layout receipts; the shared Progress subscription carries document, frame and Settings work. `recovery` is the
+    /// store where the lane keeps this window's copies and lists the ones an earlier run left (`None`:
+    /// no recovery, as in a run that must not touch the person's folders). `storage` is also absent for unattended runs.
+    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, wakes: styk_platform::shell::Wakes, recovery: Option<Arc<dyn styk_services::recovery::Recovery>>, layouts: Option<Arc<styk_core::layout::LayoutStore>>, storage: Option<Arc<dyn styk_services::storage::Storage>>) -> Result<TopBand, String> {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
         let mut documents = Documents::new();
-        let layouts = styk_core::layout::LayoutStore::new(storage.clone());
         let progress = styk_core::stage::Progress::new();
+        let notify = progress.wake();
+        let layouts = layouts.map(|store| Worker::start(spawner.as_ref(), "styk-layouts", move |work| match work {
+            LayoutWork::Load => LayoutReply::Loaded(load_layouts(&store)),
+            LayoutWork::Save(file, wall, cancel) => LayoutReply::Saved(run_future(store.save(&file, wall, &cancel)).is_ok()),
+        }, Arc::new(move || wakes.send(styk_platform::shell::Wake::Layouts))))
+            .transpose().map_err(|error| format!("the layout lane did not start: {error}"))?;
         // The application's startup document, for New and for closing the last tab. Stand-in: the engine's startup fixture,
         // until the native startup document (Blue on the landscape canvas) has an owner. The band does not send New yet.
         let startup = json::parse(STARTUP).map_err(|error| format!("the startup document: {error:?}"))?;
@@ -193,13 +233,18 @@ impl TopBand {
                 files: Arc::new(styk_platform::files::LocalFiles),
                 startup,
                 clock: engine_clock,
-                // The interface polls the host on the frames it draws while an open is running.
-                notify: progress.wake(),
+                // The shared Progress subscription polls the exclusive document lane.
+                notify: notify.clone(),
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
+        if let Some(store) = recovery {
+            documents.attach_recovery(store, clock.clone()).map_err(|error| format!("recovery did not start: {error}"))?;
+            // The first listing is queued by the first poll: ask for it.
+            notify();
+        }
         let mut core = styk_core::app::Core::new(documents);
         core.start_runtime(spawner.clone(), clock.clone(), progress.clone()).map_err(|e| e.to_string())?;
-        core.start_settings(spawner.as_ref(), storage, progress.wake()).map_err(|e| e.to_string())?;
+        if let Some(storage) = storage { core.start_settings(spawner.as_ref(), storage, progress.wake()).map_err(|e| e.to_string())?; }
         let audio_spawner = spawner.clone();
         let audio_wake = progress.wake();
         core.start_audio(spawner.as_ref(), move || {
@@ -207,7 +252,11 @@ impl TopBand {
             let decoder = styk_platform::audio::FfmpegAudioDecoder::native();
             styk_core::audio::AudioTransport::new_notifying(audio_spawner, Box::new(output), Arc::new(styk_platform::audio::QpcClock::new()), Arc::new(decoder), styk_core::audio::CACHE_BYTES, audio_wake).map_err(|e| e.to_string())
         }, progress.wake()).map_err(|e| e.to_string())?;
-        Ok(TopBand { core, layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None, progress: ProgressWatch(progress) })
+        let wall: Arc<dyn WallClock> = Arc::new(styk_platform::clock::SystemWallClock::default());
+        core.dock_mut().set_writer(wall.writer());
+        core.dock_mut().set_wall_time(wall.unix_millis());
+        core.dock_mut().handle(styk_core::dock::Event::Resized { width: f64::from(window_size.width), height: f64::from(window_size.height), scale: 1.0 }, 0);
+        Ok(TopBand { core, layouts, layout_pending: None, progress: ProgressWatch(progress), fixture: None, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, wall, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
@@ -230,20 +279,31 @@ impl TopBand {
     pub fn idle(&self) -> bool {
         self.requests.is_empty() && !self.busy && (self.core.documents.active().is_none() || (!self.core.timeline().model().pending && self.core.stage().is_some()))
     }
-    pub fn prepare_exit(&mut self) -> Task<Message> {
+    /// Final maintenance after QuitReady, through the same core dispatch fence.
+    pub fn flush_settings(&mut self) -> bool {
         let now = self.now();
-        styk_ui::message::update_at(&mut self.core, styk_core::commands::Command::PrepareExit.into(), now).map(Message::Editor)
+        // A final failure settles the lane. The last committed settings remain intact.
+        drop(self.core.dispatch(styk_core::commands::Command::Settings(styk_core::settings::Event::Finish { now })));
+        !self.core.settings_idle()
+    }
+    pub fn abandon_settings(&mut self) {
+        drop(self.core.dispatch(styk_core::commands::Command::Settings(styk_core::settings::Event::Abandon)));
+    }
+    #[cfg(test)]
+    fn with_storage(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, storage: Arc<dyn styk_services::storage::Storage>) -> Result<TopBand, String> {
+        Self::new(window_size, clock, fixed, spawner, styk_platform::shell::Wakes(Arc::new(|_| {})), None, None, Some(storage))
     }
 
     /// Shows a band screen of the catalogue (`--screen band`) instead of the open projects.
     pub fn show_screen(&mut self, screen: Option<Screen>) {
         self.screen = screen;
+        self.fixture = screen.filter(|screen| screen.is_dock()).map(|_| styk_ui::screens::inspector_model(styk_core::screens::InspectorScreen::Figure));
     }
 
     /// The fonts are ready: measure the band's words.
     pub fn fonts_ready(&mut self) {
         if let Some(ready) = warm_up::proof() {
-            let labels = view::measure_labels(ready);
+            let labels = view::measure_labels(ready, self.core.presentation());
             match self.screen {
                 Some(screen) => {
                     let window = *self.shell.window();
@@ -256,9 +316,92 @@ impl TopBand {
     }
 
     /// The window's size changed.
-    pub fn resized(&mut self, size: Size) {
+    pub fn resized(&mut self, size: Size, scale: f32) {
         let controls = self.shell.window().controls;
         drop(self.dispatch(shell::Event::Resized(shell::Window { width: size.width, height: size.height, ui_scale: 1.0, controls })));
+        let now = self.now();
+        drop(self.dock(styk_core::dock::Event::Resized { width: f64::from(size.width), height: f64::from(size.height), scale: f64::from(scale) }, now));
+    }
+
+    /// An event of the dock, through the one handler every view's message reaches.
+    fn dock(&mut self, event: styk_core::dock::Event, now: u64) -> Task<Message> {
+        styk_ui::message::update_at(&mut self.core, styk_ui::message::Message::Command(styk_core::commands::Command::Dock(event)), now).map(Message::Editor).chain(TopBand::snapshot())
+    }
+
+    /// Reads the stored layouts: the dock's own file, or today's `workspace-preferences.json` on a first launch. Nothing is
+    /// written by reading.
+    pub fn load_layouts(&mut self) -> Task<Message> {
+        let Some(worker) = &self.layouts else { return Task::none() };
+        if self.layout_pending.is_some() { return Task::none(); }
+        if worker.submit(LayoutWork::Load).is_ok() {
+            self.layout_pending = Some(Cancel::new());
+            Task::none()
+        } else {
+            let now = self.now();
+            let asked = self.core.dock_mut().loaded(styk_core::dock::Stored::Unreadable("layout worker refused the load".into()), now);
+            styk_ui::message::run(self.core.dock_effects(asked)).map(Message::Editor)
+        }
+    }
+
+    /// Submit one due layout write. SaveQueue keeps its bytes until the receipt;
+    /// a refused submission goes through the same completion bookkeeping.
+    fn save_layouts(&mut self, now: u64) {
+        if self.layout_pending.is_some() { return; }
+        let Some(worker) = &self.layouts else { return };
+        let Some(file) = self.core.dock_mut().take_save(now) else { return };
+        let cancel = Cancel::new();
+        if worker.submit(LayoutWork::Save(file, self.wall.unix_millis(), cancel.clone())).is_ok() {
+            self.layout_pending = Some(cancel);
+        } else {
+            self.core.dock_mut().save_done(false, now);
+        }
+    }
+
+    fn poll_layouts(&mut self) -> Task<Message> {
+        let reply = self.layouts.as_ref().and_then(Worker::take);
+        let now = self.now();
+        let mut effects = Vec::new();
+        if let Some(reply) = reply {
+            self.layout_pending = None;
+            match reply {
+                LayoutReply::Loaded(stored) => {
+                    let asked = self.core.dock_mut().loaded(stored, now);
+                    effects = self.core.dock_effects(asked);
+                }
+                LayoutReply::Saved(landed) => self.core.dock_mut().save_done(landed, now),
+            }
+        }
+        self.save_layouts(now);
+        styk_ui::message::run(effects).map(Message::Editor)
+    }
+
+    /// Flush after document clearance. The queue owns coalescing and the final
+    /// attempt; a failed final write abandons only proposed bytes, never disk data.
+    pub fn flush_layouts(&mut self) -> bool {
+        if self.layouts.is_none() { return false; }
+        let now = self.now();
+        self.core.dock_mut().flush_save(now);
+        self.save_layouts(now);
+        !self.layouts_idle() || self.core.dock().save_pending()
+    }
+
+    pub fn layouts_idle(&self) -> bool { self.layout_pending.is_none() }
+
+    pub fn abandon_layouts(&mut self) {
+        if let Some(cancel) = self.layout_pending.take() { cancel.cancel(); }
+        if let Some(worker) = self.layouts.take() { worker.shutdown(Box::new(())); }
+        self.core.dock_mut().abandon_save();
+    }
+
+    /// The docked window under the band: every group at its rectangle, the Properties panel and the stage in theirs.
+    pub fn dock_view<'a>(&'a self, theme: Theme) -> iced::Element<'a, Message> {
+        let params = styk_ui::dock::Params { dock: self.core.dock(), theme, presentation: self.core.presentation(), top: self.height() };
+        let presentation = self.core.presentation();
+        let (inspector, stage) = match &self.fixture {
+            Some(model) => (Some(styk_ui::inspector::View::model(model, presentation, theme)), None),
+            None => (styk_ui::inspector::View::of(&self.core, theme), self.core.stage().map(|surface| styk_ui::stage::stage(surface, theme, |event| styk_ui::Message::Command(styk_core::commands::Command::Stage(event))))),
+        };
+        styk_ui::dock::window(&params, inspector, stage).map(Message::Editor).boxed()
     }
 
     /// The places in the band that keep the pointer, in physical pixels (`scale` physical pixels per logical one).
@@ -278,23 +421,43 @@ impl TopBand {
     }
 
     pub fn view<'a>(&'a self, theme: Theme, ready: warm_up::Ready, maximize: MaxButtonState, content: iced::Element<'a, view::Message>) -> iced::Element<'a, Message> {
-        view::window(view::Params { shell: &self.shell, theme, ready, maximize }, content).map(Message::Ui).boxed()
+        view::window(view::Params { shell: &self.shell, theme, ready, presentation: self.core.presentation(), maximize }, content).map(Message::Ui).boxed()
     }
 
-    /// The overlay layer over the band: menus, lists, the stage's message and a tooltip, drawn from the Core-owned host. The band
-    /// is the only content the window shows until the docking view lands; the layer is mounted and answers regardless, and every
-    /// message it sends reaches `Core::dispatch` through `update_at`. A panel or button that opens a menu shows it by sending
-    /// `Command::Overlay { event: OpenMenu .. }`; none does yet, so today only a message pushed with `ShowMessage` (and the
-    /// Inspector's selects, once docked) show something.
+    /// The overlay layer over the band and dock: menus, lists, the stage's message,
+    /// tooltips and recovery dialogs, drawn from the core-owned host. Every message
+    /// reaches `Core::dispatch` through the same interface adapter.
     pub fn overlay_layer(&self, theme: Theme) -> iced::Element<'_, Message> {
-        styk_ui::overlays::layer(&self.core, theme.palette(), self.height() + 6.0, None, Vec::new()).map(Message::Editor).boxed()
+        let window = self.shell.window();
+        let owned = styk_ui::recovery::owned(&self.core, theme.palette(), Size::new(window.width, window.height));
+        styk_ui::overlays::layer(&self.core, theme.palette(), self.height() + 6.0, None, owned).map(Message::Editor).boxed()
     }
 
-    /// The runtime maps the core's injected deadline onto iced's one scheduled redraw.
-    pub fn overlay_wake(&self) -> iced::Element<'_, Message> {
-        crate::overlay_wake::element(self.core.next_deadline().filter(|_| self.fixed.is_none()), self.clock.clone(), |now| {
-            Message::Editor(styk_ui::message::Message::Command(styk_core::commands::Command::Wake { now }))
-        })
+    /// One runtime adapter for all core deadlines; it owns no timer or decision.
+    pub fn wake_widget(&self) -> iced::Element<'_, Message> {
+        // A load occupies the same lane as a save. Its receipt schedules the
+        // pending save; an expired save deadline cannot make that load progress.
+        crate::overlay_wake::element(self.core.wake_deadline(self.layouts.is_some() && self.layouts_idle()).filter(|_| self.fixed.is_none()), self.clock.clone(), |_| Message::Deadline)
+    }
+
+    fn deadline(&mut self) -> Task<Message> {
+        let now = self.now();
+        let documents = self.pump();
+        if self.core.session_end_expired() { return documents; }
+        let overlays = styk_ui::message::update_at(&mut self.core, styk_ui::Message::Command(styk_core::commands::Command::Wake { now }), now).map(Message::Editor);
+        let layouts = self.poll_layouts();
+        Task::batch([documents, overlays, layouts])
+    }
+
+    /// The window was asked to close. The documents host answers: nothing to ask (the program may end), or a confirmation for the
+    /// projects with unsaved work (the close prompt, with its recovery copy's retry) and `Request::QuitReady` once every project is
+    /// answered for and the recovery lane has finished.
+    pub fn ask_to_quit(&mut self) -> Task<Message> {
+        styk_ui::message::run(self.core.request_quit()).map(Message::Editor)
+    }
+
+    pub fn session_end(&mut self) -> Task<Message> {
+        styk_ui::message::run(self.core.request_session_end(self.clock.now(), styk_platform::shell::session_end_timeout())).map(Message::Editor)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -310,6 +473,9 @@ impl TopBand {
                 _ => None,
             }));
         }
+        if self.core.dock().tracking() {
+            subscriptions.push(event::listen_with(|event, _, _| styk_ui::dock::track(&event).map(Message::Editor)));
+        }
         // Readiness gates automation, not redraws. Slow workers wake this subscription
         // through Progress; a script samples its finite settling frames only when ready.
         if (self.run.is_some() && self.idle()) || self.shell.next_deadline().is_some() || self.core.timeline().playing() {
@@ -319,8 +485,9 @@ impl TopBand {
     }
 
     /// The application clock in milliseconds; the engine's clock follows it.
-    fn now(&self) -> u64 {
+    fn now(&mut self) -> u64 {
         let millis = self.clock.now().as_millis() as u64;
+        self.core.dock_mut().set_wall_time(self.wall.unix_millis());
         ENGINE_NOW_BITS.store((millis as f64).to_bits(), Ordering::Relaxed);
         millis
     }
@@ -361,7 +528,7 @@ impl TopBand {
                         Answer::Session(session) => shell::Event::Session(session),
                     })),
                     Effect::FocusTab(id) => tasks.push(TopBand::focus(ids::tab(id))),
-                    Effect::Activated(_) | Effect::Edited => self.core.refresh(),
+                    Effect::Activated(_) | Effect::Edited => tasks.push(styk_ui::message::run(self.core.refresh()).map(Message::Editor)),
                     Effect::Command(command) => tasks.push(styk_ui::message::update(&mut self.core, command.into()).map(Message::Editor)),
                     Effect::DocumentCommand { command, document } => {
                         tasks.push(styk_ui::message::update(&mut self.core, styk_core::commands::Command::Activate(document).into()).map(Message::Editor));
@@ -394,10 +561,12 @@ impl TopBand {
                 let now = self.now();
                 let task = self.pump();
                 let wake = styk_ui::message::update(&mut self.core, styk_core::commands::Command::Wake { now }.into()).map(Message::Editor);
-                (Vec::new(), Task::batch([task, wake]))
+                (vec![Request::PreferencesProgress], Task::batch([task, wake]))
             }
             Message::Editor(styk_ui::message::Message::ShellReady(event)) => (Vec::new(), self.dispatch_ready(event)),
-            Message::Editor(styk_ui::message::Message::ExitReady) => (vec![Request::ExitReady], Task::none()),
+            Message::Editor(styk_ui::message::Message::PollDocuments) => (Vec::new(), self.pump()),
+            Message::Editor(styk_ui::message::Message::QuitReady) => (vec![Request::QuitReady], Task::none()),
+            Message::Editor(styk_ui::message::Message::SessionCheckpointFinished) => (vec![Request::SessionCheckpointFinished], Task::none()),
             Message::Editor(message) => {
                 let now = self.now();
                 // The focus tasks the core asks for run on the tree this message built, then the walk reads it back.
@@ -419,9 +588,33 @@ impl TopBand {
                 (Vec::new(), Task::batch([task, overlays]))
             }
             Message::Frame => self.frame(),
+            Message::Documents => {
+                let task = self.pump();
+                let now = self.now();
+                let wake = styk_ui::message::update_at(&mut self.core, styk_core::commands::Command::Wake { now }.into(), now).map(Message::Editor);
+                (vec![Request::PreferencesProgress], Task::batch([task, wake]))
+            },
+            Message::Layouts => (vec![Request::PreferencesProgress], self.poll_layouts()),
+            Message::Deadline => (vec![Request::PreferencesProgress], self.deadline()),
         };
         let task = if reads_focus { Task::batch([task, TopBand::snapshot()]) } else { task };
-        (requests, task)
+        (requests, Task::batch([task, self.follow_workspace()]))
+    }
+
+    /// The workspace the band pressed is the arrangement the dock shows (Build is the layout's `rig`); Home keeps the last.
+    fn follow_workspace(&mut self) -> Task<Message> {
+        use styk_core::layout::Workspace as Arrangement;
+        let wanted = match self.shell.pressed() {
+            Some(Workspace::Animate) => Arrangement::Animate,
+            Some(Workspace::Draw) => Arrangement::Draw,
+            Some(Workspace::Build) => Arrangement::Rig,
+            None => return Task::none(),
+        };
+        if self.core.dock().workspace() == wanted {
+            return Task::none();
+        }
+        let now = self.now();
+        self.dock(styk_core::dock::Event::Workspace(wanted), now)
     }
 
     fn fail(&mut self, message: String) {
@@ -456,6 +649,12 @@ impl TopBand {
                         None => Task::none(),
                     };
                 }
+                if let Some(task) = self.dock_key(key) {
+                    return task;
+                }
+                if let Some(task) = styk_ui::message::dock_shortcut_at(&mut self.core, event, ignored, now) {
+                    return task.map(Message::Editor).chain(TopBand::snapshot());
+                }
                 match key.as_ref() {
                     Key::Named(Named::Tab) if modifiers.control() => self.dispatch(E::CtrlTab { backwards: modifiers.shift(), held: true }),
                     Key::Named(Named::PageDown) if modifiers.control() => self.dispatch(E::Neighbour(1)),
@@ -470,16 +669,34 @@ impl TopBand {
                 }
             }
             Event::Keyboard(keyboard::Event::KeyReleased { key: Key::Named(Named::Control), .. }) if self.shell.board_open() => self.dispatch(E::ModifierReleased),
-            Event::Keyboard(keyboard::Event::KeyReleased { .. }) => styk_ui::message::editor_key(event, ignored).map_or_else(Task::none, |message| styk_ui::message::update_at(&mut self.core, message, now).map(Message::Editor)),
+            Event::Keyboard(keyboard::Event::KeyReleased { .. }) => {
+                let shift = matches!(event, Event::Keyboard(keyboard::Event::KeyReleased { key: Key::Named(Named::Shift), .. }));
+                let key = styk_ui::message::editor_key(event, ignored).map_or_else(Task::none, |message| styk_ui::message::update_at(&mut self.core, message, now).map(Message::Editor));
+                if shift { Task::batch([key, self.dock(styk_core::dock::Event::Shift(false), now)]) } else { key }
+            }
             Event::Mouse(mouse::Event::ButtonPressed(_)) => {
                 self.shell.focus.pointer_pressed();
                 Task::none()
             }
             Event::Window(window::Event::Unfocused) => {
                 let shell = self.dispatch(E::Blurred);
-                Task::batch([shell, styk_ui::message::update_at(&mut self.core, styk_core::commands::Command::Blur.into(), now).map(Message::Editor)])
+                Task::batch([shell, self.dock(styk_core::dock::Event::Blur, now), styk_ui::message::update_at(&mut self.core, styk_core::commands::Command::Blur.into(), now).map(Message::Editor)])
             }
             _ => Task::none(),
+        }
+    }
+
+    /// A key that belongs to the dock (`styk_ui::dock::key`): what the dock sends it is sent, what it only notes is noted.
+    fn dock_key(&mut self, key: &Key) -> Option<Task<Message>> {
+        let now = self.now();
+        match styk_ui::dock::key(self.core.dock(), key) {
+            styk_ui::dock::Key::Pass => None,
+            styk_ui::dock::Key::Swallow => Some(Task::none()),
+            styk_ui::dock::Key::Send(event) => Some(self.dock(event, now)),
+            styk_ui::dock::Key::Note(event) => {
+                drop(self.dock(event, now));
+                None
+            }
         }
     }
 
@@ -487,8 +704,15 @@ impl TopBand {
     /// Starts the next queued open when the host is free, and takes what the host has finished (`poll`, nonblocking). A
     /// project the tabs refuse (the thirteenth) is the host's to dispose of on its worker, and comes back as a failure.
     fn pump(&mut self) -> Task<Message> {
+        let expired = self.core.session_end_tick(self.clock.now());
+        if self.core.session_end_expired() { return styk_ui::message::run(expired).map(Message::Editor); }
         let mut tasks = Vec::new();
-        while let Some(effect) = self.core.poll_document() {
+        if let Some(effect) = self.core.poll_document() {
+            // One completion per update. A real transition can queue the next stage without
+            // starting a worker; give it one poll, then follow notifications/deadlines.
+            if !matches!(effect, Opened::None) { tasks.push(Task::done(Message::Documents)); }
+            // A close that needs an answer, the recovery lane's events: the core's views take them.
+            tasks.push(styk_ui::message::run(self.core.document_effect(&effect)).map(Message::Editor));
             match effect {
                 Opened::Opened(id) => {
                     self.busy = false;
@@ -503,6 +727,7 @@ impl TopBand {
                 _ => {}
             }
         }
+        tasks.push(styk_ui::message::run(self.core.documents_progress()).map(Message::Editor));
         if !self.busy
             && let Some(request) = self.requests.pop_front()
         {
@@ -630,6 +855,7 @@ impl TopBand {
                     self.check_expectation(&expectation)?;
                     (Vec::new(), Task::none())
                 }
+                Step::Dock(step) => (Vec::new(), self.dock_step(step)?),
                 Step::Screenshot(path) => {
                     if let Some(run) = &mut self.run {
                         run.capturing = true;
@@ -726,6 +952,80 @@ impl TopBand {
                     _ => None,
                 });
                 same("Export", look.clone(), found.unwrap_or("hidden").to_string())
+            }
+            Expect::Dock(expectation) => self.check_dock(expectation),
+            other => Err(format!("this build cannot check {other:?}")),
+        }
+    }
+
+    /// A step in the docked window: the presses, moves and releases a person's pointer makes, sent through the same handler
+    /// the widgets' messages reach.
+    fn dock_step(&mut self, step: automation::DockStep) -> Result<Task<Message>, String> {
+        use automation::DockStep;
+        use styk_core::dock::Event as D;
+        use styk_core::layout::Rect as Place;
+        let now = self.now();
+        let (window, solution) = (self.core.dock().window(), self.core.dock().solution().clone());
+        let group_of = |kind: &str| -> Result<(styk_core::layout::GroupId, usize), String> {
+            self.core.dock().layout().groups().into_iter().find_map(|g| g.tabs.iter().position(|p| p.kind == kind).map(|tab| (g.id, tab))).ok_or_else(|| format!("{kind} is in no group"))
+        };
+        let rect_of = |group: styk_core::layout::GroupId| -> Result<Place, String> { solution.groups.get(&group).copied().ok_or_else(|| "that group is not shown".to_string()) };
+        let events: Vec<D> = match step {
+            DockStep::Drag { panel, to } => {
+                let (group, tab) = group_of(&panel)?;
+                let header = solution.headers.get(&group).copied().ok_or("that panel has no header")?;
+                let (x, y) = (header.x + 24.0, header.y + 22.0);
+                let target = match to.as_str() {
+                    "edge-left" => (4.0, window.h / 2.0),
+                    "edge-right" => (window.w - 4.0, window.h / 2.0),
+                    "edge-top" => (window.w / 2.0, 4.0),
+                    "edge-bottom" => (window.w / 2.0, window.h - 4.0),
+                    other => {
+                        let (kind, side) = other.split_once(':').map_or((other, None), |(kind, side)| (kind, Some(side)));
+                        let r = rect_of(group_of(kind)?.0)?;
+                        match side {
+                            None => (r.x + r.w / 2.0, r.y + r.h / 2.0),
+                            Some("left") => (r.x + r.w * 0.1, r.y + r.h / 2.0),
+                            Some("right") => (r.x + r.w * 0.9, r.y + r.h / 2.0),
+                            Some("above") => (r.x + r.w / 2.0, r.y + r.h * 0.1),
+                            Some("below") => (r.x + r.w / 2.0, r.y + r.h * 0.9),
+                            Some(side) => return Err(format!("{side:?} is not a side: left, right, above or below")),
+                        }
+                    }
+                };
+                vec![D::HeaderPressed { group, tab: Some(tab), x, y }, D::PointerMoved { x: x + 12.0, y: y + 12.0 }, D::PointerMoved { x: target.0, y: target.1 }, D::PointerReleased]
+            }
+            DockStep::Resize(delta) => {
+                let divider = self.core.dock().dividers().into_iter().find(|d| d.axis == styk_core::layout::Axis::Horizontal).ok_or("there is no column divider")?;
+                vec![D::DividerPressed { split: divider.split, index: divider.index }, D::DividerMoved(delta), D::DividerReleased]
+            }
+            DockStep::Collapse(panel) => {
+                let (group, _) = group_of(&panel)?;
+                let header = solution.headers.get(&group).copied().ok_or("that panel has no header")?;
+                let (x, y) = (header.x + header.w - 12.0, header.y + 22.0);
+                vec![D::HeaderPressed { group, tab: None, x, y }, D::PointerReleased, D::HeaderPressed { group, tab: None, x, y }, D::PointerReleased]
+            }
+            DockStep::Undo => vec![D::Undo],
+            other => return Err(format!("this build cannot run the dock step {other:?}")),
+        };
+        Ok(Task::batch(events.into_iter().map(|event| self.dock(event, now)).collect::<Vec<_>>()))
+    }
+
+    fn check_dock(&self, expectation: &automation::DockExpect) -> Result<(), String> {
+        use automation::DockExpect;
+        let dock = self.core.dock();
+        let group_of = |kind: &str| dock.layout().groups().into_iter().find(|g| g.tabs.iter().any(|p| p.kind == kind)).ok_or_else(|| format!("{kind} is in no group"));
+        match expectation {
+            DockExpect::Rect { panel, rect } => {
+                let group = group_of(panel)?;
+                let found = dock.solution().groups.get(&group.id).or(dock.solution().strips.get(&group.id)).copied().ok_or("that group is not shown")?;
+                let (a, b) = ([found.x, found.y, found.w, found.h], rect.map(f64::from));
+                if a.iter().zip(b).all(|(a, b)| (a - b).abs() <= 1.0) { Ok(()) } else { Err(format!("expected {panel}'s group at {b:?}, found {a:?}")) }
+            }
+            DockExpect::Modified(wanted) => if dock.modified() == *wanted { Ok(()) } else { Err(format!("expected the layout modified {wanted}, found {}", dock.modified())) },
+            DockExpect::Tabs { panel, count } => {
+                let found = group_of(panel)?.tabs.len();
+                if found == *count { Ok(()) } else { Err(format!("expected {count} tabs with {panel}, found {found}")) }
             }
             other => Err(format!("this build cannot check {other:?}")),
         }
@@ -846,6 +1146,76 @@ mod tests {
 
     fn arrow(named: Named, modifiers: Modifiers) -> Event {
         Event::Keyboard(keyboard::Event::KeyPressed { key: Key::Named(named), modified_key: Key::Named(named), physical_key: Physical::Unidentified(NativeCode::Unidentified), location: Location::Standard, modifiers, text: None, repeat: false })
+    }
+
+    /// The docked window's interaction script, run step by step through the dock's handler: the drag of a tab, the held
+    /// divider, the undo.
+    #[test]
+    fn the_dock_interaction_script_runs_through_the_one_handler() {
+        let (mut top, _) = band();
+        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
+        let script = Script::parse(include_str!("../automation/dock-interaction.script")).unwrap();
+        for (line, step) in script.steps {
+            match step {
+                Step::Resize(width, height) => top.resized(Size::new(width as f32, height as f32), 1.0),
+                Step::Wait(_) | Step::Screenshot(_) => {}
+                step => drop(top.execute(line, step)),
+            }
+        }
+        let failures = top.run.as_ref().unwrap().failures.clone();
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn the_dock_shows_the_arrangement_of_the_workspace_the_band_presses() {
+        use styk_core::layout::Workspace as Arrangement;
+        let (mut top, _) = band();
+        assert_eq!(top.core.dock().workspace(), Arrangement::Animate);
+        for (name, wanted) in [("draw", Arrangement::Draw), ("build", Arrangement::Rig), ("animate", Arrangement::Animate)] {
+            let _ = top.click(Target::Workspace(name.to_string())).unwrap();
+            let _ = top.update(Message::Frame);
+            assert_eq!(top.core.dock().workspace(), wanted, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_band_properties_command_reaches_the_dock_sheet() {
+        let (mut top, _) = band();
+        let size = Size::new(720., 800.);
+        top.resized(size, 1.);
+        let ready = warm_up::install_bundled(Default::default());
+        assert_eq!(top.core.dock().open(), None);
+        for wanted in [Some(2), None] {
+            let messages = {
+                let element = top.view(Theme::Light, ready, MaxButtonState::Idle, iced::widget::Space::new().boxed());
+                let mut driver = styk_design::widgets::testing::Driver::new(element, size, &styk_design::fonts::ALL);
+                let bounds = driver.snapshot().bounds_of(ids::PROPERTIES).expect("the mounted Properties opener");
+                driver.click(bounds.center());
+                driver.messages()
+            };
+            assert!(messages.iter().any(|m| matches!(m, Message::Ui(view::Message::Shell(shell::Event::Properties)))));
+            for message in messages { drop(top.update(message)); }
+            assert_eq!(top.core.dock().open(), wanted, "mounted opener reaches Shell, TopBand and Core");
+            if wanted.is_some() { assert!(top.core.dock().solution().visible.contains(&styk_core::layout::PanelId::new("properties"))); }
+        }
+    }
+
+    #[test]
+    fn production_layout_stamps_use_wall_time_and_distinct_session_writers() {
+        let (mut first, _) = band();
+        let (mut second, _) = band();
+        let mut stamps = Vec::new();
+        for top in [&mut first, &mut second] {
+            let before = top.wall.unix_millis();
+            drop(top.update(Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(styk_core::layout::PanelId::new("vfx")))))));
+            let after = top.wall.unix_millis();
+            let file = top.core.dock_mut().take_save(200).expect("fixed monotonic clock's 200ms debounce");
+            let stamp = file.workspaces["animate"].stamp.clone();
+            assert!(stamp.millis >= before && stamp.millis <= after);
+            assert!(stamp.millis > 1_600_000_000_000, "Unix epoch time, not process elapsed time");
+            stamps.push(stamp);
+        }
+        assert_ne!(stamps[0].writer, stamps[1].writer);
     }
 
     #[test]

@@ -178,12 +178,14 @@ fn core_loads_separate_legacy_root_and_flushes_changes_before_exit() {
     assert!(!core.settings().animation().fit_view_on_playback);
     assert!(!core.settings().animation().loop_playback);
     assert_eq!(core.settings().animation().timeline_mode, TimelineMode::Simple);
-    assert!(!core.dispatch(Command::PrepareExit).iter().any(|e| matches!(e, Effect::ExitReady)), "exit waits for the transaction");
+    core.dispatch(Command::Settings(Event::Finish { now: 20 }));
+    assert!(!core.settings_idle(), "exit waits for the transaction");
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
         assert!(std::time::Instant::now() < deadline);
         wake.recv_timeout(Duration::from_secs(30)).unwrap();
-        if core.dispatch(Command::Wake { now: 20 }).iter().any(|e| matches!(e, Effect::ExitReady)) {
+        core.dispatch(Command::Wake { now: 20 });
+        if core.settings_idle() {
             break;
         }
     }

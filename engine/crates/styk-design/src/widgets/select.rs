@@ -141,6 +141,8 @@ pub struct Select<'a, Message> {
     placeholder: Option<String>,
     disabled: bool,
     in_grid: bool,
+    /// The standalone form of dialogs and popovers (`.ui-select`), not the inspector's field (`.ui-field[data-select]`).
+    form: bool,
     on_open: Box<dyn Fn(Open) -> Message + 'a>,
     on_step: Box<dyn Fn(i32) -> Message + 'a>,
     preview: Option<Preview>,
@@ -149,7 +151,7 @@ pub struct Select<'a, Message> {
 impl<'a, Message: Clone + 'a> Select<'a, Message> {
     /// A select over `options` showing `chosen`; `on_open` when its list should open, `on_step(±1)` for an arrow key.
     pub fn new(id: FocusId, area: FocusArea, palette: &'static Palette, options: Vec<Choice>, chosen: Option<usize>, on_open: impl Fn(Open) -> Message + 'a, on_step: impl Fn(i32) -> Message + 'a) -> Self {
-        Select { id, area, palette, label: None, options, chosen, placeholder: None, disabled: false, in_grid: false, on_open: Box::new(on_open), on_step: Box::new(on_step), preview: None }
+        Select { id, area, palette, label: None, options, chosen, placeholder: None, disabled: false, in_grid: false, form: false, on_open: Box::new(on_open), on_step: Box::new(on_step), preview: None }
     }
 
     /// The label inside the field (`.ui-field[data-select]`: "Layer  Bubble"); none is a bare select.
@@ -170,6 +172,13 @@ impl<'a, Message: Clone + 'a> Select<'a, Message> {
     }
 
     /// The select is a cell of a grid of fields (tighter padding).
+    /// The select as a dialog or popover holds it (`.ui-select`): its chevron is `--icon-sm`, 10 px from the end, where the
+    /// inspector's field draws `--icon-xs` (`select.css`).
+    pub fn form(mut self, form: bool) -> Self {
+        self.form = form;
+        self
+    }
+
     pub fn in_grid(mut self, in_grid: bool) -> Self {
         self.in_grid = in_grid;
         self
@@ -181,7 +190,10 @@ impl<'a, Message: Clone + 'a> Select<'a, Message> {
     }
 
     pub fn into_element(self) -> Element<'a, Message> {
-        let Select { id, area, palette, label, options, chosen, placeholder, disabled, in_grid, on_open, on_step, preview } = self;
+        let Select { id, area, palette, label, options, chosen, placeholder, disabled, in_grid, form, on_open, on_step, preview } = self;
+        let (left, right) = frame::padding(in_grid);
+        // `.ui-select > svg`: `--icon-sm` at 10 px from the end, the value clear of it by `--space-1-5`; `.ui-field-chev`: `--icon-xs`.
+        let (glyph, clear, edge) = if form { (scale::ICON_SM, scale::SPACE_1_5, scale::SPACE_2_5 - right) } else { (scale::ICON_XS, scale::SPACE_1, scale::SPACE_2 - scale::SPACE_1) };
         let ink = |color: crate::Rgba| if disabled { color.faded(FIELD_DISABLED) } else { color };
         let typed = TextStyle::from_role(&scale::TYPE_VALUE);
         let (text, hint, handle) = (ink(palette.text_1), ink(palette.text_placeholder), ink(palette.text_3));
@@ -189,22 +201,21 @@ impl<'a, Message: Clone + 'a> Select<'a, Message> {
             .and_then(|chosen| options.get(chosen))
             .map(|option| words(option.label.clone(), typed, text))
             .or_else(|| placeholder.map(|placeholder| words(placeholder, typed, hint)));
-        let value = container(shown.unwrap_or_else(|| words(String::new(), typed, text))).width(Length::Fill).padding(Padding { right: scale::SPACE_2 + scale::ICON_XS + scale::SPACE_1, ..Padding::ZERO });
+        let value = container(shown.unwrap_or_else(|| words(String::new(), typed, text))).width(Length::Fill).padding(Padding { right: scale::SPACE_2 + glyph + clear, ..Padding::ZERO });
         let mut parts: Vec<Element<'a, Message>> = Vec::new();
         if let Some(label) = label {
             parts.push(words(label, TextStyle::from_role(&scale::TYPE_SMALL), ink(palette.text_3)));
         }
         // `.ui-field-chev`: drawn over the select's end, so a press there still opens it.
-        let chevron = container(super::icon("chevron-down", scale::ICON_XS, handle))
+        let chevron = container(super::icon("chevron-down", glyph, handle))
             .align_right(Length::Fill)
             .center_y(Length::Fill)
-            .padding(Padding { right: scale::SPACE_2 - scale::SPACE_1, ..Padding::ZERO });
+            .padding(Padding { right: edge, ..Padding::ZERO });
         parts.push(iced::widget::stack![value, chevron].boxed());
         let line = Row::with_children(parts).spacing(scale::SPACE_2).align_y(Alignment::Center);
         // The field shows focus with its own accent ring (`select:focus` draws no outline), so the target's ring is empty.
         let no_ring = Ring { color: Color::TRANSPARENT, width: 0.0, offset: 0.0, radius: 0.0 };
         let target = Focusable::new(id, area, line.boxed(), no_ring).input_role(InputRole::Select).keys(Keys::Custom(Box::new(|_| None))).enabled(!disabled);
-        let (left, right) = frame::padding(in_grid);
         let framed = FieldFrame::new(target.boxed(), palette, Length::Fill, frame::HEIGHT, Padding { top: 0.0, right, bottom: 0.0, left }).disabled(disabled).preview(preview);
         Opener { content: framed.boxed(), on_open, on_step, enabled: !disabled }.boxed()
     }

@@ -123,3 +123,40 @@ pub fn undo_depth(core: &Core) -> usize {
 pub fn editing(core: &Core) -> bool {
     core.documents.active().is_some_and(|document| document.view().is_ok_and(|view| view.editing))
 }
+
+/// How long the helpers below wait for the documents host's workers: 15 000 turns of a millisecond.
+const WAIT_TURNS: u32 = 15_000;
+
+/// Attaches recovery to `core`'s documents host over `store` (a test's private root, never the person's folder), with a
+/// fixed clock, and lets the host's first listing land, so the offer is what a start would show.
+pub fn attach_recovery(core: &mut Core, store: Arc<dyn styk_services::recovery::Recovery>) -> Result<(), String> {
+    core.documents.attach_recovery(store, Arc::new(styk_services::clock::FixedClock::new())).map_err(|error| error.to_string())?;
+    for _ in 0..WAIT_TURNS {
+        while let Some(effect) = core.documents.poll() {
+            core.document_effect(&effect);
+            if matches!(effect, crate::documents::Effect::Recovery(crate::documents::recovery::Event::Listed)) {
+                core.refresh();
+                return Ok(());
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    Err("the recovery host did not list its copies in 15 s".to_string())
+}
+
+/// Does what the frame loop does until `done` holds: takes what the documents host finished, hands each effect to the core
+/// (`Core::document_effect`) and refreshes. Fails after 15 seconds. The effects the core answered with come back.
+pub fn poll_until(core: &mut Core, done: impl Fn(&Core) -> bool) -> Result<Vec<crate::commands::Effect>, String> {
+    let mut effects = Vec::new();
+    for _ in 0..WAIT_TURNS {
+        while let Some(effect) = core.documents.poll() {
+            effects.extend(core.document_effect(&effect));
+        }
+        effects.extend(core.refresh());
+        if done(core) {
+            return Ok(effects);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    Err(format!("the documents host did not answer in 15 s (recovery: {:?})", core.documents.recovery_view()))
+}

@@ -46,6 +46,31 @@ fn wheel(delta: WheelDelta, modifiers: Modifiers) -> Event {
 }
 
 #[test]
+fn accepted_quit_fences_stage_gestures_queued_pen_and_drawing_commands() {
+    use styk_core::{commands::CommandId, documents::{CloseChoice, Effect as Doc, Request}, engine::Value};
+    use styk_services::input::{InputEvent, InputQueue, PenSample, Phase, Tool};
+    let (mut core, surface, _) = quiet();
+    let id = core.documents.active().unwrap().id();
+    core.documents.call(id, "setFPS", &[Value::Num(30.0)], &Value::Null).unwrap().result.unwrap();
+    let Doc::ConfirmQuit { prompt, .. } = core.documents.dispatch(Request::Quit).map_err(|(error, _)| error).unwrap() else { panic!("dirty prompt") };
+    assert!(matches!(core.documents.dispatch(Request::Respond { prompt, choice: CloseChoice::Discard }), Ok(Doc::QuitReady)));
+    // The application has not received QuitReady. Both mouse navigation and native queued pen input use Core.
+    for (phase, x, y) in [(PointerPhase::Down, 100.0, 100.0), (PointerPhase::Move, 130.0, 90.0), (PointerPhase::Up, 130.0, 90.0)] {
+        core.dispatch(Command::Stage(pointer(1, phase, Button::Middle, x, y)));
+    }
+    assert_eq!(view(&surface).pan, [0.0, 0.0]);
+    let queue = InputQueue::new(); surface.set_input(queue.clone());
+    surface.event(Event::PanTool(true)).unwrap();
+    for (phase, x, y) in [(Phase::Down, 100.0, 100.0), (Phase::Move, 130.0, 90.0), (Phase::Up, 130.0, 90.0)] {
+        let mut sample = PenSample::at(0, 5, Tool::Pen, x, y); sample.phase = phase;
+        assert!(queue.push(InputEvent::Sample(sample)));
+    }
+    core.dispatch(Command::Stage(Event::Progress));
+    assert_eq!(view(&surface).pan, [0.0, 0.0]);
+    assert!(core.dispatch(Command::Run(CommandId::DrawingApply)).is_empty(), "no drawing command or refusal may reach the just-closed prompt");
+}
+
+#[test]
 fn a_plain_wheel_pans_by_the_browsers_deltas_and_shift_swaps_the_axes() {
     let (mut core, surface, _) = quiet();
     assert_eq!((view(&surface).zoom, view(&surface).pan), (1.0, [0.0, 0.0]));

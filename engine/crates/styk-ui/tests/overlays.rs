@@ -617,7 +617,7 @@ fn keyboard_focus_shows_a_tooltip_with_no_pointer_at_all() {
 #[test]
 fn a_message_waits_while_the_pointer_or_keyboard_focus_is_on_it_and_its_action_dispatches() {
     let mut app = App::new(Page::Controls, WINDOW);
-    let undo = Action { command: CommandId::ZoomMenu, label: "Undo".into(), dismiss: true };
+    let undo = Action { command: CommandId::ZoomMenu.into(), label: "Undo".into(), dismiss: true, outline: false };
     app.now = 100;
     app.send(Message::Command(Command::Overlay { event: Overlay::ShowMessage(Toast::new(1, "deleted", Tone::Warning, false, vec![undo])), now: 100 }));
     assert!(app.core.overlay_deadline().is_some(), "the message's entry and its timeout are due");
@@ -633,7 +633,7 @@ fn a_message_waits_while_the_pointer_or_keyboard_focus_is_on_it_and_its_action_d
 
     // Keyboard focus on its button waits too: the core derives it from the focus walk.
     app.now = 20000;
-    let undo = Action { command: CommandId::ZoomMenu, label: "Undo".into(), dismiss: true };
+    let undo = Action { command: CommandId::ZoomMenu.into(), label: "Undo".into(), dismiss: true, outline: false };
     app.send(Message::Command(Command::Overlay { event: Overlay::ShowMessage(Toast::new(2, "again", Tone::Warning, false, vec![undo])), now: 20000 }));
     app.tab_to(message_button_id(2, 0));
     assert_eq!(app.core.focus().focused(), Some(message_button_id(2, 0)), "Tab reached the message's button");

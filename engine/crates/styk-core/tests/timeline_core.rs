@@ -178,7 +178,15 @@ fn global_transport_returns_from_beyond_end_without_changing_the_cell_selection(
 fn accepted_exit_fences_commands_and_document_requests_until_window_teardown() {
     let mut rig = Rig::new();
     let revision = rig.core.documents.active().unwrap().revision();
-    assert!(rig.core.dispatch(Command::PrepareExit).iter().any(|effect| matches!(effect, Effect::ExitReady)));
+    let mut effects = rig.core.request_quit();
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    while !effects.iter().any(|effect| matches!(effect, Effect::QuitReady)) {
+        if let Some(effect) = rig.core.poll_document() { effects.extend(rig.core.document_effect(&effect)); }
+        effects.extend(rig.core.documents_progress());
+        effects.extend(rig.core.dispatch(Command::Wake { now: 200 }));
+        assert!(std::time::Instant::now() < until, "the real document quit must settle");
+        std::thread::yield_now();
+    }
     rig.core.dispatch(Command::Timeline(Event::Action { id: Id::TimelineSetFps, payload: Payload::Number(30.), now: 200 }));
     rig.core.dispatch(Command::Settings(settings::Event::Set { id: SettingId::LoopPlayback, value: Value::Bool(false), now: 200 }));
     for _ in 0..3 { rig.core.dispatch(Command::Wake { now: 200 }); }

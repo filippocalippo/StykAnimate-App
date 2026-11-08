@@ -30,7 +30,7 @@ only acknowledged values retire. Refused worker admission retains its request an
 Each setting also owns its latest mutation identity. A Change can revert only that mutation,
 including after an ABA value sequence; changing another setting does not invalidate it. These
 identities are transient and never enter the settings file.
-Close flush waits for the transaction and retries failures while notices remain visible. Corrupt-file
+Ordinary flush waits for the transaction and retries failures while notices remain visible. Corrupt-file
 backup/recovery actions and Settings controls arrive with later design chunks, using this same owner.
 
 After the documents host grants `QuitReady`, `Event::Finish` is final maintenance: it bypasses
@@ -42,6 +42,8 @@ end, so preference persistence cannot extend the session-end bound.
 The app integration test `settings_storage` uses real LocalStorage in directories created and
 removed by each test; keeping this cross-owner test at the app avoids a core-to-platform dependency. It covers
 unknown fields, future schemas at load and transaction time, a separate read-only legacy root,
-late edits, actual replacement failure/retry, coalescing and Core's pre-exit flush.
-Native-only notice keys in `styk-core/native-messages.json` extend the English catalogue through the
+late edits, actual replacement failure/retry, coalescing and Core's final maintenance drain.
+The real app quit regression also checks the Settings and layout receipts under the accepted-quit fence;
+see [recovery.md](recovery.md). Screens and unattended runs use no personal preferences store.
+Native-only notice keys in `styk-core/messages/en.json` extend the English catalogue through the
 build script; other locales use the existing fallback presentation path.

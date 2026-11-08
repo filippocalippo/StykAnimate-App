@@ -12,6 +12,7 @@ use styk_core::shell::{Shell, TabView, Window};
 use styk_core::screens::InspectorScreen;
 use styk_design::Theme;
 use crate::overlay_sheet::OverlayScreen;
+use crate::recovery_sheet::RecoveryScreen;
 
 /// A screen of the catalogue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,15 +31,30 @@ pub enum Screen {
     Controls(bool),
     /// An overlay or panel-parts screen (`crate::overlay_sheet`); dark when `true`.
     Overlay(OverlayScreen, bool),
+    /// A recovery screen (`crate::recovery_sheet`): the offer, the chooser, the close prompt; dark when `true`.
+    Recovery(RecoveryScreen, bool),
     /// The Properties panel in a context (`styk_core::screens`), docked at today's default size; dark when `true`.
     Inspector(InspectorScreen, bool),
     /// The stage: a repository fixture fitted into the stage region at tick 0; dark when `true`.
     Stage(bool),
+    /// The main window: the band over the docked default layout in a window of this size (`styk_core::dock`); dark when `true`.
+    Dock(DockScreen, bool),
+}
+
+/// The sizes the docked window is a screen at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DockScreen {
+    /// 1560 x 1000.
+    Wide,
+    /// 1440 x 900.
+    Regular,
+    /// 720 x 800: the right dock folded to a sheet.
+    Folded,
 }
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 43] = [
+    pub const ALL: [Screen; 59] = [
         Screen::ComponentSheet,
         Screen::Band,
         Screen::BandDark,
@@ -82,6 +98,22 @@ impl Screen {
         Screen::Overlay(OverlayScreen::Dialog, true),
         Screen::Overlay(OverlayScreen::Parts, false),
         Screen::Overlay(OverlayScreen::Parts, true),
+        Screen::Recovery(RecoveryScreen::Offer, false),
+        Screen::Recovery(RecoveryScreen::Offer, true),
+        Screen::Recovery(RecoveryScreen::Chooser, false),
+        Screen::Recovery(RecoveryScreen::Chooser, true),
+        Screen::Recovery(RecoveryScreen::Busy, false),
+        Screen::Recovery(RecoveryScreen::Busy, true),
+        Screen::Recovery(RecoveryScreen::Error, false),
+        Screen::Recovery(RecoveryScreen::Error, true),
+        Screen::Recovery(RecoveryScreen::ClosePrompt, false),
+        Screen::Recovery(RecoveryScreen::ClosePrompt, true),
+        Screen::Dock(DockScreen::Wide, false),
+        Screen::Dock(DockScreen::Wide, true),
+        Screen::Dock(DockScreen::Regular, false),
+        Screen::Dock(DockScreen::Regular, true),
+        Screen::Dock(DockScreen::Folded, false),
+        Screen::Dock(DockScreen::Folded, true),
     ];
 
     /// The ID the command line uses.
@@ -110,6 +142,16 @@ impl Screen {
             Screen::Overlay(OverlayScreen::Dialog, true) => "dialog-dark",
             Screen::Overlay(OverlayScreen::Parts, false) => "parts",
             Screen::Overlay(OverlayScreen::Parts, true) => "parts-dark",
+            Screen::Recovery(RecoveryScreen::Offer, false) => "recovery-offer",
+            Screen::Recovery(RecoveryScreen::Offer, true) => "recovery-offer-dark",
+            Screen::Recovery(RecoveryScreen::Chooser, false) => "recovery-chooser",
+            Screen::Recovery(RecoveryScreen::Chooser, true) => "recovery-chooser-dark",
+            Screen::Recovery(RecoveryScreen::Busy, false) => "recovery-busy",
+            Screen::Recovery(RecoveryScreen::Busy, true) => "recovery-busy-dark",
+            Screen::Recovery(RecoveryScreen::Error, false) => "recovery-error",
+            Screen::Recovery(RecoveryScreen::Error, true) => "recovery-error-dark",
+            Screen::Recovery(RecoveryScreen::ClosePrompt, false) => "close-prompt",
+            Screen::Recovery(RecoveryScreen::ClosePrompt, true) => "close-prompt-dark",
             Screen::Inspector(InspectorScreen::Scene, false) => "inspector-scene",
             Screen::Inspector(InspectorScreen::Scene, true) => "inspector-scene-dark",
             Screen::Inspector(InspectorScreen::Figure, false) => "inspector-figure",
@@ -130,6 +172,12 @@ impl Screen {
             Screen::Inspector(InspectorScreen::Frame, true) => "inspector-frame-dark",
             Screen::Stage(false) => "stage-fit",
             Screen::Stage(true) => "stage-fit-dark",
+            Screen::Dock(DockScreen::Wide, false) => "dock",
+            Screen::Dock(DockScreen::Wide, true) => "dock-dark",
+            Screen::Dock(DockScreen::Regular, false) => "dock-1440",
+            Screen::Dock(DockScreen::Regular, true) => "dock-1440-dark",
+            Screen::Dock(DockScreen::Folded, false) => "dock-folded",
+            Screen::Dock(DockScreen::Folded, true) => "dock-folded-dark",
         }
     }
 
@@ -145,14 +193,24 @@ impl Screen {
     /// The theme the screen is drawn in.
     pub const fn theme(self) -> Theme {
         match self {
-            Screen::BandDark | Screen::Controls(true) | Screen::Inspector(_, true) | Screen::Stage(true) | Screen::Overlay(_, true) => Theme::Dark,
+            Screen::BandDark | Screen::Controls(true) | Screen::Inspector(_, true) | Screen::Stage(true) | Screen::Overlay(_, true) | Screen::Recovery(_, true) | Screen::Dock(_, true) => Theme::Dark,
             _ => Theme::Light,
         }
     }
 
     /// Whether the screen is the top band over its window (the band screens need the shell's layout).
     pub const fn is_band(self) -> bool {
-        !matches!(self, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..) | Screen::Inspector(..) | Screen::Stage(..))
+        !matches!(self, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..) | Screen::Recovery(..) | Screen::Dock(..) | Screen::Inspector(..) | Screen::Stage(..))
+    }
+
+    /// Whether the screen is the main window: the band over the docked layout.
+    pub const fn is_dock(self) -> bool {
+        matches!(self, Screen::Dock(..))
+    }
+
+    /// Whether the screen shows the window's band (a band screen, or the docked window).
+    pub const fn has_band(self) -> bool {
+        self.is_band() || self.is_dock()
     }
 
     /// The screen with this ID.
@@ -171,11 +229,12 @@ impl Screen {
 pub fn band_shell(screen: Screen, size: (u32, u32), labels: Labels) -> Shell {
     let window = Window { width: size.0 as f32, height: size.1 as f32, ui_scale: 1.0, controls: true };
     let mut shell = Shell::new(window, crate::shell::metrics(), labels);
-    let names = ["Rooftop fight", "Chase", "Untitled animation"];
+    // The window's screens show the one project today's window opens with; the band's own screens show three.
+    let (names, front, edited): (&[&str], usize, bool) = if screen.is_dock() { (&["Untitled animation"], 0, false) } else { (&["Rooftop fight", "Chase", "Untitled animation"], 1, true) };
     let tabs = names
         .iter()
         .enumerate()
-        .map(|(index, name)| TabView { id: DocumentId::preview(index as u64 + 1), name: (*name).to_string(), front: index == 1, state: (index == 1).then_some(TabState::Edited), dragging: false, drop: None })
+        .map(|(index, name)| TabView { id: DocumentId::preview(index as u64 + 1), name: (*name).to_string(), front: index == front, state: (index == front && edited).then_some(TabState::Edited), dragging: false, drop: None })
         .collect();
     shell.preview(Some(tabs));
     if screen == Screen::BandBuild {
@@ -234,5 +293,16 @@ pub fn inspector_model(context: InspectorScreen) -> styk_core::inspector::model:
         InspectorScreen::Camera => include!("screens/models/camera.rs"),
         InspectorScreen::Layer => include!("screens/models/layer.rs"),
         InspectorScreen::Frame => include!("screens/models/frame.rs"),
+    }
+}
+
+impl DockScreen {
+    /// The window size the screen is at, in logical pixels.
+    pub const fn size(self) -> (u32, u32) {
+        match self {
+            DockScreen::Wide => (1560, 1000),
+            DockScreen::Regular => (1440, 900),
+            DockScreen::Folded => (720, 800),
+        }
     }
 }

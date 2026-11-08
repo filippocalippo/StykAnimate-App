@@ -5,6 +5,7 @@
 
 use super::controls::{self, IconButton, Segment, Tone, WordButton, color};
 use super::{Message, Params, strip, text};
+use styk_core::i18n::Label;
 use crate::band::{Controls, Hot, window_controls};
 use iced::widget::{container, pin, row, space, stack, svg};
 use iced::{Alignment, Border, Element, Length, Padding, Widget as _};
@@ -23,7 +24,7 @@ const SYMBOL: &[u8] = include_bytes!("../../../../../symbol.svg");
 const LINE: f32 = 2.0;
 const LINE_HEIGHT: f32 = 24.0;
 
-fn name_of(workspace: Workspace) -> &'static str {
+fn name_of(workspace: Workspace) -> Label {
     match workspace {
         Workspace::Animate => text::ANIMATE,
         Workspace::Draw => text::DRAW,
@@ -128,7 +129,7 @@ pub(crate) fn view(params: &Params<'_>) -> Element<'static, Message> {
                     .filter_map(|p| match p.item {
                         Item::Workspace(workspace) => Some(controls::segment(Segment {
                             workspace,
-                            label: name_of(workspace),
+                            label: params.presentation.label(&name_of(workspace)),
                             content: layout.segments,
                             width: p.frame.width,
                             height: p.frame.height,
@@ -169,7 +170,7 @@ pub(crate) fn view(params: &Params<'_>) -> Element<'static, Message> {
                 frame.x,
                 controls::word_button(WordButton {
                     tone: if look == ExportLook::Primary { Tone::Primary } else { Tone::Ghost },
-                    label: text::EXPORT,
+                    label: params.presentation.label(&text::EXPORT),
                     glyph: Some("export"),
                     folded: shape == ButtonShape::Glyph,
                     width: frame.width,
@@ -184,17 +185,17 @@ pub(crate) fn view(params: &Params<'_>) -> Element<'static, Message> {
             ),
             Item::Cancel => (
                 frame.x,
-                controls::word_button(WordButton { tone: Tone::Ghost, label: text::CANCEL, glyph: None, folded: false, width: frame.width, height: frame.height, hovered: hovered(Hover::Cancel), target: Hover::Cancel, press: Message::Shell(Event::Cancel), focus: ids::CANCEL, theme }),
+                controls::word_button(WordButton { tone: Tone::Ghost, label: params.presentation.label(&text::CANCEL), glyph: None, folded: false, width: frame.width, height: frame.height, hovered: hovered(Hover::Cancel), target: Hover::Cancel, press: Message::Shell(Event::Cancel), focus: ids::CANCEL, theme }),
                 frame.right(),
             ),
             Item::TestRig(shape) => (
                 frame.x,
-                controls::word_button(WordButton { tone: Tone::Ghost, label: text::TEST_RIG, glyph: Some("test-rig"), folded: shape == ButtonShape::Glyph, width: frame.width, height: frame.height, hovered: hovered(Hover::TestRig), target: Hover::TestRig, press: Message::Shell(Event::TestRig), focus: ids::TEST_RIG, theme }),
+                controls::word_button(WordButton { tone: Tone::Ghost, label: params.presentation.label(&text::TEST_RIG), glyph: Some("test-rig"), folded: shape == ButtonShape::Glyph, width: frame.width, height: frame.height, hovered: hovered(Hover::TestRig), target: Hover::TestRig, press: Message::Shell(Event::TestRig), focus: ids::TEST_RIG, theme }),
                 frame.right(),
             ),
             Item::Done(done, shape) => (
                 frame.x,
-                controls::word_button(WordButton { tone: Tone::Primary, label: text::DONE, glyph: Some("check"), folded: shape == ButtonShape::Glyph, width: frame.width, height: frame.height, hovered: hovered(Hover::Done(done)), target: Hover::Done(done), press: Message::Shell(Event::Done(done)), focus: ids::DONE, theme }),
+                controls::word_button(WordButton { tone: Tone::Primary, label: params.presentation.label(&text::DONE), glyph: Some("check"), folded: shape == ButtonShape::Glyph, width: frame.width, height: frame.height, hovered: hovered(Hover::Done(done)), target: Hover::Done(done), press: Message::Shell(Event::Done(done)), focus: ids::DONE, theme }),
                 frame.right(),
             ),
             Item::Minimize => {

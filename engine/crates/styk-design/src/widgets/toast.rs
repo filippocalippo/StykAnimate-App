@@ -142,9 +142,10 @@ fn tone_ink(palette: &Palette, tone: Tone) -> Rgba {
 }
 
 /// A pill-shaped press target with a hover fill and a focus ring: a toast's action and close button.
-fn target<'a, Message: Clone + 'a>(palette: &'static Palette, id: FocusId, face: Element<'a, Message>, message: Message, width: Length, height: f32) -> Element<'a, Message> {
+fn target<'a, Message: Clone + 'a>(palette: &'static Palette, id: FocusId, face: Element<'a, Message>, message: Message, width: Length, height: f32, outline: bool) -> Element<'a, Message> {
     let hover = palette.surface_hover;
-    let look = move |interaction: Interaction| Look { fill: (interaction != Interaction::Rest).then_some(hover), border: 0.0, ring: None, shadows: &[], radius: pill(height), opacity: 1.0, scale: 1.0 };
+    let line = palette.line_2;
+    let look = move |interaction: Interaction| Look { fill: (interaction != Interaction::Rest).then_some(hover), border: 0.0, ring: outline.then_some((1.0, line)), shadows: &[], radius: pill(height), opacity: 1.0, scale: 1.0 };
     let surface = Surface::new(face, look).on_press_maybe(Some(message.clone())).width(width).height(Length::Fixed(height));
     Focusable::new(id, FocusArea::Stage, surface.boxed(), Ring::of(palette, pill(height))).on_activate(message).boxed()
 }
@@ -253,7 +254,7 @@ pub fn toast<'a, Message: Clone + 'a>(palette: &'static Palette, message: &Toast
     let kind = variant(message);
     let ink = TextStyle::from_role(&scale::TYPE_UI);
     let mut parts: Vec<Element<'a, Message>> = Vec::new();
-    if let Some(icon) = tone_icon(message.tone) {
+    if let Some(icon) = message.icon.as_deref().or(tone_icon(message.tone)) {
         parts.push(super::icon(icon, scale::ICON_MD, tone_ink(palette, message.tone)).boxed());
     }
     // `<b>title</b> text`: the title in semibold ink, then the words, wrapping past the window.
@@ -271,11 +272,11 @@ pub fn toast<'a, Message: Clone + 'a>(palette: &'static Palette, message: &Toast
     }
     for (index, action) in message.actions.iter().enumerate() {
         let label = container(words(action.label.clone(), TextStyle::from_role(&scale::TYPE_SMALL_STRONG), palette.accent_text)).padding(Padding { top: 0.0, right: scale::SPACE_2_5, bottom: 0.0, left: scale::SPACE_2_5 }).center_y(Length::Fixed(scale::CONTROL_MD));
-        parts.push(target(palette, button_id(message.id, index), label.boxed(), send(Event::Action { id: message.id, index }), Length::Shrink, scale::CONTROL_MD));
+        parts.push(target(palette, button_id(message.id, index), label.boxed(), send(Event::Action { id: message.id, index }), Length::Shrink, scale::CONTROL_MD, action.outline));
     }
     if message.dismissible {
         let glyph = container(super::icon("close", scale::ICON_SM, palette.text_3)).center_x(Length::Fixed(scale::CONTROL_SM)).center_y(Length::Fixed(scale::CONTROL_SM));
-        parts.push(target(palette, button_id(message.id, 15), glyph.boxed(), send(Event::Dismiss(message.id)), Length::Fixed(scale::CONTROL_SM), scale::CONTROL_SM));
+        parts.push(target(palette, button_id(message.id, 15), glyph.boxed(), send(Event::Dismiss(message.id)), Length::Fixed(scale::CONTROL_SM), scale::CONTROL_SM, false));
     }
     let buttons = message.actions.len() + usize::from(message.dismissible);
     let gap = if kind == Variant::Task { scale::SPACE_2_5 } else { scale::SPACE_2 };

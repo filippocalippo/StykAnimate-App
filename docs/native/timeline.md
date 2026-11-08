@@ -56,11 +56,12 @@ restart playback or acknowledge an obsolete transport demand.
 Pending workers wake through Progress, independently of automation readiness. Continuous frames
 are subscribed for playback and shell animation; automation requests its finite settling frames
 only when ready, never while waiting for a worker. Existing stage widget input
-and automation FPS edits use the same command path. App close first settles the new owners and
-flushes settings. Once exit is accepted, commands and document requests stay fenced until window
-teardown. Document save/close/quit requests use the same lifecycle barrier. Existing document
-confirmation/file-picker UI and OS-session-end installation remain with document/app integration;
-this core does not invent a second confirmation policy.
+and automation FPS edits use the same command path. App close first settles panel work through the
+existing lifecycle barrier, retaining a busy quit intent until its session completes. The recovery
+owner then obtains document clearance. After `QuitReady`, Settings and layout drain together while
+input remains fenced until window teardown. Session end cancels and detaches both preference lanes.
+Document save/close/quit requests share the lifecycle barrier; recovery's confirmation and shutdown
+policy remain authoritative. See [recovery.md](recovery.md), “Quit order”.
 
 ## Persistence and verification
 

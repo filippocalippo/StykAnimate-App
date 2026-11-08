@@ -291,7 +291,7 @@ impl Persistence {
             finish_failed: false,
         };
         lane.queue.mark_changed(0);
-        lane.queue.flush(0);
+        lane.queue.expedite(0);
         lane.queue.take_due(0);
         lane.submit(0);
         Ok(lane)
@@ -313,7 +313,7 @@ impl Persistence {
         self.queue.mark_changed(now);
     }
     pub fn flush(&mut self, now: u64) {
-        self.queue.flush(now);
+        self.queue.expedite(now);
     }
     /// The documents host has granted quit. As with layout, a refused final
     /// transaction leaves the last complete file for the next launch.
@@ -386,7 +386,7 @@ impl Persistence {
                 return answer;
             }
             // A late load may create the legacy-import patch during the final drain.
-            self.queue.flush(now);
+            self.queue.expedite(now);
         }
         if !self.read_only && self.waiting.is_none() {
             if self.queue.take_due(now).is_some() {
