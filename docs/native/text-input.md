@@ -31,10 +31,10 @@ A field has a **role**. The role fixes what Enter, Escape, Tab and undo do. One 
   travelled). ArrowUp and ArrowDown step inside the input as well as on the label; Ctrl and Meta arrows pass through to the
   text. A one-line field selects its text when focus comes from the keyboard (Tab, F6, a dialog opening), not when it
   comes from a click.
-- **Undo and redo in a focused field belong to the field**, unchanged fields and exhausted histories included
-  (`app.mjs` 5806: a focused text field gets the native undo; the document is never undone from a field). Ctrl+Z,
-  Ctrl+Shift+Z and Ctrl+Y route by focus alone: when `FocusState::text_entry` is set the document's undo is not
-  reachable. When the field's history is exhausted Ctrl+Z does nothing.
+- **Undo and redo in an ordinary focused field belong to the field**, unchanged fields and exhausted histories included.
+  The executable `app.mjs` has a specific exception for VFX property inputs: their feature finishes the edit before
+  undo/redo. Both keyboard and native-menu routing read the focused target's typed `HistoryOwner`; they never bypass
+  that feature owner. All other fields retain their own history, and exhausted field history does nothing.
 - Limits (the contract, `limits.rs`) are enforced **before the editor mutates** (section 2), never by rejecting the value
   after `on_input`: iced edits, shapes and records history before it publishes. **No field refuses text that today's app
   accepts and handles.** A field's limits are the ones it has today: its `maxlength` (16,384 in the text tool and in a
@@ -92,7 +92,9 @@ Plain Rust, no toolkit. The interface reports; the core decides.
   previous (`focus-next-region`, `focus-previous-region` in `src/hotkeys.mjs`); they cycle the areas that currently exist
   from anywhere, **including from inside a text field** (the text is unchanged), but not while an input method composes.
   **Shift+F6 is Remove keyframes** and is neither navigation nor a chord that works from a field: the only chords that work
-  from a text field are F6, Ctrl+F6, Ctrl+Alt+M and Ctrl+Alt+L. While a modal scope is open F6 cycles only inside the modal's regions (or does nothing when it has one).
+  from an ordinary text field are F6, Ctrl+F6, Ctrl+Alt+M and Ctrl+Alt+L. The field capture handler accepts their repeats;
+  the ordinary shortcut path keeps each command's repeat policy. VFX history follows the ownership exception above.
+  While a modal scope is open F6 cycles only inside the modal's regions (or does nothing when it has one).
 - **Scopes** form a stack. The root scope is the window; a dialog, menu or popover pushes a scope. Tab and Shift+Tab move
   among the focusable targets **of the top scope** and wrap at both edges (a modal never leaks focus to the page below).
   Opening a scope records the **invoker** (the focused target when it opened) and chooses an initial target (the
@@ -102,8 +104,10 @@ Plain Rust, no toolkit. The interface reports; the core decides.
   only Tab**: while it is open only its targets can hold focus (`reconcile` and `focus` refuse the page's, and `reconcile`
   returns the stale one so the interface takes focus from it), and the `Scope` widget consumes every pointer event the dialog
   did not take, so a click on a field behind the dialog reaches nothing.
-- **Targets** are registered by the interface each view pass in tree order: `FocusTarget { id, area, kind, enabled,
-  tab_stop }`. A roving group is one target for Tab (its active child).
+- **Targets** are registered by the interface each view pass in tree order: `FocusTarget { id, area, kind, input_role,
+  history_owner, enabled, tab_stop }`. Input role is independent of focus kind: a select is a `Control` and still
+  suppresses editor shortcuts. Checkboxes/radios permit only the reference's builder-scoped `builder-*` exceptions.
+  A roving group is one target for Tab (its active child). Widgets describe these roles; the core decides routing.
 - **Reconciliation always reports `Option<Id>`.** After any event that can change focus (Tab, click, Escape, a removed or
   disabled field, a panel replaced, programmatic focus) the toolkit side reports what it holds focused:
   `FocusState::reconcile(Option<Id>)`. `None` clears the core's `text_entry` and `composing`. The core never trusts a

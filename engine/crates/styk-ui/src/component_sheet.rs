@@ -10,7 +10,7 @@ use iced::widget::{Column, Row, Stack, container, scrollable, slider, text};
 use iced::{Element, Event, Length, Subscription, Task, Widget as _, event, keyboard, mouse};
 use styk_core::controls::{Select, SelectKey, SelectOutcome, SliderKey, slider_value};
 use styk_core::field::{FieldValue, Role};
-use styk_core::focus::{FocusArea, FocusId, FocusState, ScopeId};
+use styk_core::focus::{FocusArea, FocusId, FocusState, InputRole, ScopeId};
 use styk_core::number::{NumberEdit, Range, StepKeys};
 use styk_core::roving::Orientation;
 use styk_core::text_entry::{Chord, command_allowed};
@@ -382,6 +382,7 @@ impl Sheet {
             slider(0.0..=100.0, self.slider, Message::SliderTo).width(Length::Fixed(220.0)).boxed(),
             self.ring(),
         )
+        .input_role(InputRole::Other)
         .keys(Keys::Custom(Box::new(move |event| match event {
             keyboard::Event::KeyPressed { key, modifiers, .. } => {
                 let keys = StepKeys { shift: modifiers.shift(), alt: modifiers.alt() };
@@ -409,7 +410,7 @@ impl Sheet {
                 .width(Length::Fixed(160.0))
                 .style(move |_| container::Style::default().background(iced::Color::from(palette.surface_field)).border(iced::Border { color: palette.line_control.into(), width: 1.0, radius: tokens::scale::RADIUS_XS.into() }))
         };
-        let select_target = Focusable::new(ids::SELECT, FocusArea::Panels, select_face.boxed(), self.ring()).keys(Keys::Custom(Box::new(|event| match event {
+        let select_target = Focusable::new(ids::SELECT, FocusArea::Panels, select_face.boxed(), self.ring()).input_role(InputRole::Select).keys(Keys::Custom(Box::new(|event| match event {
             keyboard::Event::KeyPressed { key, modifiers, .. } => {
                 use keyboard::key::Named;
                 let select_key = match key.as_ref() {
@@ -428,7 +429,7 @@ impl Sheet {
         })));
 
         let switch_face = text(if self.switch_on { "On" } else { "Off" }).size(tokens::scale::TYPE_UI.size).font(styk_design::widgets::INTER).color(iced::Color::from(palette.text_1));
-        let switch = Focusable::new(ids::TOGGLE, FocusArea::Panels, container(switch_face).padding([6.0, 12.0]).boxed(), self.ring()).keys(Keys::Toggle).on_activate(Message::ToggleSwitch);
+        let switch = Focusable::new(ids::TOGGLE, FocusArea::Panels, container(switch_face).padding([6.0, 12.0]).boxed(), self.ring()).input_role(InputRole::Checkbox).keys(Keys::Toggle).on_activate(Message::ToggleSwitch);
 
         let number = NumberField::new(ids::NUMBER_LABEL, ids::NUMBER, FocusArea::Panels, "Rotation", number_text, palette)
             .unit("°")
@@ -530,6 +531,15 @@ mod tests {
             "the fields and the number field, the buttons, one stop for the toolbar, then slider, select and switch"
         );
         assert!(targets.iter().any(|t| t.id == ids::DISABLED && !t.enabled));
+        let mut focus = FocusState::new();
+        focus.register(ScopeId::ROOT, targets.to_vec());
+        for (id, role) in [(ids::SELECT, InputRole::Select), (ids::TOGGLE, InputRole::Checkbox), (ids::SLIDER, InputRole::Other)] {
+            focus.reconcile(Some(id));
+            assert_eq!(focus.input_role(), role);
+            assert_eq!(styk_core::shortcuts::Shortcuts::new(styk_core::shortcuts::Platform::Control, true)
+                .press(&focus, &Chord::new("Delete", false, false, false), &[], styk_core::shortcuts::Input::default(), |_| true),
+                styk_core::shortcuts::Press::Ignored, "the actual widget snapshot must suppress editor Delete");
+        }
     }
 
     #[test]

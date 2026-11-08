@@ -1,17 +1,17 @@
 //! Resolved menu data and keyboard/hover decisions from `ui-menu.mjs`.
+use crate::commands::CommandId;
+use crate::shortcuts::{Platform, Scope, aria_binding, format_binding};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Entry {
     Separator,
     Label(String),
     Item(Item),
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
-    pub command: String,
+    pub command: CommandId,
     pub label: String,
     pub icon: Option<String>,
-    pub shortcut: String,
-    pub keyshortcuts: String,
     pub checked: Option<bool>,
     pub radio: bool,
     pub group: Option<String>,
@@ -22,7 +22,30 @@ pub struct Item {
     pub keep_open: bool,
     pub submenu: Option<Vec<Entry>>,
 }
-/// Registry/localization resolution happens before this typed boundary. Disabled rows remain focusable.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShortcutHint {
+    pub text: String,
+    pub keyshortcuts: String,
+}
+impl Item {
+    /// A row must name a registry command, even when its current label is contextual.
+    pub fn new(command: CommandId, label: impl Into<String>) -> Self {
+        Self { command, label: label.into(), icon: None, checked: None, radio: false,
+            group: None, danger: false, disabled: false, reason: String::new(), hidden: false,
+            keep_open: false, submenu: None }
+    }
+
+    /// Hints are derived from the one registry at display time, including aliases and scope precedence.
+    pub fn shortcuts(&self, platform: Platform, desktop: bool, active: &[Scope]) -> ShortcutHint {
+        if self.submenu.is_some() { return ShortcutHint::default(); }
+        let bindings = self.command.info().visible_bindings(platform, desktop, active);
+        ShortcutHint {
+            text: bindings.first().map_or_else(String::new, |key| format_binding(key, platform)),
+            keyshortcuts: bindings.iter().map(|key| aria_binding(key, platform)).collect::<Vec<_>>().join(" "),
+        }
+    }
+}
+/// Owners supply localized labels and availability. Disabled rows remain focusable.
 pub fn normalize(entries: Vec<Entry>) -> Vec<Entry> {
     let mut filtered = Vec::new();
     for entry in entries {
@@ -37,7 +60,6 @@ pub fn normalize(entries: Vec<Entry>) -> Vec<Entry> {
                         continue;
                     }
                     item.submenu = Some(sub);
-                    item.shortcut.clear();
                 }
                 if !item.disabled {
                     item.reason.clear();
@@ -77,7 +99,7 @@ pub enum Action {
     Menubar(i8),
     Activate {
         index: usize,
-        command: String,
+        command: CommandId,
         close: bool,
     },
 }
@@ -150,7 +172,7 @@ impl Menu {
         let keep = i.keep_open && (i.radio || i.checked.is_some());
         let radio = i.radio;
         let group = i.group.clone();
-        let command = i.command.clone();
+        let command = i.command;
         if keep {
             for (n, e) in self
                 .entries

@@ -25,6 +25,7 @@
 //!
 //! Tabs are numbered from 1 in the order the projects were opened, and keep their number when they move.
 
+use crate::commands::CommandId;
 use crate::stage::input::{Button, Pointer, PointerPhase};
 use std::path::PathBuf;
 use styk_services::input::{Modifiers, PenButtons, PenSample, Phase, Tool, Valid};
@@ -41,20 +42,8 @@ pub const MAX_SCRIPT_BYTES: usize = 64 * 1024;
 pub enum Target {
     /// A project's tab, by the number it was opened under.
     Tab(usize),
-    /// New animation.
-    New,
-    /// Home.
-    Home,
-    /// The mark.
-    Mark,
-    /// Undo.
-    Undo,
-    /// Redo.
-    Redo,
-    /// Save.
-    Save,
-    /// Export.
-    Export,
+    /// A named command control (the mark uses the Menu identity).
+    Command(CommandId),
     /// A workspace by name: `animate`, `draw` or `build`.
     Workspace(String),
 }
@@ -257,13 +246,13 @@ fn number(text: &str, line: usize, what: &str) -> Result<usize, ScriptError> {
 
 fn target(text: &str, line: usize) -> Result<Target, ScriptError> {
     Ok(match text {
-        "new" => Target::New,
-        "home" => Target::Home,
-        "mark" => Target::Mark,
-        "undo" => Target::Undo,
-        "redo" => Target::Redo,
-        "save" => Target::Save,
-        "export" => Target::Export,
+        "new" => Target::Command(CommandId::New),
+        "home" => Target::Command(CommandId::Home),
+        "mark" => Target::Command(CommandId::Menu),
+        "undo" => Target::Command(CommandId::Undo),
+        "redo" => Target::Command(CommandId::Redo),
+        "save" => Target::Command(CommandId::Save),
+        "export" => Target::Command(CommandId::Export),
         other => match other.split_once(':') {
             Some(("tab", n)) => Target::Tab(number(n, line, "tab")?),
             Some(("workspace", name)) if ["animate", "draw", "build"].contains(&name) => {
@@ -578,6 +567,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn named_controls_parse_to_the_registry_identity() {
+        for (name, command) in [
+            ("new", CommandId::New), ("home", CommandId::Home), ("mark", CommandId::Menu),
+            ("undo", CommandId::Undo), ("redo", CommandId::Redo), ("save", CommandId::Save),
+            ("export", CommandId::Export),
+        ] {
+            let script = Script::parse(&format!("click {name}")).unwrap();
+            assert_eq!(script.steps, [(1, Step::Click(Target::Command(command)))]);
+        }
+    }
+
+    #[test]
     fn stage_inspector_and_profiling_steps_share_one_ordered_script() {
         let script = Script::parse(concat!(
             "styk-auto/1\n",
@@ -596,7 +597,7 @@ mod tests {
         assert!(matches!(&script.steps[6].1, Step::Pointer(Pointer { id: 7, .. })));
         assert_eq!(script.steps[7].1, Step::Expect(Expect::Property("root_x".into(), "500".into())));
         assert!(matches!(&script.steps[8].1, Step::Pen(PenSample { pointer: 8, .. })));
-        assert_eq!(script.steps[9].1, Step::Click(Target::Undo));
+        assert_eq!(script.steps[9].1, Step::Click(Target::Command(CommandId::Undo)));
         assert_eq!(script.steps[10].1, Step::Play { from: 100., frames: 120 });
         assert_eq!(script.steps[11].1, Step::Expect(Expect::History(0)));
         assert_eq!(script.steps[12].1, Step::Frame(2.));

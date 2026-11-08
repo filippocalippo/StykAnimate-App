@@ -139,8 +139,8 @@ fn the_interaction_script_runs_through_the_widgets() {
                 driver.release(arrow);
                 deliver(&mut core, &mut driver);
             }
-            Step::Click(Target::Undo) => drop(update(&mut core, Message::Command(Command::Run(CommandId::Undo)))),
-            Step::Click(Target::Redo) => drop(update(&mut core, Message::Command(Command::Run(CommandId::Redo)))),
+            Step::Click(Target::Command(CommandId::Undo)) => drop(update(&mut core, Message::Command(Command::Run(CommandId::Undo)))),
+            Step::Click(Target::Command(CommandId::Redo)) => drop(update(&mut core, Message::Command(Command::Run(CommandId::Redo)))),
             Step::Expect(Expect::Property(name, expected)) => {
                 // The app publishes and its facts lane answers between frames; the panel then shows the new state.
                 styk_core::testing::settle_facts(&mut core).unwrap();
