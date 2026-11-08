@@ -623,6 +623,9 @@ impl Frames {
     /// Retry once on an event-loop turn (including an EngineProgress wake).
     /// False means the latest requests are still retained here, never lost.
     pub fn flush(&mut self) -> bool {
+        // Progress may arrive while a worker holds the queue. An empty outbox
+        // needs no admission and must not turn that contention into another wake.
+        if !self.dirty.iter().any(|dirty| *dirty) { return true; }
         let Ok(mut state) = self.shared.state.try_lock() else {
             // A queue owner may go idle without completing a frame. Schedule an
             // interface retry even then; the outbox alone is not a wakeup.
@@ -661,9 +664,11 @@ impl Frames {
         if !inputs.valid() {
             return Err(Error::InvalidRequest);
         }
-        self.shared
-            .lookahead_bytes
-            .store(bytes.min(self.shared.cache_bytes), Ordering::Release);
+        let limit = bytes.min(self.shared.cache_bytes);
+        if self.shared.lookahead_bytes.swap(limit, Ordering::AcqRel) != limit {
+            // Budget maintenance still needs a worker even when all requests match.
+            self.shared.changed.notify_all();
+        }
         let span = range.end.saturating_sub(range.start);
         let mut queued = 0;
         if span > 0 && bytes > 0 {

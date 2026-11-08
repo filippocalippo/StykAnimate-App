@@ -373,12 +373,25 @@ fn retry_with_autosave_off_starts_without_an_unrelated_frame() {
 #[test]
 fn session_end_retains_the_checkpoint_and_quit_until_the_worker_answers() {
     let mut rt = Runtime::new(); rt.settled(); rt.dirty(false);
+    let (send, receive) = mpsc::sync_channel(2);
+    *rt.gate.observer.lock().unwrap() = Some(send);
     rt.gate.pause.store(true, Ordering::SeqCst);
     rt.message(Message::SessionEnd);
     rt.until(|app| app.band.core.documents.recovery_view().unwrap().busy);
+    receive.recv_timeout(HANG_GUARD).expect("the checkpoint reached the closed worker gate");
     rt.drain();
     assert!(!rt.app.closing && !rt.checkpoint_finished);
     assert!(rt.app.band.core.recovery().closing().is_none());
+    // The gate, not elapsed wall time, establishes the pending checkpoint. Only the
+    // platform's session bound may wake this idle window before the worker answers.
+    let due = rt.app.band.core.session_end_deadline().unwrap();
+    let mut driver = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+    let at = std::time::Instant::now();
+    driver.events(&[iced::Event::Window(iced::window::Event::RedrawRequested(at))]);
+    assert!(driver.messages().is_empty(), "waiting for recovery cannot publish a poll");
+    assert!(matches!(driver.redraw_request, iced::window::RedrawRequest::At(next) if next == at + due.saturating_sub(rt.clock.now())),
+        "only the session bound may schedule a redraw while the worker gate is closed");
+    drop(driver);
     rt.gate.release(); rt.prompt(); rt.drain();
     assert!(rt.checkpoint_finished, "the OS block reason must be released after the checkpoint");
     assert_eq!(rt.app.band.core.session_end_deadline(), None, "a completed checkpoint retires its timer");

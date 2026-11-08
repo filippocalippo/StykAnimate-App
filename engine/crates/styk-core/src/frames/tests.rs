@@ -323,6 +323,28 @@ fn revision_change_in_flight_rejects_old_result_and_retires_idle_cache() {
 }
 
 #[test]
+fn an_empty_outbox_does_not_schedule_a_retry_while_the_worker_holds_the_queue() {
+    let spawner = ManualSpawner::new();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let count = wakes.clone();
+    let source: Arc<dyn FrameDocument> = document();
+    let mut frames = Frames::new(7, 0, 0, &source, Config::default(), &spawner,
+        Arc::new(FixedClock::new()), Arc::new(move || { count.fetch_add(1, Ordering::SeqCst); })).unwrap();
+    frames.request(Consumer::Stage, 0.0, Arc::new(Inputs::default())).unwrap();
+    let shared = frames.shared.clone();
+    let held = shared.state.lock().unwrap();
+    let flushed = frames.flush();
+    assert_eq!(wakes.load(Ordering::SeqCst), 0, "idle must not schedule a contention retry");
+    assert!(flushed, "an empty outbox has nothing to admit");
+    drop(held);
+    drain(&frames);
+    assert_eq!(status(&frames, Consumer::Stage), Status::Ready);
+    assert!(wakes.load(Ordering::SeqCst) > 0, "the worker's answer must still wake the interface");
+    drop(frames);
+    while spawner.run_next() {}
+}
+
+#[test]
 fn contended_queue_admission_and_readiness_never_wait_and_keep_latest_stage() {
     let (mut frames, spawner) = frames(document(), Config::default());
     let shared = frames.shared.clone();
