@@ -86,6 +86,7 @@ enum Intent {
     Export,
     Other,
     Channel,
+    Refresh(u64),
 }
 pub struct Host {
     runtime: Runtime,
@@ -94,6 +95,10 @@ pub struct Host {
     requested_overlay: bool,
     next_sample: Option<u64>,
     stop_retry: Option<u64>,
+    stop: Option<Pending>,
+    refresh: Option<(u64, usize)>,
+    refresh_id: u64,
+    refresh_retry: Option<u64>,
     pending: Option<(Pending, Intent)>,
     sample: Option<Pending>,
     memory: Option<Pending>,
@@ -115,6 +120,10 @@ impl Host {
             requested_overlay: false,
             next_sample: None,
             stop_retry: None,
+            stop: None,
+            refresh: None,
+            refresh_id: 0,
+            refresh_retry: None,
             pending: None,
             sample: None,
             input: None,
@@ -139,6 +148,7 @@ impl Host {
             self.runtime.clear_capture();
             self.profiler = ProfilerModel::default();
             self.stop_retry = None;
+            self.stop = None;
             if self
                 .pending
                 .as_ref()
@@ -152,6 +162,15 @@ impl Host {
         }
         if self.open[2] && !open[2] {
             self.parameters = ParametersModel::default();
+            self.refresh = None;
+            self.refresh_retry = None;
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|(_, i)| matches!(i, Intent::Refresh(_)))
+            {
+                self.pending = None;
+            }
         }
         let parameters_opened = !self.open[2] && open[2];
         self.open = open;
@@ -172,23 +191,29 @@ impl Host {
             self.overlay.sample = Sample::default();
         }
         if parameters_opened {
-            self.issue(Request::ParametersPage(0), Intent::Other);
+            self.request_refresh(0, now);
         }
+        self.try_refresh(now);
     }
     pub fn deadline(&self) -> Option<u64> {
-        [self.next_sample, self.next_memory, self.stop_retry]
-            .into_iter()
-            .flatten()
-            .min()
+        [
+            self.next_sample,
+            self.next_memory,
+            self.stop_retry,
+            self.refresh_retry.filter(|_| self.pending.is_none()),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
     pub fn busy(&self) -> bool {
-        self.pending.is_some()
+        self.pending.is_some() || self.stop.is_some()
     }
     pub fn availability(&self) -> Availability {
         let ready = !self.busy();
         Availability {
             start: ready && self.open[0] && !self.profiler.recording,
-            stop: ready && self.profiler.recording && !self.profiler.stopping,
+            stop: self.profiler.recording && !self.profiler.stopping,
             export: ready && self.profiler.can_export,
             parameters: ready,
             profiles: ready,
@@ -229,8 +254,10 @@ impl Host {
                 }
             }
             Event::Stop => {
-                if self.profiler.recording {
-                    self.issue(Request::Stop, Intent::Stop);
+                if self.profiler.recording && !self.profiler.stopping {
+                    self.profiler.stopping = true;
+                    self.stop_retry = Some(now);
+                    self.try_stop(now);
                 }
             }
             Event::Export(target) => self.issue(Request::Export(target), Intent::Export),
@@ -274,9 +301,7 @@ impl Host {
                 );
             }
             Event::Reset(name) => self.issue(Request::Reset(name), Intent::Other),
-            Event::ParametersPage(offset) => {
-                self.issue(Request::ParametersPage(offset), Intent::Other)
-            }
+            Event::ParametersPage(offset) => self.request_refresh(offset, now),
             Event::SaveProfile(name) => self.issue(Request::SaveProfile(name), Intent::Other),
             Event::LoadProfile(name) => self.issue(Request::LoadProfile(name), Intent::Other),
             Event::Filter {
@@ -306,6 +331,49 @@ impl Host {
             }
             Event::Poll => self.poll(now),
             Event::Tick(at) => self.tick(at),
+        }
+    }
+    fn request_refresh(&mut self, offset: usize, now: u64) {
+        self.refresh_id = self.refresh_id.wrapping_add(1);
+        self.refresh = Some((self.refresh_id, offset));
+        self.refresh_retry = None;
+        self.try_refresh(now);
+    }
+    fn try_refresh(&mut self, now: u64) {
+        let Some((id, offset)) = self.refresh else {
+            return;
+        };
+        if self.pending.is_some() || self.refresh_retry.is_some_and(|at| now < at) {
+            return;
+        }
+        match self
+            .runtime
+            .submit(Request::ParametersPage(offset), self.notify.clone())
+        {
+            Ok(p) => {
+                self.pending = Some((p, Intent::Refresh(id)));
+                self.refresh_retry = None;
+            }
+            Err(e) => {
+                self.error = Some(notice(e));
+                self.refresh_retry = Some(now.saturating_add(50));
+            }
+        }
+    }
+    fn try_stop(&mut self, now: u64) {
+        if self.stop.is_some() || !self.stop_retry.is_some_and(|at| now >= at) {
+            return;
+        }
+        match self.runtime.submit(Request::Stop, self.notify.clone()) {
+            Ok(p) => {
+                self.stop = Some(p);
+                self.stop_retry = None;
+                self.error = None;
+            }
+            Err(e) => {
+                self.error = Some(notice(e));
+                self.stop_retry = Some(now.saturating_add(50));
+            }
         }
     }
     fn issue(&mut self, request: Request, intent: Intent) {
@@ -343,10 +411,6 @@ impl Host {
     }
     fn tick(&mut self, now: u64) {
         self.poll(now);
-        if self.stop_retry.is_some_and(|at| now >= at) && self.pending.is_none() {
-            self.stop_retry = None;
-            self.issue(Request::Stop, Intent::Stop);
-        }
         if self.next_sample.is_some_and(|at| now >= at) {
             self.next_sample = Some(now.saturating_add(250)); // missed periods coalesce
             if self.sample.is_none() {
@@ -373,6 +437,10 @@ impl Host {
         }
     }
     fn poll(&mut self, now: u64) {
+        if let Some(result) = self.stop.as_ref().and_then(Pending::take) {
+            self.stop = None;
+            self.action_reply(Some(Intent::Stop), result, now);
+        }
         if let Some(result) = self.memory.as_ref().and_then(Pending::take) {
             self.memory = None;
             match result {
@@ -398,74 +466,88 @@ impl Host {
         }
         if let Some(result) = self.pending.as_ref().and_then(|(p, _)| p.take()) {
             let intent = self.pending.take().map(|(_, i)| i);
-            if matches!(intent, Some(Intent::Channel)) {
-                self.control_result = Some(match result {
-                    Ok(Reply::Value(v)) => Ok(v),
-                    Err(e) => Err(e),
-                    _ => Err("unexpected parameter acknowledgement".into()),
-                });
-                if self.open[2] && self.control_result.as_ref().is_some_and(Result::is_ok) {
-                    self.issue(
-                        Request::ParametersPage(self.parameters.offset),
-                        Intent::Other,
-                    );
-                }
+            self.action_reply(intent, result, now);
+        }
+        self.try_stop(now);
+        self.try_refresh(now);
+    }
+    fn action_reply(&mut self, intent: Option<Intent>, result: Result<Reply, String>, now: u64) {
+        if let Some(Intent::Refresh(id)) = intent {
+            if !self.refresh.is_some_and(|(current, _)| current == id) {
                 return;
             }
-            match result {
-                Err(e) => {
-                    self.error = Some(notice(e));
-                    if matches!(intent, Some(Intent::Stop)) {
-                        self.profiler.stopping = false;
-                    }
+            self.refresh = None;
+            self.refresh_retry = None;
+            // A worker failure is visible and terminal; admission failures retain the intent.
+            if result.is_ok() {
+                self.error = None;
+            }
+        }
+        if matches!(intent, Some(Intent::Channel)) {
+            self.control_result = Some(match result {
+                Ok(Reply::Value(v)) => Ok(v),
+                Err(e) => Err(e),
+                _ => Err("unexpected parameter acknowledgement".into()),
+            });
+            if self.open[2] && self.control_result.as_ref().is_some_and(Result::is_ok) {
+                self.request_refresh(self.parameters.offset, now);
+            }
+            return;
+        }
+        match result {
+            Err(e) => {
+                self.error = Some(notice(e));
+                if matches!(intent, Some(Intent::Stop)) {
+                    self.profiler.stopping = false;
+                    self.stop_retry = None;
                 }
-                Ok(Reply::Parameters(rows)) => {
-                    self.parameters.rows = rows;
-                    self.parameters.offset = 0;
-                }
-                Ok(Reply::ParameterPage {
+            }
+            Ok(Reply::Parameters(rows)) => {
+                self.parameters.rows = rows;
+                self.parameters.offset = 0;
+            }
+            Ok(Reply::ParameterPage {
+                rows,
+                offset,
+                total,
+            }) => {
+                let end = offset.saturating_add(rows.len());
+                self.parameters = ParametersModel {
                     rows,
                     offset,
                     total,
-                }) => {
-                    let end = offset.saturating_add(rows.len());
-                    self.parameters = ParametersModel {
-                        rows,
-                        offset,
-                        total,
-                        next: (end < total).then_some(end),
-                    };
-                }
-                Ok(Reply::Stopped {
+                    next: (end < total).then_some(end),
+                };
+            }
+            Ok(Reply::Stopped {
+                bytes,
+                dropped,
+                summary,
+            }) => {
+                self.profiler = ProfilerModel {
                     bytes,
                     dropped,
-                    summary,
-                }) => {
+                    summary: Some(summary),
+                    can_export: true,
+                    ..ProfilerModel::default()
+                };
+                self.stop_retry = None;
+            }
+            Ok(Reply::Value(value)) => match intent {
+                Some(Intent::Start) => {
                     self.profiler = ProfilerModel {
-                        bytes,
-                        dropped,
-                        summary: Some(summary),
-                        can_export: true,
+                        recording: true,
                         ..ProfilerModel::default()
                     };
-                    self.stop_retry = None;
                 }
-                Ok(Reply::Value(value)) => match intent {
-                    Some(Intent::Start) => {
-                        self.profiler = ProfilerModel {
-                            recording: true,
-                            ..ProfilerModel::default()
-                        };
-                    }
-                    Some(Intent::Stop) if value["pending"] == true => {
-                        self.profiler.stopping = true;
-                        self.stop_retry = Some(now.saturating_add(50));
-                    }
-                    _ => {}
-                },
-                Ok(Reply::Snapshot(_) | Reply::Memory(_)) => {
-                    self.error = Some(notice("unexpected action response"))
+                Some(Intent::Stop) if value["pending"] == true => {
+                    self.profiler.stopping = true;
+                    self.stop_retry = Some(now.saturating_add(50));
                 }
+                _ => {}
+            },
+            Ok(Reply::Snapshot(_) | Reply::Memory(_)) => {
+                self.error = Some(notice("unexpected action response"))
             }
         }
     }

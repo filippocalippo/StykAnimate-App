@@ -175,11 +175,21 @@ struct Shared {
     send: SyncSender<Work>,
     stop: Arc<AtomicBool>,
     admitted: Arc<AtomicUsize>,
+    controls: Arc<AtomicUsize>,
+    wake_queued: Arc<AtomicBool>,
+}
+impl Shared {
+    fn wake(&self) {
+        if !self.wake_queued.swap(true, Ordering::AcqRel) && self.send.try_send(Work::Wake).is_err()
+        {
+            self.wake_queued.store(false, Ordering::Release);
+        }
+    }
 }
 impl Drop for Shared {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        let _ = self.send.try_send(Work::Wake);
+        self.wake();
     }
 }
 #[derive(Clone)]
@@ -219,7 +229,10 @@ impl Runtime {
         {
             return Err("startup parameters exceed admission bounds".into());
         }
-        let (send, receive) = mpsc::sync_channel::<Work>(9); // eight admitted requests plus a reserved lifecycle wake
+        // Eight ordinary requests, one reserved Stop and one coalesced lifecycle wake.
+        let (send, receive) = mpsc::sync_channel::<Work>(10);
+        let wake_queued = Arc::new(AtomicBool::new(false));
+        let worker_wake = wake_queued.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
         let logs = Arc::new(Logs::default());
@@ -231,7 +244,7 @@ impl Runtime {
             let mut capture_owner:Option<(Arc<AtomicU64>,u64)>=None;
             while !stopping.load(Ordering::Acquire) {
                 if capture_owner.as_ref().is_some_and(|(o,g)|o.load(Ordering::Acquire)!=*g) { state.reader.clear(); capture_owner=None; }
-                let packet=match receive.recv() { Ok(Work::Request(p))=>p,Ok(Work::Wake)=>continue,Err(_)=>break };
+                let packet=match receive.recv() { Ok(Work::Request(p))=>p,Ok(Work::Wake)=>{worker_wake.store(false,Ordering::Release);continue},Err(_)=>break };
                 if packet.cancel.is_cancelled() { continue; }
                 if matches!(packet.request,Request::Memory) && initialized.is_ok() {
                     let at_ns=state.services.clock.now().as_nanos().min(u128::from(u64::MAX)) as u64;
@@ -244,10 +257,12 @@ impl Runtime {
                     continue;
                 }
                 let start=matches!(&packet.request,Request::Start) || matches!(&packet.request,Request::Protocol{op,..} if op=="trace.start");
-                let capture_action=matches!(&packet.request,Request::Stop|Request::ClearCapture|Request::Export(_)) || matches!(&packet.request,Request::Protocol{op,..} if op=="trace.stop");
+                let clear=matches!(&packet.request,Request::ClearCapture);
+                let capture_action=start || matches!(&packet.request,Request::Stop|Request::ClearCapture|Request::Export(_)) || matches!(&packet.request,Request::Protocol{op,..} if op=="trace.stop");
                 let allowed=!capture_action || capture_owner.as_ref().is_none_or(|(o,_)|Arc::ptr_eq(o,&packet.owner));
                 let result=if allowed { initialized.clone().and_then(|()| state.run(packet.request,&packet.cancel)).map_err(|e|crate::answer::text(&e)) } else {Err("capture belongs to another developer client".into())};
                 if start && result.is_ok() { capture_owner=Some((packet.owner,packet.generation)); }
+                if clear && result.is_ok() { capture_owner=None; }
                 let _=packet.reply.try_send(result); (packet.notify)();
             }
             // State and captures are destroyed here, never by the closing window.
@@ -257,6 +272,8 @@ impl Runtime {
                 send,
                 stop,
                 admitted: Arc::new(AtomicUsize::new(0)),
+                controls: Arc::new(AtomicUsize::new(0)),
+                wake_queued,
             }),
             logs,
             owner: Arc::new(AtomicU64::new(0)),
@@ -273,7 +290,7 @@ impl Runtime {
     }
     pub fn clear_capture(&self) {
         self.owner.fetch_add(1, Ordering::AcqRel);
-        let _ = self.shared.send.try_send(Work::Wake);
+        self.shared.wake();
     }
     pub fn submit(
         &self,
@@ -283,13 +300,19 @@ impl Runtime {
         if request.bytes() > 8192 {
             return Err("developer request exceeds 8 KiB".into());
         }
-        self.shared
-            .admitted
+        let control = matches!(&request, Request::Stop)
+            || matches!(&request, Request::Protocol { op, .. } if op == "trace.stop");
+        let (counter, limit) = if control {
+            (&self.shared.controls, 1)
+        } else {
+            (&self.shared.admitted, 8)
+        };
+        counter
             .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < 8).then_some(n + 1)
+                (n < limit).then_some(n + 1)
             })
             .map_err(|_| "developer replies are full")?;
-        let admission = Arc::new(Admission(self.shared.admitted.clone()));
+        let admission = Arc::new(Admission(counter.clone()));
         let (reply, receive) = mpsc::sync_channel(1);
         let cancel = Arc::new(Cancel::new());
         self.shared

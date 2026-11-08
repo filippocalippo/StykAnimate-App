@@ -17,6 +17,387 @@ use styk_devtools::{
     runtime::{Runtime, Services, Startup},
 };
 struct Memory;
+// Captures share trace admission; keep these lifetime tests deterministic without timing thresholds.
+static CAPTURE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[derive(Default)]
+struct ExportProbe {
+    fail: std::sync::atomic::AtomicBool,
+    bytes: std::sync::Mutex<Vec<u8>>,
+}
+impl styk_services::files::StreamFiles for ExportProbe {
+    fn replace_stream<'a>(
+        &'a self,
+        _: &'a styk_services::files::FileTarget,
+        body: styk_services::files::StreamBody<'a>,
+        _: &'a styk_services::Cancel,
+    ) -> styk_services::files::FileFuture<'a, ()> {
+        Box::pin(async move {
+            if self.fail.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(styk_services::files::FileError::Full);
+            }
+            let mut bytes = Vec::new();
+            body(&mut bytes)?;
+            *self.bytes.lock().unwrap() = bytes;
+            Ok(())
+        })
+    }
+}
+struct PausedStore(Arc<styk_services::storage::fake::MemoryStorage>);
+impl Drop for PausedStore {
+    fn drop(&mut self) {
+        self.0.fail(styk_services::storage::fake::Failure::None);
+    }
+}
+fn pause_save(
+    top: &mut TopBand,
+    driver: &mut Driver<'static, Message>,
+    store: Arc<styk_services::storage::fake::MemoryStorage>,
+) -> PausedStore {
+    store.fail(styk_services::storage::fake::Failure::PauseBeforeCommit);
+    let pause = PausedStore(store);
+    send(top, driver, Dev::SaveProfile("delayed".into()));
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    while !pause.0.staged() {
+        assert!(
+            std::time::Instant::now() < until,
+            "save reached the storage boundary"
+        );
+        std::thread::yield_now();
+    }
+    pause
+}
+fn panel(
+    top: &mut TopBand,
+    driver: &mut Driver<'static, Message>,
+    panel: styk_core::dev_extension::Panel,
+    open: bool,
+) {
+    send(top, driver, Dev::Panel { panel, open });
+}
+fn deadline(top: &mut TopBand, clock: &FixedClock, driver: &mut Driver<'static, Message>) {
+    clock.advance(Duration::from_millis(50));
+    let mut wake = Driver::new(top.developer_wake(), Size::new(1., 1.), &[]);
+    wake.redraw();
+    for message in wake.messages() {
+        deliver(top, driver, message);
+    }
+}
+fn stopped(top: &mut TopBand, clock: &FixedClock, driver: &mut Driver<'static, Message>) {
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    while !top.developer.as_ref().unwrap().profiler.can_export {
+        assert!(
+            std::time::Instant::now() < until,
+            "stop reaches its terminal reply"
+        );
+        if top.developer.as_ref().unwrap().busy() {
+            let message = wake_message(top);
+            deliver(top, driver, message);
+        } else {
+            assert!(
+                top.developer.as_ref().unwrap().deadline().is_some(),
+                "stop intent retained"
+            );
+            deadline(top, clock, driver);
+        }
+    }
+}
+fn retained_capture(failed_export: bool, protocol: bool) {
+    let _serial = CAPTURE_TEST.lock().unwrap_or_else(|e| e.into_inner());
+    let output = Arc::new(ExportProbe::default());
+    let (mut a, clock, runtime, mut driver) =
+        setup_with_services(None, Arc::new(Default::default()), output.clone());
+    panel(
+        &mut a,
+        &mut driver,
+        styk_core::dev_extension::Panel::Profiler,
+        true,
+    );
+    send(&mut a, &mut driver, Dev::Start);
+    settle(&mut a, &mut driver);
+    assert!(a.developer.as_ref().unwrap().profiler.recording);
+    send(&mut a, &mut driver, Dev::Stop);
+    stopped(&mut a, &clock, &mut driver);
+    if failed_export {
+        output
+            .fail
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        send(
+            &mut a,
+            &mut driver,
+            Dev::Export(styk_services::files::FileTarget::new("capture.json")),
+        );
+        settle(&mut a, &mut driver);
+        assert!(a.developer.as_ref().unwrap().error.is_some());
+        assert!(a.developer.as_ref().unwrap().profiler.can_export);
+        output
+            .fail
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+    if protocol {
+        // The same production runtime handler used by the control protocol, with a distinct lease.
+        let client = runtime.client();
+        let answer = client
+            .submit(
+                styk_devtools::runtime::Request::Protocol {
+                    op: "trace.start".into(),
+                    args: ParameterValue::Null,
+                },
+                Arc::new(|| {}),
+            )
+            .unwrap()
+            .wait();
+        assert!(answer.unwrap_err().contains("another developer client"));
+    } else {
+        let (mut b, _, _, mut other_driver) = setup();
+        b.attach_developer(runtime.clone());
+        panel(
+            &mut b,
+            &mut other_driver,
+            styk_core::dev_extension::Panel::Profiler,
+            true,
+        );
+        send(&mut b, &mut other_driver, Dev::Start);
+        settle(&mut b, &mut other_driver);
+        assert!(
+            !b.developer.as_ref().unwrap().profiler.recording,
+            "another client cannot replace the retained capture"
+        );
+        assert!(b.developer.as_ref().unwrap().error.is_some());
+    }
+    send(
+        &mut a,
+        &mut driver,
+        Dev::Export(styk_services::files::FileTarget::new("capture.json")),
+    );
+    settle(&mut a, &mut driver);
+    assert!(a.developer.as_ref().unwrap().error.is_none());
+    assert!(
+        output
+            .bytes
+            .lock()
+            .unwrap()
+            .starts_with(b"{\"traceEvents\":")
+    );
+    panel(
+        &mut a,
+        &mut driver,
+        styk_core::dev_extension::Panel::Profiler,
+        false,
+    );
+    // Explicit release permits a new owner.
+    let next = runtime.client();
+    next.submit(styk_devtools::runtime::Request::Start, Arc::new(|| {}))
+        .unwrap()
+        .wait()
+        .unwrap();
+    next.clear_capture();
+}
+#[test]
+fn review_capture_lease_after_stop() {
+    retained_capture(false, false);
+}
+#[test]
+fn review_capture_lease_after_failed_export() {
+    retained_capture(true, false);
+}
+#[test]
+fn review_protocol_capture_lease_after_stop() {
+    retained_capture(false, true);
+}
+#[test]
+fn review_protocol_capture_lease_after_failed_export() {
+    retained_capture(true, true);
+}
+#[test]
+fn review_stop_survives_delayed_save_and_full_ordinary_admission() {
+    let _serial = CAPTURE_TEST.lock().unwrap_or_else(|e| e.into_inner());
+    let store = Arc::new(styk_services::storage::fake::MemoryStorage::default());
+    let (mut top, clock, runtime, mut driver) =
+        setup_with_services(None, store.clone(), Arc::new(ExportProbe::default()));
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Profiler,
+        true,
+    );
+    send(&mut top, &mut driver, Dev::Start);
+    settle(&mut top, &mut driver);
+    assert!(top.developer.as_ref().unwrap().profiler.recording);
+    let pause = pause_save(&mut top, &mut driver, store.clone());
+    let held: Vec<_> = (0..7)
+        .map(|_| {
+            runtime
+                .submit(styk_devtools::runtime::Request::Parameters, Arc::new(|| {}))
+                .unwrap()
+        })
+        .collect();
+    assert!(
+        runtime
+            .submit(styk_devtools::runtime::Request::Parameters, Arc::new(|| {}))
+            .is_err()
+    );
+    let available = top.developer.as_ref().unwrap().availability().stop;
+    send(&mut top, &mut driver, Dev::Stop);
+    assert!(
+        top.developer.as_ref().unwrap().profiler.stopping,
+        "Stop survives the busy gate"
+    );
+    assert!(available, "ordinary work never disables Stop");
+    drop(pause);
+    stopped(&mut top, &clock, &mut driver);
+    settle(&mut top, &mut driver);
+    assert!(store.get("delayed.json").is_some());
+    assert!(!top.developer.as_ref().unwrap().profiler.recording);
+    drop(held);
+}
+#[test]
+fn review_parameter_reopen_survives_delayed_save() {
+    let store = Arc::new(styk_services::storage::fake::MemoryStorage::default());
+    let (mut top, _, _, mut driver) =
+        setup_with_services(None, store.clone(), Arc::new(ExportProbe::default()));
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Parameters,
+        true,
+    );
+    settle(&mut top, &mut driver);
+    assert_eq!(top.developer.as_ref().unwrap().parameters.rows.len(), 1);
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Parameters,
+        false,
+    );
+    let pause = pause_save(&mut top, &mut driver, store);
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Parameters,
+        true,
+    );
+    assert!(top.developer.as_ref().unwrap().parameters.rows.is_empty());
+    drop(pause);
+    settle(&mut top, &mut driver);
+    assert_eq!(
+        top.developer.as_ref().unwrap().parameters.rows.len(),
+        1,
+        "reopen retains its first-page intent"
+    );
+    assert_eq!(
+        top.developer.as_ref().unwrap().parameters.rows[0].effective,
+        ParameterValue::from(24)
+    );
+}
+#[test]
+fn review_refresh_pressure_retries_current_page() {
+    let (mut top, clock, runtime, mut driver) = setup();
+    let held: Vec<_> = (0..8)
+        .map(|_| {
+            let p = runtime
+                .submit(styk_devtools::runtime::Request::Parameters, Arc::new(|| {}))
+                .unwrap();
+            p.wait().unwrap();
+            p
+        })
+        .collect();
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Parameters,
+        true,
+    );
+    send(&mut top, &mut driver, Dev::ParametersPage(1));
+    send(&mut top, &mut driver, Dev::ParametersPage(0));
+    assert!(top.developer.as_ref().unwrap().parameters.rows.is_empty());
+    assert!(
+        top.developer.as_ref().unwrap().deadline().is_some(),
+        "refused refresh keeps its retry intent"
+    );
+    drop(held);
+    deadline(&mut top, &clock, &mut driver);
+    settle(&mut top, &mut driver);
+    assert_eq!(top.developer.as_ref().unwrap().parameters.rows.len(), 1);
+    assert_eq!(top.developer.as_ref().unwrap().parameters.offset, 0);
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Parameters,
+        false,
+    );
+    assert_eq!(top.developer.as_ref().unwrap().deadline(), None);
+}
+#[test]
+fn review_control_pressure_retains_stop() {
+    let _serial = CAPTURE_TEST.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut top, clock, runtime, mut driver) = setup();
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Profiler,
+        true,
+    );
+    send(&mut top, &mut driver, Dev::Start);
+    settle(&mut top, &mut driver);
+    let occupied = runtime
+        .submit(styk_devtools::runtime::Request::Stop, Arc::new(|| {}))
+        .unwrap();
+    assert!(
+        occupied
+            .wait()
+            .unwrap_err()
+            .contains("another developer client")
+    );
+    send(&mut top, &mut driver, Dev::Stop);
+    assert!(
+        top.developer.as_ref().unwrap().profiler.stopping,
+        "Stop intent survives reserved-slot pressure"
+    );
+    assert!(top.developer.as_ref().unwrap().deadline().is_some());
+    drop(occupied);
+    deadline(&mut top, &clock, &mut driver);
+    stopped(&mut top, &clock, &mut driver);
+    assert!(!top.developer.as_ref().unwrap().profiler.recording);
+    assert!(
+        top.developer.as_ref().unwrap().error.is_none(),
+        "admitted Stop retires its admission refusal"
+    );
+}
+#[test]
+fn review_refresh_retry_waits_for_pending_worker_wake() {
+    let store = Arc::new(styk_services::storage::fake::MemoryStorage::default());
+    let (mut top, clock, runtime, mut driver) =
+        setup_with_services(None, store.clone(), Arc::new(ExportProbe::default()));
+    let held: Vec<_> = (0..8)
+        .map(|_| {
+            let p = runtime
+                .submit(styk_devtools::runtime::Request::Parameters, Arc::new(|| {}))
+                .unwrap();
+            p.wait().unwrap();
+            p
+        })
+        .collect();
+    panel(
+        &mut top,
+        &mut driver,
+        styk_core::dev_extension::Panel::Parameters,
+        true,
+    );
+    assert!(top.developer.as_ref().unwrap().deadline().is_some());
+    drop(held);
+    let pause = pause_save(&mut top, &mut driver, store);
+    assert_eq!(
+        top.developer.as_ref().unwrap().deadline(),
+        None,
+        "a pending worker resumes through its wake, not refresh redraws"
+    );
+    drop(pause);
+    settle(&mut top, &mut driver);
+    // Admission retry may still be in the future; its deadline is exposed again after the worker settles.
+    deadline(&mut top, &clock, &mut driver);
+    settle(&mut top, &mut driver);
+    assert_eq!(top.developer.as_ref().unwrap().parameters.rows.len(), 1);
+}
 impl styk_services::diagnostics::MemoryDiagnostics for Memory {
     fn memory(
         &self,
@@ -36,15 +417,25 @@ fn setup() -> (TopBand, FixedClock, Runtime, Driver<'static, Message>) {
 fn setup_with_runtime_clock(
     runtime_clock: Option<Arc<dyn styk_services::Clock>>,
 ) -> (TopBand, FixedClock, Runtime, Driver<'static, Message>) {
+    setup_with_services(
+        runtime_clock,
+        Arc::new(styk_services::storage::fake::MemoryStorage::default()),
+        Arc::new(styk_platform::files::LocalFiles),
+    )
+}
+fn setup_with_services(
+    runtime_clock: Option<Arc<dyn styk_services::Clock>>,
+    store: Arc<styk_services::storage::fake::MemoryStorage>,
+    output: Arc<dyn styk_services::files::StreamFiles>,
+) -> (TopBand, FixedClock, Runtime, Driver<'static, Message>) {
     let clock = FixedClock::new();
     let spawner: Arc<dyn Spawner> = Arc::new(styk_platform::spawn::ThreadSpawner);
-    let store = Arc::new(styk_services::storage::fake::MemoryStorage::default());
     let runtime = Runtime::start(
         Services {
             spawner: spawner.clone(),
             clock: runtime_clock.unwrap_or_else(|| Arc::new(clock.clone())),
             files: Arc::new(styk_services::files::fake::MemoryFiles::default()),
-            output: Arc::new(styk_platform::files::LocalFiles),
+            output,
             storage: store.clone(),
             memory: Arc::new(Memory),
         },

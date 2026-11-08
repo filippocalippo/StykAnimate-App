@@ -40,16 +40,19 @@ panel, hit region or independent timer. F11 uses the normal shortcut adapter.
 
 One process Runtime owns the registry, log ring and shared capture controller.
 Each window Host has a capture lease. The explicit control channel uses the same
-Runtime, so another client cannot stop, export or discard its capture. Closing
+Runtime, so another client cannot start over, stop, export or discard its capture,
+including through the protocol. The lease survives Stop and failed Export until
+its owner explicitly replaces or releases the capture. Closing
 the profiler drops only its own capture action; unrelated parameter actions stay
 intact. Closing all panels stops sampling, without reverting setters. Dropping a
 window detaches its command bridge and wakes capture reclamation. Runtime ends
 on process teardown; no UI path joins the worker or frees a capture buffer.
 
-- Eight admitted requests, each at most 8 KiB including payload allocations;
-  a ninth queue slot wakes lifecycle work. Admission remains held by pending
+- Eight ordinary admitted requests, each at most 8 KiB including payload allocations;
+  a separate permit and queue slot reserve Stop, and a tenth slot coalesces lifecycle
+  wakes. Admission remains held by pending
   callbacks and unread replies. Full queues report a retryable error.
-- A Host holds one action reply, one sample reply and one MP reply; each update
+- A Host holds one ordinary action reply, one Stop reply, one sample reply and one MP reply; each update
   adopts at most one of each. Response payloads fit 64 KiB: log rows use 48 KiB,
   parameter pages 7 KiB, MP keeps at most 16 adapter/segment rows. Strings use the
   existing 2 KiB truncation helper. Control replies retain their existing budget.
@@ -77,6 +80,13 @@ on process teardown; no UI path joins the worker or frees a capture buffer.
   It is not a per-site flame graph. Stop completion retries at injected 50 ms
   deadlines. Streaming replacement shares LocalFiles staging/flush/commit logic;
   failure preserves both the old destination and the stopped capture for retry.
+
+Stop remains enabled during ordinary work. Its separate pending intent survives
+admission refusal and retries at the injected deadline, while ordinary completion
+still resumes through its worker wake. Closing the profiler cancels its Stop intent.
+Parameters retains a generation-stamped desired page across busy/admission refusal;
+ordinary completion or an admission retry admits it, and only the current reply is
+adopted. Closing cancels that refresh; reopening requests a fresh first page.
 
 ## Parameters and persistence
 
