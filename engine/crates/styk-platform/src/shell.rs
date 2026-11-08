@@ -276,25 +276,35 @@ impl Shell {
     }
 }
 
-/// Reads the file, records the frame, and replaces the file atomically (a temporary file, then a rename).
+/// Save on the shell's background task; K-store owns the complete preference transaction.
 fn write_state(path: &std::path::Path, frame: WindowFrame) -> Result<(), String> {
     #[cfg(windows)]
-    {
-        let monitors = monitors::monitors();
-        let mut file = std::fs::read_to_string(path).map(|text| WindowStateFile::parse(&text)).unwrap_or_default();
-        file.record(SetupKey::of(&monitors), frame);
-        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let temporary = path.with_extension(format!("tmp{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
-        if let Err(error) = std::fs::write(&temporary, file.to_text()).and_then(|()| std::fs::rename(&temporary, path)) {
-            let _ = std::fs::remove_file(&temporary);
-            return Err(format!("could not save window state: {error}"));
-        }
-    }
+    return write_state_for_setup(path, SetupKey::of(&monitors::monitors()), frame, &styk_services::Cancel::new());
     #[cfg(not(windows))]
-    let _ = (path, frame);
-    Ok(())
+    { let _ = (path, frame); Ok(()) }
 }
 
+#[cfg(windows)]
+fn write_state_for_setup(path: &std::path::Path, setup: SetupKey, frame: WindowFrame, cancel: &styk_services::Cancel) -> Result<(), String> {
+    use styk_services::{storage::Storage, worker::run_future};
+    use styk_services::shell::window_state::MAX_FILE;
+    let save = || {
+        let directory = path.parent().ok_or_else(|| styk_services::files::FileError::Io("missing profile directory".into()))?;
+        let name = path.file_name().and_then(|s| s.to_str()).ok_or_else(|| styk_services::files::FileError::Io("invalid window state name".into()))?;
+        let storage = crate::storage::LocalStorage::new(directory, &crate::spawn::ThreadSpawner)?;
+        run_future(storage.update(name, MAX_FILE, Box::new(move |current| {
+            let mut file = current.and_then(|bytes| std::str::from_utf8(bytes).ok()).map(WindowStateFile::parse).unwrap_or_default();
+            // Read and merge under Storage's OS lock: never replace other windows' setup entries
+            // with an earlier snapshot. The existing codec owns retention and the last-frame fallback.
+            file.record(setup, frame);
+            Ok(file.to_text().into_bytes())
+        }), cancel))
+    };
+    save().map_err(|error| format!("could not save window state: {error}"))
+}
+
+#[cfg(all(test, windows))]
+mod persistence_tests;
 /// What attaching the shell to the open window produced.
 #[derive(Clone)]
 pub struct Attached {
@@ -383,6 +393,9 @@ mod tests {
         });
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(WindowStateFile::parse(&text).last.is_some(), "the file is whole: {text:?}");
+        let file = WindowStateFile::parse(&text);
+        assert_eq!(file.to_text(), text, "the entire file is canonical");
+        assert!(matches!(file.last, Some(saved) if saved == frame(39) || saved == frame(1039)));
         let _ = std::fs::remove_dir_all(dir);
     }
 
