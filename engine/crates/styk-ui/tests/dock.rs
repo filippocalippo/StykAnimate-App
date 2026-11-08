@@ -311,8 +311,35 @@ fn a_click_on_a_tab_activates_it_and_a_double_click_on_the_header_collapses_the_
     world.click(icon);
     assert_eq!(world.core.dock().open(), Some(PROPERTIES));
     assert!(world.bounds(ids::tab(PROPERTIES, 0)).is_some(), "the flyout shows the group's tabs");
-    world.key(Key::Named(Named::Escape), Modifiers::default());
+    // The flyout's tabs close as the docked ones do: a middle click on a tab that is not in front leaves the flyout open, the x
+    // on the tab in front closes that panel and with it the flyout (the core's rule).
+    let library = world.centre_of(ids::tab(PROPERTIES, 2));
+    world.moved(library.x, library.y);
+    world.pointer(mouse::Event::ButtonPressed(mouse::Button::Middle));
+    world.pointer(mouse::Event::ButtonReleased(mouse::Button::Middle));
+    assert_eq!(world.tabs_of(PROPERTIES), ["properties", "vfx"], "a middle click closed Library in the flyout");
+    assert_eq!(world.core.dock().open(), Some(PROPERTIES));
+    let tab = world.bounds(ids::tab(PROPERTIES, 1)).unwrap();
+    world.click(Point::new(tab.x + tab.width - 7.0, tab.y + tab.height / 2.0));
+    assert_eq!(world.tabs_of(PROPERTIES), ["properties"], "the x closed VFX in the flyout");
     assert_eq!(world.core.dock().open(), None);
+}
+
+#[test]
+fn the_sheet_at_compact_width_closes_tabs_with_the_x_and_the_middle_click_too() {
+    let mut world = World::new(720.0, 800.0);
+    world.key(Key::Character("1".into()), Modifiers::CTRL);
+    assert_eq!(world.core.dock().open(), Some(PROPERTIES), "Ctrl+1 opens the sheet");
+    let library = world.centre_of(ids::tab(PROPERTIES, 2));
+    world.moved(library.x, library.y);
+    world.pointer(mouse::Event::ButtonPressed(mouse::Button::Middle));
+    world.pointer(mouse::Event::ButtonReleased(mouse::Button::Middle));
+    assert_eq!(world.tabs_of(PROPERTIES), ["properties", "vfx"], "a middle click closed Library in the sheet");
+    assert_eq!(world.core.dock().open(), Some(PROPERTIES));
+    let tab = world.bounds(ids::tab(PROPERTIES, 0)).expect("the sheet's tabs");
+    world.click(Point::new(tab.x + tab.width - 7.0, tab.y + tab.height / 2.0));
+    assert_eq!(world.tabs_of(PROPERTIES), ["vfx"], "the x closed Properties in the sheet");
+    assert!(world.core.dock().can_undo());
 }
 
 #[test]

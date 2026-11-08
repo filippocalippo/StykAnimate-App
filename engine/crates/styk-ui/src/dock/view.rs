@@ -187,7 +187,8 @@ fn flyout<'a>(params: &Params<'_>, group: &TabGroup, body: Element<'a, Message>,
     out.push(Placed::new(container(scrim).width(Length::Fill).height(Length::Fill), at(0.0, 0.0)));
     let mut column: Vec<Element<'a, Message>> = Vec::new();
     let tabs: Vec<Tab> = group.tabs.iter().map(|panel| Tab { label: title(params.presentation, panel), icon: None }).collect();
-    let tabs = Tabs::new(ids::tabs(id), Dock::area_of(&group.tabs[group.active]), palette, tabs, group.active, move |index| send(Event::Open { group: id, tab: index })).into_element();
+    let panels = group.tabs.clone();
+    let tabs = Tabs::new(ids::tabs(id), Dock::area_of(&group.tabs[group.active]), palette, tabs, group.active, move |index| send(Event::Open { group: id, tab: index })).closable(move |index| send(Event::Close(panels[index].clone()))).into_element();
     let pin = IconButton::new(ids::pin(id), Dock::area_of(&group.tabs[group.active]), palette, "pin", send(Event::Pin(id))).size(IconSize::Sm).into_element();
     let header = iced::widget::Row::with_children(vec![container(tabs).width(Length::Fill).boxed(), pin]).align_y(Alignment::Center).spacing(scale::SPACE_1);
     column.push(fixed(container(header).padding(Padding { top: scale::SPACE_1_5, right: scale::SPACE_2, bottom: scale::SPACE_1_5, left: scale::SPACE_2 }), w, HEADER_HEIGHT));
