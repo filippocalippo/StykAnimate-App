@@ -66,7 +66,7 @@ impl<'a, Message: Clone + 'a> Switch<'a, Message> {
         let face = |knob: Rgba| -> Element<'a, Message> {
             let (size, inset) = if checked { KNOB_ON } else { KNOB_OFF };
             let dot = container(Space::new().width(size).height(size)).style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(knob.faded(opacity).into())),
+                background: Some(iced::Background::Color(layered(knob, palette.surface, opacity).into())),
                 border: iced::Border { radius: (size / 2.0).into(), ..Default::default() },
                 ..Default::default()
             });
@@ -81,10 +81,10 @@ impl<'a, Message: Clone + 'a> Switch<'a, Message> {
             let hovered = !disabled && interaction != Interaction::Rest;
             if checked {
                 let fill = if hovered { palette.accent_strong.mix(86.0, palette.text_1) } else { palette.accent_strong };
-                Look { fill: Some(fill), border: 0.0, ring: None, shadows: &[], radius: SWITCH_HEIGHT / 2.0, opacity }
+                Look { fill: Some(fill), border: 0.0, ring: None, shadows: &[], radius: SWITCH_HEIGHT / 2.0, opacity, scale: 1.0 }
             } else {
                 let ring = if hovered { palette.text_2 } else { palette.line_control };
-                Look { fill: Some(palette.surface_sunken), border: 0.0, ring: Some((1.5, ring)), shadows: &[], radius: SWITCH_HEIGHT / 2.0, opacity }
+                Look { fill: Some(palette.surface_sunken), border: 0.0, ring: Some((1.5, ring)), shadows: &[], radius: SWITCH_HEIGHT / 2.0, opacity, scale: 1.0 }
             }
         };
         let message = on_toggle(!checked);
@@ -111,7 +111,7 @@ impl<'a, Message: Clone + 'a> Switch<'a, Message> {
         let ink = if disabled { palette.text_3.faded(super::control::FIELD_DISABLED) } else { palette.text_3 };
         let line = Row::with_children([words(label, style, ink), Space::new().width(Length::Fill).boxed(), self.into_element()]).spacing(scale::SPACE_2).align_y(Alignment::Center);
         let (left, right) = frame::padding(in_grid);
-        FieldFrame::new(line.boxed(), palette, Length::Fill, frame::HEIGHT, Padding { top: 0.0, right, bottom: 0.0, left }).disabled(disabled).preview(preview.filter(|preview| *preview != Preview::Focus)).boxed()
+        FieldFrame::new(line.boxed(), palette, Length::Fill, frame::HEIGHT, Padding { top: 0.0, right, bottom: 0.0, left }).disabled(disabled).preview(preview).boxed()
     }
 
     /// The switch at the end of a row (`.ui-switch-row`): `--type-ui` words, 36 px at least.
@@ -135,12 +135,12 @@ pub enum Checked {
 
 /// The tick of `.ui-checkbox::before` (a 9 by 5 corner of 2 px lines turned 45 degrees, lifted 1 px), and the bar of a mixed
 /// one, in the 16 px box. They are drawn in `--text-on-strong` by tinting.
-const TICK: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.757 7.707L6.586 10.536L12.243 4.879" fill="none" stroke="#000" stroke-width="2" stroke-linejoin="miter" stroke-miterlimit="4"/></svg>"##;
+const TICK: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M2.343 7.707L6.586 11.95L13.657 4.879" fill="none" stroke="#000" stroke-width="2" stroke-linejoin="miter" stroke-miterlimit="4"/></svg>"##;
 const BAR: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="4" y="7" width="8" height="2" fill="#000"/></svg>"##;
 
 fn mark<'a, Message: 'a>(bytes: &'static [u8], color: Rgba) -> Element<'a, Message> {
     let color = iced::Color::from(color);
-    svg(svg::Handle::from_memory(bytes)).width(Length::Fixed(BOX)).height(Length::Fixed(BOX)).style(move |_, _| svg::Style { color: Some(color) }).boxed()
+    svg(svg::Handle::from_memory(bytes)).width(Length::Fixed(BOX)).height(Length::Fixed(BOX)).opacity(color.a).style(move |_, _| svg::Style { color: Some(iced::Color { a: 1.0, ..color }) }).boxed()
 }
 
 /// A checkbox. `on_toggle` is given the state a press asks for.
@@ -183,16 +183,16 @@ impl<'a, Message: Clone + 'a> Checkbox<'a, Message> {
         let on = checked != Checked::No;
         let look = move |interaction: Interaction| {
             if on {
-                Look { fill: Some(palette.accent_strong), border: 0.0, ring: None, shadows: &[], radius, opacity }
+                Look { fill: Some(palette.accent_strong), border: 0.0, ring: None, shadows: &[], radius, opacity, scale: 1.0 }
             } else {
                 let ring = if !disabled && interaction != Interaction::Rest { palette.text_2 } else { palette.line_control };
-                Look { fill: Some(palette.surface), border: 0.0, ring: Some((1.5, ring)), shadows: &[], radius, opacity }
+                Look { fill: Some(palette.surface), border: 0.0, ring: Some((1.5, ring)), shadows: &[], radius, opacity, scale: 1.0 }
             }
         };
         let face: Element<'a, Message> = match checked {
             Checked::No => Space::new().width(BOX).height(BOX).boxed(),
-            Checked::Yes => mark(TICK, palette.text_on_strong.faded(opacity)),
-            Checked::Mixed => mark(BAR, palette.text_on_strong.faded(opacity)),
+            Checked::Yes => mark(TICK, layered(palette.text_on_strong, palette.surface, opacity)),
+            Checked::Mixed => mark(BAR, layered(palette.text_on_strong, palette.surface, opacity)),
         };
         let message = on_toggle(checked != Checked::Yes);
         let surface = Surface::new(face, look).on_press_maybe((!disabled).then(|| message.clone())).preview(preview).width(Length::Fixed(BOX)).height(Length::Fixed(BOX));
@@ -256,7 +256,7 @@ impl<'a, Message: Clone + 'a> Radio<'a, Message> {
             } else {
                 (1.5, palette.line_control)
             };
-            Look { fill: Some(palette.surface), border: 0.0, ring: Some(ring), shadows: &[], radius, opacity }
+            Look { fill: Some(palette.surface), border: 0.0, ring: Some(ring), shadows: &[], radius, opacity, scale: 1.0 }
         };
         let surface = Surface::new(Space::new().width(BOX).height(BOX).boxed(), look)
             .on_press_maybe((!disabled).then(|| on_select.clone()))
@@ -283,4 +283,13 @@ fn check_row<'a, Message: Clone + 'a>(palette: &'static Palette, control: Elemen
     let line = Row::with_children([control, words(label, TextStyle::from_role(&scale::TYPE_UI), ink)]).spacing(scale::SPACE_2).align_y(Alignment::Center);
     let row = container(line).height(Length::Fixed(scale::CONTROL_LG)).center_y(Length::Fixed(scale::CONTROL_LG));
     Surface::new(row.boxed(), |_| Look::plain(0.0)).on_press_maybe((!disabled).then_some(message)).boxed()
+}
+
+/// What an opaque part `color` of a control looks like when the whole control is one layer at `opacity` over `page`: the parts
+/// are drawn opaque first and faded together, so a knob over its track is not faded twice (it covers the track).
+fn layered(color: Rgba, page: Rgba, opacity: f32) -> Rgba {
+    if opacity >= 1.0 {
+        return color;
+    }
+    color.mix(opacity * 100.0, page)
 }

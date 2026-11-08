@@ -45,13 +45,13 @@ impl SwatchSize {
 }
 
 /// A colour in a rounded square with its hairline (`--swatch-ring`).
-pub fn swatch<'a, Message: 'a>(palette: &'static Palette, rgb: [u8; 3], size: SwatchSize) -> Element<'a, Message> {
+pub fn swatch<'a, Message: 'a>(palette: &'static Palette, rgb: [u8; 3], size: SwatchSize, opacity: f32) -> Element<'a, Message> {
     let side = size.side();
     let ring = palette.swatch_ring;
     container(Space::new().width(side).height(side))
         .style(move |_| container::Style {
-            background: Some(Background::Color(Color::from_rgb8(rgb[0], rgb[1], rgb[2]))),
-            border: Border { color: ring.into(), width: 1.0, radius: size.radius().into() },
+            background: Some(Background::Color(Color { a: opacity, ..Color::from_rgb8(rgb[0], rgb[1], rgb[2]) })),
+            border: Border { color: ring.faded(opacity).into(), width: 1.0, radius: size.radius().into() },
             ..container::Style::default()
         })
         .boxed()
@@ -103,7 +103,7 @@ impl<'a, Message: Clone + 'a> ColorField<'a, Message> {
         let gap = if in_grid { scale::SPACE_1 } else { scale::SPACE_2 };
         let ink: Rgba = if disabled { palette.text_1.faded(FIELD_DISABLED) } else { palette.text_1 };
         let hex = words(caption, TextStyle::from_role(&scale::TYPE_VALUE).tabular().tracking_em(0.01), ink);
-        let line = Row::with_children([swatch(palette, rgb, SwatchSize::Sm), hex]).spacing(gap).align_y(Alignment::Center);
+        let line = Row::with_children([swatch(palette, rgb, SwatchSize::Sm, if disabled { FIELD_DISABLED } else { 1.0 }), hex]).spacing(gap).align_y(Alignment::Center);
         let line: Element<'a, Message> = if centered { container(line).center_x(Length::Fill).boxed() } else { line.boxed() };
         let line = container(line).center_y(Length::Fill).boxed();
         let press = Surface::new(line, |_| Look::plain(0.0)).on_press_maybe((!disabled).then(|| on_press.clone())).width(Length::Fill).height(Length::Fill);

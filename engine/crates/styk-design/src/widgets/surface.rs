@@ -26,12 +26,14 @@ pub struct Look {
     pub radius: f32,
     /// Multiplies every colour drawn (a disabled control).
     pub opacity: f32,
+    /// The look is drawn at this scale about its centre (`transform: scale(var(--press-scale))` while a button is pressed).
+    pub scale: f32,
 }
 
 impl Look {
     /// A flat look of `radius` with nothing drawn.
     pub fn plain(radius: f32) -> Look {
-        Look { fill: None, border: 0.0, ring: None, shadows: &[], radius, opacity: 1.0 }
+        Look { fill: None, border: 0.0, ring: None, shadows: &[], radius, opacity: 1.0, scale: 1.0 }
     }
 }
 
@@ -179,13 +181,16 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Surface<'a, M
         let bounds = layout.bounds();
         let interaction = self.interaction(tree.state.downcast_ref::<State>(), bounds, cursor);
         let look = (self.look)(interaction);
+        // A pressed button is drawn at `--press-scale` about its centre; its words keep their size (the 3 % is about a pixel).
+        let (width, height) = (bounds.width * look.scale, bounds.height * look.scale);
+        let bounds = Rectangle { x: bounds.x + (bounds.width - width) / 2.0, y: bounds.y + (bounds.height - height) / 2.0, width, height };
         paint_shadows(renderer, bounds, look.radius, look.shadows, look.opacity);
         if let Some(fill) = look.fill {
             paint_fill(renderer, bounds, look.radius, fill.faded(look.opacity));
         }
-        if let Some((width, color)) = look.ring {
+        if let Some((ring, color)) = look.ring {
             let inner = Rectangle { x: bounds.x + look.border, y: bounds.y + look.border, width: bounds.width - 2.0 * look.border, height: bounds.height - 2.0 * look.border };
-            paint_ring(renderer, inner, (look.radius - look.border).max(0.0), width, color.faded(look.opacity));
+            paint_ring(renderer, inner, (look.radius - look.border).max(0.0), ring, color.faded(look.opacity));
         }
         match (&self.hover, interaction) {
             (Some(hover), Interaction::Hover | Interaction::Pressed) => hover.draw(&tree.children[1], renderer, theme, style, layout, cursor, viewport),

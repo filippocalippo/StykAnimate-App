@@ -108,6 +108,8 @@ pub struct Sheet {
     pub dialog_open: bool,
     /// The last thing that happened, shown at the bottom.
     pub status: String,
+    /// The page shows the design system's controls in every state ([`crate::controls_sheet`]) instead of the fields and focus page.
+    pub controls: bool,
     /// What the last walk of the tree found: where each target is.
     pub snapshot: focus::Snapshot,
 }
@@ -130,6 +132,7 @@ impl Sheet {
             switch_on: true,
             dialog_open: false,
             status: String::new(),
+            controls: false,
             snapshot: focus::Snapshot::default(),
         }
     }
@@ -350,7 +353,15 @@ impl Sheet {
             .on_compose(Message::Compose)
     }
 
+    /// The controls page for `theme`.
+    pub fn controls_page(theme: Theme) -> Sheet {
+        Sheet { controls: true, ..Sheet::new(theme, Dir::Ltr) }
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
+        if self.controls {
+            return crate::controls_sheet::page(self.theme);
+        }
         let palette = self.theme.palette();
         let dir = self.dir;
         let number_text = self.edit.text();

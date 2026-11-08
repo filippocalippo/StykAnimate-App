@@ -9,6 +9,7 @@
 
 pub mod band;
 pub mod component_sheet;
+pub mod controls_sheet;
 pub mod dock;
 pub mod inspector;
 pub mod message;

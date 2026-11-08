@@ -268,3 +268,18 @@ masks = [
   [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
   [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
 ]
+
+# The design system's controls in every state (K-widgets-a): one table of five state columns, today's components drawn by
+# today's stylesheets with hover, pressed and focus forced through the DevTools protocol (bundled Chromium, LCD text on,
+# opaque surfaces, device scale 1) by engine/crates/styk-app/automation/controls-reference/screens.mjs.
+["controls"]
+reference = "docs/native/screens/controls/controls.png"
+max_difference = 0.011
+width = 938
+height = 2120
+
+["controls-dark"]
+reference = "docs/native/screens/controls/controls-dark.png"
+max_difference = 0.011
+width = 938
+height = 2120

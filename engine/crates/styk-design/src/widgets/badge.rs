@@ -104,7 +104,7 @@ impl<'a, Message: Clone + 'a> Chip<'a, Message> {
         let look = move |interaction: Interaction| {
             let hovered = !disabled && interaction != Interaction::Rest;
             let fill = if on { palette.accent_soft } else if hovered { palette.surface_pressed } else { palette.surface_well };
-            Look { fill: Some(fill), border: 1.0, ring: on.then_some((1.0, palette.accent_line)), shadows: &[], radius, opacity }
+            Look { fill: Some(fill), border: 1.0, ring: on.then_some((1.0, palette.accent_line)), shadows: &[], radius, opacity, scale: 1.0 }
         };
         let message = on_press.filter(|_| !disabled);
         let surface = Surface::new(face.boxed(), look).on_press_maybe(message.clone()).preview(preview).height(Length::Fixed(height));

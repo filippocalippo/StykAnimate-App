@@ -38,7 +38,9 @@ pub mod weight {
 pub fn icon<'a>(name: &str, size: f32, color: impl Into<Color>) -> svg::Svg<'a> {
     let handle = svg::Handle::from_memory(icons::svg(name));
     let color = color.into();
-    svg(handle).width(Length::Fixed(size)).height(Length::Fixed(size)).style(move |_, _| svg::Style { color: Some(color) })
+    // An svg's tint ignores the colour's alpha, so the alpha is the svg's opacity (a disabled control's glyph).
+    let opaque = Color { a: 1.0, ..color };
+    svg(handle).width(Length::Fixed(size)).height(Length::Fixed(size)).opacity(color.a).style(move |_, _| svg::Style { color: Some(opaque) })
 }
 
 #[cfg(test)]
@@ -75,5 +77,7 @@ pub mod toggle;
 pub mod testing;
 #[cfg(all(test, feature = "testing"))]
 mod page_tests;
+#[cfg(all(test, feature = "testing"))]
+mod control_tests;
 
 pub use dir::Dir;

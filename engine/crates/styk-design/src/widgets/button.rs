@@ -247,6 +247,7 @@ impl<'a, Message: Clone + 'a> Button<'a, Message> {
             shadows: lift,
             radius,
             opacity,
+            scale: if interaction == Interaction::Pressed { scale::PRESS_SCALE } else { 1.0 },
         };
         let message = on_press.filter(|_| !disabled);
         let mut surface = Surface::new(face(colors.ink[0]), look).on_press_maybe(message.clone()).preview(preview).height(Length::Fixed(height));
@@ -398,7 +399,7 @@ impl<'a, Message: Clone + 'a> IconButton<'a, Message> {
         let face = |ink: Rgba| -> Element<'a, Message> {
             container(super::icon(icon, size.glyph(), ink.faded(opacity))).center_x(Length::Fixed(side)).center_y(Length::Fixed(side)).boxed()
         };
-        let look = move |interaction: Interaction| Look { fill: fill[interaction as usize], border: 1.0, ring: None, shadows: &[], radius, opacity };
+        let look = move |interaction: Interaction| Look { fill: fill[interaction as usize], border: 1.0, ring: None, shadows: &[], radius, opacity, scale: if interaction == Interaction::Pressed { scale::PRESS_SCALE } else { 1.0 } };
         let message = on_press.filter(|_| !disabled);
         let mut surface = Surface::new(face(ink), look).on_press_maybe(message.clone()).preview(preview).width(Length::Fixed(side)).height(Length::Fixed(side));
         if hover_ink != ink {

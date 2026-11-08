@@ -35,6 +35,7 @@ pub struct RovingGroup<'a, Message> {
     ring: Ring,
     width: Length,
     role: InputRole,
+    shown: Option<usize>,
     on_move: Arc<dyn Fn(usize) -> Message + 'a>,
 }
 
@@ -59,6 +60,7 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
             ring,
             width: Length::Shrink,
             role: InputRole::None,
+            shown: None,
             on_move: Arc::new(on_move),
         }
     }
@@ -86,6 +88,12 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
     /// The width of a horizontal group (`Length::Fill` for items that share the row).
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
+        self
+    }
+
+    /// Shows the focus ring on item `index` whatever holds focus (a preview of the focus state).
+    pub fn ring_shown(mut self, index: Option<usize>) -> Self {
+        self.shown = index;
         self
     }
 
@@ -117,7 +125,7 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
     /// The group as an element.
     pub fn into_element(self) -> Element<'a, Message> {
         let group = self;
-        let RovingGroup { area, items, active, orientation, dir, wrap, spacing, ring, width, role, on_move } = group;
+        let RovingGroup { area, items, active, orientation, dir, wrap, spacing, ring, width, role, shown, on_move } = group;
         let count = items.len();
         let enabled: Arc<[bool]> = items.iter().map(|item| item.enabled).collect();
 
@@ -145,7 +153,8 @@ impl<'a, Message: Clone + 'a> RovingGroup<'a, Message> {
                     .keys(keys)
                     .enabled(item.enabled)
                     .tab_stop(index == active)
-                    .input_role(role);
+                    .input_role(role)
+                    .ring_shown(shown == Some(index));
                 if let Some(message) = item.on_activate {
                     target = target.on_activate(message);
                 }

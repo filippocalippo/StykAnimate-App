@@ -156,9 +156,9 @@ impl<'a, Message: Clone + 'a> Segmented<'a, Message> {
                 let held = preview.filter(|(at, _)| *at == index).map(|(_, preview)| preview);
                 let look = move |_: Interaction| {
                     if on {
-                        Look { fill: Some(palette.control_thumb), border: 1.0, ring: Some((1.0, palette.line_control)), shadows: palette.elevation_1, radius, opacity }
+                        Look { fill: Some(palette.control_thumb), border: 1.0, ring: Some((1.0, palette.line_control)), shadows: palette.elevation_1, radius, opacity, scale: 1.0 }
                     } else {
-                        Look { fill: None, border: 1.0, ring: None, shadows: &[], radius, opacity }
+                        Look { fill: None, border: 1.0, ring: None, shadows: &[], radius, opacity, scale: 1.0 }
                     }
                 };
                 let rest_ink = if on { palette.text_1 } else { palette.text_2 };
@@ -180,6 +180,7 @@ impl<'a, Message: Clone + 'a> Segmented<'a, Message> {
             .dir(dir)
             .spacing(scale::SPACE_0_5)
             .input_role(if radios { InputRole::Radio } else { InputRole::None })
+            .ring_shown(preview.filter(|(_, preview)| *preview == Preview::Focus).map(|(item, _)| item))
             .width(if fill { Length::Fill } else { Length::Shrink })
             .into_element();
         let track_width = if fill { Length::Fill } else { Length::Shrink };

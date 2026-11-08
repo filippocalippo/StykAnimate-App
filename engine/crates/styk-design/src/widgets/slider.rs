@@ -212,10 +212,12 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Track<'a, Mes
         // The track: the filled part from the start to the thumb, the rest after it.
         let track = Rectangle { x: bounds.x, y: centre_y - TRACK / 2.0, width: bounds.width, height: TRACK };
         paint_fill(renderer, track, TRACK / 2.0, rest.faded(opacity));
+        // `--_p` is the value's share of the whole track (the inspector kit writes it), not where the thumb's centre is.
+        let share = (((self.value - self.min) / (self.max - self.min).max(f64::EPSILON)).clamp(0.0, 1.0) as f32) * bounds.width;
         let filled = if self.dir.is_rtl() {
-            Rectangle { x: thumb_x, y: track.y, width: (bounds.x + bounds.width - thumb_x).max(0.0), height: TRACK }
+            Rectangle { x: bounds.x + bounds.width - share, y: track.y, width: share, height: TRACK }
         } else {
-            Rectangle { x: bounds.x, y: track.y, width: (thumb_x - bounds.x).max(0.0), height: TRACK }
+            Rectangle { x: bounds.x, y: track.y, width: share, height: TRACK }
         };
         if filled.width > 0.0 {
             paint_fill(renderer, filled, TRACK / 2.0, fill.faded(opacity));
@@ -233,8 +235,21 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for Track<'a, Mes
         } else {
             paint_shadows(renderer, thumb, THUMB / 2.0, palette.elevation_1, opacity);
         }
-        disc(renderer, 1.0, palette.line_control);
-        disc(renderer, 0.0, palette.slider_thumb);
+        if self.disabled {
+            // The whole slider is one 42 % layer: its thumb is the thumb over what the track shows through it, drawn opaque.
+            let under = palette.surface;
+            let ring = palette.line_control.mix(opacity * 100.0, under);
+            let face = palette.slider_thumb.mix(opacity * 100.0, under);
+            let opaque = |renderer: &mut Renderer, grow: f32, color: Rgba| {
+                let bounds = Rectangle { x: thumb.x - grow, y: thumb.y - grow, width: THUMB + 2.0 * grow, height: THUMB + 2.0 * grow };
+                paint_fill(renderer, bounds, bounds.width / 2.0, color);
+            };
+            opaque(renderer, 1.0, ring);
+            opaque(renderer, 0.0, face);
+        } else {
+            disc(renderer, 1.0, palette.line_control);
+            disc(renderer, 0.0, palette.slider_thumb);
+        }
         self.inner.draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
     }
 }

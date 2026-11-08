@@ -25,13 +25,15 @@ pub enum Screen {
     BandFolded,
     /// The band while a figure is being built: Build is the workspace, Test rig and Done show, Export is quiet.
     BandBuild,
+    /// The design system's controls in every state (`styk_ui::controls_sheet`); dark when `true`.
+    Controls(bool),
     /// The Properties panel in a context (`styk_core::screens`), docked at today's default size; dark when `true`.
     Inspector(InspectorScreen, bool),
 }
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 23] = [
+    pub const ALL: [Screen; 25] = [
         Screen::ComponentSheet,
         Screen::Band,
         Screen::BandDark,
@@ -55,6 +57,8 @@ impl Screen {
         Screen::Inspector(InspectorScreen::Layer, true),
         Screen::Inspector(InspectorScreen::Frame, false),
         Screen::Inspector(InspectorScreen::Frame, true),
+        Screen::Controls(false),
+        Screen::Controls(true),
     ];
 
     /// The ID the command line uses.
@@ -65,6 +69,8 @@ impl Screen {
             Screen::BandDark => "band-dark",
             Screen::BandFolded => "band-folded",
             Screen::BandBuild => "band-build",
+            Screen::Controls(false) => "controls",
+            Screen::Controls(true) => "controls-dark",
             Screen::Inspector(InspectorScreen::Scene, false) => "inspector-scene",
             Screen::Inspector(InspectorScreen::Scene, true) => "inspector-scene-dark",
             Screen::Inspector(InspectorScreen::Figure, false) => "inspector-figure",
@@ -89,14 +95,14 @@ impl Screen {
     /// The theme the screen is drawn in.
     pub const fn theme(self) -> Theme {
         match self {
-            Screen::BandDark | Screen::Inspector(_, true) => Theme::Dark,
+            Screen::BandDark | Screen::Controls(true) | Screen::Inspector(_, true) => Theme::Dark,
             _ => Theme::Light,
         }
     }
 
     /// Whether the screen is the top band over its window (the band screens need the shell's layout).
     pub const fn is_band(self) -> bool {
-        !matches!(self, Screen::ComponentSheet | Screen::Inspector(..))
+        !matches!(self, Screen::ComponentSheet | Screen::Controls(_) | Screen::Inspector(..))
     }
 
     /// The screen with this ID.

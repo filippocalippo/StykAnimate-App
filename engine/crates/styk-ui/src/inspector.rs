@@ -391,7 +391,7 @@ impl Kit<'_> {
                 Row::with_children(line).align_y(Alignment::Center).boxed()
             }
             m::Row::Swatches { items, .. } => {
-                let swatches: Vec<Element<'static, Message>> = items.iter().map(|(rgb, _)| swatch(self.palette, *rgb, SwatchSize::Md)).collect();
+                let swatches: Vec<Element<'static, Message>> = items.iter().map(|(rgb, _)| swatch(self.palette, *rgb, SwatchSize::Md, 1.0)).collect();
                 Row::with_children(swatches).spacing(tokens::scale::SPACE_1).wrap().boxed()
             }
             m::Row::Pager { text: page, previous, next, .. } => row![self.button(previous, ButtonSize::Small), Space::new().width(Length::Fill), self.small(page.to_string()), Space::new().width(Length::Fill), self.button(next, ButtonSize::Small)].align_y(Alignment::Center).boxed(),

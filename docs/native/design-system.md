@@ -42,6 +42,35 @@ Cyrillic, Greek, Vietnamese). A test fails if a file is replaced by another buil
 code point of every shipped subset has the same advance in them. How the text stack draws them like the browser, the
 fidelity check (`cargo xtask fonts`) and its results: [typography.md](typography.md).
 
+## Shared controls (`styk-design::widgets`)
+
+Every control a panel needs is built once here and drawn from the tokens only; a panel (`styk-ui::inspector` is the
+worked example) composes them and sends messages. A control reports; it never computes a feature.
+
+| Module | Controls | Notes |
+| --- | --- | --- |
+| `button` | `Button` (soft, primary, accent, ghost, outline, danger; sm 28, md 32, lg 36; glyph, toggled, danger tone, section action), `IconButton` (xs to lg, soft, round, toggled, expanded) | the pressed state is drawn at `--press-scale` about its centre; the words keep their size |
+| `toggle` | `Switch` (bare, in a field, as a row), `Checkbox` (mixed), `Radio` | a disabled control is one 42 % layer: a knob or tick is the opaque part over the page, not faded twice |
+| `segmented` | `Segmented` (md, sm, lg, fill, glyphs) | one Tab stop; the arrow keys choose the next enabled item (`roving`); radios or buttons |
+| `slider` | `Slider`, `Slider::row` | press jumps, a drag follows the pointer until release (snapped to the step), keys through `styk_core::controls::slider_value`, wheel only when asked; it reports `Slide { value, commit }` |
+| `number_field` | `NumberField` (field box, label that scrubs, value sized to its text, unit glued for `%`, `°`, `×`), `stepper` | the scrub, step and clamp rules are `styk_core::number` |
+| `select`, `color` | `Select`, `ColorField`, `swatch` | a select reports the option picked and the key step asked for |
+| `badge` | `Chip`, `badge` (the section tint tile) | |
+| `frame` | `FieldFrame` | the field box: hover hairline, accent ring and halo while anything inside holds focus (it asks the tree), danger ring, half opacity |
+| `surface`, `control` | `Surface`, `Look`, `Preview`, shadows | the pressable box under buttons, chips and segmented items |
+
+**Input roles.** An input-like control declares its `styk_core::focus::InputRole` in its own constructor, so no panel can
+forget it and let Delete reach the document: text and number fields are `Text`, `Select` is `Select`, switch and checkbox
+are `Checkbox`, radio and a radio group are `Radio`, slider and colour field are `Other`. Buttons, chips and a button group
+declare none. `control_tests::every_input_like_control_declares_its_role_and_keeps_delete_from_the_document` routes each kind
+through `Shortcuts::press`.
+
+**Previews.** `Preview::{Hover, Pressed, Focus}` holds a state whatever the pointer does. The controls page
+(`stykanimate --screen controls`, `controls-dark`; `styk_ui::controls_sheet`) shows every control in every state with them
+and is compared with today's components drawn by today's stylesheets
+(`engine/crates/styk-app/automation/controls-reference/screens.mjs`: hover, pressed and focus forced through the DevTools
+protocol). `--scale 1.5 --out <dir>` writes the 150 % references the chunk checked by hand.
+
 ## Dependencies
 
 `styk-design` is plain data without its `widgets` feature, so tools and tests read the tokens without a toolkit. Nothing
