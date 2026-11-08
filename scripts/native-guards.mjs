@@ -8,17 +8,18 @@ import {sourceErrors} from './native-source-guards.mjs';
 import {screenCheck} from './native-screen-guards.mjs';
 import {TOOLCHAIN, THREADED_WASM_ARGS, threadedWasmEnv} from './engine-wasm-config.mjs';
 
-const frontend = new Set(['styk-app', 'styk-ui', 'styk-design', 'styk-devtools', 'styk-platform', 'styk-text-check', 'xtask']);
+const frontend = new Set(['styk-app', 'styk-ui', 'styk-design', 'styk-devtools', 'styk-devtools-engine', 'styk-platform', 'styk-text-check', 'xtask']);
 const toolkit = name => /^(iced|winit|cryoglyph)([_-]|$)/.test(name);
 const nativeEdges = {
   'styk-app': ['styk-core', 'styk-ui', 'styk-design', 'styk-platform', 'styk-devtools', 'styk-trace', 'styk-text-check', 'styk-services'],
   'styk-ui': ['styk-core', 'styk-design'],
   // Shared field widgets use core's portable focus and text state (S2a).
   'styk-design': ['styk-core'],
-  'styk-devtools': ['styk-core', 'styk-ui', 'styk-design', 'styk-trace'],
+  'styk-devtools': ['styk-core', 'styk-ui', 'styk-design', 'styk-trace', 'styk-devtools-engine'],
+  'styk-devtools-engine': ['styk-core', 'styk-services', 'styk-platform', 'styk-trace'],
   'styk-platform': ['styk-services'],
   'styk-services': [],
-  'styk-trace': [],
+  'styk-trace': ['styk-services'],
 };
 
 export function directionErrors(metadata) {
@@ -42,6 +43,12 @@ export function directionErrors(metadata) {
       if (['windows', 'windows-sys', 'winapi'].includes(d.name) && p.name !== 'styk-platform') {
         errors.push({package: p, dependency: d.name, rule: 'platform', message: `${d.name} belongs only in styk-platform`});
       }
+      if (d.name === 'styk-devtools-engine' && p.name !== 'styk-devtools') {
+        if (p.name !== 'styk-cli' || !d.optional || !p.features['app-tools']?.includes('dep:styk-devtools-engine') ||
+            Object.entries(p.features).some(([f, entries]) => f !== 'app-tools' && entries.some(e => /^(dep:)?styk-devtools-engine([/?]|$)|^app-tools$/.test(e)))) {
+          errors.push({package: p, dependency: d.name, rule: 'devtools', message: 'the headless developer engine is allowed only through styk-devtools or styk-cli/app-tools'});
+        }
+      }
       if (d.name === 'styk-devtools') {
         const features = p.features;
         if (p.name !== 'styk-app' || !d.optional || !features.devtools?.includes('dep:styk-devtools') ||
@@ -59,11 +66,12 @@ export function directionErrors(metadata) {
           if (edge.dep_kinds.every(k => k.kind === 'dev')) continue;
           const next = byId.get(edge.pkg);
           if (!next) throw new Error(`unresolved metadata package ${edge.pkg}`);
+          if (p.name === 'styk-devtools-engine' && toolkit(next.name)) errors.push({package: p, dependency: path[1] ?? next.name, rule: 'direction', message: 'headless developer workers must not reach the interface toolkit'});
           if (next.name.startsWith('styk-') && !nativeEdges[p.name].includes(next.name)) {
             // A permitted front-end module may in turn own its documented edges.
             if (p.name === 'styk-devtools' && ['styk-ui', 'styk-design'].includes(path.at(-1))) continue;
             errors.push({package: p, dependency: path[1] ?? next.name, rule: 'direction', message: `${[...path, next.name].join(' -> ')} crosses an ownership boundary`});
-          } else if (next.name !== 'styk-core' && !(p.name === 'styk-app' && nativeEdges[p.name].includes(next.name))) walk(next.id, [...path, next.name]);
+          } else if (next.name !== 'styk-core' && !(p.name === 'styk-devtools' && ['styk-devtools-engine', 'styk-trace'].includes(next.name)) && !(p.name === 'styk-app' && nativeEdges[p.name].includes(next.name))) walk(next.id, [...path, next.name]);
         }
       };
       walk(p.id, [p.name]);
@@ -77,7 +85,7 @@ export function directionErrors(metadata) {
         const next = byId.get(edge.pkg);
         if (!next) throw new Error(`unresolved metadata package ${edge.pkg}`);
         // Q2: deps.rs separately validates this non-default feature and its closure.
-        if (p.name === 'styk-cli' && id === p.id && ['styk-core', 'styk-services', 'styk-platform'].includes(next.name)) continue;
+        if (p.name === 'styk-cli' && id === p.id && ['styk-core', 'styk-services', 'styk-platform', 'styk-devtools-engine'].includes(next.name)) continue;
         if (frontend.has(next.name) || toolkit(next.name)) {
           errors.push({package: p, dependency: path[1] ?? next.name, rule: 'direction', message: `${[...path, next.name].join(' -> ')} reaches the front end`});
         } else visit(next.id, [...path, next.name], seen);

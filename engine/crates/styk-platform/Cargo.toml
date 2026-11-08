@@ -47,3 +47,6 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Di
 
 [dev-dependencies]
 tiny_http = "0.12"
+
+[features]
+dev-control = []

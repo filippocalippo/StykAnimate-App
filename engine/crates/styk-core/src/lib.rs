@@ -29,5 +29,7 @@ pub mod text;
 
 pub use launch::{ClockMode, Launch, LaunchError, USAGE};
 
+#[cfg(feature = "inspect")]
+pub mod inspect;
 /// Service contracts exposed to views through the application core.
 pub use styk_services as services;

@@ -162,6 +162,10 @@ pub struct Document {
 }
 
 impl Document {
+    #[cfg(feature = "inspect")]
+    pub fn inspection(&self) -> Result<crate::inspect::DocumentSnapshot, DocumentsError> { Ok(self.prepared.session.get()?.inspection().into()) }
+    #[cfg(feature = "inspect")]
+    pub fn inspect_history(&self, offset:usize) -> Result<crate::inspect::Page<crate::inspect::HistoryRow>, DocumentsError> { Ok(self.prepared.session.get()?.inspect_history(offset).into()) }
     pub fn id(&self) -> DocumentId { self.id }
     pub fn name(&self) -> &str { &self.prepared.name }
     pub fn revision(&self) -> u64 { self.prepared.session.revision() }
@@ -236,6 +240,17 @@ pub struct Documents {
 struct Clipboard { source: (DocumentId, u64), holder: (DocumentId, u64), value: Value }
 
 impl Documents {
+    #[cfg(feature = "inspect")]
+    pub fn inspection_state(&self) -> Result<crate::inspect::State, DocumentsError> {
+        let documents = self.tabs.iter().map(|tab| {
+            let view = tab.view()?;
+            Ok(crate::inspect::DocumentState {
+                id: tab.id.0, revision: view.revision, tick: view.tick,
+                dirty: view.dirty, undo: view.history.undo, redo: view.history.redo,
+            })
+        }).collect::<Result<Vec<_>, DocumentsError>>()?;
+        Ok(crate::inspect::State { active: self.active.map(|id| id.0), documents })
+    }
     pub fn new() -> Self { Self::default() }
     pub fn tabs(&self) -> &[Document] { &self.tabs }
     pub fn get(&self, id: DocumentId) -> Option<&Document> { self.tabs.iter().find(|tab| tab.id == id) }
@@ -340,4 +355,30 @@ impl Documents {
 
     pub fn undo(&mut self, id: DocumentId) -> Result<CallAnswer, DocumentsError> { self.call(id, "undo", &[], &Value::Null) }
     pub fn redo(&mut self, id: DocumentId) -> Result<CallAnswer, DocumentsError> { self.call(id, "redo", &[], &Value::Null) }
+}
+
+#[cfg(all(test, feature = "inspect"))]
+mod inspection_handoff_tests {
+    use super::*;
+
+    #[test]
+    fn inspection_refuses_a_handed_off_session_and_keeps_prior_tickets_valid() {
+        let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
+        let bytes = include_bytes!("../../../tests/edit/startup.document.json");
+        let prepared = PreparedDocument::open_bytes(&engine, bytes.as_slice().into(), "fixture.styk", &|| false).unwrap();
+        let mut owner = Documents::new();
+        owner.open(prepared).map_err(|(error, _)| error).unwrap();
+        let ticket = owner.active().unwrap().inspection().unwrap();
+        let revision = ticket.revision;
+        // This is the same exclusive handoff the document host uses for worker commands.
+        let session = owner.tabs[0].prepared.session.take().unwrap();
+        assert!(matches!(owner.active().unwrap().inspection(), Err(DocumentsError::Busy)));
+        assert!(matches!(owner.active().unwrap().inspect_history(0), Err(DocumentsError::Busy)));
+        assert!(matches!(crate::inspect::state(&owner), Err(DocumentsError::Busy)));
+        assert_eq!(ticket.node_raw(&["fps"]).unwrap().value.as_deref(), Some("24"));
+        owner.tabs[0].prepared.session = SessionOwner::Ready(session);
+        assert_eq!(owner.active().unwrap().inspection().unwrap().revision, revision);
+        assert_eq!(crate::inspect::state(&owner).unwrap().documents[0].revision, revision);
+        assert!(owner.active().unwrap().inspect_history(0).is_ok());
+    }
 }

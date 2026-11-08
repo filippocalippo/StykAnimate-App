@@ -414,3 +414,6 @@ enum Job {
     Task(TaskQueue),
     Frames(frames::Work),
 }
+
+#[cfg(feature = "inspect")]
+pub mod inspect;

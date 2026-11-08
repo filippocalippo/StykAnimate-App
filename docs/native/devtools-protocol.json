@@ -1,0 +1,528 @@
+{
+  "$defs": {
+    "error": {
+      "properties": {
+        "cause": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "input": {},
+        "what": {
+          "type": "string"
+        },
+        "where": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "what",
+        "where",
+        "input",
+        "cause",
+        "hint"
+      ],
+      "type": "object"
+    },
+    "request": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {},
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "hello"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {},
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "metrics.get"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {
+                "cursor": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "path": {
+                  "items": {
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "maxItems": 32,
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "state.get"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {
+                "cap_mb": {
+                  "maximum": 256,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "trace.start"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {},
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "trace.stop"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {
+                "cursor": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "trace.ring"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {
+                "cursor": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "path": {
+                  "items": {
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "maxItems": 32,
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "doc.tree"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {
+                "cursor": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "path": {
+                  "items": {
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "maxItems": 32,
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "doc.node"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {
+                "cursor": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "history.list"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {},
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "jobs.get"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {
+                "cursor": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "threads.get"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {},
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "cmd.list"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "response": {
+      "oneOf": [
+        {
+          "properties": {
+            "id": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "more": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "ok": {
+              "const": true
+            },
+            "result": {},
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "ok",
+            "result",
+            "truncated",
+            "more"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/error"
+            },
+            "id": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "ok": {
+              "const": false
+            }
+          },
+          "required": [
+            "id",
+            "ok",
+            "error"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    }
+  ],
+  "title": "StykAnimate developer protocol v1",
+  "x-byte-limits": {
+    "full": 24576,
+    "request": 16384,
+    "rows": 50,
+    "short": 4096,
+    "string": 2048
+  }
+}

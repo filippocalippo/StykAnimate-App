@@ -34,7 +34,9 @@ pub const IO_DEADLINE: Duration = Duration::from_secs(2);
 const ACK_GRACE: Duration = Duration::from_millis(1000);
 
 /// An owned kernel handle.
-struct Owned(HANDLE);
+pub(crate) struct Owned(pub(crate) HANDLE);
+#[cfg(feature = "dev-control")]
+impl Owned { pub(crate) fn raw(&self)->HANDLE { self.0 } }
 
 // SAFETY: a kernel handle may be used and closed from any thread.
 unsafe impl Send for Owned {}
@@ -49,7 +51,7 @@ impl Drop for Owned {
     }
 }
 
-fn event() -> std::io::Result<Owned> {
+pub(crate) fn event() -> std::io::Result<Owned> {
     // SAFETY: an unnamed manual-reset event.
     let handle = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
     if handle.is_null() { Err(std::io::Error::last_os_error()) } else { Ok(Owned(handle)) }
@@ -120,20 +122,20 @@ pub fn pipe_sddl() -> std::io::Result<String> {
     Ok(format!("D:P(A;;GA;;;{})", current_user_sid()?))
 }
 
-fn deadline_left(deadline: Instant) -> u32 {
+pub(crate) fn deadline_left(deadline: Instant) -> u32 {
     deadline.saturating_duration_since(Instant::now()).as_millis().min(u128::from(u32::MAX - 1)) as u32
 }
 
 /// Why a pipe read or write did not complete.
 #[derive(Debug, PartialEq, Eq)]
-enum IoFail {
+pub(crate) enum IoFail {
     Timeout,
     Shutdown,
     Broken,
 }
 
 /// Runs one overlapped operation to completion, the deadline, or the shutdown event; cancels it if it did not finish.
-unsafe fn overlapped_io(handle: HANDLE, deadline: Instant, shutdown: Option<HANDLE>, start: impl FnOnce(*mut OVERLAPPED) -> (i32, u32)) -> Result<u32, IoFail> {
+pub(crate) unsafe fn overlapped_io(handle: HANDLE, deadline: Instant, shutdown: Option<HANDLE>, start: impl FnOnce(*mut OVERLAPPED) -> (i32, u32)) -> Result<u32, IoFail> {
     // SAFETY: `ov` and its event outlive the operation: the function does not return before the operation has
     // completed or has been cancelled and waited for.
     unsafe {
@@ -167,7 +169,7 @@ unsafe fn overlapped_io(handle: HANDLE, deadline: Instant, shutdown: Option<HAND
     }
 }
 
-fn read_exact(handle: HANDLE, buffer: &mut [u8], deadline: Instant, shutdown: Option<HANDLE>) -> Result<(), IoFail> {
+pub(crate) fn read_exact(handle: HANDLE, buffer: &mut [u8], deadline: Instant, shutdown: Option<HANDLE>) -> Result<(), IoFail> {
     let mut filled = 0;
     while filled < buffer.len() {
         let chunk = &mut buffer[filled..];
@@ -182,7 +184,7 @@ fn read_exact(handle: HANDLE, buffer: &mut [u8], deadline: Instant, shutdown: Op
     Ok(())
 }
 
-fn write_all(handle: HANDLE, data: &[u8], deadline: Instant, shutdown: Option<HANDLE>) -> Result<(), IoFail> {
+pub(crate) fn write_all(handle: HANDLE, data: &[u8], deadline: Instant, shutdown: Option<HANDLE>) -> Result<(), IoFail> {
     let mut sent = 0;
     while sent < data.len() {
         let chunk = &data[sent..];

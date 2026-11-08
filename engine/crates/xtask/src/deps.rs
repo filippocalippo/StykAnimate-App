@@ -16,12 +16,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Crates the engine side must never reach.
-const FRONT_END: &[&str] = &["styk-ui", "styk-devtools", "styk-design", "styk-platform", "styk-app", "styk-text-check", "xtask"];
+const FRONT_END: &[&str] = &["styk-ui", "styk-devtools", "styk-devtools-engine", "styk-design", "styk-platform", "styk-app", "styk-text-check", "xtask"];
 
 /// The one engine-side crate allowed to reach front-end-side crates, and the crates it may reach, both only through its
 /// `app-tools` feature (decision Q2).
 const APP_TOOLS_CRATE: &str = "styk-cli";
-const APP_TOOLS_REACH: &[&str] = &["styk-core", "styk-services", "styk-platform"];
+const APP_TOOLS_REACH: &[&str] = &["styk-core", "styk-services", "styk-platform", "styk-devtools-engine"];
 const APP_TOOLS_FEATURE: &str = "app-tools";
 
 /// Name prefixes of the windowing toolkit: iced and its own forks.
@@ -218,7 +218,7 @@ pub fn app_tools_manifest_violations(manifest: &str) -> Vec<String> {
             violations.push(format!("{APP_TOOLS_CRATE} depends on {tool} without making it optional"));
         }
     }
-    let expected: BTreeSet<String> = APP_TOOLS_REACH.iter().map(|t| format!("dep:{t}")).collect();
+    let expected: BTreeSet<String> = APP_TOOLS_REACH.iter().map(|t| format!("dep:{t}")).chain(["dep:serde_json".into()]).collect();
     match features.get(APP_TOOLS_FEATURE) {
         Some(list) => {
             let have: BTreeSet<String> = list.iter().cloned().collect();
@@ -258,6 +258,7 @@ fn members(root: &Path) -> Result<Vec<String>, String> {
 }
 
 pub fn deps(root: &Path) -> Result<(), String> {
+    crate::dev_features::check(root)?;
     let lock = std::fs::read_to_string(root.join("engine/Cargo.lock")).map_err(|e| format!("engine/Cargo.lock: {e}"))?;
     let members = members(root)?;
     let mut violations = direction_violations(&lock, &members);
