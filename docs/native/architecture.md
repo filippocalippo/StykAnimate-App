@@ -17,14 +17,17 @@ Everything is one Cargo workspace (`engine/`, members `engine/crates/*`). The en
 | `styk-core` | The application core, plain Rust, no toolkit: app and view state (documents, tabs, selection, tools, playhead, panels), every command and shortcut and undo grouping, the docking layout model and its solver, settings, the view models panels display, the stage's view (zoom, pan, hit-testing, drag sessions), frame scheduling, the automation mode. | engine crates, `styk-services`, `styk-trace` |
 | `styk-design` | The design system: tokens (both themes), icons, bundled fonts (Inter, Inter Tight), and the shared iced widgets in their every state. Generates the CSS custom properties, the SVG sprite and the component sheet for the design studio. | iced and `styk-core` for shared focus and field state (behind `widgets`) |
 | `styk-ui` | The iced front end: lays out and draws what the core holds and turns input into core commands. Shell, docking widgets, stage, timeline, inspector, panels, dialogs, Home, Settings, drawing, build, text input. | `styk-core`, `styk-design`, iced |
-| `styk-devtools` | The developer tools ([devtools.md](devtools.md)). Compiled only with the app's `devtools` feature. | `styk-core`, `styk-ui`, `styk-design`, `styk-trace` |
+| `styk-devtools` | Guarded developer views ([devtools.md](devtools.md)), compiled only with the app's `devtools` feature. | `styk-core`, `styk-ui`, `styk-design`, `styk-trace`, `styk-devtools-engine` |
+| `styk-devtools-engine` | Headless developer workers: bounded captures, control dispatch, owner inspection and profiling. No views or toolkit. | `styk-core` inspection APIs, `styk-services`, `styk-platform`, `styk-trace` |
 | `styk-app` | The binary `stykanimate`: command line, startup, wiring of platform services into the core, the window. Feature `devtools`. | everything above |
-| `styk-cli` | The headless tools (`styk` binary); its `video` command (feature `app-tools`, off by default) drives a video export of a document through the core's planning and flow, the engine's frame source and the platform's encoder services. `cargo xtask deps` lets it reach `styk-core`, `styk-services` and `styk-platform` only through that feature. | engine crates; `styk-core`, `styk-services`, `styk-platform` with `app-tools` |
+| `styk-cli` | The headless tools (`styk` binary); its `video` command (feature `app-tools`, off by default) drives a video export of a document through the core's planning and flow, the engine's frame source and the platform's encoder services. `cargo xtask deps` lets it reach `styk-core`, `styk-services` and `styk-platform` only through that feature; it also enables profiling through `styk-devtools-engine`. | engine crates; `styk-core`, `styk-services`, `styk-platform`, `styk-devtools-engine` with `app-tools` |
 | `xtask` | The task runner (`cargo xtask ...`, alias in the repository's `.cargo/config.toml`). | std |
 
 Dependencies point one way: `styk-app` → `styk-ui` → `styk-core` → engine crates and `styk-services`. The engine types
 the core passes on to its own logic are re-exported in one place, `styk_core::engine`; `styk-ui` and the developer tools'
-views never name it or an engine crate, and see only plain view models (`cargo xtask check` enforces it). Nothing in the
+views never name it or an engine crate, and see only plain view models (`cargo xtask check` enforces it). Document data is
+read and written as JSON only through `styk_doc::json` (V8-exact numbers and key order); `serde_json` is allowed only in the
+developer tools (`styk-cli`, `styk-devtools-engine`) for their own protocol and schemas, never for document data. Nothing in the
 engine or the core depends on iced, `styk-ui` or `styk-devtools`. A different front end (a touch layout, Slint, a newer
 toolkit) sits on `styk-core` without rewriting a feature; the core's features are tested without a window.
 

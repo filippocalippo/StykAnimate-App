@@ -347,3 +347,6 @@ mod tests {
 #[cfg(test)]
 #[path = "frames/d7_tests.rs"]
 mod d7_tests;
+
+#[cfg(feature = "inspect")]
+impl Cache { pub(crate) fn inspection_stats(&self)->FrameStats { self.summary } }

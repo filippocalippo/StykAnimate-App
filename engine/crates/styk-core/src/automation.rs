@@ -131,6 +131,12 @@ pub enum InspectorStep {
 pub enum Step {
     /// Open a project file (relative to the script).
     Open(PathBuf),
+    /// Evaluate a document frame at an integer tick (headless/stage runner).
+    Frame(u32),
+    /// Export the active document through its export owner.
+    Export,
+    /// A measurement budget; the profiling runner judges it after the runs.
+    Budget(BudgetSpec),
     /// Let this many frames pass.
     Wait(u32),
     /// Resize the window to this logical size.
@@ -166,6 +172,35 @@ pub enum Step {
     Expect(Expect),
     /// Write the window to a PNG (relative to the script).
     Screenshot(PathBuf),
+}
+
+/// Parsed measurement declaration. Core owns syntax; tools own measurement and verdicts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BudgetSpec {
+    pub metric: String,
+    pub op: String,
+    pub limit: f64,
+    pub unit: String,
+    pub floor: Option<String>,
+}
+
+fn budget(text: &str, line: usize) -> Result<BudgetSpec, ScriptError> {
+    let bad = |message: &str| ScriptError { line, message: message.into() };
+    let (text, floor) = text.split_once(" floor:")
+        .map_or((text, None), |(a, b)| (a, Some(b.trim().to_owned())));
+    let fields: Vec<_> = text.split_whitespace().collect();
+    let ["budget", metric, op, quantity] = fields.as_slice() else { return Err(bad("invalid budget declaration")); };
+    if metric.len() > 128 || !metric.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_')
+        || !["<=", ">=", "==", "<", ">"].contains(op)
+        || floor.as_ref().is_some_and(|s| s.len() > 512) {
+        return Err(bad("invalid budget declaration"));
+    }
+    let (number, unit, multiplier) = [("MiB", 1048576.), ("KiB", 1024.), ("ms", 1.), ("s", 1000.), ("B", 1.), ("%", 1.)]
+        .into_iter().find_map(|(u, m)| quantity.strip_suffix(u).map(|n| (n, u, m)))
+        .unwrap_or((quantity, "", 1.));
+    let limit = number.parse::<f64>().map_err(|_| bad("invalid budget value"))? * multiplier;
+    if !limit.is_finite() || limit < 0. { return Err(bad("budget must be finite and nonnegative")); }
+    Ok(BudgetSpec { metric: (*metric).into(), op: (*op).into(), limit, unit: unit.into(), floor })
 }
 
 /// A script that cannot be run.
@@ -279,6 +314,13 @@ impl Script {
             let step = match verb {
                 "open" if !rest.is_empty() => Step::Open(PathBuf::from(rest)),
                 "open" => return Err(wants("a path")),
+                "frame" => match words.as_slice() {
+                    [tick] => Step::Frame(tick.parse().map_err(|_| wants("a nonnegative integer tick"))?),
+                    _ => return Err(wants("one tick")),
+                },
+                "export" if words.is_empty() => Step::Export,
+                "export" => return Err(wants("no arguments")),
+                "budget" => Step::Budget(budget(content, line)?),
                 "wait" => Step::Wait(words.first().and_then(|w| w.parse().ok()).ok_or_else(|| wants("a number of frames"))?),
                 "resize" => match words.as_slice() {
                     [w, h] => Step::Resize(w.parse().map_err(|_| wants("a width and a height"))?, h.parse().map_err(|_| wants("a width and a height"))?),
@@ -450,5 +492,37 @@ expect history 3
         assert_eq!(steps[8], Step::Expect(Expect::History(3)));
         assert!(Script::parse("inspector scrub root_x far").is_err());
         assert!(Script::parse("expect property root_x lots").is_err());
+    }
+}
+
+#[cfg(test)]
+mod developer_steps_tests {
+    use super::*;
+
+    #[test]
+    fn developer_actions_and_budgets_use_the_application_language() {
+        let script = Script::parse("styk-auto/1\nopen fixture.styk\nframe 0\nadvance 17\nexport\nbudget export.ms <= 0.5s floor:shared machine\n").unwrap();
+        assert_eq!(script.steps.len(), 5);
+        assert_eq!(script.steps[1], (3, Step::Frame(0)));
+        assert_eq!(script.steps[3], (5, Step::Export));
+        let Step::Budget(spec) = &script.steps[4].1 else { panic!("budget AST missing"); };
+        assert_eq!(spec.limit, 500.);
+        assert_eq!(spec.floor.as_deref(), Some("shared machine"));
+        for text in ["frame nope", "frame -1", "frame 1 extra", "export extra", "budget x <= NaNms"] {
+            assert_eq!(Script::parse(&format!("styk-auto/1\n{text}\n")).unwrap_err().line, 2);
+        }
+        assert!(Script::parse("styk-auto/1\nfile fixture.styk\nopen\n").is_err());
+    }
+}
+
+#[cfg(test)]
+mod repository_scenarios {
+    use super::*;
+    #[test]
+    fn every_headless_fixture_is_a_valid_application_script() {
+        for text in [include_str!("../../../../scenarios/open.styk-auto"), include_str!("../../../../scenarios/frame.styk-auto"), include_str!("../../../../scenarios/export.styk-auto")] {
+            let script = Script::parse(text).unwrap();
+            assert!(matches!(&script.steps[0].1, Step::Open(_)));
+        }
     }
 }

@@ -1,7 +1,8 @@
 # Only the orchestrator adds reference captures and chooses thresholds (never tuned to pass).
 # Paths are repository-relative captures of today's app. An empty reference is pending,
 # not an exemption after a reference is supplied. max_difference is the fraction of
-# pixels with any RGBA channel difference, in [0, 1]; dimensions must match exactly.
+# pixels with an RGBA channel difference above 24 (`styk image-diff`'s TOLERANCE, decision N8), in [0, 1]; dimensions must match
+# exactly. A complete screen's limit sits a little above what it measures; a part another chunk owns is masked until it lands.
 ["component-sheet"]
 reference = ""
 max_difference = 0.0

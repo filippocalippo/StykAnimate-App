@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "budgets": {
+      "maxItems": 64,
+      "type": "array"
+    },
+    "build_profile": {
+      "enum": [
+        "release",
+        "quick",
+        "debug"
+      ]
+    },
+    "clock": {
+      "const": "real"
+    },
+    "format": {
+      "const": "stykprofile/1"
+    },
+    "input_hash": {
+      "type": "string"
+    },
+    "samples_ms": {
+      "items": {
+        "minimum": 0,
+        "type": "number"
+      },
+      "maxItems": 32,
+      "minItems": 3,
+      "type": "array"
+    },
+    "scenario": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "format",
+    "scenario",
+    "input_hash",
+    "clock",
+    "build_profile",
+    "samples_ms",
+    "summary",
+    "budgets"
+  ],
+  "title": "StykAnimate headless profile v1",
+  "type": "object"
+}

@@ -14,6 +14,12 @@
 //!
 //! It depends on `std` alone, so it builds in seconds and can never become a way for a toolkit to reach the engine.
 
+mod dev_reads;
+mod dev_tasks;
+mod dev_trace;
+mod dev_features;
+mod dev_release;
+mod dev_resolution;
 mod css;
 mod deps;
 mod design;
@@ -46,6 +52,11 @@ fn run(args: &[String]) -> Result<(), String> {
         ["design", "check"] => design::check(&root),
         ["deps"] => deps::deps(&root),
         ["lock"] => deps::lock(&root),
+        ["read-apis"] => dev_reads::run(&root,false),
+        ["check-read-apis"] => dev_reads::run(&root,true),
+        ["check-features"] => dev_features::check(&root),
+        ["check-release", ..] => dev_release::run(&args[1..]),
+        ["check-shipping-features"] => dev_resolution::check(&root),
         ["fonts"] => fonts::check(&root),
         ["fonts", "verify"] => fonts::verify(&root),
         ["fonts", "surfaces"] => fonts::surfaces(&root),
@@ -54,12 +65,16 @@ fn run(args: &[String]) -> Result<(), String> {
         ["locales", "check"] => locales::check(&root),
         ["check"] => design::check(&root).and_then(|()| locales::check(&root)).and_then(|()| deps::deps(&root)).and_then(|()| deps::lock(&root)).and_then(|()| guards::check(&root, false)),
         ["check", "--wasm"] => design::check(&root).and_then(|()| locales::check(&root)).and_then(|()| deps::deps(&root)).and_then(|()| deps::lock(&root)).and_then(|()| guards::check(&root, true)),
+        ["build" | "test" | "scenario" | "profile" | "compare" | "screenshot" | "doctor" | "check-trace" | "check-schema" | "flags" | "design-export" | "renderdoc" | "serve-web", ..] => dev_tasks::run(&root,args),
         _ => Err(USAGE.to_string()),
     }
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--json") {
+        return if dev_tasks::run_json(&root(), &args) { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+    }
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {

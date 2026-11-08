@@ -230,3 +230,19 @@ test('wasm gate selects the engine binding, core and services without native too
   assert.deepEqual(wasmPackages(m), ['styk-core', 'styk-services', 'styk-wasm']);
   assert.throws(() => wasmPackages(fixture({'styk-core': ['styk-services']})), /styk-wasm is missing/);
 });
+
+test('headless developer workers keep UI and engine dependency boundaries', () => {
+  const m = fixture({'styk-cli': ['styk-devtools-engine'], 'styk-devtools-engine': ['styk-core', 'styk-platform', 'styk-services', 'styk-trace'], 'styk-platform':['styk-services'], 'styk-trace':['styk-services']});
+  const cli = m.packages.find(p => p.name === 'styk-cli');
+  assert.ok(directionErrors(m).some(e => e.rule === 'devtools'));
+  cli.dependencies[0].optional = true;
+  cli.features['app-tools'] = ['dep:styk-devtools-engine'];
+  assert.deepEqual(directionErrors(m), []);
+  cli.features.default = ['app-tools'];
+  assert.ok(directionErrors(m).some(e => e.rule === 'devtools'));
+  assert.deepEqual(directionErrors(fixture({'styk-devtools':['styk-devtools-engine','styk-trace'], 'styk-devtools-engine':['styk-platform'], 'styk-platform':['styk-services'], 'styk-trace':['styk-services']})), []);
+  assert.ok(directionErrors(fixture({'styk-core':['styk-devtools-engine']})).some(e => e.rule === 'direction'));
+  assert.ok(directionErrors(fixture({'styk-cli':['styk-devtools']})).some(e => e.rule === 'devtools'));
+  assert.ok(directionErrors(fixture({'styk-devtools-engine':['bridge'], bridge:['iced']})).some(e => e.message.includes('headless developer workers')));
+  assert.ok(directionErrors(fixture({'styk-devtools':['styk-platform']})).some(e => e.rule === 'direction'));
+});

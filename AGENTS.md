@@ -84,3 +84,33 @@ Run `npm run check` after JavaScript changes and tests covering affected behavio
 - Run `npm run release:prepare` and `npm run changelog:check`. Commit the changelog, both package version files, and both generated note files together. Generate notes through the script; never append history to the current release payload.
 - Published sections are immutable during ordinary work. Software fixes need a higher version. Review semantic duplicates manually; validation catches normalized text duplicates and structural errors, not equivalent meanings.
 - Shipping includes exact-artifact verification and the history update. Implementing a feature alone does not authorize publishing. When shipping is authorized, complete the documented process without redundant approval. Tag pushes can publish immediately.
+## Native developer tools (headless)
+
+The default tools crate has no views; the app's optional devtools feature includes the existing
+pen lab. CLI tools require app-tools. Run all builds, tests and measurements through the machine
+queue. Heavy xtask commands use STYK_QUEUE_CMD (or recognize STYK_QUEUE_ACTIVE); otherwise they
+use an advisory lock. Separate shipping and developer build invocations prevent Cargo feature
+unification from contaminating the shipping app. The quick profile is for iteration only.
+
+- cargo xtask build --profile quick|release [--devtools]: app and CLI artifact paths and sizes.
+- cargo xtask test -p <crate> or --changed: targeted crates, including reverse dependencies.
+- cargo xtask scenario open|frame|export --out <new-dir>: repository fixture scripts.
+- cargo xtask profile <input> open|frame|export|<script.styk-auto> --out <new-dir> [--runs 3..32].
+- cargo xtask compare <A/profile.json> <B/profile.json>: matching release measurements.
+- cargo xtask screenshot <screen-id> [--against <PNG>] [--size <WxH>] [--scale <number>].
+- cargo xtask doctor: tools, disk and GPU capabilities; never cleans other tasks' resources.
+- cargo xtask check-release <shipping.exe> <matching.map>: linked-symbol check with PE/map identity; never builds.
+- cargo xtask check-shipping-features: resolve default shipping app/CLI features for the current host.
+- cargo xtask check-features, check-trace, check-schema, check-read-apis: developer guards.
+- cargo xtask read-apis and styk devtools-schema: regenerate inspection inventory and schemas.
+- cargo xtask flags, design-export [--check], renderdoc: registry and design/capture conveniences.
+- styk attach <pid> '<JSON request>': explicit local developer process, current-user pipe only.
+
+All xtask commands accept --json for a bounded machine-readable result with truncation reported.
+CLI profile/compare emit JSON; statuses are 0 success, 1 regression/budget miss, 2 error,
+3 incomparable. Profiles include a capture, Perfetto export, measurements and median budget
+judgements. Use budget lines such as 'budget export.ms <= 50ms' only with an established contract;
+never tune thresholds to pass. Frozen fixtures remain unchanged. No input contents enter default
+answers. GPU timing, Tracy, window scenarios and renderer debugging await K-stage; uninstalled
+owner adapters and experiment registries fail explicitly. N8 prohibits serve-web in this phase.
+See docs/native/devtools-engine.md for bounds, schemas and the exact implemented capabilities.

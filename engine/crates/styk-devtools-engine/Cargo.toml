@@ -1,0 +1,15 @@
+[package]
+name = "styk-devtools-engine"
+description = "Bounded headless developer workers, captures and profiling. No interface toolkit."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+styk-core = { path = "../styk-core", features = ["inspect"] }
+styk-platform = { path = "../styk-platform", features = ["dev-control"] }
+styk-services = { path = "../styk-services" }
+styk-trace = { path = "../styk-trace", features = ["enabled"] }
+serde_json = "1"
+serde = "1"
