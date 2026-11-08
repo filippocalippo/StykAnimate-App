@@ -262,6 +262,8 @@ pub struct Persistence {
     loaded: bool,
     read_only: bool,
     retry_at: Option<u64>,
+    finishing: bool,
+    finish_failed: bool,
 }
 impl Persistence {
     pub fn start(spawner: &dyn Spawner, storage: Arc<dyn Storage>, notify: Arc<dyn Fn() + Send + Sync>) -> Result<Self, SpawnError> {
@@ -285,6 +287,8 @@ impl Persistence {
             loaded: false,
             read_only: false,
             retry_at: None,
+            finishing: false,
+            finish_failed: false,
         };
         lane.queue.mark_changed(0);
         lane.queue.flush(0);
@@ -311,16 +315,24 @@ impl Persistence {
     pub fn flush(&mut self, now: u64) {
         self.queue.flush(now);
     }
+    /// The documents host has granted quit. As with layout, a refused final
+    /// transaction leaves the last complete file for the next launch.
+    pub fn finish(&mut self, now: u64) {
+        self.finishing = true;
+        self.flush(now);
+    }
     pub fn deadline(&self) -> Option<u64> {
+        if self.finish_failed { return None; }
         [self.retry_at, if !self.read_only { self.queue.deadline() } else { None }].into_iter().flatten().min()
     }
     pub fn idle(&self) -> bool {
-        self.loaded && (self.read_only || self.queue.idle()) && self.waiting.is_none()
+        self.finish_failed || (self.loaded && (self.read_only || self.queue.idle()) && self.waiting.is_none())
     }
     pub fn read_only(&self) -> bool {
         self.read_only
     }
     pub fn poll(&mut self, now: u64) -> Option<Completion> {
+        if self.finish_failed { return None; }
         let answer = self.worker.take();
         match &answer {
             Some(Completion::Loaded(Ok(loaded))) => {
@@ -366,6 +378,15 @@ impl Persistence {
                 }
             }
             None => {}
+        }
+        if self.finishing {
+            if matches!(&answer, Some(Completion::Loaded(Err(_)) | Completion::Saved(Err(_)))) {
+                self.finish_failed = true;
+                self.retry_at = None;
+                return answer;
+            }
+            // A late load may create the legacy-import patch during the final drain.
+            self.queue.flush(now);
         }
         if !self.read_only && self.waiting.is_none() {
             if self.queue.take_due(now).is_some() {

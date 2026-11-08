@@ -132,6 +132,8 @@ impl Core {
         self.settings_store = Some(crate::settings::persistence::Persistence::start(spawner, storage, wake)?); Ok(())
     }
     pub fn set_audio(&mut self, audio: Result<crate::audio::AudioTransport, String>) { self.timeline.set_audio(audio); }
+    /// Receipt of the Settings maintenance lane; the app combines it with layout's receipt after QuitReady.
+    pub fn settings_idle(&self) -> bool { self.settings_store.as_ref().is_none_or(|store| store.idle()) }
     pub fn next_deadline(&self) -> Option<u64> {
         [self.overlay_deadline(), self.timeline.deadline(), self.settings_store.as_ref().and_then(|s| s.deadline()),
             ((!self.command_queue.is_empty() || self.settings_mode_pending) && !self.activity().operation).then_some(self.now)].into_iter().flatten().min()
@@ -515,6 +517,8 @@ impl Core {
                 }
             }
             Event::Flush { now } => { if let Some(store) = &mut self.settings_store { store.flush(now); } effects.extend(self.settings_event(Event::Wake { now })); }
+            Event::Finish { now } => { if let Some(store) = &mut self.settings_store { store.finish(now); } effects.extend(self.settings_event(Event::Wake { now })); }
+            Event::Abandon => { self.settings_store = None; }
             Event::Wake { now } => {
                 if let Some(answer) = self.settings_store.as_mut().and_then(|store| store.poll(now)) {
                     use crate::settings::persistence::Completion;

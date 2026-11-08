@@ -120,6 +120,36 @@ fn real_failed_transaction_retries_on_layout_backoff_and_coalesces_newer_changes
 }
 
 #[test]
+fn final_settings_flush_preserves_the_last_file_on_refusal_and_stops_retrying() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use styk_core::{app::Core, commands::Command, settings::Event};
+    let dir = Directory::new();
+    let previous = br#"{"schema":1,"values":{"loopPlayback":true,"future":7},"view":{}}"#;
+    std::fs::write(dir.0.join(FILE), previous).unwrap();
+    let (send, wake) = mpsc::channel();
+    let mut core = Core::default();
+    core.start_settings(&ThreadSpawner, dir.storage(), Arc::new(move || { let _ = send.send(()); })).unwrap();
+    while !core.settings_idle() {
+        wake.recv_timeout(Duration::from_secs(30)).unwrap();
+        core.dispatch(Command::Settings(Event::Wake { now: 0 }));
+    }
+    core.dispatch(Command::Settings(Event::Set { id: SettingId::LoopPlayback, value: Value::Bool(false), now: 0 }));
+    // A real sharing refusal in LocalStorage, with the previous complete file on disk.
+    let locked = std::fs::OpenOptions::new().read(true).share_mode(0).open(dir.0.join(FILE)).unwrap();
+    core.dispatch(Command::Settings(Event::Finish { now: 0 }));
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    while !core.settings_idle() {
+        assert!(std::time::Instant::now() < until, "a refused final transaction must settle");
+        wake.recv_timeout(Duration::from_secs(30)).unwrap();
+        core.dispatch(Command::Settings(Event::Wake { now: 0 }));
+    }
+    drop(locked);
+    core.dispatch(Command::Settings(Event::Wake { now: 60_000 }));
+    assert_eq!(std::fs::read(dir.0.join(FILE)).unwrap(), previous);
+    assert!(!core.settings().animation().loop_playback, "abandoning persistence does not invent an applied revert");
+}
+
+#[test]
 fn core_loads_separate_legacy_root_and_flushes_changes_before_exit() {
     use styk_core::{
         app::Core,

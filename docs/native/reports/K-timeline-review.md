@@ -28,6 +28,9 @@ when the regression binaries were compiled; subsequent fixes do not alter those 
 - `timeline-review-pause-mutation.log`: removing just the terminal pending-gate exception
   makes the strengthened, already-playing held-worker regression fail: `Buffering` instead
   of `Paused`, `0 passed; 1 failed`. The exception was restored afterwards.
+- `timeline-review-final-settings.log`: `6 passed; 0 failed` through real LocalStorage,
+  including final-drain sharing refusal, preservation of the last complete file, no later retry,
+  ordinary backoff/retry, unknown fields, newer-schema refusal and legacy import.
 
 ## Decisions
 
@@ -44,3 +47,6 @@ when the regression binaries were compiled; subsequent fixes do not alter those 
   cleanup: the existing playback/fit test caught and prevented an unnecessary asynchronous delay.
 - Run app unit fixtures serially because they share the process's single engine clock; do not
   change its assertion, sleep or threshold to hide parallel interference.
+- Use the recovery quit contract's existing policy for Settings: after document clearance,
+  final persistence refusal safely abandons the proposal; session end detaches immediately.
+  Ordinary preference saves retain their retry policy.

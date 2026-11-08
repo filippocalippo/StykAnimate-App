@@ -87,6 +87,10 @@ pub enum Event {
     Revert { change: Change, now: u64 },
     Wake { now: u64 },
     Flush { now: u64 },
+    /// Final maintenance after document quit clearance: one final write, then settle even on refusal.
+    Finish { now: u64 },
+    /// OS session end detaches outstanding work without extending its shutdown bound.
+    Abandon,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {

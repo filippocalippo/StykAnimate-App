@@ -33,6 +33,12 @@ identities are transient and never enter the settings file.
 Close flush waits for the transaction and retries failures while notices remain visible. Corrupt-file
 backup/recovery actions and Settings controls arrive with later design chunks, using this same owner.
 
+After the documents host grants `QuitReady`, `Event::Finish` is final maintenance: it bypasses
+debounce, drains an outstanding load/import/write, and settles on a refused final transaction.
+That refusal leaves the previous atomic file intact; it does not revert the in-memory preference.
+Normal `Flush` retains its retry policy. `Event::Abandon` cancels/detaches this lane at OS session
+end, so preference persistence cannot extend the session-end bound.
+
 The app integration test `settings_storage` uses real LocalStorage in directories created and
 removed by each test; keeping this cross-owner test at the app avoids a core-to-platform dependency. It covers
 unknown fields, future schemas at load and transaction time, a separate read-only legacy root,
