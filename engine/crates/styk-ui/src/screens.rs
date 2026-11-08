@@ -54,7 +54,7 @@ pub enum DockScreen {
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 59] = [
+    pub const ALL: [Screen; 63] = [
         Screen::ComponentSheet,
         Screen::Band,
         Screen::BandDark,
@@ -78,6 +78,10 @@ impl Screen {
         Screen::Inspector(InspectorScreen::Layer, true),
         Screen::Inspector(InspectorScreen::Frame, false),
         Screen::Inspector(InspectorScreen::Frame, true),
+        Screen::Inspector(InspectorScreen::JointGradient, false),
+        Screen::Inspector(InspectorScreen::JointGradient, true),
+        Screen::Inspector(InspectorScreen::Colours, false),
+        Screen::Inspector(InspectorScreen::Colours, true),
         Screen::Stage(false),
         Screen::Stage(true),
         Screen::Controls(false),
@@ -170,6 +174,10 @@ impl Screen {
             Screen::Inspector(InspectorScreen::Layer, true) => "inspector-layer-dark",
             Screen::Inspector(InspectorScreen::Frame, false) => "inspector-frame",
             Screen::Inspector(InspectorScreen::Frame, true) => "inspector-frame-dark",
+            Screen::Inspector(InspectorScreen::JointGradient, false) => "inspector-joint-gradient",
+            Screen::Inspector(InspectorScreen::JointGradient, true) => "inspector-joint-gradient-dark",
+            Screen::Inspector(InspectorScreen::Colours, false) => "inspector-colours",
+            Screen::Inspector(InspectorScreen::Colours, true) => "inspector-colours-dark",
             Screen::Stage(false) => "stage-fit",
             Screen::Stage(true) => "stage-fit-dark",
             Screen::Dock(DockScreen::Wide, false) => "dock",
@@ -293,6 +301,8 @@ pub fn inspector_model(context: InspectorScreen) -> styk_core::inspector::model:
         InspectorScreen::Camera => include!("screens/models/camera.rs"),
         InspectorScreen::Layer => include!("screens/models/layer.rs"),
         InspectorScreen::Frame => include!("screens/models/frame.rs"),
+        InspectorScreen::JointGradient => include!("screens/models/joint-gradient.rs"),
+        InspectorScreen::Colours => include!("screens/models/colours.rs"),
     }
 }
 

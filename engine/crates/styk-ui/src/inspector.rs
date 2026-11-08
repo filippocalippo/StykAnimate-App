@@ -21,7 +21,9 @@ use styk_core::number::{StepKeys, format};
 use styk_design::typography::TextStyle;
 use styk_design::widgets::badge::{Tint as DesignTint, badge};
 use styk_design::widgets::button::{Button, IconButton, IconSize, Variant};
-use styk_design::widgets::color::{ColorField, SwatchSize, swatch};
+use styk_core::inspector::paint::{PaintSpec, PaintType};
+use styk_core::roving::{NavKey, Orientation, next_index};
+use styk_design::widgets::color::{ColorField, GradientKind, SwatchButton, SwatchPaint, SwatchSize, SwatchStop};
 use styk_design::widgets::field::EditField;
 use styk_design::widgets::frame::{self, FieldFrame};
 use styk_design::widgets::focus::{Focusable, Keys, Ring};
@@ -305,9 +307,9 @@ impl Kit<'_> {
     }
 
     fn color(&self, row: &m::ColorRow) -> Element<'static, Message> {
-        let first = match &row.paint {
-            Paint::Solid(rgb) => *rgb,
-            Paint::Gradient(paint) => paint.stops.first().map_or([0; 3], styk_core::inspector::paint::Stop::rgb),
+        let (first, gradient) = match &row.paint {
+            Paint::Solid(rgb) => (*rgb, None),
+            Paint::Gradient(paint) => (paint.stops.first().map_or([0; 3], styk_core::inspector::paint::Stop::rgb), swatch_paint(paint)),
         };
         let caption = match (&row.caption, row.mixed) {
             (_, true) => self.say(&Msg::new("inspector.mixed")),
@@ -317,10 +319,75 @@ impl Kit<'_> {
         // The label is the swatch's accessible name; the field shows the swatch and its caption. The paint picker is a
         // button, which centres what it holds unless it spans the row.
         ColorField::new(self.id(), FocusArea::Panels, self.palette, first, caption, send(Event::Color(row.target)))
+            .paint(gradient)
             .centered(row.paint_picker && !row.span)
             .in_grid(self.in_grid.get())
             .disabled(row.disabled)
             .into_element()
+    }
+
+    /// `.ui-swatch-grid`: 24 px swatch buttons, 6 px apart, wrapping across the row. The group is one Tab stop (its first
+    /// swatch) and the arrow keys, Home and End move inside it (`[data-count-one]`); a press opens the picker on that
+    /// palette colour.
+    fn swatches(&self, items: &[m::Swatch]) -> Element<'static, Message> {
+        let ids: Arc<[FocusId]> = items.iter().map(|_| self.id()).collect();
+        let buttons: Vec<Element<'static, Message>> = items
+            .iter()
+            .enumerate()
+            .map(|(at, item)| {
+                let press = send(Event::Color(item.target));
+                let (moves, enter) = (ids.clone(), press.clone());
+                let keys = Keys::Custom(Box::new(move |event| {
+                    let iced::keyboard::Event::KeyPressed { key, modifiers, .. } = event else { return None };
+                    if modifiers.alt() || modifiers.control() || modifiers.logo() {
+                        return None;
+                    }
+                    use iced::keyboard::{Key, key::Named};
+                    let nav = match key.as_ref() {
+                        Key::Named(Named::Enter | Named::Space) => return Some(enter.clone()),
+                        Key::Named(Named::Home) => NavKey::Home,
+                        Key::Named(Named::End) => NavKey::End,
+                        Key::Named(Named::ArrowLeft) => NavKey::ArrowLeft,
+                        Key::Named(Named::ArrowRight) => NavKey::ArrowRight,
+                        Key::Named(Named::ArrowUp) => NavKey::ArrowUp,
+                        Key::Named(Named::ArrowDown) => NavKey::ArrowDown,
+                        _ => return None,
+                    };
+                    let next = next_index(nav, Some(at), moves.len(), Orientation::Both, true, |_| false)?;
+                    (next != at).then(|| Message::Focusing(Box::new(Message::Idle), moves[next]))
+                }));
+                SwatchButton::new(ids[at], FocusArea::Panels, self.palette, item.rgb, SwatchSize::Grid, press).tab_stop(at == 0).keys(keys).into_element()
+            })
+            .collect();
+        Row::with_children(buttons).spacing(tokens::scale::SPACE_1_5).wrap().boxed()
+    }
+
+    /// A fill of the figure (`.inspector-group`, 8 px between its parts): its list row first, then its other rows. The
+    /// list row (`.ui-list-row`: 32 px, the polygon glyph, the name, then the actions) holds the fill's colour as its
+    /// 16 px swatch and the delete button, the group's colour row and its first action row.
+    fn group(&self, label: &Msg, rows: &[m::Row]) -> Element<'static, Message> {
+        let colour = rows.iter().position(|row| matches!(row, m::Row::Color(_)));
+        // The row of the fill's own actions has no name; the order steps' row is named.
+        let delete = rows.iter().position(|row| matches!(row, m::Row::Actions(actions) if actions.label.is_none()));
+        let mut parts: Vec<Element<'static, Message>> = Vec::new();
+        let mut actions: Vec<Element<'static, Message>> = Vec::new();
+        if let Some(m::Row::Color(color)) = colour.map(|at| &rows[at]) {
+            let rgb = match &color.paint {
+                Paint::Solid(rgb) => *rgb,
+                Paint::Gradient(paint) => paint.stops.first().map_or([0; 3], styk_core::inspector::paint::Stop::rgb),
+            };
+            let chip = SwatchButton::new(self.id(), FocusArea::Panels, self.palette, rgb, SwatchSize::Chip, send(Event::Color(color.target))).into_element();
+            // `margin-inline: var(--space-1)`.
+            actions.push(container(chip).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_1 }).boxed());
+        }
+        if let Some(m::Row::Actions(delete)) = delete.map(|at| &rows[at]) {
+            actions.extend(delete.items.iter().map(|item| self.button(item, ButtonSize::Small)));
+        }
+        let name = self.text(self.say(label), &tokens::scale::TYPE_UI, self.palette.text_1);
+        let line = row![self.icon("polygon", tokens::scale::ICON_SM, self.palette.text_3), name, Space::new().width(Length::Fill), Row::with_children(actions).align_y(Alignment::Center)].spacing(tokens::scale::SPACE_2).align_y(Alignment::Center);
+        parts.push(container(line).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_2_5 }).center_y(Length::Fixed(tokens::scale::CONTROL_MD)).width(Length::Fill).boxed());
+        parts.extend(rows.iter().enumerate().filter(|(at, _)| Some(*at) != colour && Some(*at) != delete).filter_map(|(_, row)| self.row(row)));
+        Column::with_children(parts).spacing(tokens::scale::SPACE_2).boxed()
     }
 
     fn segmented(&self, row: &m::SegmentedRow) -> Element<'static, Message> {
@@ -383,7 +450,11 @@ impl Kit<'_> {
                 if self.in_grid.get() { container(buttons).center_y(Length::Fixed(tokens::scale::CONTROL_LG)).width(Length::Fill).boxed() } else { buttons.boxed() }
             }
             m::Row::Segmented(segmented) => self.segmented(segmented),
-            m::Row::Value { label, text } => row![self.small(self.say(label)), Space::new().width(Length::Fill), self.text(self.label(text), &tokens::scale::TYPE_VALUE, self.palette.text_1)].align_y(Alignment::Center).boxed(),
+            // `.ui-row`: at least 36 px, the label (`--type-small`, `--text-2`) and the value 12 px apart.
+            m::Row::Value { label, text } => {
+                let line = row![self.text(self.say(label), &tokens::scale::TYPE_SMALL, self.palette.text_2), Space::new().width(Length::Fill), self.text(self.label(text), &tokens::scale::TYPE_VALUE, self.palette.text_1)].spacing(tokens::scale::SPACE_3).align_y(Alignment::Center);
+                container(line).center_y(Length::Fixed(tokens::scale::CONTROL_LG)).width(Length::Fill).boxed()
+            }
             // `.inspector-meta`: small, tabular, the quiet ink.
             m::Row::Meta(meta) => self.styled(self.say(meta), style(&tokens::scale::TYPE_SMALL).tabular(), self.palette.text_3),
             // `.inspector-preview-caption`: its parts spread across the row ("960 × 540" at the start, "100% zoom" at the end).
@@ -397,16 +468,9 @@ impl Kit<'_> {
                 }
                 Row::with_children(line).align_y(Alignment::Center).boxed()
             }
-            m::Row::Swatches { items, .. } => {
-                let swatches: Vec<Element<'static, Message>> = items.iter().map(|item| swatch(self.palette, item.rgb, SwatchSize::Md, 1.0)).collect();
-                Row::with_children(swatches).spacing(tokens::scale::SPACE_1).wrap().boxed()
-            }
+            m::Row::Swatches { items, .. } => self.swatches(items),
             m::Row::Pager { text: page, previous, next, .. } => row![self.button(previous, ButtonSize::Small), Space::new().width(Length::Fill), self.small(page.to_string()), Space::new().width(Length::Fill), self.button(next, ButtonSize::Small)].align_y(Alignment::Center).boxed(),
-            m::Row::Group { label, rows } => {
-                let mut children = vec![self.small(self.say(label))];
-                children.extend(rows.iter().filter_map(|row| self.row(row)));
-                Column::with_children(children).spacing(tokens::scale::SPACE_1_5).boxed()
-            }
+            m::Row::Group { label, rows } => self.group(label, rows),
             // Another chunk's part of the panel: its place is kept, it draws nothing until that chunk lands.
             m::Row::Slot(slot) => Space::new().width(Length::Fill).height(slot_height(*slot)?).boxed(),
         })
@@ -552,6 +616,18 @@ impl Kit<'_> {
         }
         Some(container(Column::with_children(parts)).padding(Padding { top: 0.0, right: tokens::scale::SPACE_4, bottom: tokens::scale::SPACE_1, left: tokens::scale::SPACE_4 }).boxed())
     }
+}
+
+/// The gradient a colour row's swatch shows (`paintCSS`): none for a solid paint, a diamond drawn as a radial one.
+fn swatch_paint(paint: &PaintSpec) -> Option<SwatchPaint> {
+    let kind = match paint.kind {
+        PaintType::Solid => return None,
+        PaintType::Linear => GradientKind::Linear,
+        PaintType::Radial | PaintType::Diamond => GradientKind::Radial,
+        PaintType::Angular => GradientKind::Angular,
+    };
+    let stops = paint.stops.iter().map(|stop| SwatchStop { offset: stop.offset as f32, rgb: stop.rgb(), opacity: stop.opacity as f32 }).collect();
+    Some(SwatchPaint { kind, angle: paint.angle as f32, stops })
 }
 
 /// A double click on the name renames in place.

@@ -33,6 +33,8 @@ const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json
 const SHEET: &[u8] = include_bytes!("../../../tests/edit/property-sheet.document.json");
 #[cfg(feature = "engine")]
 const SPRITE: &[u8] = include_bytes!("../../../tests/edit/sprite-segment-sparse-native.document.json");
+#[cfg(feature = "engine")]
+const POLYGONS: &[u8] = include_bytes!("../../../tests/edit/polygons.document.json");
 
 /// A context of the Properties panel the catalogue shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,10 +48,14 @@ pub enum InspectorScreen {
     Camera,
     Layer,
     Frame,
+    /// A segment painted with a linear gradient.
+    JointGradient,
+    /// A figure with a palette of several colours and three fills.
+    Colours,
 }
 
 impl InspectorScreen {
-    pub const ALL: [InspectorScreen; 9] = [
+    pub const ALL: [InspectorScreen; 11] = [
         InspectorScreen::Scene,
         InspectorScreen::Figure,
         InspectorScreen::Joint,
@@ -59,6 +65,8 @@ impl InspectorScreen {
         InspectorScreen::Camera,
         InspectorScreen::Layer,
         InspectorScreen::Frame,
+        InspectorScreen::JointGradient,
+        InspectorScreen::Colours,
     ];
 
     /// The context's name in the screen IDs (`inspector-<name>`, `inspector-<name>-dark`).
@@ -73,6 +81,8 @@ impl InspectorScreen {
             InspectorScreen::Camera => "camera",
             InspectorScreen::Layer => "layer",
             InspectorScreen::Frame => "frame",
+            InspectorScreen::JointGradient => "joint-gradient",
+            InspectorScreen::Colours => "colours",
         }
     }
 }
@@ -148,6 +158,34 @@ pub fn inspector(screen: InspectorScreen, spawner: Arc<dyn Spawner>, wake: crate
         InspectorScreen::Scene => (STARTUP, "[null,-1]"),
         InspectorScreen::Figure | InspectorScreen::Camera | InspectorScreen::Layer | InspectorScreen::Frame => (STARTUP, "[1,-1]"),
         InspectorScreen::Joint => (STARTUP, "[1,1]"),
+        InspectorScreen::JointGradient => {
+            // The startup document with the head painted by a linear gradient (blue to a half-transparent pink).
+            let mut document = styk_doc::json::parse(STARTUP).map_err(|error| error.to_string())?;
+            let paint = styk_doc::json::parse(br#"{"type":"linear","angle":0,"stops":[{"offset":0,"color":[13,153,255],"opacity":1},{"offset":1,"color":[255,102,153],"opacity":0.6}]}"#).map_err(|error| error.to_string())?;
+            for figure in document.make_obj().and_then(|document| document.get_mut("figure_types")).and_then(Value::make_arr).into_iter().flatten() {
+                for segment in figure.make_obj().and_then(|figure| figure.get_mut("segments")).and_then(Value::make_arr).into_iter().flatten() {
+                    if let Some(segment) = segment.make_obj().filter(|segment| segment.get("segment_id").and_then(Value::as_f64) == Some(2.0)) {
+                        segment.set("paint", paint.clone());
+                    }
+                }
+            }
+            text = styk_doc::json::to_string(&document).into_bytes();
+            (text.as_slice(), "[1,1]")
+        }
+        InspectorScreen::Colours => {
+            // The polygons document with its segments in four colours, so the palette holds four.
+            let mut document = styk_doc::json::parse(POLYGONS).map_err(|error| error.to_string())?;
+            let colours = [[13.0, 153.0, 255.0], [255.0, 102.0, 153.0], [255.0, 184.0, 0.0], [60.0, 200.0, 120.0]];
+            for figure in document.make_obj().and_then(|document| document.get_mut("figure_types")).and_then(Value::make_arr).into_iter().flatten() {
+                for (at, segment) in figure.make_obj().and_then(|figure| figure.get_mut("segments")).and_then(Value::make_arr).into_iter().flatten().enumerate() {
+                    if let Some(segment) = segment.make_obj() {
+                        segment.set("color_rgb", Value::array(colours[at % colours.len()].iter().map(|channel| Value::Num(*channel)).collect()));
+                    }
+                }
+            }
+            text = styk_doc::json::to_string(&document).into_bytes();
+            (text.as_slice(), "[1,-1]")
+        }
         InspectorScreen::Figures => (SHEET, ""),
         InspectorScreen::Text => {
             // The startup document with every segment a text segment (primitive 5).
@@ -173,6 +211,17 @@ pub fn inspector(screen: InspectorScreen, spawner: Arc<dyn Spawner>, wake: crate
         InspectorScreen::Camera => core.view_state_mut().set_context(InspectorContext::Camera),
         InspectorScreen::Layer => core.view_state_mut().set_context(InspectorContext::Layer),
         InspectorScreen::Frame => core.view_state_mut().set_tab(InspectorTab::Animation),
+        // Opened as a person opens it: the section's toggle, which needs the panel's first model (the facts lane's).
+        InspectorScreen::Colours => {
+            for _ in 0..200_000 {
+                core.refresh();
+                if core.inspector().model().is_some() {
+                    break;
+                }
+                std::thread::yield_now();
+            }
+            core.dispatch(crate::commands::Command::Inspector(crate::inspector::Event::Section { id: "colours", open: true }));
+        }
         _ => {}
     }
     core.refresh();
