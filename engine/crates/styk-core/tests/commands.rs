@@ -58,6 +58,26 @@ fn all_unported_commands_dispatch_the_typed_not_available_effect() {
 }
 
 #[test]
+fn menu_and_message_actions_reach_dispatch_with_their_registry_identity() {
+    use styk_core::app::Core;
+    use styk_core::commands::{Command as AppCommand, Effect};
+    use styk_core::overlay::{menu, messages};
+
+    let mut core = Core::default();
+    let mut menu = menu::Menu::new(vec![menu::Entry::Item(menu::Item::new(CommandId::Save, "Save"))]);
+    menu.focus(0);
+    let menu::Action::Activate { command, close: true, .. } = menu.activate() else { panic!("menu activation"); };
+    assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Save)]);
+
+    let mut slot = messages::Messages::default();
+    slot.push(messages::Message::new(1, "save-again", messages::Tone::Warning, false, vec![messages::Action {
+        command: CommandId::Save, label: "Retry".into(), dismiss: true,
+    }]), 0);
+    let command = slot.current().unwrap().actions[0].command;
+    assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Save)]);
+}
+
+#[test]
 fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates() {
     let output = Command::new("node").arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/command-reference.mjs")).output().expect("Node is a required source-parity prerequisite");
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -121,7 +141,16 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
         let repeat = router.press(&FocusState::new(), &chord, &[scope], Input { repeat: true, ..Input::default() }, |_| true);
         assert_eq!(matches!(repeat, Press::Run(_)), actual.command.info().shortcut.unwrap().repeat, "{} repeat", actual.command.id());
     }
-    eprintln!("source parity: {} registry entries, {} shortcut cases", commands.len(), cases.len());
+    let hints = reference.get("hints").unwrap().as_arr().unwrap();
+    for hint in hints {
+        let row = styk_core::overlay::menu::Item::new(CommandId::from_id(text(hint, "id")).unwrap(), "localized label");
+        let platform = if flag(hint, "mac") { Platform::Command } else { Platform::Control };
+        let scopes: Vec<_> = strings(hint, "scopes").iter().map(|s| Scope::parse(s).unwrap()).collect();
+        let actual = row.shortcuts(platform, true, &scopes);
+        assert_eq!(actual.text, text(hint, "text"), "{hint:?}");
+        assert_eq!(actual.keyshortcuts, text(hint, "aria"), "{hint:?}");
+    }
+    eprintln!("source parity: {} registry entries, {} shortcut cases, {} menu hints", commands.len(), cases.len(), hints.len());
 }
 
 #[test]

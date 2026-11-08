@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::CommandId;
 use crate::focus::{FocusArea, TargetKind};
 fn target(id: u64) -> FocusTarget {
     FocusTarget::new(id, FocusArea::Stage, TargetKind::Control)
@@ -122,11 +123,7 @@ fn close_all_stops_at_guard() {
     assert_eq!(s.entries().len(), 2);
 }
 fn item(label: &str) -> menu::Entry {
-    menu::Entry::Item(menu::Item {
-        label: label.into(),
-        command: label.into(),
-        ..Default::default()
-    })
+    menu::Entry::Item(menu::Item::new(CommandId::Undo, label))
 }
 fn key(k: &str) -> menu::Key<'_> {
     menu::Key {
@@ -139,7 +136,7 @@ fn menu_navigation_includes_disabled_rows_and_blocks_activation() {
     let mut disabled = menu::Item {
         label: "Disabled".into(),
         disabled: true,
-        ..Default::default()
+        ..menu::Item::new(CommandId::Menu, "")
     };
     disabled.reason = "No document".into();
     let mut m = menu::Menu::new(vec![
@@ -188,13 +185,13 @@ fn menu_submenu_hover_rtl_and_keep_open() {
     let mut m = menu::Menu::new(vec![
         menu::Entry::Item(menu::Item {
             submenu: Some(vec![item("Child")]),
-            ..Default::default()
+            ..menu::Item::new(CommandId::Menu, "")
         }),
         menu::Entry::Item(menu::Item {
             keep_open: true,
             checked: Some(false),
-            command: "toggle".into(),
-            ..Default::default()
+            command: CommandId::ToggleGrid,
+            ..menu::Item::new(CommandId::Menu, "")
         }),
     ]);
     m.rtl = true;
@@ -208,7 +205,7 @@ fn menu_submenu_hover_rtl_and_keep_open() {
         m.activate(),
         menu::Action::Activate {
             index: 1,
-            command: "toggle".into(),
+            command: CommandId::ToggleGrid,
             close: false
         }
     );
@@ -226,11 +223,11 @@ fn normalized_menu_removes_hidden_empty_and_separators() {
         Separator,
         Item(menu::Item {
             hidden: true,
-            ..Default::default()
+            ..menu::Item::new(CommandId::Menu, "")
         }),
         Item(menu::Item {
             submenu: Some(vec![]),
-            ..Default::default()
+            ..menu::Item::new(CommandId::Menu, "")
         }),
         Label("Empty".into()),
         Separator,
@@ -293,7 +290,7 @@ fn timeout_defaults_match_actions_not_waiting_count() {
     assert_eq!(msg(1, Tone::Success).timeout, 4000);
     assert_eq!(msg(1, Tone::Error).timeout, 0);
     let actions = vec![Action {
-        command: "undo".into(),
+        command: CommandId::Undo,
         label: "Undo".into(),
         dismiss: true,
     }];
@@ -383,7 +380,7 @@ fn radio_activation_clears_only_its_group_and_plain_keep_open_closes() {
             checked: Some(checked),
             group: Some(group.into()),
             keep_open: true,
-            ..Item::default()
+            ..Item::new(CommandId::ToggleGrid, "")
         })
     };
     let mut m = Menu::new(vec![radio("a", true), radio("a", false), radio("b", true)]);
@@ -398,7 +395,7 @@ fn radio_activation_clears_only_its_group_and_plain_keep_open_closes() {
     );
     let mut m = Menu::new(vec![Entry::Item(Item {
         keep_open: true,
-        ..Item::default()
+        ..Item::new(CommandId::ToggleGrid, "")
     })]);
     m.focus(0);
     assert!(matches!(m.activate(), Action::Activate { close: true, .. }));
@@ -425,7 +422,7 @@ fn submenu_pointer_intent_closes_after_250_ms_and_cancels_on_return() {
     let mut m = menu::Menu::new(vec![
         menu::Entry::Item(menu::Item {
             submenu: Some(vec![item("Child")]),
-            ..Default::default()
+            ..menu::Item::new(CommandId::Menu, "")
         }),
         item("Plain"),
     ]);
@@ -602,7 +599,7 @@ fn review_submenu_deadlines_drive_open_close_and_cancellation_without_polling() 
     let mut m = Menu::new(vec![
         Entry::Item(Item {
             submenu: Some(vec![item("Child")]),
-            ..Default::default()
+            ..Item::new(CommandId::Menu, "")
         }),
         item("Other"),
     ]);
@@ -802,6 +799,60 @@ fn review_refresh_and_hover_close_preserve_the_other_menus_focus() {
         "closed rows leave the shared scope"
     );
     assert_eq!(f.depth(), 2);
+}
+
+#[test]
+fn menu_tree_refresh_and_teardown_preserve_input_roles_and_history_owners() {
+    use crate::focus::{HistoryOwner, InputRole};
+
+    let mut s = Stack::default();
+    let mut f = page();
+    let mut select = target(10);
+    select.input_role = InputRole::Select;
+    s.open(Overlay::new(10, Kind::Menu), &mut f, vec![select], None).unwrap();
+    let mut child = Overlay::new(20, Kind::Menu);
+    child.parent = Some(10);
+    child.anchor = Some(FocusId(10));
+    let mut vfx = FocusTarget::new(20, FocusArea::Panels, TargetKind::TextEntry);
+    vfx.history_owner = HistoryOwner::Vfx;
+    s.open_with_focus(child, &mut f, vec![vfx], OpenFocus::First).unwrap();
+    // Replacing the parent's rows keeps the child's complete focused target.
+    s.register_targets(10, vec![select, target(12)], &mut f);
+    assert_eq!(f.focused(), Some(FocusId(20)));
+    assert_eq!(f.input_role(), InputRole::Text);
+    assert_eq!(f.history_owner(), HistoryOwner::Vfx);
+    s.register_targets(20, vec![vfx, target(21)], &mut f);
+    assert_eq!(f.input_role(), InputRole::Text);
+    assert_eq!(f.history_owner(), HistoryOwner::Vfx);
+    f.focus(FocusId(10));
+    assert_eq!(f.input_role(), InputRole::Select);
+    assert_eq!(f.history_owner(), HistoryOwner::Field);
+    // Removing a child uses remove_scope_targets without rebuilding the ancestor's role.
+    s.finish(20, Reason::Hover, &mut f);
+    assert_eq!(f.focused(), Some(FocusId(10)));
+    assert_eq!(f.input_role(), InputRole::Select);
+    // Removing the menu scope beneath a dialog preserves the original return chain.
+    s.open(Overlay::new(30, Kind::Dialog), &mut f, vec![vfx], None).unwrap();
+    s.finish(10, Reason::Removed, &mut f);
+    assert_eq!(f.history_owner(), HistoryOwner::Vfx);
+    s.finish(30, Reason::Removed, &mut f);
+    assert_eq!(f.focused(), Some(FocusId(1)));
+    assert_eq!(f.input_role(), InputRole::None);
+}
+
+#[test]
+fn menu_shortcuts_follow_the_command_and_submenus_have_no_hint() {
+    use crate::shortcuts::Platform;
+
+    let mut row = menu::Item::new(CommandId::Undo, "Undo");
+    assert_eq!(row.shortcuts(Platform::Control, true, &[]).text, "Ctrl+Z");
+    row.command = CommandId::Redo;
+    let hint = row.shortcuts(Platform::Control, true, &[]);
+    assert_eq!(hint.text, "Ctrl+Shift+Z");
+    assert_eq!(hint.keyshortcuts, "Control+Shift+Z Control+Y");
+    row.submenu = Some(vec![item("Child")]);
+    let model = menu::Menu::new(vec![menu::Entry::Item(row)]);
+    assert_eq!(model.items().next().unwrap().shortcuts(Platform::Control, true, &[]), menu::ShortcutHint::default());
 }
 #[test]
 fn review_keyboard_enters_an_existing_hover_child_and_escape_restores_its_row() {

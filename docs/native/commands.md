@@ -107,6 +107,11 @@ equivalent “Zoom to {percent}%” message when attaching to the slice's native
 `tests/commands.rs` reads appendix A and executes `tests/support/command-reference.mjs` against today's catalogues.
 It checks all metadata and default shortcut cases, field modifiers, repeat and held-key behavior, requirements,
 queue release/capacity/document identity, both polygon gates and each error outcome. Frozen fixtures are unchanged.
+Menu hints are compared with today's executable `CommandRegistry`; overlay menu and message actions carry
+`CommandId` through to the slice's dispatch. Shared menu-scope refresh/removal preserves input roles and history owners.
+Named automation click targets use `CommandId` (the `mark` control names `Menu`); pointer, playback and profiling steps
+remain typed feature operations. Shell effects use the slice's `Command`, with a document ID for targeted tab actions,
+and the shell reads Home behavior from the metadata instead of a second command list.
 `tests/command_routing.rs` enters the production router/queue and executes the actual JS capture and bubble handlers
 for control, VFX history, modified Cancel and repeat cases. Its live/queued nudge regressions use a real edit session
 and verify that a single undo restores the gesture's baseline and a single redo restores its result.

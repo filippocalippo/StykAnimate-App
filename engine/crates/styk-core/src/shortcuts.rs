@@ -45,6 +45,41 @@ impl Shortcut {
     }
 }
 
+/// Today's visible binding spelling (`hotkeys.mjs::formatBinding`). No binding is stored here.
+pub fn format_binding(binding: &str, platform: Platform) -> String {
+    binding.split('+').map(|part| binding_part(part, platform, false)).collect::<Vec<_>>().join("+")
+}
+
+/// Today's accessible binding spelling (`command-registry.mjs::ariaKeyShortcut`).
+pub fn aria_binding(binding: &str, platform: Platform) -> String {
+    binding.split('+').map(|part| binding_part(part, platform, true)).collect::<Vec<_>>().join("+")
+}
+
+fn binding_part(part: &str, platform: Platform, aria: bool) -> String {
+    let label = match part {
+        "Mod" => match (platform, aria) {
+            (Platform::Control, false) => "Ctrl", (Platform::Control, true) => "Control",
+            (Platform::Command, false) => "Cmd", (Platform::Command, true) => "Meta",
+        },
+        "Ctrl" if aria => "Control",
+        "Meta" if !aria && platform == Platform::Command => "Cmd",
+        "Escape" if !aria => "Esc",
+        "ArrowLeft" if !aria => "←", "ArrowRight" if !aria => "→",
+        "ArrowUp" if !aria => "↑", "ArrowDown" if !aria => "↓",
+        "CapsLock" if !aria => "Caps Lock",
+        "Comma" => ",", "Period" => ".", "Slash" => "/", "Backslash" => "\\",
+        "Semicolon" => ";", "Quote" => "'", "BracketLeft" => "[", "BracketRight" => "]",
+        "Minus" if !aria => "−", "Minus" => "-", "Equal" => "=", "Backquote" => "`",
+        other => {
+            let key = other.strip_prefix("Key").or_else(|| other.strip_prefix("Digit")).unwrap_or(other);
+            return key.strip_prefix("Numpad").map_or_else(|| key.to_owned(), |n| {
+                if aria { n.to_owned() } else { format!("Num {n}") }
+            });
+        }
+    };
+    label.to_owned()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Physical<'a> { code: &'a str, ctrl: bool, meta: bool, alt: bool, shift: bool }
 

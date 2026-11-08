@@ -19,6 +19,7 @@ Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {plat
 const windows = await import('../../../../../src/hotkeys.mjs?command-reference-windows');
 Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {platform: 'MacIntel'}});
 const apple = await import('../../../../../src/hotkeys.mjs?command-reference-apple');
+const {CommandRegistry} = await import('../../../../../src/ui/command-registry.mjs');
 const macById = new Map(apple.HOTKEY_COMMANDS.map(row => [row.id, row]));
 const catalog = new Map(COMMAND_CATALOG.map(row => [row.id, row]));
 const all = new Map(COMMAND_CATALOG.map(row => [row.id, {...row}]));
@@ -48,5 +49,19 @@ for (const [mac, module] of [[false, windows], [true, apple]]) {
     }
   }
 }
-process.stdout.write(JSON.stringify({commands, cases, polygonActions, polygonKeys, homeActions,
+// Menu hints go through the reference registry, including aliases and workspace conflicts.
+const hints = [];
+for (const [mac, module] of [[false, windows], [true, apple]]) {
+  const registry = new CommandRegistry({hotkeys: new module.HotkeyManager({mac}),
+    hotkeyCommands: module.HOTKEY_COMMANDS, formatBinding: binding => module.formatBinding(binding, mac)});
+  for (const [id, scopes] of [
+    ['undo', []], ['redo', []], ['play', []], ['delete-single-segment', ['builder']],
+    ['tool-line', []], ['tool-line', ['drawing']], ['cancel', []], ['zoom-out', []],
+    ['recent-project', []], ['menu', []], ['home', []], ['handle-left', ['canvas']],
+  ]) {
+    const context = {hotkeyScopes: scopes};
+    hints.push({id, mac, scopes, text: registry.shortcut(id, context), aria: registry.keyShortcuts(id, context)});
+  }
+}
+process.stdout.write(JSON.stringify({commands, cases, hints, polygonActions, polygonKeys, homeActions,
   fieldCommands: array(app, 'SHELL_FIELD_KEYS'), requirements: [...new Set([...catalog.values()].flatMap(row => row.requires ?? []))]}));
