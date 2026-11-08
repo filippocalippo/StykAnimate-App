@@ -1,7 +1,7 @@
 # Docking core
 
 `styk_core::layout` owns arrangements. It has no toolkit, thread, clock or file access.
-This is the core implementation for K-dock; UI integration and platform storage remain separate.
+This is the core implementation for K-dock; UI integration remains separate. K-store supplies the Windows storage adapter.
 The accepted review changes are part of the model: an overlay is a placement, a stage can float,
 Layers can join the timeline without extra chrome, return placements have stable anchors,
 and workspace state retains arrangements by monitor setup.
@@ -52,6 +52,8 @@ names to 48 Unicode scalar values. Tombstones retain 30 days, with at most 16 af
 
 `SaveQueue` accepts caller-provided monotonic milliseconds, debounces 200 ms, allows one outstanding
 write and coalesces newer edits. A failed write is retried unless a newer edit supersedes it.
+Retry delays double from 200 ms to at most 10 seconds, resetting after success or an accepted newer edit.
+An older failed completion never delays the newer edit. Deadlines saturate at the injected clock's maximum.
 The caller reports completion and errors; this queue does not perform I/O.
 
 `LayoutFile::save` calls `styk_services::storage::Storage::update`. Its callback reads and merges the
@@ -61,8 +63,32 @@ The trait contract is deliberate: separately calling read and replace would lose
 a refused boundary never replaces the file. Callback/staging failures, cancellation and dropping a
 future before commit preserve existing bytes and clean up that transaction's staging. Cancellation
 after commit cannot undo publication. The in-memory service tests these boundaries and wakeups.
-The platform must implement this contract before production persistence is connected. Core tests use
-an in-memory transactional implementation and check refusal over a newer file.
+`styk_platform::storage::LocalStorage` implements this contract on Windows. It uses
+`%LOCALAPPDATA%\StykAnimate\settings`, separately from Electron's roaming profile (an import source).
+An explicit directory constructor supports isolated hosts/tests; it does not consult the shell's
+Electron-compatible `STYK_USER_DATA_DIR`. Construction and a missing `load` create no files.
+Document names are bounded ASCII components, never paths, device names or alternate data streams.
+
+One platform worker serializes requests, with one active and one queued request; overflow returns
+an error for the caller to retry. Future polling and dropping never wait for the worker. Each update
+uses its own `Cancel`; dropping its future cancels the operation, including an unpolled request.
+The worker acquires an exclusive `LockFileEx` byte-range lock in `.storage.lock`, held through the
+bounded read, merge callback, stage, flush and replacement. The OS releases it after a crash. The
+lock file stays in place so every process locks the same identity; existence alone means nothing.
+Contention retries every 25 ms on an event that cancellation wakes immediately. Acquisition uses
+one event and cancellation registration, independent of its retry count. Merge callbacks run only
+on the worker and should return promptly; file I/O uses K-doc's bounded chunks and pre-commit gate.
+
+Reads share `styk-platform::files`' bounded reader, including the check after a file grows; writes
+use `LocalFiles::replace` unchanged in ownership, staging names, flushing and atomic replacement.
+Only the transaction's own staging is removed. A committed replacement stays committed even if
+the caller subsequently drops the future or cancels. Storage errors reach the caller unchanged.
+Core tests retain the in-memory implementation and refusal over a newer file.
+
+The app constructs the adapter beside `LocalFiles` and passes it as `Arc<dyn Storage>` to the core's
+`LayoutStore`, retained by `TopBand`. This small handle delegates to the existing `LayoutFile` codec
+and transactional save; it retains no layout copy. Docking views and startup/restoration orchestration
+remain their host's work; construction alone neither imports nor rewrites a user's layouts.
 
 Legacy import takes explicit main-client physical origin, logical stage geometry, scale and window
 size. Compact Draw retains the old arrangement; Build hides the timeline, Build + timeline does not.
@@ -92,8 +118,11 @@ existing 256 KiB file bound, at 801 by 600; it introduces no group-count cap or 
 
 This core does not certify the later UI scenarios: native float windows, live playback while dragging,
 keyboard routing, screenshot parity, flyout animation and application restart. The platform adapter
-and a real cross-process storage race test belong to a later platform chunk; its implementation must
-fulfil the transaction and cancellation contract above. The orchestrator accepted the legacy numeric solver matrix as
+is implemented by K-store, whose Windows tests race four real processes adding distinct entries,
+decode every observed file, and kill a holder before the next update acquires the lock. They also
+exercise staging/flush failures, refused replacement, cancellation at commit and during acquisition,
+dropped futures, byte limits, missing loads, queue ordering and overflow. UI integration remains a
+later chunk. The orchestrator accepted the legacy numeric solver matrix as
 outside this chunk because docking is a new system; several window and screen setups are covered,
 and the default 1440 by 900 rectangles have an exact source golden. Nested unknown fields in the
 typed layout codec are retained and tested through `LayoutFile` and edits of their owning records.

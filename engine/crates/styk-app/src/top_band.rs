@@ -86,6 +86,9 @@ struct Run {
 pub struct TopBand {
     /// The open projects.
     pub documents: Documents,
+    /// The core's layout persistence service, ready for the docking view's host.
+    #[expect(dead_code, reason = "The docking view host is a separate chunk; retain its injected service.")]
+    pub layouts: styk_core::layout::LayoutStore,
     /// The shell.
     pub shell: shell::Shell,
     /// The projects in the order they were opened, which is how scripts number them.
@@ -159,6 +162,10 @@ impl TopBand {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
         let mut documents = Documents::new();
+        let layouts = styk_core::layout::LayoutStore::new(Arc::new(
+            styk_platform::storage::LocalStorage::for_user(spawner.as_ref())
+                .map_err(|error| format!("the layout store did not start: {error}"))?,
+        ));
         // The application's startup document, for New and for closing the last tab. Stand-in: the engine's startup fixture,
         // until the native startup document (Blue on the landscape canvas) has an owner. The band does not send New yet.
         let startup = json::parse(STARTUP).map_err(|error| format!("the startup document: {error:?}"))?;
@@ -173,7 +180,7 @@ impl TopBand {
                 notify: Arc::new(|| {}),
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
-        Ok(TopBand { documents, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
+        Ok(TopBand { documents, layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
