@@ -28,3 +28,53 @@ Attachment tests also cover input/history metadata surviving menu-tree refresh a
 ## Review regressions
 
 The review tests first reproduced lost parent focus, blocked ancestor navigation, missing hover deadlines and incorrect submenu placement. Placement edge/corner expectations were obtained by executing the unchanged JavaScript `#place` body with its `computePosition` adapter. The cramped 400 px case gives LTR x=152, width=240. Today's RTL branch is asymmetric (x=8, width=140); that behavior is preserved rather than silently redesigned. Tests also cover entering an existing hover submenu from the keyboard, parent-row key routing, target refreshes and hover-close focus restoration.
+
+## The views (K-widgets-b)
+
+`styk_core::overlay::host` is the controller the views consume; `styk_ui::overlays::Overlays` carries it out in the toolkit;
+`styk_design::widgets` draws it. The views decide nothing the core decides.
+
+- **`overlay::host::Host`** owns the `Stack`, the open menu trees, the `Messages` and the `Tooltip`. `open` registers a root
+  menu (one focus target per row, `row_id(menu, index)`, a disabled row included); `key`, `hover`, `press`, `pointer` and
+  `tick` apply each `menu::Action` (a submenu opens with the intent `Action::submenu_focus` names, a child closed by the
+  stack is acknowledged to its parent, an activation closes the tree with `Reason::Selected` unless a check or radio row keeps
+  it open). Every call returns an `Update`: the stack's effects (focus, the hotkey gate, held-key release, guard checks), the
+  command to run, or a select's chosen index. `next_deadline()` is the earliest hover intent, message timeout or tooltip
+  delay; the runtime schedules one wake there and calls `tick(now)`. Nothing reads a clock. The row under the pointer
+  (`OpenMenu::hovered`) is tracked apart from focus: a pointer-opened menu focuses its first row without the fill or the ring,
+  as `ui-menu.mjs` does, and only the keyboard brings the ring (`FocusState::focus_visible`).
+- **A select is the host's anchored menu** (`Purpose::Select`): its rows come from `host::option_rows`, a disabled option is a
+  disabled row, and choosing reports the option's index, never a command (the rows carry the registry's `Menu` identity as a
+  placeholder the host never reports). The `Select` widget opens it from a press, Space, Enter and Alt+Down (`Open` carries the
+  field's rectangle and whether a key asked) and still steps the value with plain Up and Down; its `InputRole::Select` is
+  unchanged, and the rows keep it. The pick list is gone.
+- **`styk_ui::overlays::Overlays`** is the window's owner: it keeps the host, the bounds of the focus targets the last walk found
+  (`observe`), and the messages a select's options stand for (`Message::OpenSelect` carries them; the Inspector's selects send
+  it). `update` takes the application's milliseconds and returns an `Outcome` (focus requests as tasks and as data, the command
+  to run, the chosen option's message, the hotkey gate, guard checks). Core and toolkit agree on focus after every step: the tree
+  is rebuilt, then the focus tasks run on it, then the walk is given to `focus::sync`. The application window does not own an
+  `Overlays` yet: the opening of each menu belongs to the feature that has one (K-cmd, the band, the panels) and the wake to the
+  window's own scheduler (`Overlays::next_deadline`).
+- **`widgets::layer::Layer`** places each box over the page at the rectangle `Menu::place`, `Tooltip::place` or
+  `messages::position` gives it from its natural size, each in its own layer (a submenu's fill covers its parent's words), swallows
+  the pointer over a box that takes it, and reports each press and release with whether it landed on a box, so `Host::pointer`
+  decides what dismisses. A menu tree is one passive focus scope (`Scope::passive`): a press outside it closes it and goes on to
+  the page. A dialog is the modal `Scope`, and its veil takes the pointer.
+- **Drawn parts**: `menu` (rows with the glyph, check or radio dot, label, registry hint, chevron and disabled reason; the fill
+  and ring from the core's state), `tooltip`, `toast` (a message with actions wraps as today's `flex-wrap` does), `dialog`
+  (dialog, popover, sheet), `parts` (stepper, kbd, dot, crumb, divider, island, list row, section head, tabs, scroll area, empty
+  state, split button), `progress` (bar, spinner), `splitter`, `card` (the raised box).
+
+**Screens.** `menu-root`, `menu-submenu`, `menu-context`, `select-open`, `tooltip`, `toasts`, `dialog` and `parts`, each in both
+themes (`styk_ui::overlay_sheet`; the state comes from the host: a menu is opened, hovered and ticked as the application
+would). The references are today's menus, tooltip, messages, dialog and parts drawn by today's stylesheets and today's own modules
+(`openMenu`, `createDialog`) in Chromium (`engine/crates/styk-app/automation/overlays-reference/screens.mjs`; `--scale 2` writes the
+200 % references). Today's native `<select>` list is an operating-system popup the page cannot capture: the select's reference is
+today's menu stylesheet anchored under today's select field. Looked at side by side at 100 % and 200 %, what remains is glyph
+rasterisation; the limits are in `screens/limits.toml`.
+
+**Not drawn, on purpose.** The popover's and menu's 160 ms entry fade, the dialog's 240 ms lift and the toast's entry (a frame
+shows the settled state; an animation needs a clock the views must not read), a menu taller than the window scrolling with its
+fade and scrollbar (the box is clipped to the room the core gives it), the stage header's `head` and `drop` message slots, and
+the split button's hover shared across its halves while a pointer moves over it (the screen holds it with a flag; the live halves
+each take their own).

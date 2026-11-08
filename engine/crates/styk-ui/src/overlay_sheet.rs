@@ -362,8 +362,7 @@ fn parts_page(palette: &'static Palette) -> Element<'static, Message> {
         next += 1;
         FocusId(next)
     };
-    let mut rows: Vec<Element<'static, Message>> = Vec::new();
-    rows.push(heading(palette, "Small parts"));
+    let mut rows: Vec<Element<'static, Message>> = vec![heading(palette, "Small parts")];
     rows.push(row(palette, "Keycaps", 52.0, vec![parts::chord(palette, &["Ctrl", "Shift", "Z"]), parts::kbd(palette, "Esc")]));
     rows.push(row(
         palette,
@@ -455,6 +454,16 @@ mod tests {
                 let distinct = pixels.chunks(4).map(|p| [p[0], p[1], p[2]]).take(400_000).collect::<std::collections::HashSet<_>>().len();
                 assert!(distinct > 6, "{} {theme:?} drew something: {distinct} colours", screen.id());
             }
+        }
+    }
+
+    #[test]
+    fn the_catalogue_names_each_scene_in_both_themes() {
+        for scene in OverlayScreen::ALL {
+            assert_eq!(crate::screens::Screen::Overlay(scene, false).id(), scene.id());
+            assert_eq!(crate::screens::Screen::Overlay(scene, true).id(), format!("{}-dark", scene.id()));
+            assert_eq!(crate::screens::Screen::from_id(scene.id()), Some(crate::screens::Screen::Overlay(scene, false)));
+            assert_eq!(crate::screens::Screen::Overlay(scene, true).theme(), Theme::Dark);
         }
     }
 

@@ -436,3 +436,34 @@ fn the_tooltip_waits_500_ms_and_switches_at_once_within_300_ms_of_hiding() {
     w.overlays.host_mut().tooltip_mut().schedule(tip(4), 3000, true, true);
     assert_eq!(w.overlays.next_deadline(), Some(3500), "keyboard focus does");
 }
+
+#[test]
+fn a_message_waits_while_the_pointer_or_focus_is_on_it_and_resumes_with_the_time_left() {
+    use styk_core::overlay::messages::{Message as Toast, Tone};
+    use styk_design::widgets::toast::Event as ToastEvent;
+    let mut w = Window::new();
+    w.overlays.host_mut().messages_mut().push(Toast::new(1, "saved", Tone::Success, false, vec![]), 100);
+    assert_eq!(w.overlays.next_deadline(), Some(4100));
+    let outcome = w.overlays.update(Message::Toast(ToastEvent::Hover(true)), &mut w.focus, 1000);
+    w.carry(outcome);
+    assert_eq!(w.overlays.next_deadline(), None, "hovered: nothing is due");
+    let outcome = w.overlays.update(Message::Toast(ToastEvent::Hover(false)), &mut w.focus, 2000);
+    w.carry(outcome);
+    assert_eq!(w.overlays.next_deadline(), Some(5100), "the 3.1 s that were left start again");
+    let outcome = w.overlays.update(Message::Toast(ToastEvent::Focus(true)), &mut w.focus, 3000);
+    w.carry(outcome);
+    assert_eq!(w.overlays.next_deadline(), None, "focus on a button waits too");
+}
+
+#[test]
+fn a_message_with_an_action_runs_its_command_and_dismisses_it() {
+    use styk_core::overlay::messages::{Action, Message as Toast, Tone};
+    use styk_design::widgets::toast::Event as ToastEvent;
+    let mut w = Window::new();
+    let undo = Action { command: CommandId::Undo, label: "Undo".into(), dismiss: true };
+    w.overlays.host_mut().messages_mut().push(Toast::new(1, "deleted", Tone::Warning, false, vec![undo]), 0);
+    let outcome = w.overlays.update(Message::Toast(ToastEvent::Action { id: 1, index: 0 }), &mut w.focus, 500);
+    w.carry(outcome);
+    assert_eq!(w.runs, [CommandId::Undo]);
+    assert!(w.overlays.host().messages().current().is_none());
+}

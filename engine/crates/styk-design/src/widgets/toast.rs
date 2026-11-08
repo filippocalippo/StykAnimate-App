@@ -7,6 +7,7 @@
 use iced::Widget as _;
 use super::card::Card;
 use super::control::{Interaction, pill, words};
+use super::focus::{Focusable, Ring};
 use super::layer::{Placed, Position};
 use super::progress::Bar;
 use super::surface::{Look, Surface};
@@ -14,10 +15,12 @@ use crate::tokens::scale;
 use crate::typography::TextStyle;
 use crate::{Palette, Rgba};
 use iced::advanced::layout::{Layout, Limits};
-use iced::advanced::widget::{self, Operation, Tree};
+use iced::advanced::widget::{self, Operation, Tree, tree};
 use iced::advanced::{Shell, Widget, overlay, renderer};
 use iced::widget::{Row, container};
+use std::rc::Rc;
 use iced::{Alignment, Element, Event as IcedEvent, Length, Padding, Rectangle, Renderer, Size, Theme, Vector, mouse};
+use styk_core::focus::{FocusArea, FocusId};
 use styk_core::overlay::messages::{self, Message as Toast, Priority, Tone};
 use styk_core::overlay::placement::{Rect, Size as PlaceSize};
 
@@ -28,6 +31,73 @@ pub enum Event {
     Action { id: u64, index: usize },
     /// The close button of message `id`.
     Dismiss(u64),
+    /// The pointer entered (`true`) or left the visible message: its timeout pauses and resumes (`Messages::interaction`).
+    Hover(bool),
+    /// Keyboard focus entered one of its buttons: the same.
+    Focus(bool),
+}
+
+/// The focus target of a message's `slot`th button (its actions, then its close button): a message's buttons are reachable by
+/// Tab, as today's are. The range never meets the page's or a menu's.
+pub fn button_id(message: u64, slot: usize) -> FocusId {
+    FocusId((1 << 41) + (message << 4) + slot.min(15) as u64)
+}
+
+/// Reports the pointer entering and leaving what it wraps.
+struct Watch<'a, Message> {
+    content: Element<'a, Message>,
+    on_change: Box<dyn Fn(bool) -> Message + 'a>,
+}
+
+impl<Message> widget::Meta for Watch<'_, Message> {}
+
+impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Watch<'a, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<bool>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(false)
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.size()
+    }
+
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_mut(&mut self.content));
+    }
+
+    fn layout(&mut self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) {
+        self.content.layout(&mut tree.children[0], renderer, limits);
+        tree.size = tree.children[0].size;
+    }
+
+    fn operate(&mut self, tree: &mut Tree, layout: Layout, viewport: &Rectangle, renderer: &Renderer, operation: &mut dyn Operation) {
+        self.content.operate(&mut tree.children[0], layout, viewport, renderer, operation);
+    }
+
+    fn update(&mut self, tree: &mut Tree, event: &IcedEvent, layout: Layout, cursor: mouse::Cursor, renderer: &Renderer, shell: &mut Shell<'_, Message>, viewport: &Rectangle) {
+        self.content.update(&mut tree.children[0], event, layout, cursor, renderer, shell, viewport);
+        let over = cursor.is_over(layout.bounds());
+        let was = tree.state.downcast_mut::<bool>();
+        if *was != over {
+            *was = over;
+            shell.publish((self.on_change)(over));
+        }
+    }
+
+    fn mouse_interaction(&self, tree: &Tree, layout: Layout, cursor: mouse::Cursor, viewport: &Rectangle, renderer: &Renderer) -> mouse::Interaction {
+        self.content.mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
+    }
+
+    fn draw(&self, tree: &Tree, renderer: &mut Renderer, theme: &Theme, style: &renderer::Style, layout: Layout, cursor: mouse::Cursor, viewport: &Rectangle) {
+        self.content.draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
+    }
+
+    fn overlay<'b>(&'b mut self, tree: &'b mut Tree, layout: Layout, renderer: &Renderer, viewport: &Rectangle, translation: Vector, window: Size) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.overlay(&mut tree.children[0], layout, renderer, viewport, translation, window)
+    }
 }
 
 /// How the message is dressed (`data-variant`).
@@ -71,11 +141,12 @@ fn tone_ink(palette: &Palette, tone: Tone) -> Rgba {
     }
 }
 
-/// A pill-shaped press target with a hover fill: a toast's action and close button.
-fn target<'a, Message: Clone + 'a>(palette: &'static Palette, face: Element<'a, Message>, message: Message, width: Length, height: f32) -> Element<'a, Message> {
+/// A pill-shaped press target with a hover fill and a focus ring: a toast's action and close button.
+fn target<'a, Message: Clone + 'a>(palette: &'static Palette, id: FocusId, face: Element<'a, Message>, message: Message, on_focus: Rc<dyn Fn(bool) -> Message + 'a>, width: Length, height: f32) -> Element<'a, Message> {
     let hover = palette.surface_hover;
     let look = move |interaction: Interaction| Look { fill: (interaction != Interaction::Rest).then_some(hover), border: 0.0, ring: None, shadows: &[], radius: pill(height), opacity: 1.0, scale: 1.0 };
-    Surface::new(face, look).on_press_maybe(Some(message)).width(width).height(Length::Fixed(height)).boxed()
+    let surface = Surface::new(face, look).on_press_maybe(Some(message.clone())).width(width).height(Length::Fixed(height));
+    Focusable::new(id, FocusArea::Stage, surface.boxed(), Ring::of(palette, pill(height))).on_activate(message).on_focus_change(move |focused| on_focus(focused)).boxed()
 }
 
 /// `flex-wrap: wrap` with the text at `flex: 1 1 160px`, as a message with actions is laid out: the box is as wide as its items
@@ -176,7 +247,12 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Wrap<'a, Message> {
 }
 
 /// The visible message as a pill. `send` turns what the person pressed into the owner's message.
-pub fn toast<'a, Message: Clone + 'a>(palette: &'static Palette, message: &Toast, send: impl Fn(Event) -> Message) -> Element<'a, Message> {
+pub fn toast<'a, Message: Clone + 'a>(palette: &'static Palette, message: &Toast, send: impl Fn(Event) -> Message + 'a) -> Element<'a, Message> {
+    let send: Rc<dyn Fn(Event) -> Message + 'a> = Rc::new(send);
+    let focus = |send: &Rc<dyn Fn(Event) -> Message + 'a>| -> Rc<dyn Fn(bool) -> Message + 'a> {
+        let send = send.clone();
+        Rc::new(move |focused| send(Event::Focus(focused)))
+    };
     let kind = variant(message);
     let ink = TextStyle::from_role(&scale::TYPE_UI);
     let mut parts: Vec<Element<'a, Message>> = Vec::new();
@@ -198,11 +274,11 @@ pub fn toast<'a, Message: Clone + 'a>(palette: &'static Palette, message: &Toast
     }
     for (index, action) in message.actions.iter().enumerate() {
         let label = container(words(action.label.clone(), TextStyle::from_role(&scale::TYPE_SMALL_STRONG), palette.accent_text)).padding(Padding { top: 0.0, right: scale::SPACE_2_5, bottom: 0.0, left: scale::SPACE_2_5 }).center_y(Length::Fixed(scale::CONTROL_MD));
-        parts.push(target(palette, label.boxed(), send(Event::Action { id: message.id, index }), Length::Shrink, scale::CONTROL_MD));
+        parts.push(target(palette, button_id(message.id, index), label.boxed(), send(Event::Action { id: message.id, index }), focus(&send), Length::Shrink, scale::CONTROL_MD));
     }
     if message.dismissible {
         let glyph = container(super::icon("close", scale::ICON_SM, palette.text_3)).center_x(Length::Fixed(scale::CONTROL_SM)).center_y(Length::Fixed(scale::CONTROL_SM));
-        parts.push(target(palette, glyph.boxed(), send(Event::Dismiss(message.id)), Length::Fixed(scale::CONTROL_SM), scale::CONTROL_SM));
+        parts.push(target(palette, button_id(message.id, message.actions.len()), glyph.boxed(), send(Event::Dismiss(message.id)), focus(&send), Length::Fixed(scale::CONTROL_SM), scale::CONTROL_SM));
     }
     let buttons = message.actions.len() + usize::from(message.dismissible);
     let gap = if kind == Variant::Task { scale::SPACE_2_5 } else { scale::SPACE_2 };
@@ -214,16 +290,17 @@ pub fn toast<'a, Message: Clone + 'a>(palette: &'static Palette, message: &Toast
     // One line is `min-block-size: 36px` with its words centred; wrapped lines take the room they need.
     let body = if message.actions.is_empty() { container(line).center_y(Length::Fixed(height)).padding(padding) } else { container(line).padding(padding) };
     let card = Card::new(body).radius(radius);
-    match kind {
+    let card = match kind {
         Variant::Pill | Variant::Task => card.fill(palette.surface_raised).shadows(palette.elevation_1),
         Variant::Mode => card.fill(palette.accent_soft),
         Variant::Quiet => card,
-    }
-    .boxed()
+    };
+    let hover = send.clone();
+    Watch { content: card.boxed(), on_change: Box::new(move |hovered| hover(Event::Hover(hovered))) }.boxed()
 }
 
 /// The visible message as a child of the overlay layer: centred on `x`, its top at `top` (from `messages::position`).
-pub fn placed<'a, Message: Clone + 'a>(palette: &'static Palette, message: &Toast, stage: Option<Rectangle>, send: impl Fn(Event) -> Message) -> Placed<'a, Message> {
+pub fn placed<'a, Message: Clone + 'a>(palette: &'static Palette, message: &Toast, stage: Option<Rectangle>, send: impl Fn(Event) -> Message + 'a) -> Placed<'a, Message> {
     let stage = stage.map(|stage| Rect { x: f64::from(stage.x), y: f64::from(stage.y), width: f64::from(stage.width), height: f64::from(stage.height) });
     Placed::new(toast(palette, message, send), move |natural: Size, viewport: Size| {
         let at = messages::position(PlaceSize { width: f64::from(natural.width), height: f64::from(natural.height) }, f64::from(viewport.height), stage, None, None, &[], 0.0);

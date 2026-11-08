@@ -54,6 +54,9 @@ pub struct Overlays {
     bounds: Vec<(FocusId, Rectangle)>,
     /// The select whose list is open (the menu's ID) and the message each option stands for.
     picks: Option<(u64, Vec<Message>)>,
+    /// The pointer is over the visible message, or focus is on one of its buttons: its timeout waits.
+    message_hovered: bool,
+    message_focused: bool,
 }
 
 fn rect(bounds: Rectangle) -> Rect {
@@ -62,7 +65,7 @@ fn rect(bounds: Rectangle) -> Rect {
 
 impl Overlays {
     pub fn new(hints: Hints, rtl: bool) -> Overlays {
-        Overlays { host: Host::new(hints, rtl), bounds: Vec::new(), picks: None }
+        Overlays { host: Host::new(hints, rtl), bounds: Vec::new(), picks: None, message_hovered: false, message_focused: false }
     }
 
     pub fn host(&self) -> &Host {
@@ -171,6 +174,16 @@ impl Overlays {
                 let hit = if inside { None } else { anchor };
                 let update = self.host.pointer(press, inside, hit, focus);
                 self.carry(update)
+            }
+            Message::Toast(toast::Event::Hover(hovered)) => {
+                self.message_hovered = hovered;
+                self.host.messages_mut().interaction(self.message_hovered, self.message_focused, now);
+                Outcome::none()
+            }
+            Message::Toast(toast::Event::Focus(focused)) => {
+                self.message_focused = focused;
+                self.host.messages_mut().interaction(self.message_hovered, self.message_focused, now);
+                Outcome::none()
             }
             Message::Toast(toast::Event::Dismiss(id)) => {
                 self.host.messages_mut().dismiss(id, now);
