@@ -149,3 +149,51 @@ The toolkit-free Host is exposed by `styk-devtools/panels`; `ui` forwards that
 feature and `styk-ui/devtools` together. The default headless tools dependency
 only enables `inspect` in Core. This prevents a combined default guard build
 from enabling Core extension variants without their UI adapter.
+
+## The views (K-dev panels, step 3)
+
+`styk_devtools::ui` (feature `ui`, which the application's `devtools` feature enables) draws the models above and owns
+no decision. `Context::of(&Host, Surroundings)` borrows the host's models, availability, error, argument request and draft;
+`ui::panel(&Context, &PanelId)` is the view the dock places for `dev.profiler`, `dev.logs` and `dev.parameters`
+(`styk_ui::dock::window_with` takes it as the dock's extra panel source; `icon_of` asks `Panel::icon`), and `ui::overlay`
+is the layer the application stacks above the dock and below menus and messages.
+
+- **Developer mark.** `Dev` on the well (`--surface-well`, micro type, `--radius-xs`) with the `dev.accent` dot
+  (`--violet-500`), at the end of every developer panel's header. The tab icon's dot of design 3.4 and the floating window's
+  top rule wait for `Tabs` to carry a mark and for floating windows (K-dock part 2).
+- **Profiler.** Start, Stop and Export are `Command::Run` of the registered ids, enabled by `Host::availability()`. Export
+  asks for its file through the host's argument request: a field showing `Host.draft`, typed through `Event::Draft`, Enter or
+  Export sends `Event::Export(FileTarget)`, Cancel or Escape `Event::Input(None)`. Below: the status line, bytes and drops,
+  and the summary statistics of `ProfilerModel.summary`.
+- **Logs.** Level chips and the module and text fields send `Event::Filter` (every change starts at offset 0; the host
+  clears the page and resamples); the page's rows, `LogsModel::next`/`previous` for the pager, the counts and the ring's drops.
+- **Parameters.** One block per row: integers and floats a stepper (one press, one `Event::Set` of the value one step away;
+  the registry clamps), bools a switch, enums a row of chips, a reset that is enabled only for a modified value, the default,
+  a pending value and a restart note. Controls disable while the host is busy.
+- **Overlay.** A passive `Layer` child at the host's `bounds` (inset 12 px) while `visible`: the frame sparkline with the
+  16.7 ms line (late frames, over 1.5 budgets, in the danger colour), the quantiles of each timing stream (a stream with no
+  records says "Unavailable", never zero), stalls, drops, truncation, private memory and each video segment. It takes no
+  pointer and registers no panel.
+- **Focus.** Controls take ids from `dev_extension::ids::slot(panel, n)`, `PER_PANEL` apart.
+- **Text.** Every string is a `dev.*` catalogue key (gated, in `dev_extension_catalogue.rs`), formatted through the presentation;
+  a test scans the views for keys the catalogue lacks.
+
+The host gained what the views need and the plan assigned to it: `Event::Draft`, `Host.draft` (cleared when the request ends,
+is cancelled or is accepted; bounded to 2 KiB) and the pager cursors `LogsModel::next`/`previous` and
+`ParametersModel::previous`.
+
+**Screens.** `dev-profiler-recording`, `dev-profiler`, `dev-logs`, `dev-parameters` and `dev-overlay`, each in both themes
+(`styk_devtools::ui::screens`), drawn by a developer build of the application (`stykanimate --screen <id>`). The preview cannot
+draw them: the developer crates link the engine through `inspect`, and the preview's graph is model-only. `limits.toml` records
+them as new screens whose references are this build's own accepted captures (`docs/native/screens/devtools/`); `cargo xtask
+check` compares them in its last step, which builds the developer application in its own cargo invocation. The overlay screens
+show the card over the stage's field; the profiler screens show the export request open.
+
+**Tests.** `styk-app` `developer_view_tests.rs` mounts the dock's panels and the overlay in the headless interface and goes
+through `TopBand::update`, `Core::dispatch`, the extension effect, the worker and its real wake: Start, Stop and Export (button
+and Enter) reach the capture controller and the output service, a parameter step and a reset are acknowledged by the setter,
+the log filter applies in the worker, and the overlay is drawn at the stage's corner while a press goes through it.
+
+**Not in the views, for the core to decide later.** The logs pager follows the oldest-first offset the worker pages by, with no
+"follow the tail"; parameter profiles (Save and Load) have no view yet; the overlay's own draw cost (design 3.5.2) has no
+producer; the monospace font of the design's data surfaces is not bundled, so the panels use Inter.

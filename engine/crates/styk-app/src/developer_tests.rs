@@ -16,6 +16,8 @@ use styk_devtools::{
     ParameterValue,
     runtime::{Runtime, Services, Startup},
 };
+#[path = "developer_view_tests.rs"]
+mod views;
 struct Memory;
 // Captures share trace admission; keep these lifetime tests deterministic without timing thresholds.
 static CAPTURE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());

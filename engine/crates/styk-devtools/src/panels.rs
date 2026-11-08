@@ -37,12 +37,29 @@ pub struct LogsModel {
     pub filter: Filter,
     pub page: Page,
 }
+impl LogsModel {
+    /// The offset of the page after this one (the documented cursor: offset plus the rows returned).
+    pub fn next(&self) -> Option<usize> {
+        let end = self.filter.offset.saturating_add(self.page.lines.len());
+        (!self.page.lines.is_empty() && end < self.page.total).then_some(end)
+    }
+    /// The offset of the page before this one.
+    pub fn previous(&self) -> Option<usize> {
+        (self.filter.offset > 0).then(|| self.filter.offset.saturating_sub(self.page.lines.len().max(1)))
+    }
+}
 #[derive(Clone, Debug, Default)]
 pub struct ParametersModel {
     pub rows: Vec<Parameter>,
     pub offset: usize,
     pub total: usize,
     pub next: Option<usize>,
+}
+impl ParametersModel {
+    /// The offset of the page before this one.
+    pub fn previous(&self) -> Option<usize> {
+        (self.offset > 0).then(|| self.offset.saturating_sub(self.rows.len().max(1)))
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Availability {
@@ -64,19 +81,19 @@ pub const DESCRIPTORS: [PanelDescriptor; 3] = [
         panel: Panel::Profiler,
         title: "dev.profiler",
         mark: "dev.mark",
-        icon: "activity",
+        icon: Panel::Profiler.icon(),
     },
     PanelDescriptor {
         panel: Panel::Logs,
         title: "dev.logs",
         mark: "dev.mark",
-        icon: "list",
+        icon: Panel::Logs.icon(),
     },
     PanelDescriptor {
         panel: Panel::Parameters,
         title: "dev.parameters",
         mark: "dev.mark",
-        icon: "sliders",
+        icon: Panel::Parameters.icon(),
     },
 ];
 #[derive(Clone, Copy)]
@@ -110,6 +127,8 @@ pub struct Host {
     pub error: Option<Msg>,
     pub control_result: Option<Result<ParameterValue, String>>,
     pub input: Option<styk_core::dev_extension::CommandId>,
+    /// The text typed for the open argument request; bounded, and gone when the request ends.
+    pub draft: String,
 }
 impl Host {
     pub fn new(runtime: Runtime, notify: Arc<dyn Fn() + Send + Sync>) -> Self {
@@ -127,6 +146,7 @@ impl Host {
             pending: None,
             sample: None,
             input: None,
+            draft: String::new(),
             memory: None,
             next_memory: None,
             control_result: None,
@@ -228,7 +248,22 @@ impl Host {
     }
     pub fn update(&mut self, event: Event, now: u64) {
         match event {
-            Event::Input(id) => self.input = id,
+            Event::Input(id) => {
+                if id.is_none() || id != self.input {
+                    self.draft.clear();
+                }
+                self.input = id;
+            }
+            Event::Draft(text) => {
+                if self.input.is_none() {
+                    return;
+                }
+                if text.len() > 2048 {
+                    self.error = Some(notice("text exceeds 2 KiB"));
+                    return;
+                }
+                self.draft = text;
+            }
             Event::Panel { .. } => {
                 // Membership was accepted by the dock before this effect.
                 if self.input == Some(styk_core::dev_extension::CommandId::DevPanelClose) {
@@ -398,6 +433,7 @@ impl Host {
                 self.pending = Some((p, intent));
                 if consumes_input {
                     self.input = None;
+                    self.draft.clear();
                 }
                 self.error = None;
             }
@@ -555,5 +591,32 @@ impl Host {
 impl Drop for Host {
     fn drop(&mut self) {
         self.runtime.clear_capture();
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use styk_devtools_engine::logs::Line;
+    fn line(sequence: u64) -> Line {
+        Line { sequence, time_ns: 0, level: 3, module: "m".into(), text: "t".into(), truncated: false }
+    }
+    #[test]
+    fn log_pager_cursors_follow_the_returned_rows() {
+        let mut model = LogsModel::default();
+        assert_eq!((model.next(), model.previous()), (None, None), "an empty page has neither");
+        model.page = Page { lines: (0..50).map(line).collect(), total: 120, dropped: 0 };
+        assert_eq!((model.next(), model.previous()), (Some(50), None));
+        model.filter.offset = 50;
+        assert_eq!((model.next(), model.previous()), (Some(100), Some(0)));
+        model.filter.offset = 100;
+        model.page = Page { lines: (0..20).map(line).collect(), total: 120, dropped: 0 };
+        assert_eq!((model.next(), model.previous()), (None, Some(80)), "the last page has no next");
+    }
+    #[test]
+    fn parameter_pager_previous_steps_back_by_the_rows_shown() {
+        let mut model = ParametersModel::default();
+        assert_eq!(model.previous(), None);
+        model.offset = 7;
+        assert_eq!(model.previous(), Some(6), "an empty page still steps back");
     }
 }

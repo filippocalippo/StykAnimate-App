@@ -52,6 +52,10 @@ fn title(presentation: &Presentation, panel: &PanelId) -> String {
 
 /// The panel's glyph (`panel-registry.mjs`).
 fn icon_of(panel: &PanelId) -> &'static str {
+    #[cfg(feature = "devtools")]
+    if let Some(developer) = styk_core::dev_extension::Panel::from_kind(&panel.kind) {
+        return developer.icon();
+    }
     match panel.kind.as_str() {
         "properties" => "inspector",
         "vfx" => "fx",

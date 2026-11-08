@@ -336,7 +336,28 @@ impl TopBand {
             Some(model) => (Some(styk_ui::inspector::View::model(model, presentation, theme)), None),
             None => (styk_ui::inspector::View::of(&self.core, theme), self.core.stage().map(|surface| styk_ui::stage::stage(surface, theme, |event| styk_ui::Message::Command(styk_core::commands::Command::Stage(event))))),
         };
-        styk_ui::dock::window(&params, inspector, stage).map(Message::Editor).boxed()
+        #[cfg(feature = "devtools")]
+        let docked = {
+            let developer = self.developer.as_ref().map(|host| styk_devtools::ui::Context::of(host, self.developer_surroundings(theme)));
+            styk_ui::dock::window_with(&params, inspector, stage, &mut |panel| developer.as_ref().and_then(|context| styk_devtools::ui::panel(context, panel)))
+        };
+        #[cfg(not(feature = "devtools"))]
+        let docked = styk_ui::dock::window(&params, inspector, stage);
+        docked.map(Message::Editor).boxed()
+    }
+
+    #[cfg(feature = "devtools")]
+    fn developer_surroundings(&self, theme: Theme) -> styk_devtools::ui::Surroundings<'_> {
+        styk_devtools::ui::Surroundings { presentation: self.core.presentation(), theme, composing: self.core.focus().composing() }
+    }
+
+    /// The performance overlay: the host's bounds and visibility, drawn without taking input.
+    #[cfg(feature = "devtools")]
+    pub fn developer_overlay(&self, theme: Theme) -> iced::Element<'_, Message> {
+        match &self.developer {
+            Some(host) => styk_devtools::ui::overlay(&styk_devtools::ui::Context::of(host, self.developer_surroundings(theme))).map(Message::Editor).boxed(),
+            None => iced::widget::space().width(0).height(0).boxed(),
+        }
     }
 
     /// The runtime maps the dock's one deadline (its debounced layout save) onto iced's scheduled redraw.

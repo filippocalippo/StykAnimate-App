@@ -2914,6 +2914,7 @@ name = "styk-devtools"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "serde_json",
  "styk-core",
  "styk-design",
  "styk-devtools-engine",

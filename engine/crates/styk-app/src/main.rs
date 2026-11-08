@@ -536,7 +536,11 @@ impl App {
             (Some(ready), None) => {
                 // The docked window fills the window under the band; the band's own area holds nothing below it.
                 let below_band = iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed();
-                let layers=iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.dock_wake(), self.band.overlay_wake(), self.band.overlay_layer(self.theme)];
+                let layers=iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.dock_wake(), self.band.overlay_wake()];
+                // The developer overlay takes no input and sits under the menus and messages.
+                #[cfg(feature = "devtools")]
+                let layers=layers.push(self.band.developer_overlay(self.theme));
+                let layers=layers.push(self.band.overlay_layer(self.theme));
                 #[cfg(feature = "devtools")]
                 let layers=layers.push(self.band.developer_wake());
                 layers.map(Message::Band).boxed()
@@ -628,6 +632,10 @@ fn main() -> ExitCode {
     if launch.control {
         eprintln!("--control requires a developer build");
         return ExitCode::from(2);
+    }
+    #[cfg(feature = "devtools")]
+    if let Some(developer) = launch.screen.as_deref().and_then(styk_devtools::ui::screens::Screen::from_id) {
+        return run_developer_screen(&launch, developer);
     }
     let screen = match launch.screen.as_deref().map(|id| (id, Screen::from_id(id))) {
         Some((id, None)) => {
@@ -785,6 +793,23 @@ fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
 fn run_pen_lab(_: &Launch, _: Option<Strategy>) -> ExitCode {
     eprintln!("the pen lab is in the developer build (cargo build --features devtools)");
     ExitCode::from(2)
+}
+
+/// A developer panel screen (`styk_devtools::ui::screens`): drawn offscreen into the `--screenshot` picture, in every mode.
+#[cfg(feature = "devtools")]
+fn run_developer_screen(launch: &Launch, screen: styk_devtools::ui::screens::Screen) -> ExitCode {
+    let Some(path) = &launch.screenshot else {
+        eprintln!("a developer screen needs --screenshot <png>");
+        return ExitCode::from(2);
+    };
+    let result = headless::developer_screenshot(screen, launch.size.unwrap_or(screen.size()), launch.scale.unwrap_or(1.0) as f32).and_then(|image| screenshot::write(path, &image));
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// An unattended run with no window: draws the interface offscreen into the `--screenshot` picture and exits.

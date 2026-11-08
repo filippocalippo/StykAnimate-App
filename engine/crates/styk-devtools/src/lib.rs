@@ -5,3 +5,5 @@ pub use styk_devtools_engine::*;
 pub mod panels;
 #[cfg(feature = "ui")]
 pub mod pen_lab;
+#[cfg(feature = "ui")]
+pub mod ui;
