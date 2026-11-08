@@ -22,6 +22,7 @@ pub mod frames;
 pub mod launch;
 pub mod limits;
 pub mod number;
+pub mod overlay;
 pub mod roving;
 pub mod shell;
 pub mod text_entry;

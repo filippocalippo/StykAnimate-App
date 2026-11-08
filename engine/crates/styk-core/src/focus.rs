@@ -279,6 +279,26 @@ impl FocusState {
         first
     }
 
+    /// Removes an overlay scope by identity, including a parent removed underneath a child.
+    /// The child inherits the parent's return target when its invoker belonged to that parent.
+    pub fn remove_scope(&mut self, id: ScopeId, restore: bool) -> Option<FocusId> {
+        let Some(index) = self.scopes.iter().position(|scope| scope.id == id) else { return self.focused; };
+        if index == 0 { return self.focused; }
+        if index + 1 == self.scopes.len() {
+            let previous = self.focused;
+            let restored = self.close_scope();
+            if !restore { self.reconcile(previous); }
+            return if restore { restored } else { self.focused };
+        }
+        let removed = self.scopes.remove(index);
+        for child in &mut self.scopes[index..] {
+            if child.invoker.is_some_and(|inv| removed.targets.iter().any(|t| t.id == inv.id)) {
+                child.invoker = removed.invoker;
+            }
+        }
+        self.focused
+    }
+
     /// Closes the top modal scope (the root never closes) and restores focus: to the invoker when it is still there,
     /// else to the nearest focusable target of the scope below by its old position, else to the first target of the
     /// invoker's area, else nothing. Returns the focus afterwards.
