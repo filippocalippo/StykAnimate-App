@@ -82,13 +82,21 @@ Crash-left staging files are not guessed to belong to this process or deleted.
 Each lease opens or creates the same `.lock` file with no sharing and holds the OS handle for the
 session. A sharing violation means another process owns it; successful opening reclaims an orphaned
 file. Delete-on-close is only housekeeping: a leftover file after power loss never establishes ownership.
-Records include a SHA-256 data identity. Chooser records additionally seal data attributes and the
-sidecar; restore and discard revalidate that selection under the lease. Write receipts identify the
+Records include a SHA-256 data identity. Chooser records additionally seal data attributes and a
+readable sidecar; restore and discard revalidate that selection under the lease. Write receipts identify the
 committed data independently of optional metadata. Data reads hold a handle that denies writes/renames.
 Discard marks verified handles for deletion, never deletes paths after releasing the checked handles.
 A failed optional sidecar deletion retains its fingerprint in the lease and retries before later
 writes/removals; a changed sidecar is left alone. Releasing the lease can leave an inert sidecar behind.
-Reparse-point files are refused. Listing skips owned/unreadable copies and keeps them on disk.
+Unavailable optional sidecars (missing, unreadable, or not regular files) never hide valid data.
+Listing falls back to `Recovered animation` and the data file's modification time, as today's chooser
+does for missing display information. Such offers identify only the data bytes: later sidecar
+availability cannot invalidate the selected project or authorize deleting that sidecar. If previously
+readable metadata becomes unavailable during claim, read or discard, the data identity still decides
+and the unverifiable sidecar is left untouched. Readable metadata that changes is still refused.
+This intentionally improves on Electron, which can hide a good copy when its sidecar is unavailable.
+Reparse-point data files are refused; reparse-point sidecars are unavailable metadata. Listing skips
+owned/unreadable data copies and keeps them on disk.
 After commit, named copies beyond sixteen are pruned
 oldest-unowned first; the legacy copy and owned copies are never pruned.
 
@@ -110,6 +118,10 @@ Review regressions first failed on `d24e7793`: an orphaned lock hid a complete c
 retracted a committed removal, a post-commit sharing violation retracted a write, and failed Close/Quit
 checkpoints produced unqualified confirmations. Further checks hold a lease in another process, kill
 only that child by handle, exercise cleanup with changed metadata, and retry failed close intents.
+Sidecar regressions first failed on `e941f89c`: a directory or deny-sharing handle at the JSON path
+hid valid committed bytes, and metadata becoming unreadable prevented selection. Tests also cover
+fallback labels/timestamps, changed-data refusal and sidecar availability changing after listing;
+discard must preserve every unverifiable or unselected sidecar.
 
 `node --test tests/native-recovery-reference.test.mjs` checks that the writer is unchanged from
 `99c62189`, writes a public repository fixture twice through that recovery code, and compares every

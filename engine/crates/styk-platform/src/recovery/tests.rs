@@ -25,6 +25,85 @@ impl Drop for Sandbox {
     }
 }
 
+struct SidecarDirectory(PathBuf);
+impl SidecarDirectory {
+    fn new(path: PathBuf) -> Self {
+        fs::create_dir(&path).unwrap(); fs::write(path.join("keep"), b"not recovery metadata").unwrap(); Self(path)
+    }
+}
+impl Drop for SidecarDirectory {
+    fn drop(&mut self) { fs::remove_file(self.0.join("keep")).unwrap(); fs::remove_dir(&self.0).unwrap(); }
+}
+
+fn check_unavailable_sidecar(store: LocalRecovery) {
+    let copy = store.lease(Slot::legacy()).unwrap();
+    let receipt = run_future(copy.write(None, OLD, "Committed project", &Cancel::new())).unwrap();
+    assert_eq!(&*run_future(copy.read(&receipt, MAX_BYTES, &Cancel::new())).unwrap(), OLD);
+    drop(copy);
+    let reopened = LocalRecovery::new(store.directory());
+    let records = run_future(reopened.list(&Cancel::new())).unwrap();
+    assert_eq!(records.len(), 1, "unavailable optional metadata must not hide committed data");
+    let selected = &records[0];
+    assert_eq!(selected.name, "Recovered animation");
+    assert_eq!(selected.saved_at, metadata::file_time(fs::metadata(store.path(&Slot::legacy(), "styk")).unwrap().last_write_time()));
+    assert_eq!(selected.version, receipt.version); assert_eq!(selected.size, OLD.len());
+    let claimed = run_future(reopened.claim(selected, &Cancel::new())).unwrap();
+    assert_eq!(&*run_future(claimed.read(selected, MAX_BYTES, &Cancel::new())).unwrap(), OLD);
+    fs::write(store.path(&Slot::legacy(), "styk"), NEW).unwrap();
+    assert_eq!(run_future(claimed.read(selected, MAX_BYTES, &Cancel::new())), Err(RecoveryError::Changed));
+    assert_eq!(run_future(claimed.remove(selected, &Cancel::new())), Err(RecoveryError::Changed));
+    fs::write(store.path(&Slot::legacy(), "styk"), OLD).unwrap();
+    run_future(claimed.remove(selected, &Cancel::new())).unwrap();
+    assert!(!store.path(&Slot::legacy(), "styk").exists());
+}
+
+#[test]
+fn unavailable_sidecar_directory_keeps_the_committed_copy_listed_and_selectable() {
+    let folder = Sandbox::new("sidecar-directory");
+    let directory = SidecarDirectory::new(folder.0.join("recovery.json"));
+    check_unavailable_sidecar(LocalRecovery::new(&folder.0));
+    assert_eq!(fs::read(directory.0.join("keep")).unwrap(), b"not recovery metadata");
+}
+
+#[test]
+fn unavailable_sidecar_sharing_violation_keeps_the_committed_copy_listed_and_selectable() {
+    let folder = Sandbox::new("sidecar-unreadable"); let path = folder.0.join("recovery.json");
+    fs::write(&path, b"unreadable display info").unwrap();
+    let held = OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+    check_unavailable_sidecar(LocalRecovery::new(&folder.0));
+    drop(held); assert_eq!(fs::read(path).unwrap(), b"unreadable display info");
+}
+
+#[test]
+fn unavailable_sidecar_after_listing_does_not_block_claim_read_or_data_removal() {
+    let folder = Sandbox::new("sidecar-becomes-unreadable"); let store = LocalRecovery::new(&folder.0);
+    let copy = store.lease(Slot::legacy()).unwrap(); run_future(copy.write(None, OLD, "Known", &Cancel::new())).unwrap(); drop(copy);
+    let record = run_future(store.list(&Cancel::new())).unwrap().remove(0); assert_eq!(record.name, "Known");
+    let path = folder.0.join("recovery.json"); let before = fs::read(&path).unwrap();
+    let held = OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+    let copy = run_future(store.claim(&record, &Cancel::new())).unwrap();
+    assert_eq!(&*run_future(copy.read(&record, MAX_BYTES, &Cancel::new())).unwrap(), OLD);
+    run_future(copy.remove(&record, &Cancel::new())).unwrap(); drop(copy); drop(held);
+    assert_eq!(fs::read(path).unwrap(), before, "an unverifiable sidecar is left untouched");
+}
+
+#[test]
+fn unavailable_sidecar_at_listing_is_not_deleted_when_it_later_becomes_readable() {
+    let folder = Sandbox::new("sidecar-becomes-readable"); let store = LocalRecovery::new(&folder.0);
+    fs::write(folder.0.join("recovery.styk"), OLD).unwrap();
+    let path = folder.0.join("recovery.json"); let before = metadata::encode("Other info", "2026-01-01T00:00:00.000Z"); fs::write(&path, &before).unwrap();
+    let held = OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+    let records = run_future(store.list(&Cancel::new())).unwrap();
+    assert_eq!(records.len(), 1, "a sidecar that could not be verified is optional");
+    // This offer is identified by its bytes, even if its file timestamp changes before selection.
+    OpenOptions::new().write(true).open(folder.0.join("recovery.styk")).unwrap().set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(2)).unwrap();
+    drop(held);
+    let copy = run_future(store.claim(&records[0], &Cancel::new())).unwrap();
+    assert_eq!(&*run_future(copy.read(&records[0], MAX_BYTES, &Cancel::new())).unwrap(), OLD);
+    run_future(copy.remove(&records[0], &Cancel::new())).unwrap(); drop(copy);
+    assert_eq!(fs::read(path).unwrap(), before, "becoming readable does not authorize deleting unselected metadata");
+}
+
 #[test]
 fn review_orphaned_lock_does_not_hide_a_good_copy() {
     let folder = Sandbox::new("orphan");

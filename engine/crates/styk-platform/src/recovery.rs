@@ -137,12 +137,19 @@ impl LocalCopy {
         self.describe_file(&mut file, cancel, fingerprint)
     }
     fn describe_file(&self, file: &mut File, cancel: &Cancel, fingerprint: bool) -> Result<Record, RecoveryError> {
-        let mut metadata = match open_regular(&self.store.path(&self.slot, "json")) {
-            Ok(file) => Some(file), Err(RecoveryError::Missing) => None, Err(error) => return Err(error),
-        };
-        self.describe_files(file, metadata.as_mut(), cancel, fingerprint)
+        let record = self.describe_data(file, cancel, fingerprint)?;
+        Ok(match self.optional_metadata() {
+            Some((bytes, version)) => Self::with_metadata(record, &bytes, version),
+            None => { let mut record = record; record.selection = Some(record.version); record },
+        })
     }
-    fn describe_files(&self, file: &mut File, metadata: Option<&mut File>, cancel: &Cancel, fingerprint: bool) -> Result<Record, RecoveryError> {
+    fn optional_metadata(&self) -> Option<(Vec<u8>, [u8; 32])> {
+        // Missing, unreadable and non-file sidecars all mean no display information. A good
+        // committed project must remain discoverable; this intentionally improves on Electron.
+        let mut file = open_regular(&self.store.path(&self.slot, "json")).ok()?;
+        metadata_value(&mut file).ok()
+    }
+    fn describe_data(&self, file: &mut File, cancel: &Cancel, fingerprint: bool) -> Result<Record, RecoveryError> {
         check(cancel)?;
         let meta = file.metadata().map_err(io)?;
         let size = usize::try_from(meta.len()).map_err(|_| RecoveryError::Invalid)?;
@@ -153,26 +160,33 @@ impl LocalCopy {
         hash.update(meta.len().to_le_bytes());
         // A room check reads only stat/sidecar data, as today's store does. Hash complete payloads
         // only for an offered identity or an actual prune victim, not all spare files every autosave.
-        let metadata = match metadata {
-            Some(file) => {
-                let (bytes, version) = metadata_value(file)?; hash.update(version); bytes
-            }
-            None => Vec::new(),
-        };
-        let (name, saved_at) = metadata::decode(&metadata).unwrap_or_default();
-        Ok(Record { slot: self.slot.clone(), name: if name.is_empty() { "Recovered animation".into() } else { String::from_utf16_lossy(&name.encode_utf16().take(180).collect::<Vec<_>>()) },
-            saved_at: if saved_at.is_empty() { metadata::file_time(meta.last_write_time()) } else { saved_at }, size, version, selection: Some(hash.finalize().into()) })
+        Ok(Record { slot: self.slot.clone(), name: "Recovered animation".into(),
+            saved_at: metadata::file_time(meta.last_write_time()), size, version, selection: Some(hash.finalize().into()) })
+    }
+    fn with_metadata(mut record: Record, bytes: &[u8], version: [u8; 32]) -> Record {
+        if let Some(data_selection) = record.selection {
+            let mut hash = Sha256::new(); hash.update(data_selection); hash.update(version);
+            record.selection = Some(hash.finalize().into());
+        }
+        let (name, saved_at) = metadata::decode(bytes).unwrap_or_default();
+        if !name.is_empty() { record.name = String::from_utf16_lossy(&name.encode_utf16().take(180).collect::<Vec<_>>()); }
+        if !saved_at.is_empty() { record.saved_at = saved_at; }
+        record
     }
     fn verify(&self, record: &Record, cancel: &Cancel) -> Result<(), RecoveryError> {
         let mut file = open_regular(&self.store.path(&self.slot, "styk"))?;
-        self.verify_file(&mut file, record, cancel)
+        self.verify_file(&mut file, record, cancel).map(|_| ())
     }
-    fn verify_data(&self, file: &mut File, record: &Record, cancel: &Cancel) -> Result<(), RecoveryError> {
-        if record.slot != self.slot || file.metadata().map_err(io)?.len() != record.size as u64 || data_version(file, cancel)? != record.version { Err(RecoveryError::Changed) } else { Ok(()) }
-    }
-    fn verify_file(&self, file: &mut File, record: &Record, cancel: &Cancel) -> Result<(), RecoveryError> {
-        if record.selection.is_none() { return self.verify_data(file, record, cancel); }
-        if record.slot != self.slot || self.describe_file(file, cancel, true)? != *record { Err(RecoveryError::Changed) } else { Ok(()) }
+    /// Return only the fingerprint of metadata we can verify and are authorized to clean up.
+    fn verify_file(&self, file: &mut File, record: &Record, cancel: &Cancel) -> Result<Option<[u8; 32]>, RecoveryError> {
+        let current = self.describe_data(file, cancel, true)?;
+        if current.slot != record.slot || current.size != record.size || current.version != record.version { return Err(RecoveryError::Changed); }
+        // This selection offered data alone. A sidecar appearing later was never selected and
+        // must neither invalidate the chosen data nor become eligible for deletion.
+        if record.selection == Some(record.version) { return Ok(None); }
+        let Some((bytes, version)) = self.optional_metadata() else { return Ok(None); };
+        if record.selection.is_some() && Self::with_metadata(current, &bytes, version) != *record { return Err(RecoveryError::Changed); }
+        Ok(Some(version))
     }
     fn retry_metadata_cleanup(&self) {
         // Only worker calls reach this state; never wait for an optional cleanup operation.
@@ -190,17 +204,10 @@ impl LocalCopy {
     fn remove_checked(&self, record: &Record, cancel: &Cancel) -> Result<(), RecoveryError> {
         self.retry_metadata_cleanup();
         let mut file = open_access(&self.store.path(&self.slot, "styk"), true)?;
-        let mut metadata = match open_regular(&self.store.path(&self.slot, "json")) {
-            Ok(file) => Some(file), Err(RecoveryError::Missing) => None,
-            Err(_) if record.selection.is_none() => None, Err(error) => return Err(error),
-        };
-        if record.selection.is_some() {
-            if self.describe_files(&mut file, metadata.as_mut(), cancel, true)? != *record { return Err(RecoveryError::Changed); }
-        } else { self.verify_data(&mut file, record, cancel)?; }
-        let sidecar = metadata.as_mut().and_then(|file| metadata_value(file).ok()).map(|(_, version)| version);
+        let sidecar = self.verify_file(&mut file, record, cancel)?;
         if !cancel.begin_commit() { return Err(FileError::Cancelled.into()); }
         remove_handle(&file)?;
-        drop(file); drop(metadata); // Data removal committed: never return its obsolete record.
+        drop(file); // Data removal committed: never return its obsolete record.
         if let Ok(mut pending) = self.metadata_cleanup.lock() { *pending = sidecar; }
         self.retry_metadata_cleanup();
         Ok(())

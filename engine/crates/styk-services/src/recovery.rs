@@ -31,8 +31,9 @@ pub struct Record {
     pub size: usize,
     /// Committed data's digest. Callers must return identities unchanged, never reconstruct them.
     pub version: [u8; 32],
-    /// Listings also seal the file attributes and optional metadata the person saw. A write receipt
-    /// has no selection seal: its data is committed even if optional metadata cannot be accessed.
+    /// Listings seal the file attributes and metadata the person saw, or use `version` alone when
+    /// metadata is unavailable. A write receipt has no selection seal: its data is committed even
+    /// if optional metadata cannot be accessed.
     pub selection: Option<[u8; 32]>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
