@@ -32,6 +32,7 @@ pub mod limits;
 pub mod number;
 pub mod range;
 pub mod roving;
+pub mod screens;
 pub mod selection_actions;
 pub mod shell;
 pub mod text_entry;

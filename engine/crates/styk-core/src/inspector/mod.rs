@@ -31,7 +31,7 @@ use crate::commands::{Effect, Notice, Severity};
 use crate::documents::{DocumentId, Documents};
 use crate::facts::{Facts, FactsKey};
 use crate::frames::FrameDocument;
-use crate::i18n::Msg;
+use crate::i18n::{Msg, Presentation};
 use crate::number::{NumberEdit, Range as FieldRange, Settled, StepKeys};
 use crate::range::Range;
 use crate::view_state::ViewState;
@@ -76,6 +76,8 @@ pub enum Event {
     Field(PropertyKey, FieldEvent),
     Toggle(Toggle, bool),
     Choose(Choice, Arc<str>),
+    /// An arrow key on a closed select: the next (+1) or previous (-1) option that can be chosen.
+    ChooseStep(Choice, i32),
     Section { id: &'static str, open: bool },
     Act(PanelAction),
     Segment(Segments, &'static str),
@@ -422,9 +424,16 @@ impl Panel {
     }
 
     /// Runs one event of the panel's view against the active document.
-    pub fn update(&mut self, documents: &mut Documents, view: &mut ViewState, session: &mut Session, event: Event) -> Vec<Effect> {
+    pub fn update(&mut self, documents: &mut Documents, view: &mut ViewState, session: &mut Session, presentation: &Presentation, event: Event) -> Vec<Effect> {
         let mut effects = Vec::new();
         let Some(id) = documents.active().map(|document| document.id()) else { return effects };
+        let event = match event {
+            Event::ChooseStep(choice, step) => match self.stepped_choice(choice, step) {
+                Some(value) => Event::Choose(choice, value),
+                None => return effects,
+            },
+            other => other,
+        };
         match event {
             Event::Field(key, event) => self.field_event(documents, session, view, id, key, event, &mut effects),
             Event::Toggle(toggle, on) => {
@@ -479,9 +488,34 @@ impl Panel {
                 self.finish(documents, session, &mut effects);
                 effects.push(Effect::PickColor(target));
             }
-            Event::Rename(event) => self.rename_event(documents, session, id, event, &mut effects),
+            Event::Rename(event) => self.rename_event(documents, session, presentation, id, event, &mut effects),
+            Event::ChooseStep(..) => {}
         }
         effects
+    }
+
+    /// The option an arrow key moves a select to, from the model's options: the next enabled one, none past the ends.
+    fn stepped_choice(&self, choice: Choice, step: i32) -> Option<Arc<str>> {
+        fn find(rows: &[model::Row], choice: Choice) -> Option<&model::SelectRow> {
+            rows.iter().find_map(|row| match row {
+                model::Row::Select(select) if select.choice == choice => Some(select),
+                model::Row::Grid { rows, .. } | model::Row::Group { rows, .. } => find(rows, choice),
+                _ => None,
+            })
+        }
+        let model = self.model.as_ref()?;
+        let select = model.sections.iter().find_map(|section| find(&section.rows, choice))?;
+        if select.disabled {
+            return None;
+        }
+        let enabled: Vec<&Arc<str>> = select.options.iter().filter(|option| !option.disabled).map(|option| &option.value).collect();
+        let current = select.value.as_ref().and_then(|value| enabled.iter().position(|option| *option == value));
+        let next = match current {
+            Some(at) => at.checked_add_signed(step as isize).filter(|next| *next < enabled.len())?,
+            None if step > 0 => 0,
+            None => enabled.len().checked_sub(1)?,
+        };
+        Some(enabled[next].clone())
     }
 
     fn act(&mut self, documents: &mut Documents, session: &mut Session, id: DocumentId, action: PanelAction, effects: &mut Vec<Effect>) {
@@ -525,7 +559,7 @@ impl Panel {
         }
     }
 
-    fn rename_event(&mut self, documents: &mut Documents, session: &mut Session, id: DocumentId, event: RenameEvent, effects: &mut Vec<Effect>) {
+    fn rename_event(&mut self, documents: &mut Documents, session: &mut Session, presentation: &Presentation, id: DocumentId, event: RenameEvent, effects: &mut Vec<Effect>) {
         let Some(rename) = self.model.as_ref().and_then(|model| model.target.rename.clone()) else {
             self.rename = None;
             return;
@@ -536,7 +570,7 @@ impl Panel {
                     return;
                 }
                 self.finish(documents, session, effects);
-                self.rename = Some(self.model.as_ref().map(|model| model.target.name.english()).unwrap_or_default());
+                self.rename = Some(self.model.as_ref().map(|model| presentation.label(&model.target.name)).unwrap_or_default());
                 effects.push(Effect::Focus(FocusRequest::Rename));
             }
             RenameEvent::Input(text) => {

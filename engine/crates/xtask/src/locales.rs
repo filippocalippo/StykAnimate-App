@@ -18,7 +18,7 @@ fn files(root: &Path) -> Result<Vec<(PathBuf, String)>, String> {
     }
     let text = String::from_utf8(output.stdout).map_err(|_| "locales.mjs printed invalid UTF-8".to_string())?;
     let parts: Vec<&str> = text.split('\0').collect();
-    if parts.len() % 2 != 0 {
+    if !parts.len().is_multiple_of(2) {
         return Err("locales.mjs printed an odd number of parts".into());
     }
     Ok(parts.chunks(2).map(|pair| (PathBuf::from(pair[0]), pair[1].to_string())).collect())

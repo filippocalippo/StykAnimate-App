@@ -81,6 +81,21 @@ impl PropertyKey {
         PropertyKey::Duration,
     ];
 
+    /// The key of today's property name (`root_x`, `polygon_2_opacity`).
+    pub fn from_id(id: &str) -> Option<PropertyKey> {
+        if let Some(found) = PropertyKey::FIXED.iter().find(|key| key.id() == id) {
+            return Some(*found);
+        }
+        let rest = id.strip_prefix("polygon_")?;
+        let (index, property) = rest.split_once('_')?;
+        let index: u32 = index.parse().ok()?;
+        match property {
+            "opacity" => Some(PropertyKey::PolygonOpacity(index)),
+            "z_order" => Some(PropertyKey::PolygonZOrder(index)),
+            _ => None,
+        }
+    }
+
     /// Today's property name.
     pub fn id(self) -> Cow<'static, str> {
         Cow::Borrowed(match self {

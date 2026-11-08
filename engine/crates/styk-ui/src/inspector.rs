@@ -1,7 +1,9 @@
 //! The Properties panel's view: a generic kit that draws the core's descriptor ([`styk_core::inspector::model`]) and
 //! sends [`Message`]s back. It decides nothing: every value, label, range, enabled state and section comes from the
 //! model; a control's change is an [`Event`] for the core. The kit's look follows today's `.ui-*` components
-//! (`src/styles/components/section.css`, `field.css`, `button.css`), built from `styk-design`'s tokens and widgets.
+//! (`src/styles/components/section.css`, `field.css`, `button.css`), built from `styk-design`'s tokens and widgets. Text is
+//! formatted by the core's [`Presentation`] (locale, plural rules, numbers); the panel fills the bounds it is given (the
+//! dock decides its size: [`crate::dock`]).
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -11,7 +13,7 @@ use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Widge
 use styk_core::commands::Command;
 use styk_core::focus::{FocusArea, FocusId};
 use styk_core::field::Role;
-use styk_core::i18n::{Label, Msg, english};
+use styk_core::i18n::{Label, Msg, Presentation};
 use styk_core::inspector::model::{self as m, Action, Inspector, Paint, Place, Tint};
 use styk_core::inspector::property::PropertyKey;
 use styk_core::inspector::{Event, FieldEvent, FieldView, RenameEvent, RenameView, Scrub};
@@ -23,9 +25,6 @@ use styk_design::widgets::number_field::{self, ScrubLabel};
 use styk_design::{Palette, Theme, tokens};
 
 use crate::message::Message;
-
-/// The panel's width in today's default layout (the right dock's Properties panel).
-pub const WIDTH: f32 = 320.0;
 
 const BASE_ID: u64 = 0x1_0000;
 
@@ -40,14 +39,22 @@ pub fn label_id(key: PropertyKey) -> FocusId {
 }
 
 fn key_index(key: PropertyKey) -> u64 {
-    PropertyKey::ALL.iter().position(|candidate| *candidate == key).unwrap_or(0) as u64
+    match key {
+        // A fill's fields follow the fixed keys, two per fill.
+        PropertyKey::PolygonOpacity(index) => PropertyKey::FIXED.len() as u64 + 2 * u64::from(index),
+        PropertyKey::PolygonZOrder(index) => PropertyKey::FIXED.len() as u64 + 2 * u64::from(index) + 1,
+        fixed => PropertyKey::FIXED.iter().position(|candidate| *candidate == fixed).unwrap_or(0) as u64,
+    }
 }
 
-const RENAME_ID: FocusId = FocusId(BASE_ID + 0x100);
+/// The header's rename field and its name, focus targets the core asks for ([`styk_core::inspector::FocusRequest`]).
+pub const RENAME_ID: FocusId = FocusId(BASE_ID + 0x100);
+pub const TARGET_NAME_ID: FocusId = FocusId(BASE_ID + 0x101);
 
 /// What the view draws: the model and the panel's live field and rename, as the core holds them.
 pub struct View<'a> {
     pub model: &'a Inspector,
+    pub presentation: &'a Presentation,
     pub field: Option<FieldView>,
     pub rename: Option<RenameView>,
     pub theme: Theme,
@@ -55,8 +62,9 @@ pub struct View<'a> {
     pub button_probe: Option<fn() -> bool>,
 }
 
-struct Kit {
+struct Kit<'a> {
     palette: &'static Palette,
+    presentation: &'a Presentation,
     field: Option<FieldView>,
     probe: Option<fn() -> bool>,
     /// Focus IDs for buttons, in drawing order: stable while the model is.
@@ -71,7 +79,15 @@ fn style(role: &styk_design::TypeRole) -> TextStyle {
     TextStyle::from_role(role)
 }
 
-impl Kit {
+impl Kit<'_> {
+    fn say(&self, msg: &Msg) -> String {
+        self.presentation.text(msg)
+    }
+
+    fn label(&self, label: &Label) -> String {
+        self.presentation.label(label)
+    }
+
     fn id(&self) -> FocusId {
         let id = self.next.get();
         self.next.set(id + 1);
@@ -100,7 +116,7 @@ impl Kit {
         let palette = self.palette;
         let message = match item.action {
             Action::Command(command) => Message::Command(Command::Run(command)),
-            Action::Page(pager, step) => send(Event::Page(pager, step)),
+            Action::Panel(action) => send(Event::Act(action)),
         };
         let ink = if item.disabled { palette.text_disabled } else { palette.text_2 };
         let face: Element<'static, Message> = if item.text {
@@ -108,7 +124,7 @@ impl Kit {
             if let (Some(icon), true) = (item.icon, item.outline) {
                 parts.push(self.icon(icon, 16.0, ink));
             }
-            parts.push(self.text(english(&item.label), &tokens::scale::TYPE_UI, if item.disabled { palette.text_disabled } else { palette.text_1 }));
+            parts.push(self.text(self.say(&item.label), &tokens::scale::TYPE_UI, if item.disabled { palette.text_disabled } else { palette.text_1 }));
             Row::with_children(parts).spacing(tokens::scale::SPACE_1_5).align_y(Alignment::Center).boxed()
         } else {
             self.icon(item.icon.unwrap_or("file"), 16.0, ink)
@@ -161,7 +177,8 @@ impl Kit {
         let active = self.field.as_ref().filter(|field| field.key == key);
         let value = match active {
             Some(field) => field.text.clone(),
-            None if row.mixed => String::new(),
+            // Mixed (several values), or a fact still being made on a worker: shown empty.
+            None if row.mixed || row.pending => String::new(),
             None => format(row.value, row.display_precision),
         };
         let invalid = active.is_some_and(|field| field.invalid.is_some());
@@ -174,7 +191,7 @@ impl Kit {
             number_field::Scrub::KeyStep { direction, shift, alt } => send(Event::Field(key, FieldEvent::KeyStep { direction, keys: StepKeys { shift, alt } })),
             number_field::Scrub::KeyEnd => send(Event::Field(key, FieldEvent::KeyEnd)),
         });
-        let label = self.small(row.label.english());
+        let label = self.small(self.label(&row.label));
         let scrub = ScrubLabel::new(label, on_scrub.clone()).held(self.probe).boxed();
         let keys = {
             let on_scrub = on_scrub.clone();
@@ -195,15 +212,16 @@ impl Kit {
                 }
             }))
         };
-        let label = Focusable::new(label_id(key), FocusArea::Panels, scrub, Ring::of(palette, tokens::scale::RADIUS_2XS)).keys(keys).enabled(!row.disabled);
-        let placeholder: &'static str = if row.mixed { "Mixed" } else { "" };
+        let label = Focusable::new(label_id(key), FocusArea::Panels, scrub, Ring::of(palette, tokens::scale::RADIUS_2XS)).keys(keys).enabled(!row.disabled && !row.pending);
+        let placeholder = if row.mixed { self.say(&Msg::new("inspector.mixed")) } else { String::new() };
+        let enabled = !row.disabled && !row.pending;
         // The value is as wide as its text and the unit follows it (`.ui-field-suffix`), as today.
         let chars = value.chars().count().max(if row.mixed { 5 } else { 1 }) as f32;
         let width = Length::Fixed((chars * 7.5 + 2.0).min(120.0));
         let input = EditField::new(input_id(key), FocusArea::Panels, Role::Number, value, palette)
             .embedded()
             .width(width)
-            .enabled(!row.disabled)
+            .enabled(enabled)
             .invalid(invalid)
             .placeholder(placeholder)
             .on_input(move |text| send(Event::Field(key, FieldEvent::Input(text))))
@@ -223,7 +241,7 @@ impl Kit {
         // `GLUED_UNITS`: "100%", "172°"; other units read after a space ("8 px").
         let glued = matches!(row.unit, "%" | "°" | "×");
         let value = Row::with_children(value).spacing(if glued { 0.0 } else { 3.0 }).align_y(Alignment::Center).boxed();
-        vec![label.boxed(), Space::new().width(tokens::scale::SPACE_1).boxed(), value, Space::new().width(Length::Fill).boxed()]
+        vec![label.boxed(), value, Space::new().width(Length::Fill).boxed()]
     }
 
     fn select(&self, row: &m::SelectRow) -> Element<'static, Message> {
@@ -238,7 +256,7 @@ impl Kit {
             }
         }
         let palette = self.palette;
-        let options: Vec<Choice> = row.options.iter().filter(|option| !option.disabled).map(|option| Choice { value: option.value.clone(), label: option.label.english() }).collect();
+        let options: Vec<Choice> = row.options.iter().filter(|option| !option.disabled).map(|option| Choice { value: option.value.clone(), label: self.label(&option.label) }).collect();
         let selected = row.value.as_ref().and_then(|value| options.iter().find(|option| &option.value == value).cloned());
         let choice = row.choice;
         let typed = style(&tokens::scale::TYPE_UI);
@@ -255,17 +273,26 @@ impl Kit {
                 border: Border::default(),
             });
         if let Some(placeholder) = &row.placeholder {
-            list = list.placeholder(english(placeholder));
+            list = list.placeholder(self.say(placeholder));
         }
         if !row.disabled {
             list = list.on_select(move |option: Choice| send(Event::Choose(choice, option.value)));
         }
         let mut parts = Vec::new();
         if !row.bare {
-            parts.push(self.small(english(&row.label)));
+            parts.push(self.small(self.say(&row.label)));
         }
         parts.push(list.boxed());
-        self.field_box(Row::with_children(parts).spacing(tokens::scale::SPACE_2).align_y(Alignment::Center).boxed(), row.disabled)
+        let face = self.field_box(Row::with_children(parts).spacing(tokens::scale::SPACE_2).align_y(Alignment::Center).boxed(), row.disabled);
+        let keys = Keys::Custom(Box::new(move |event| {
+            use iced::keyboard::{self, Key, key::Named};
+            match event {
+                keyboard::Event::KeyPressed { key: Key::Named(Named::ArrowDown), .. } => Some(send(Event::ChooseStep(choice, 1))),
+                keyboard::Event::KeyPressed { key: Key::Named(Named::ArrowUp), .. } => Some(send(Event::ChooseStep(choice, -1))),
+                _ => None,
+            }
+        }));
+        Focusable::new(self.id(), FocusArea::Panels, face, self.ring()).keys(keys).enabled(!row.disabled).boxed()
     }
 
     fn switch(&self, row: &m::SwitchRow, boxed: bool) -> Element<'static, Message> {
@@ -288,8 +315,9 @@ impl Kit {
         if !row.disabled {
             control = control.on_toggle(move |on| send(Event::Toggle(toggle, on)));
         }
-        let line = row![self.small(english(&row.label)), Space::new().width(Length::Fill), control].align_y(Alignment::Center).spacing(tokens::scale::SPACE_2);
-        if boxed { self.field_box(line.boxed(), row.disabled) } else { line.boxed() }
+        let line = row![self.small(self.say(&row.label)), Space::new().width(Length::Fill), control].align_y(Alignment::Center).spacing(tokens::scale::SPACE_2);
+        let face = if boxed { self.field_box(line.boxed(), row.disabled) } else { line.boxed() };
+        Focusable::new(self.id(), FocusArea::Panels, face, self.ring()).keys(Keys::Toggle).on_activate(send(Event::Toggle(toggle, !row.checked))).enabled(!row.disabled).boxed()
     }
 
     fn swatch(&self, rgb: [u8; 3], size: f32) -> Element<'static, Message> {
@@ -309,8 +337,8 @@ impl Kit {
             Paint::Gradient(stops) => stops.first().map_or([0; 3], |stop| stop.1),
         };
         let caption = match (&row.caption, row.mixed) {
-            (_, true) => english(&Msg::new("inspector.mixed")),
-            (Some(caption), _) => caption.english(),
+            (_, true) => self.say(&Msg::new("inspector.mixed")),
+            (Some(caption), _) => self.label(caption),
             (None, false) => format!("{:02X}{:02X}{:02X}", first[0], first[1], first[2]),
         };
         let target = row.target;
@@ -333,7 +361,7 @@ impl Kit {
             .map(|(value, label)| {
                 let chosen = *value == row.value;
                 let message = send(Event::Segment(segments, value));
-                let face = container(self.text(english(label), &tokens::scale::TYPE_UI, if chosen { palette.text_1 } else { palette.text_2 })).center_x(Length::Fill).center_y(Length::Fixed(tokens::scale::CONTROL_SM));
+                let face = container(self.text(self.say(label), &tokens::scale::TYPE_UI, if chosen { palette.text_1 } else { palette.text_2 })).center_x(Length::Fill).center_y(Length::Fixed(tokens::scale::CONTROL_SM));
                 let clickable = button(face).padding(0).width(Length::Fill).on_press(message.clone()).style(move |_, _| button::Style {
                     background: Some(Background::Color(if chosen { Color::from(palette.surface_raised) } else { Color::TRANSPARENT })),
                     border: Border { radius: tokens::scale::RADIUS_SM.into(), ..Border::default() },
@@ -382,8 +410,10 @@ impl Kit {
             m::Row::Number(number) => self.number(number),
             // `.ui-field[data-steps]`: the steps sit inside the field, after the value.
             m::Row::Stepper(stepper) => {
+                // `.ui-field[data-steps]`: the label, the step down, the value, the step up.
                 let mut parts = self.number_parts(&stepper.field);
-                parts.push(self.button(&stepper.down));
+                parts.insert(1, self.button(&stepper.down));
+                parts.pop();
                 parts.push(self.button(&stepper.up));
                 self.field_box(Row::with_children(parts).spacing(tokens::scale::SPACE_0_5).align_y(Alignment::Center).boxed(), stepper.field.disabled)
             }
@@ -394,21 +424,21 @@ impl Kit {
                 let buttons: Vec<Element<'static, Message>> = actions.items.iter().map(|item| self.button(item)).collect();
                 let buttons = Row::with_children(buttons).spacing(tokens::scale::SPACE_1).align_y(Alignment::Center);
                 match &actions.label {
-                    Some(label) => column![self.small(english(label)), buttons].spacing(tokens::scale::SPACE_1_5).boxed(),
+                    Some(label) => column![self.small(self.say(label)), buttons].spacing(tokens::scale::SPACE_1_5).boxed(),
                     None => buttons.boxed(),
                 }
             }
             m::Row::Segmented(segmented) => self.segmented(segmented),
-            m::Row::Value { label, text } => row![self.small(english(label)), Space::new().width(Length::Fill), self.text(text.english(), &tokens::scale::TYPE_VALUE, self.palette.text_1)].align_y(Alignment::Center).boxed(),
-            m::Row::Meta(meta) => self.text(english(meta), &tokens::scale::TYPE_SMALL, self.palette.text_2),
-            m::Row::Caption(parts) => self.small(parts.iter().map(Label::english).collect::<Vec<_>>().join(" · ")),
+            m::Row::Value { label, text } => row![self.small(self.say(label)), Space::new().width(Length::Fill), self.text(self.label(text), &tokens::scale::TYPE_VALUE, self.palette.text_1)].align_y(Alignment::Center).boxed(),
+            m::Row::Meta(meta) => self.text(self.say(meta), &tokens::scale::TYPE_SMALL, self.palette.text_2),
+            m::Row::Caption(parts) => self.small(parts.iter().map(|part| self.label(part)).collect::<Vec<_>>().join(" · ")),
             m::Row::Swatches { items, .. } => {
                 let swatches: Vec<Element<'static, Message>> = items.iter().map(|(rgb, _)| self.swatch(*rgb, 20.0)).collect();
                 Row::with_children(swatches).spacing(tokens::scale::SPACE_1).wrap().boxed()
             }
             m::Row::Pager { text: page, previous, next, .. } => row![self.button(previous), Space::new().width(Length::Fill), self.small(page.to_string()), Space::new().width(Length::Fill), self.button(next)].align_y(Alignment::Center).boxed(),
             m::Row::Group { label, rows } => {
-                let mut children = vec![self.small(english(label))];
+                let mut children = vec![self.small(self.say(label))];
                 children.extend(rows.iter().filter_map(|row| self.row(row)));
                 Column::with_children(children).spacing(tokens::scale::SPACE_1_5).boxed()
             }
@@ -438,7 +468,7 @@ impl Kit {
         let palette = self.palette;
         let titled = section.place == Place::Titled;
         let mut head: Vec<Element<'static, Message>> = Vec::new();
-        let title = section.title.as_ref().map(|title| self.text(title.english(), &tokens::scale::TYPE_SECTION, palette.text_1));
+        let title = section.title.as_ref().map(|title| self.text(self.label(title), &tokens::scale::TYPE_SECTION, palette.text_1));
         if titled {
             let mut toggle_parts: Vec<Element<'static, Message>> = Vec::new();
             if let Some((icon, tint)) = section.badge {
@@ -512,9 +542,21 @@ impl Kit {
                 line.push(field.into_element());
             }
             (_, how) => {
-                let name = text(target.name.english()).font(name_style.font).size(16.0).color(Color::from(palette.text_1)).wrapping(iced::widget::text::Wrapping::None);
+                let name = text(self.label(&target.name)).font(name_style.font).size(16.0).color(Color::from(palette.text_1)).wrapping(iced::widget::text::Wrapping::None);
                 let name: Element<'static, Message> = match how {
-                    Some(_) => mouse_double_click(name.boxed(), send(Event::Rename(RenameEvent::Begin))),
+                    Some(_) => {
+                        let keys = Keys::Custom(Box::new(|event| {
+                            use iced::keyboard::{self, Key, key::Named};
+                            match event {
+                                keyboard::Event::KeyPressed { key: Key::Named(Named::Enter | Named::F2), modifiers, .. } if !modifiers.alt() && !modifiers.control() && !modifiers.logo() => {
+                                    Some(send(Event::Rename(RenameEvent::Begin)))
+                                }
+                                _ => None,
+                            }
+                        }));
+                        let named = mouse_double_click(name.boxed(), send(Event::Rename(RenameEvent::Begin)));
+                        Focusable::new(TARGET_NAME_ID, FocusArea::Panels, named, Ring::of(palette, tokens::scale::RADIUS_2XS)).keys(keys).boxed()
+                    }
                     None => name.boxed(),
                 };
                 line.push(container(name).width(Length::Fill).clip(true).boxed());
@@ -523,7 +565,7 @@ impl Kit {
         let mut header = vec![Row::with_children(line).spacing(tokens::scale::SPACE_2).align_y(Alignment::Center).height(Length::Fixed(tokens::scale::CONTROL_LG)).boxed()];
         if let Some(scope) = &model.scope {
             let dot = container(Space::new().width(6.0).height(6.0)).style(move |_| container::Style { background: Some(Background::Color(Color::from(palette.tint_select))), border: Border { radius: 3.0.into(), ..Border::default() }, ..container::Style::default() });
-            header.push(row![dot, self.small(english(&scope.label)), Space::new().width(Length::Fill), self.button(&scope.stop)].spacing(tokens::scale::SPACE_2).align_y(Alignment::Center).boxed());
+            header.push(row![dot, self.small(self.say(&scope.label)), Space::new().width(Length::Fill), self.button(&scope.stop)].spacing(tokens::scale::SPACE_2).align_y(Alignment::Center).boxed());
         }
         Column::with_children(header).spacing(tokens::scale::SPACE_1).boxed()
     }
@@ -563,23 +605,16 @@ impl IntoRgba for Color {
 /// The Properties panel for the core's model.
 pub fn view(view: View<'_>) -> Element<'static, Message> {
     let palette = view.theme.palette();
-    let kit = Kit { palette, field: view.field, probe: view.button_probe, next: Cell::new(0) };
+    let kit = Kit { palette, presentation: view.presentation, field: view.field, probe: view.button_probe, next: Cell::new(0) };
     let mut sections: Vec<Element<'static, Message>> = Vec::new();
     for section in &view.model.sections {
         if let Some(element) = kit.section(section, sections.is_empty()) {
             sections.push(element);
         }
     }
-    let body = scrollable(Column::with_children(sections).padding(Padding::from([0.0, tokens::scale::SPACE_4]))).height(Length::Fill);
+    // Today's panel content ends 27 px from its right edge: its scroll area keeps room for the scrollbar.
+    let body = scrollable(Column::with_children(sections).padding(Padding { top: 0.0, right: tokens::scale::SPACE_4 + 11.0, bottom: 0.0, left: tokens::scale::SPACE_4 })).height(Length::Fill);
     let header = container(kit.header(view.model, view.rename)).padding(Padding { top: tokens::scale::SPACE_2, right: tokens::scale::SPACE_4, bottom: tokens::scale::SPACE_1, left: tokens::scale::SPACE_4 });
-    // The docked panel's card (`.shell-panel`).
-    container(column![header, body])
-        .width(Length::Fixed(WIDTH))
-        .height(Length::Fill)
-        .style(move |_| container::Style {
-            background: Some(Background::Color(Color::from(palette.surface))),
-            border: Border { color: palette.line_1.into(), width: 1.0, radius: tokens::scale::RADIUS_LG.into() },
-            ..container::Style::default()
-        })
-        .boxed()
+    // The panel fills the bounds the dock gives it.
+    column![header, body].width(Length::Fill).height(Length::Fill).boxed()
 }

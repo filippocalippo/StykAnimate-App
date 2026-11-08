@@ -22,8 +22,18 @@ const SPRITE: &[u8] = include_bytes!("../../../tests/edit/sprite-segment-sparse-
 include!("support/today_bounds.rs");
 const TODAY_PROPERTY_SHEET_BOUNDS: [f64; 4] = TODAY_BOUNDS;
 
+
+/// The facts lane's thread.
+struct Threads;
+
+impl styk_services::Spawner for Threads {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        std::thread::Builder::new().name(name.to_owned()).spawn(job).map(|_| ()).map_err(|error| styk_services::SpawnError(error.to_string()))
+    }
+}
+
 fn core_with(bytes: &[u8]) -> Core {
-    testing::core_with_document(bytes, "Test.styk").unwrap()
+    testing::core_with_document(bytes, "Test.styk", std::sync::Arc::new(Threads)).unwrap()
 }
 
 /// The startup document with every segment of its figure turned into `primitive` (2 image, 5 text).
@@ -169,7 +179,7 @@ fn several_figures_show_their_bounds_align_and_mixed_values() {
     assert_eq!(figures.kind, Kind::Figures);
     assert_eq!(figures.target.name.english(), "3 figures");
     assert_eq!(section_ids(&figures)[..4], ["selection", "align", "appearance", "arrange"]);
-    assert_eq!(figures.section("connection").is_some(), true, "a joined figure among them offers Combine");
+    assert!(figures.section("connection").is_some(), "a joined figure among them offers Combine");
     // The bounds are made on the worker: pending until it has run, never computed by the refresh itself.
     assert!(figures.number(PropertyKey::GroupX).unwrap().pending, "no geometry on the interface thread");
     testing::settle_facts(&mut core).unwrap();
@@ -319,7 +329,9 @@ fn held_arrow_keys_are_one_gesture() {
 /// Each route of `native-property-edit.mjs` and `propertyChannel`: one entry per commit, undo back to the start.
 #[test]
 fn every_kind_of_edit_is_one_entry_that_undoes_and_redoes() {
-    let cases: &[(&[u8], &str, Option<InspectorContext>, PropertyKey, f64)] = &[
+    // (fixture, selection, context, field, value)
+    type Case<'a> = (&'a [u8], &'a str, Option<InspectorContext>, PropertyKey, f64);
+    let cases: &[Case] = &[
         (STARTUP, "[1,-1]", None, PropertyKey::RootY, 300.0),
         (STARTUP, "[1,-1]", None, PropertyKey::Rotation, 30.0),
         (STARTUP, "[1,-1]", None, PropertyKey::FigureOpacity, 50.0),

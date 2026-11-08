@@ -30,14 +30,14 @@ impl Range {
         if sheet(document) {
             let mut ticks: Vec<f64> = Vec::with_capacity(chosen.len() + 1);
             for tick in chosen.iter().map(|tick| *tick as f64).chain(std::iter::once(tick)) {
-                if !ticks.iter().any(|seen| *seen == tick) {
+                if !ticks.contains(&tick) {
                     ticks.push(tick);
                 }
             }
             return Some(Range { indices: vec![frame_index], sheet_ticks: Some(ticks) });
         }
         let mut indices: Vec<usize> = Vec::with_capacity(chosen.len() + 1);
-        for index in chosen.iter().map(|frame| *frame as usize).chain(std::iter::once(frame_index)) {
+        for index in chosen.iter().copied().chain(std::iter::once(frame_index)) {
             if !indices.contains(&index) {
                 indices.push(index);
             }

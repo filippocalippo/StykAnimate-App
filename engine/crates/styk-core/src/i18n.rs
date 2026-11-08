@@ -198,8 +198,9 @@ pub enum Direction {
 
 /// How the interface writes text and numbers in one locale: today's `Localization` (`src/localization.mjs`). The
 /// catalogue's message, else English's; the plural form by the locale's CLDR rules (ICU4X 1.4, CLDR 44, the data of
-/// Electron 39's ICU 74), English's rules for an English fallback; numbers as `Intl.NumberFormat(locale)` writes them by
-/// default (grouped, at most three decimals, a tie away from zero).
+/// Electron 39's ICU 74), English's rules for an English fallback, chosen for the count as `Intl.PluralRules` rounds it
+/// (at most three decimals); numbers as `Intl.NumberFormat(locale)` writes them by default (grouped, at most three
+/// decimals, a tie away from zero), in Latin digits, as Electron's ICU data writes every catalogue locale's.
 pub struct Presentation {
     tables: Tables,
     locale: usize,
@@ -229,7 +230,9 @@ impl Presentation {
         let (id, rtl, _) = tables.locale(locale);
         let plurals = icu_plurals::PluralRules::try_new_cardinal(&data_locale(id)).ok()?;
         let english_plurals = icu_plurals::PluralRules::try_new_cardinal(&data_locale("en")).ok()?;
-        let decimal = icu_decimal::FixedDecimalFormatter::try_new(&data_locale(id), Default::default()).ok()?;
+        // Electron's ICU data writes Latin digits for every catalogue locale (Arabic included, where CLDR's default is
+        // Arabic-Indic): `-u-nu-latn`.
+        let decimal = icu_decimal::FixedDecimalFormatter::try_new(&data_locale(&format!("{id}-u-nu-latn")), Default::default()).ok()?;
         Some(Presentation { tables, locale, id, direction: if rtl { Direction::Rtl } else { Direction::Ltr }, plurals, english_plurals, decimal })
     }
 
@@ -347,7 +350,8 @@ impl Presentation {
 
 fn category(rules: &icu_plurals::PluralRules, count: f64) -> &'static str {
     use icu_plurals::PluralCategory as C;
-    let Some(decimal) = fixed_decimal::FixedDecimal::try_from_f64(count, fixed_decimal::FloatPrecision::Floating).ok() else { return "other" };
+    // `Intl.PluralRules` chooses for the count rounded as its number format writes it (2.0004 is "2").
+    let Some(decimal) = Presentation::decimal(count) else { return "other" };
     match rules.category_for(&decimal) {
         C::Zero => "zero",
         C::One => "one",

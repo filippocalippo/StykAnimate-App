@@ -39,3 +39,119 @@ reference = "docs/native/screens/band/band-build.png"
 max_difference = 0.008
 width = 1000
 height = 900
+
+# The Properties panel (reference slice), docked at today's default size. The references are today's panel in each
+# context, captured as the band's are (bundled Chromium through Playwright, LCD text on, opaque surfaces, device scale 1)
+# by engine/crates/styk-app/automation/inspector-reference/screens.mjs on the same fixtures styk_core::screens opens.
+# The limits are the differing-pixel fractions measured on 2026-11-08 (debug build, headless, `styk image-diff`) rounded up
+# to three places. Most of each is rows shifted by what other chunks own and the native panel does not draw yet:
+# today's quick-actions row under the header (K-cmd), the header's menu button and the panel's Add to library footer.
+# They are to be tightened as those land, never loosened.
+
+["inspector-scene"]
+reference = "docs/native/screens/inspector/inspector-scene.png"
+max_difference = 0.156
+width = 320
+height = 502
+
+["inspector-scene-dark"]
+reference = "docs/native/screens/inspector/inspector-scene-dark.png"
+max_difference = 0.173
+width = 320
+height = 502
+
+["inspector-figure"]
+reference = "docs/native/screens/inspector/inspector-figure.png"
+max_difference = 0.508
+width = 320
+height = 502
+
+["inspector-figure-dark"]
+reference = "docs/native/screens/inspector/inspector-figure-dark.png"
+max_difference = 0.524
+width = 320
+height = 502
+
+["inspector-joint"]
+reference = "docs/native/screens/inspector/inspector-joint.png"
+max_difference = 0.556
+width = 320
+height = 502
+
+["inspector-joint-dark"]
+reference = "docs/native/screens/inspector/inspector-joint-dark.png"
+max_difference = 0.557
+width = 320
+height = 502
+
+["inspector-figures"]
+reference = "docs/native/screens/inspector/inspector-figures.png"
+max_difference = 0.460
+width = 320
+height = 502
+
+["inspector-figures-dark"]
+reference = "docs/native/screens/inspector/inspector-figures-dark.png"
+max_difference = 0.468
+width = 320
+height = 502
+
+["inspector-text"]
+reference = "docs/native/screens/inspector/inspector-text.png"
+max_difference = 0.471
+width = 320
+height = 502
+
+["inspector-text-dark"]
+reference = "docs/native/screens/inspector/inspector-text-dark.png"
+max_difference = 0.486
+width = 320
+height = 502
+
+["inspector-image"]
+reference = "docs/native/screens/inspector/inspector-image.png"
+max_difference = 0.514
+width = 320
+height = 502
+
+["inspector-image-dark"]
+reference = "docs/native/screens/inspector/inspector-image-dark.png"
+max_difference = 0.529
+width = 320
+height = 502
+
+["inspector-camera"]
+reference = "docs/native/screens/inspector/inspector-camera.png"
+max_difference = 0.420
+width = 320
+height = 502
+
+["inspector-camera-dark"]
+reference = "docs/native/screens/inspector/inspector-camera-dark.png"
+max_difference = 0.443
+width = 320
+height = 502
+
+["inspector-layer"]
+reference = "docs/native/screens/inspector/inspector-layer.png"
+max_difference = 0.357
+width = 320
+height = 502
+
+["inspector-layer-dark"]
+reference = "docs/native/screens/inspector/inspector-layer-dark.png"
+max_difference = 0.372
+width = 320
+height = 502
+
+["inspector-frame"]
+reference = "docs/native/screens/inspector/inspector-frame.png"
+max_difference = 0.373
+width = 320
+height = 502
+
+["inspector-frame-dark"]
+reference = "docs/native/screens/inspector/inspector-frame-dark.png"
+max_difference = 0.388
+width = 320
+height = 502

@@ -18,10 +18,36 @@ use styk_ui::screens::Screen;
 ///
 /// Fails when the machine has no graphics adapter the renderer can use.
 pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>) -> Result<Image, String> {
-    pollster::block_on(screenshot_async(theme, size, scale, sheet, band))
+    pollster::block_on(screenshot_async(theme, size, scale, sheet, band, None))
 }
 
-async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>) -> Result<Image, String> {
+/// A Properties panel screen: its fixture's core, refreshed (never waited on) until the facts its context shows landed.
+pub fn inspector_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
+    let Screen::Inspector(context, _) = screen else { return Err("not a Properties panel screen".into()) };
+    let mut core = styk_core::screens::inspector(context, std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(|| {}))?;
+    pollster::block_on(async {
+        // The figures' bounds come from the facts lane: refresh until they are shown, at most two seconds.
+        for _ in 0..400 {
+            core.refresh();
+            if context != styk_core::screens::InspectorScreen::Figures || core.inspector().shown().bounds.is_some() {
+                break;
+            }
+            pause().await?;
+        }
+        screenshot_async(screen.theme(), size, scale, None, None, Some(&core)).await
+    })
+}
+
+/// Five milliseconds, on the platform's timer.
+async fn pause() -> Result<(), String> {
+    let (send, receive) = iced::futures::channel::oneshot::channel();
+    styk_platform::diagnostics::after(std::time::Duration::from_millis(5), move || {
+        if send.send(()).is_err() { eprintln!("headless capture timer receiver closed"); }
+    })?;
+    receive.await.map_err(|error| error.to_string())
+}
+
+async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>, inspector: Option<&styk_core::app::Core>) -> Result<Image, String> {
     let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
     let mut renderer = <iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None).await.ok_or("no graphics adapter is available to draw offscreen")?;
     // Nothing here is an event loop to keep responsive: the font system is built and the bundled fonts installed in place.
@@ -31,7 +57,15 @@ async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Opt
     let iced_theme = styk_ui::base_theme(theme);
     // A band screen: the band over its window, laid out for this size with its words measured.
     let shell = band.map(|screen| styk_ui::screens::band_shell(screen, size, styk_ui::shell::measure_labels(ready)));
+    let panel = inspector.and_then(|core| core.inspector().model().map(|model| (core, model)));
     let view: iced::Element<'_, ()> = match (sheet, shell.as_ref()) {
+        _ if panel.is_some() => match panel {
+            Some((core, model)) => {
+                let panel = styk_ui::inspector::View { model, presentation: core.presentation(), field: None, rename: None, theme, button_probe: None };
+                styk_ui::dock::docked(styk_ui::inspector::view(panel), theme).map(|_| ()).boxed()
+            }
+            None => styk_ui::loading(theme),
+        },
         (Some(sheet), _) => sheet.view().map(|_| ()).boxed(),
         (None, Some(shell)) => styk_ui::shell::window(styk_ui::shell::Params { shell, theme, ready, maximize: styk_services::shell::chrome::MaxButtonState::Idle }, styk_ui::loading(theme)).map(|_| ()).boxed(),
         (None, None) => styk_ui::view(theme, ready),
@@ -55,11 +89,7 @@ async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Opt
         if !styk_design::glyphs::incomplete() {
             return Ok(Image { width: physical.width, height: physical.height, rgba });
         }
-        let (send, receive) = iced::futures::channel::oneshot::channel();
-        styk_platform::diagnostics::after(std::time::Duration::from_millis(5), move || {
-            if send.send(()).is_err() { eprintln!("headless capture timer receiver closed"); }
-        })?;
-        receive.await.map_err(|error| error.to_string())?;
+        pause().await?;
     }
     Err("the text was still missing glyphs after 400 frames: the glyph worker did not deliver".to_string())
 }

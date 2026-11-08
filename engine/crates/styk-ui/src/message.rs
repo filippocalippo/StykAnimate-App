@@ -8,6 +8,7 @@ use iced::Task;
 use iced::advanced::widget::operate;
 use styk_core::app::Core;
 use styk_core::commands::{Command, Effect};
+use styk_core::inspector::FocusRequest;
 use styk_core::inspector::property::PropertyKey;
 use styk_design::widgets::focus;
 
@@ -19,6 +20,10 @@ pub enum Message {
     FocusField(PropertyKey),
     /// Nothing to do (a widget reports a change the core does not need, such as a field gaining focus it already knows).
     Idle,
+    /// A key no widget took: the core's focus state may move focus (Tab, F6).
+    Key(iced::Event),
+    /// What a walk of the tree found of the focus targets, for the core's focus state.
+    Snapshot(focus::Snapshot),
 }
 
 impl From<Command> for Message {
@@ -37,6 +42,17 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
         }
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
         Message::Idle => Task::none(),
+        Message::Key(event) => match focus::navigate(core.focus_mut(), &event) {
+            Some(id) => operate(focus::focus(id)).discard(),
+            None => Task::none(),
+        },
+        Message::Snapshot(snapshot) => {
+            let synced = focus::sync(core.focus_mut(), &snapshot);
+            match synced.unfocus {
+                Some(_) => operate(focus::unfocus()).discard(),
+                None => Task::none(),
+            }
+        }
     }
 }
 
@@ -45,6 +61,11 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
 fn effect(effect: Effect) -> Task<Message> {
     match effect {
         Effect::Blur => operate(focus::unfocus()).discard(),
+        Effect::Focus(request) => operate(focus::focus(match request {
+            FocusRequest::Rename => crate::inspector::RENAME_ID,
+            FocusRequest::TargetName => crate::inspector::TARGET_NAME_ID,
+        }))
+        .discard(),
         Effect::Notice(_) | Effect::NotAvailable(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
 }

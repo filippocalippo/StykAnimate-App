@@ -33,7 +33,7 @@ pub struct EditField<'a, Message> {
     area: FocusArea,
     role: Role,
     value: std::borrow::Cow<'a, str>,
-    placeholder: &'a str,
+    placeholder: std::borrow::Cow<'a, str>,
     limits: Limits,
     dir: Dir,
     palette: &'static Palette,
@@ -67,7 +67,7 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
             area,
             role,
             value,
-            placeholder: "",
+            placeholder: std::borrow::Cow::Borrowed(""),
             limits,
             dir: Dir::Ltr,
             palette,
@@ -88,8 +88,8 @@ impl<'a, Message: Clone + 'a> EditField<'a, Message> {
         }
     }
 
-    pub fn placeholder(mut self, placeholder: &'a str) -> Self {
-        self.placeholder = placeholder;
+    pub fn placeholder(mut self, placeholder: impl Into<std::borrow::Cow<'a, str>>) -> Self {
+        self.placeholder = placeholder.into();
         self
     }
 

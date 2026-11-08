@@ -19,7 +19,7 @@ use crate::documents::{DocumentId, Documents};
 use crate::facts::Facts;
 use crate::focus::FocusState;
 use crate::frames::FrameDocument;
-use crate::i18n::Msg;
+use crate::i18n::{Msg, Presentation};
 use crate::inspector::Panel;
 use crate::view_state::ViewState;
 
@@ -29,7 +29,6 @@ pub trait Lifecycle {
     fn finish(&mut self, documents: &mut Documents, session: &mut Session, effects: &mut Vec<Effect>);
 }
 
-#[derive(Default)]
 pub struct Core {
     pub documents: Documents,
     view: ViewState,
@@ -39,6 +38,22 @@ pub struct Core {
     sources: HashMap<DocumentId, Arc<dyn FrameDocument>>,
     session: Session,
     focus: FocusState,
+    presentation: Presentation,
+}
+
+impl Default for Core {
+    fn default() -> Core {
+        Core {
+            documents: Documents::default(),
+            view: ViewState::default(),
+            inspector: Panel::default(),
+            facts: None,
+            sources: HashMap::new(),
+            session: Session::default(),
+            focus: FocusState::default(),
+            presentation: Presentation::english(),
+        }
+    }
 }
 
 fn warn(message: Msg) -> Effect {
@@ -77,6 +92,22 @@ impl Core {
         &self.inspector
     }
 
+    /// How the interface writes text in the selected language.
+    pub fn presentation(&self) -> &Presentation {
+        &self.presentation
+    }
+
+    /// Selects the interface's language (a catalogue locale: `de`, `pt-BR`); `false` for one the catalogue lacks.
+    pub fn set_locale(&mut self, id: &str) -> bool {
+        match Presentation::new(id) {
+            Some(presentation) => {
+                self.presentation = presentation;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Which target holds focus, the scopes and the text-entry gate (`docs/native/text-input.md`).
     pub fn focus(&self) -> &FocusState {
         &self.focus
@@ -101,7 +132,7 @@ impl Core {
     pub fn dispatch(&mut self, command: Command) -> Vec<Effect> {
         self.session = Session::default();
         match command {
-            Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, event),
+            Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event),
             Command::Run(id) => self.run(id),
             Command::Activate(id) => self.activate(id),
         }

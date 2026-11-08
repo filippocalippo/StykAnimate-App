@@ -17,8 +17,18 @@ const SHEET: &[u8] = include_bytes!("../../../tests/edit/property-sheet.document
 const SPRITE: &[u8] = include_bytes!("../../../tests/edit/sprite-segment-sparse-native.document.json");
 const NATIVE: &[u8] = include_bytes!("../../../tests/edit/selection-metadata-plain-native.document.json");
 
+
+/// The facts lane's thread.
+struct Threads;
+
+impl styk_services::Spawner for Threads {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        std::thread::Builder::new().name(name.to_owned()).spawn(job).map(|_| ()).map_err(|error| styk_services::SpawnError(error.to_string()))
+    }
+}
+
 fn core_with(bytes: &[u8]) -> Core {
-    testing::core_with_document(bytes, "Test.styk").unwrap()
+    testing::core_with_document(bytes, "Test.styk", std::sync::Arc::new(Threads)).unwrap()
 }
 
 fn session(core: &mut Core, method: &str, args: &str) {
