@@ -1,4 +1,5 @@
 //! Overlay ownership, dismissal and focus. No toolkit, services or clock reads.
+pub mod host;
 pub mod menu;
 pub mod messages;
 pub mod placement;
@@ -480,3 +481,5 @@ pub enum OpenFocus {
     Target(FocusId),
     Keep,
 }
+#[cfg(test)]
+mod host_tests;
