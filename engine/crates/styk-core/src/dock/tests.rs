@@ -28,6 +28,18 @@ fn centre(r: Rect) -> (f64, f64) {
     (r.x + r.w / 2.0, r.y + r.h / 2.0)
 }
 
+/// Two presses on the empty part of `group`'s header: a double click.
+fn double_click(dock: &mut Dock, group: GroupId, now: u64) -> Vec<Effect> {
+    let at = dock.solution().headers[&group];
+    let (x, y) = (at.x + at.w - 10.0, at.y + 20.0);
+    let mut effects = Vec::new();
+    for _ in 0..2 {
+        effects = dock.handle(Event::HeaderPressed { group, tab: None, x, y }, now);
+        dock.handle(Event::PointerReleased, now);
+    }
+    effects
+}
+
 /// Presses a tab of `group`, moves through `path` and lets go; returns the effects of the release.
 fn drag(dock: &mut Dock, group: GroupId, tab: Option<usize>, path: &[(f64, f64)], now: u64) -> Vec<Effect> {
     let start = centre(dock.solution().headers[&group]);
@@ -118,11 +130,11 @@ fn a_press_that_stays_inside_the_slop_is_a_click_and_never_a_drag() {
     assert!(!d.dragging() && !d.tracking());
     assert_eq!(d.layout().groups().into_iter().find(|g| g.id == PROPERTIES).map(|g| g.active), Some(1), "the click activated the tab");
     // Past the slop it is a drag, and the click that follows its release activates nothing.
-    d.handle(Event::HeaderPressed { group: PROPERTIES, tab: Some(1), x, y }, 7);
-    d.handle(Event::PointerMoved { x: x + 4.0, y }, 7);
+    d.handle(Event::HeaderPressed { group: PROPERTIES, tab: Some(1), x, y }, 2_000);
+    d.handle(Event::PointerMoved { x: x + 4.0, y }, 2_000);
     assert!(d.drag().is_some(), "4 px is a drag");
-    d.handle(Event::PointerReleased, 8);
-    d.handle(Event::TabSelected { group: PROPERTIES, index: 2 }, 8);
+    d.handle(Event::PointerReleased, 2_001);
+    d.handle(Event::TabSelected { group: PROPERTIES, index: 2 }, 2_001);
     assert_eq!(d.layout().groups().into_iter().find(|g| g.id == PROPERTIES).map(|g| g.active), Some(1), "the click after a drag was swallowed");
 }
 
@@ -168,21 +180,23 @@ fn shift_forces_float_and_part_one_refuses_it_visibly() {
 #[test]
 fn a_double_click_on_a_header_collapses_the_group_to_a_strip_and_again_expands_it() {
     let mut d = dock(1560.0, 1000.0);
-    d.handle(Event::HeaderDoubleClicked(PROPERTIES), 1);
+    double_click(&mut d, PROPERTIES, 1);
     assert!(d.solution().strips.contains_key(&PROPERTIES), "a collapsed group at the window's edge is a strip");
     assert!(!d.solution().groups.contains_key(&PROPERTIES));
     assert!(d.solution().groups[&STAGE].w > 1216.0, "the stage took its room");
-    d.handle(Event::HeaderDoubleClicked(PROPERTIES), 2);
+    // A collapsed group has no header: its strip opens a flyout, and the flyout's pin expands it.
+    d.handle(Event::Open { group: PROPERTIES, tab: 0 }, 2);
+    d.handle(Event::Pin(PROPERTIES), 3);
     assert!(d.solution().groups.contains_key(&PROPERTIES));
     // The stage cannot collapse: the core refuses and the dock says so.
-    let effects = d.handle(Event::HeaderDoubleClicked(STAGE), 3);
+    let effects = double_click(&mut d, STAGE, 4);
     assert!(effects.iter().any(|e| matches!(e, Effect::Message(_))) && d.solution().groups.contains_key(&STAGE));
 }
 
 #[test]
 fn a_strip_opens_a_flyout_that_escape_closes_and_pin_expands_the_group() {
     let mut d = dock(1560.0, 1000.0);
-    d.handle(Event::HeaderDoubleClicked(PROPERTIES), 1);
+    double_click(&mut d, PROPERTIES, 1);
     d.handle(Event::Open { group: PROPERTIES, tab: 1 }, 2);
     assert_eq!(d.open(), Some(PROPERTIES));
     assert!(d.solution().sheets.contains_key(&PROPERTIES), "the flyout is placed");
@@ -334,7 +348,8 @@ fn a_change_is_saved_after_the_debounce_on_the_injected_clock_and_reloads_as_it_
     assert_eq!(d.deadline(), Some(1_200), "200 ms after the change");
     assert!(d.take_save(1_199).is_none(), "not before the debounce");
     // A second change within the window moves the deadline and coalesces into one write.
-    d.handle(Event::HeaderDoubleClicked(group_of(&d, "library")), 1_100);
+    let library = group_of(&d, "library");
+    double_click(&mut d, library, 1_100);
     assert_eq!(d.deadline(), Some(1_300));
     saved_through(&storage, &mut d, 1_300);
     assert_eq!(d.deadline(), None);
@@ -352,7 +367,7 @@ fn a_change_is_saved_after_the_debounce_on_the_injected_clock_and_reloads_as_it_
 #[test]
 fn a_failed_write_is_retried_and_a_newer_file_is_never_overwritten() {
     let mut d = dock(1560.0, 1000.0);
-    d.handle(Event::HeaderDoubleClicked(PROPERTIES), 1_000);
+    double_click(&mut d, PROPERTIES, 1_000);
     assert!(d.take_save(1_200).is_some());
     d.save_done(false, 1_200);
     assert_eq!(d.deadline(), Some(1_400), "retried after the backoff");
@@ -362,7 +377,7 @@ fn a_failed_write_is_retried_and_a_newer_file_is_never_overwritten() {
     let mut newer = dock(1560.0, 1000.0);
     let effects = newer.loaded(Stored::Newer, 5);
     assert!(effects.iter().any(|e| matches!(e, Effect::Message(_))));
-    newer.handle(Event::HeaderDoubleClicked(PROPERTIES), 10);
+    double_click(&mut newer, PROPERTIES, 10);
     assert_eq!(newer.deadline(), None, "a newer file is read-only");
     assert!(newer.take_save(10_000).is_none());
 }
@@ -375,7 +390,7 @@ fn a_change_made_before_the_stored_layout_arrives_is_kept() {
     first.handle(Event::Close(panel("library")), 1);
     saved_through(&storage, &mut first, 300);
     let mut d = dock(1560.0, 1000.0);
-    d.handle(Event::HeaderDoubleClicked(PROPERTIES), 5);
+    double_click(&mut d, PROPERTIES, 5);
     let mine = d.layout().clone();
     let file = run_future(store.load()).expect("readable").expect("stored");
     d.loaded(Stored::File(file), 10);
@@ -456,6 +471,49 @@ fn the_dock_is_reached_through_the_one_dispatch_and_follows_the_window() {
     let effects = core.dispatch(crate::commands::Command::Dock(Event::Resized { width: 1440.0, height: 900.0, scale: 1.0 }));
     assert!(effects.is_empty());
     assert_eq!(core.dock().solution().groups[&STAGE].w, 1096.0);
-    core.dispatch(crate::commands::Command::Dock(Event::HeaderDoubleClicked(PROPERTIES)));
+    let at = core.dock().solution().headers[&PROPERTIES];
+    for _ in 0..2 {
+        core.dispatch(crate::commands::Command::Dock(Event::HeaderPressed { group: PROPERTIES, tab: None, x: at.x + at.w - 10.0, y: at.y + 20.0 }));
+        core.dispatch(crate::commands::Command::Dock(Event::PointerReleased));
+    }
     assert!(core.dock().solution().strips.contains_key(&PROPERTIES));
+}
+
+
+#[test]
+fn the_compact_window_folds_the_right_dock_to_a_sheet_and_keeps_the_timeline_docked_as_today_does() {
+    // Today's window at 720 x 800: the stage over the timeline's island, the inspector a sheet behind the band's button.
+    let d = dock(720.0, 800.0);
+    let s = d.solution();
+    assert_eq!(s.groups[&STAGE], Rect { x: 8.0, y: 50.0, w: 704.0, h: 478.0 });
+    assert_eq!(s.groups[&TIMELINE], Rect { x: 8.0, y: 528.0, w: 704.0, h: 264.0 });
+    assert!(s.sheets.contains_key(&PROPERTIES) && !s.groups.contains_key(&PROPERTIES));
+    // The divider beside the sheet has nothing to resize; the one between the stage and the timeline does.
+    let usable = d.dividers();
+    assert_eq!(usable.len(), 1);
+    assert_eq!(usable[0].axis, crate::layout::Axis::Vertical);
+    // A low window folds the timeline to its strip.
+    assert!(dock(1000.0, 560.0).solution().strips.contains_key(&TIMELINE));
+}
+
+#[test]
+fn two_presses_on_a_divider_in_a_double_click_reset_it_and_a_drag_between_them_does_not() {
+    let mut d = dock(1560.0, 1000.0);
+    let divider = d.dividers().into_iter().find(|x| x.axis == crate::layout::Axis::Horizontal).cloned().expect("a column divider");
+    let (split, index) = (divider.split, divider.index);
+    d.handle(Event::DividerPressed { split, index }, 100);
+    d.handle(Event::DividerMoved(-60.0), 100);
+    d.handle(Event::DividerReleased, 101);
+    assert_eq!(d.solution().groups[&PROPERTIES].w, 380.0);
+    // The press that began a drag is not the first click of a double click.
+    d.handle(Event::DividerPressed { split, index }, 200);
+    assert_eq!(d.solution().groups[&PROPERTIES].w, 380.0);
+    d.handle(Event::DividerReleased, 201);
+    d.handle(Event::DividerPressed { split, index }, 300);
+    d.handle(Event::DividerReleased, 301);
+    assert_eq!(d.solution().groups[&PROPERTIES].w, 320.0, "the second press within 500 ms reset it");
+    d.handle(Event::DividerPressed { split, index }, 5_000);
+    d.handle(Event::DividerMoved(-10.0), 5_000);
+    d.handle(Event::DividerReleased, 5_001);
+    assert_eq!(d.solution().groups[&PROPERTIES].w, 330.0, "a press long after the last is a new first click");
 }

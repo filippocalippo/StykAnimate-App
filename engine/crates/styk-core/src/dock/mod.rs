@@ -1,4 +1,4 @@
-//! The docked main window: what the views draw and what they send (`docs/native/docking-views.md`).
+//! The docked main window: what the views draw and what they send (`docs/native/dockin-views.md`).
 //!
 //! `styk_core::layout` owns placement: the arrangement, the operations, the solver, the drop zones and the history. This
 //! module holds what a window adds to it and no view may decide: which workspace's arrangement shows, the solution for the
@@ -18,6 +18,9 @@ pub use place::{default_layout, default_timeline_height, keyboard_places, set_ti
 use crate::layout::store::{Entry, ImportResult, LayoutFile, MigrationGeometry, SaveQueue, Stamp, import_v2, state_from_value, state_to_value};
 use crate::layout::{DragSession, Env, GroupId, Layout, LayoutError, LayoutState, Node, NodeId, Operation, PanelId, Rect, Size, Solution, Sz, Workspace, Zone, solve, spec};
 use styk_doc::Value;
+
+/// The time within which a second press on the same header or divider is a double click (Windows' default).
+pub const DOUBLE_CLICK_MS: u64 = 500;
 
 /// How far the pointer travels from a press before it is a drag and not a click (design 3.4; today's 4 px).
 pub const SLOP: f64 = 4.0;
@@ -49,8 +52,6 @@ pub enum Event {
     Escape,
     /// The window lost focus: a gesture in progress is cancelled.
     Blur,
-    /// A double click on a group's header: collapse or expand it.
-    HeaderDoubleClicked(GroupId),
     /// A tab was closed (its x, middle click).
     Close(PanelId),
     /// A closed panel was opened again (the Window menu).
@@ -128,6 +129,13 @@ struct Move {
     at: usize,
 }
 
+/// What a press landed on, for the double click.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Target {
+    Header(GroupId),
+    Divider(NodeId, usize),
+}
+
 enum Gesture {
     Idle,
     Pressed(Press),
@@ -145,6 +153,8 @@ pub struct Dock {
     solution: Solution,
     open: Option<GroupId>,
     gesture: Gesture,
+    /// The last press that may start a double click: what it landed on, when and where.
+    last_press: Option<(Target, u64, (f64, f64))>,
     /// A drag began since the last press: the click that follows it activates nothing.
     swallow_click: bool,
     /// The button came up since: the next event that is not that click ends the swallowing.
@@ -173,6 +183,7 @@ impl Dock {
             solution: Solution::default(),
             open: None,
             gesture: Gesture::Idle,
+            last_press: None,
             swallow_click: false,
             swallow_ends: false,
             shift: false,
@@ -226,7 +237,26 @@ impl Dock {
     /// Whether the pointer must be followed beyond the widgets that started the gesture (the host subscribes to the cursor
     /// and the button while it is).
     pub fn tracking(&self) -> bool {
-        matches!(self.gesture, Gesture::Pressed(_) | Gesture::Dragging { .. } | Gesture::Resizing(_))
+        matches!(self.gesture, Gesture::Pressed(_) | Gesture::Dragging { .. })
+    }
+
+    /// Whether Escape belongs to the dock: a gesture is in progress, or a flyout or sheet is open.
+    pub fn wants_escape(&self) -> bool {
+        !matches!(self.gesture, Gesture::Idle) || self.open.is_some()
+    }
+
+    /// Whether a keyboard move is in progress (the arrow keys, Enter and Escape are its).
+    pub fn moving(&self) -> bool {
+        matches!(self.gesture, Gesture::Moving(_))
+    }
+
+    /// The panel a focus target stands for: a tab, or a group's body.
+    pub fn panel_of(&self, id: crate::focus::FocusId) -> Option<PanelId> {
+        let (group, tab) = match ids::group_of(id) {
+            Some((group, index)) => (group, Some(index)),
+            None => (ids::body_of(id)?, None),
+        };
+        self.panel_at(group, tab)
     }
 
     /// Whether a tab or a divider is being moved (the stage is not asked for frames meanwhile).
@@ -262,6 +292,30 @@ impl Dock {
     /// When the host must wake: the layout save's debounce or retry.
     pub fn deadline(&self) -> Option<u64> {
         if self.read_only { None } else { self.saves.deadline() }
+    }
+
+    /// The dividers a person can use: a divider next to a group that is not shown (folded to a strip or a sheet) has nothing
+    /// to resize.
+    pub fn dividers(&self) -> Vec<&crate::layout::Divider> {
+        fn kids_of(node: &Node, split: NodeId) -> Option<&Vec<crate::layout::Kid>> {
+            match node {
+                Node::Split { id, kids, .. } if *id == split => Some(kids),
+                Node::Split { kids, .. } => kids.iter().find_map(|k| kids_of(&k.node, split)),
+                Node::Tabs(_) => None,
+            }
+        }
+        let shown = |node: &Node| {
+            let mut groups = Vec::new();
+            node.groups(&mut groups);
+            groups.iter().any(|g| self.solution.groups.contains_key(&g.id))
+        };
+        self.solution
+            .dividers
+            .iter()
+            .filter(|d| {
+                self.layout().main.as_ref().and_then(|root| kids_of(root, d.split)).is_none_or(|kids| kids.get(d.index).is_some_and(|a| shown(&a.node)) && kids.get(d.index + 1).is_some_and(|b| shown(&b.node)))
+            })
+            .collect()
     }
 
     /// The panel a pointer press on group `group` at tab `tab` stands for.
@@ -389,7 +443,13 @@ impl Dock {
             Event::HeaderPressed { group, tab, x, y } => {
                 self.swallow_click = false;
                 self.cancel_gesture();
-                if let Some(panel) = self.panel_at(group, tab) {
+                if self.double_click(Target::Header(group), (x, y), now) {
+                    // A second press on the same header within the double-click time: collapse or expand the group, and the
+                    // click that follows it activates nothing.
+                    self.swallow_click = true;
+                    let collapsed = self.layout().groups().into_iter().find(|g| g.id == group).is_some_and(|g| g.collapsed);
+                    self.edit(Operation::Collapse(group, !collapsed), &mut effects);
+                } else if let Some(panel) = self.panel_at(group, tab) {
                     self.gesture = Gesture::Pressed(Press { panel, origin: (x, y) });
                 }
             }
@@ -412,15 +472,15 @@ impl Dock {
                 self.cancel_gesture();
                 self.shift = false;
             }
-            Event::HeaderDoubleClicked(group) => {
-                let collapsed = self.layout().groups().into_iter().find(|g| g.id == group).is_some_and(|g| g.collapsed);
-                self.edit(Operation::Collapse(group, !collapsed), &mut effects);
-            }
             Event::Close(panel) => self.edit(Operation::Close(panel), &mut effects),
             Event::Reopen(panel) => self.edit(Operation::Reopen(panel), &mut effects),
             Event::DividerPressed { split, index } => {
                 self.cancel_gesture();
-                self.gesture = Gesture::Resizing(Box::new(Resize { origin: self.layout().clone(), solution: self.solution.clone(), split, index }));
+                if self.double_click(Target::Divider(split, index), (0.0, 0.0), now) {
+                    self.reset_divider(split, index, &mut effects);
+                } else {
+                    self.gesture = Gesture::Resizing(Box::new(Resize { origin: self.layout().clone(), solution: self.solution.clone(), split, index }));
+                }
             }
             Event::DividerMoved(delta) => self.divider_moved(delta),
             Event::DividerReleased => {
@@ -480,6 +540,13 @@ impl Dock {
             Event::Tick => {}
         }
         effects
+    }
+
+    /// Whether this press is the second of a double click on `target`; remembers it otherwise.
+    fn double_click(&mut self, target: Target, at: (f64, f64), now: u64) -> bool {
+        let double = matches!(self.last_press, Some((t, then, from)) if t == target && now.saturating_sub(then) <= DOUBLE_CLICK_MS && (at.0 - from.0).hypot(at.1 - from.1) < SLOP);
+        self.last_press = if double { None } else { Some((target, now, at)) };
+        double
     }
 
     fn env(&self) -> Env {
@@ -567,6 +634,8 @@ impl Dock {
                 }
                 let source = press.panel.clone();
                 self.swallow_click = true;
+                // A press that became a drag was not a click: it starts no double click.
+                self.last_press = None;
                 match DragSession::new(&self.states[self.active].current, source.clone()) {
                     Ok(mut session) => {
                         // A place the pointer cannot take leaves the session without a zone: the drop does nothing.
@@ -613,6 +682,7 @@ impl Dock {
     fn divider_moved(&mut self, delta: f64) {
         let workspace = self.workspace();
         let Gesture::Resizing(resize) = &self.gesture else { return };
+        self.last_press = None;
         let mut next = resize.origin.clone();
         if next.resize_divider(&resize.solution, resize.split, resize.index, delta, workspace).is_ok() {
             let state = &mut self.states[self.active];
@@ -692,7 +762,7 @@ impl Dock {
 }
 
 /// What the stored layout answered.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Stored {
     /// The stored file.
     File(LayoutFile),
@@ -720,7 +790,7 @@ pub mod ids {
     use crate::focus::FocusId;
     use crate::layout::GroupId;
 
-    const BASE: u64 = 0x4_0000;
+    const BASE: u64 = 1 << 42;
 
     /// Tab `index` of group `group` (`Tabs` takes consecutive ids from `first`).
     pub fn tab(group: GroupId, index: usize) -> FocusId {
@@ -735,6 +805,12 @@ pub mod ids {
     /// A group's body, the target F6 lands on in a group that has no tab strip.
     pub fn body(group: GroupId) -> FocusId {
         FocusId(BASE + 0x80_0000 + u64::from(group))
+    }
+
+    /// The group a body id belongs to.
+    pub fn body_of(id: FocusId) -> Option<GroupId> {
+        let raw = id.0.checked_sub(BASE + 0x80_0000)?;
+        (raw < 0x80_0000).then_some(raw as GroupId)
     }
 
     /// A divider.

@@ -31,7 +31,7 @@ use styk_design::{Theme, warm_up};
 use styk_core::engine::{Budgets, Engine, Value, json};
 use styk_services::Spawner;
 use styk_services::clock::{Clock, FixedClock};
-use styk_services::files::FileTarget;
+use styk_services::files::{FileTarget, Files as _};
 use styk_services::shell::Rect;
 use styk_services::shell::chrome::MaxButtonState;
 use styk_ui::screens::Screen;
@@ -55,6 +55,12 @@ pub enum Message {
     Snapshot(focus::Snapshot),
     /// A frame was drawn: time passes for the strip and the automation.
     Frame,
+    /// The stored layouts (or today's, on a first launch) arrived.
+    LayoutsLoaded(styk_core::dock::Stored),
+    /// The dock's wake: its debounced layout save is due.
+    LayoutWake(u64),
+    /// The layout write ended: whether it landed.
+    LayoutSaved(bool),
 }
 
 /// What the wiring asks of the window.
@@ -87,9 +93,8 @@ struct Run {
 pub struct TopBand {
     /// The open projects.
     pub core: styk_core::app::Core,
-    /// The core's layout persistence service, ready for the docking view's host.
-    #[expect(dead_code, reason = "The docking view host is a separate chunk; retain its injected service.")]
-    pub layouts: styk_core::layout::LayoutStore,
+    /// The layout persistence service: the stored arrangements load through it and the dock's writes go through it.
+    layouts: Arc<styk_core::layout::LayoutStore>,
     /// The shell.
     pub shell: shell::Shell,
     /// The projects in the order they were opened, which is how scripts number them.
@@ -106,6 +111,8 @@ pub struct TopBand {
     measured: bool,
     /// A band screen of the catalogue shown in place of the open projects (`--screen band`).
     screen: Option<Screen>,
+    /// The Properties panel's prepared model while a window screen of the catalogue shows (`--screen dock`).
+    fixture: Option<styk_core::inspector::model::Inspector>,
 }
 
 /// What the stand-in for the workspace sessions answers.
@@ -163,10 +170,10 @@ impl TopBand {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
         let mut documents = Documents::new();
-        let layouts = styk_core::layout::LayoutStore::new(Arc::new(
+        let layouts = Arc::new(styk_core::layout::LayoutStore::new(Arc::new(
             styk_platform::storage::LocalStorage::for_user(spawner.as_ref())
                 .map_err(|error| format!("the layout store did not start: {error}"))?,
-        ));
+        )));
         // The application's startup document, for New and for closing the last tab. Stand-in: the engine's startup fixture,
         // until the native startup document (Blue on the landscape canvas) has an owner. The band does not send New yet.
         let startup = json::parse(STARTUP).map_err(|error| format!("the startup document: {error:?}"))?;
@@ -181,7 +188,9 @@ impl TopBand {
                 notify: Arc::new(|| {}),
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
-        Ok(TopBand { core: styk_core::app::Core::new(documents), layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
+        let mut core = styk_core::app::Core::new(documents);
+        core.dock_mut().handle(styk_core::dock::Event::Resized { width: f64::from(window_size.width), height: f64::from(window_size.height), scale: 1.0 }, 0);
+        Ok(TopBand { core, layouts, fixture: None, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
@@ -208,6 +217,7 @@ impl TopBand {
     /// Shows a band screen of the catalogue (`--screen band`) instead of the open projects.
     pub fn show_screen(&mut self, screen: Option<Screen>) {
         self.screen = screen;
+        self.fixture = screen.filter(|screen| screen.is_dock()).map(|_| styk_ui::screens::inspector_model(styk_core::screens::InspectorScreen::Figure));
     }
 
     /// The fonts are ready: measure the band's words.
@@ -226,9 +236,64 @@ impl TopBand {
     }
 
     /// The window's size changed.
-    pub fn resized(&mut self, size: Size) {
+    pub fn resized(&mut self, size: Size, scale: f32) {
         let controls = self.shell.window().controls;
         drop(self.dispatch(shell::Event::Resized(shell::Window { width: size.width, height: size.height, ui_scale: 1.0, controls })));
+        let now = self.now();
+        drop(self.dock(styk_core::dock::Event::Resized { width: f64::from(size.width), height: f64::from(size.height), scale: f64::from(scale) }, now));
+    }
+
+    /// An event of the dock, through the one handler every view's message reaches.
+    fn dock(&mut self, event: styk_core::dock::Event, now: u64) -> Task<Message> {
+        styk_ui::message::update_at(&mut self.core, styk_ui::message::Message::Command(styk_core::commands::Command::Dock(event)), now).map(Message::Editor).chain(TopBand::snapshot())
+    }
+
+    /// Reads the stored layouts: the dock's own file, or today's `workspace-preferences.json` on a first launch. Nothing is
+    /// written by reading.
+    pub fn load_layouts(&self) -> Task<Message> {
+        let store = self.layouts.clone();
+        Task::perform(
+            async move {
+                use styk_core::dock::Stored;
+                use styk_core::layout::LayoutError;
+                match store.load().await {
+                    Ok(Some(file)) => Stored::File(file),
+                    Err(LayoutError::FutureVersion) => Stored::Newer,
+                    Err(error) => Stored::Unreadable(format!("{error:?}")),
+                    Ok(None) => {
+                        let target = FileTarget::new(styk_platform::shell::profile_dir().join("workspace-preferences.json"));
+                        match styk_platform::files::LocalFiles.read(&target, 256 * 1024, &styk_services::Cancel::new()).await {
+                            Ok(bytes) => json::parse(&bytes).map_or(Stored::Nothing, Stored::Legacy),
+                            Err(_) => Stored::Nothing,
+                        }
+                    }
+                }
+            },
+            Message::LayoutsLoaded,
+        )
+    }
+
+    /// Hands the dock's due write to the layout store, off the interface thread.
+    fn save_layouts(&mut self, now: u64) -> Task<Message> {
+        let Some(file) = self.core.dock_mut().take_save(now) else { return Task::none() };
+        let store = self.layouts.clone();
+        Task::perform(async move { store.save(&file, now, &styk_services::Cancel::new()).await.is_ok() }, Message::LayoutSaved)
+    }
+
+    /// The docked window under the band: every group at its rectangle, the Properties panel and the stage in theirs.
+    pub fn dock_view<'a>(&'a self, theme: Theme) -> iced::Element<'a, Message> {
+        let params = styk_ui::dock::Params { dock: self.core.dock(), theme, presentation: self.core.presentation(), top: self.height() };
+        let presentation = self.core.presentation();
+        let (inspector, stage) = match &self.fixture {
+            Some(model) => (Some(styk_ui::inspector::View::model(model, presentation, theme)), None),
+            None => (styk_ui::inspector::View::of(&self.core, theme), self.core.stage().map(|surface| styk_ui::stage::stage(surface, theme, |event| styk_ui::Message::Command(styk_core::commands::Command::Stage(event))))),
+        };
+        styk_ui::dock::window(&params, inspector, stage).map(Message::Editor).boxed()
+    }
+
+    /// The runtime maps the dock's one deadline (its debounced layout save) onto iced's scheduled redraw.
+    pub fn dock_wake(&self) -> iced::Element<'_, Message> {
+        crate::overlay_wake::element(self.core.dock().deadline().filter(|_| self.fixed.is_none()), self.clock.clone(), Message::LayoutWake)
     }
 
     /// The places in the band that keep the pointer, in physical pixels (`scale` physical pixels per logical one).
@@ -281,6 +346,11 @@ impl TopBand {
                 _ => None,
             }));
         }
+        if self.core.dock().tracking() {
+            subscriptions.push(event::listen_with(|event, _, _| styk_ui::dock::track(&event).map(Message::Editor)));
+        }
+        // The stage's picture is ready or the pen has drawn: its one redraw, while a stage is shown.
+        subscriptions.push(styk_ui::stage::subscription(&self.core).map(Message::Editor));
         if self.run.is_some() || self.shell.next_deadline().is_some() || !self.idle() {
             subscriptions.push(window::frames().map(|_| Message::Frame));
         }
@@ -361,6 +431,19 @@ impl TopBand {
                 (Vec::new(), Task::batch([task, overlays]))
             }
             Message::Frame => self.frame(),
+            Message::LayoutsLoaded(stored) => {
+                let now = self.now();
+                let asked = self.core.dock_mut().loaded(stored, now);
+                let effects = self.core.dock_effects(asked);
+                drop(effects);
+                (Vec::new(), self.save_layouts(now))
+            }
+            Message::LayoutWake(now) => (Vec::new(), self.save_layouts(now)),
+            Message::LayoutSaved(landed) => {
+                let now = self.now();
+                self.core.dock_mut().save_done(landed, now);
+                (Vec::new(), self.save_layouts(now))
+            }
         };
         let task = if reads_focus { Task::batch([task, TopBand::snapshot()]) } else { task };
         (requests, task)
@@ -398,6 +481,9 @@ impl TopBand {
                         None => Task::none(),
                     };
                 }
+                if let Some(task) = self.dock_key(key, *modifiers) {
+                    return task;
+                }
                 match key.as_ref() {
                     Key::Named(Named::Tab) if modifiers.control() => self.dispatch(E::CtrlTab { backwards: modifiers.shift(), held: true }),
                     Key::Named(Named::PageDown) if modifiers.control() => self.dispatch(E::Neighbour(1)),
@@ -413,8 +499,29 @@ impl TopBand {
                 self.shell.focus.pointer_pressed();
                 Task::none()
             }
-            Event::Window(window::Event::Unfocused) => self.dispatch(E::Blurred),
+            Event::Keyboard(keyboard::Event::KeyReleased { key: Key::Named(Named::Shift), .. }) => {
+                let now = self.now();
+                self.dock(styk_core::dock::Event::Shift(false), now)
+            }
+            Event::Window(window::Event::Unfocused) => {
+                let now = self.now();
+                Task::batch([self.dispatch(E::Blurred), self.dock(styk_core::dock::Event::Blur, now)])
+            }
             _ => Task::none(),
+        }
+    }
+
+    /// A key that belongs to the dock (`styk_ui::dock::key`): what the dock sends it is sent, what it only notes is noted.
+    fn dock_key(&mut self, key: &Key, modifiers: keyboard::Modifiers) -> Option<Task<Message>> {
+        let now = self.now();
+        match styk_ui::dock::key(self.core.dock(), self.core.focus().focused(), key, modifiers) {
+            styk_ui::dock::Key::Pass => None,
+            styk_ui::dock::Key::Swallow => Some(Task::none()),
+            styk_ui::dock::Key::Send(event) => Some(self.dock(event, now)),
+            styk_ui::dock::Key::Note(event) => {
+                drop(self.dock(event, now));
+                None
+            }
         }
     }
 

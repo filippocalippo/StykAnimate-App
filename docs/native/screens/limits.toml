@@ -410,3 +410,101 @@ reference = "docs/native/screens/overlays/parts-dark.png"
 max_difference = 0.010
 width = 938
 height = 1270
+
+# The docked main window (K-dock views, part 1): the band over the default Animate layout at 1560 x 1000, at 1440 x 900 and
+# folded at 720 x 800 (the right dock a sheet), light and dark. The references are today's whole window at those sizes
+# (bundled Chromium through Playwright, LCD text on, opaque surfaces, device scale 1, the startup project's figure selected)
+# captured by engine/crates/styk-app/automation/dock-reference/screens.mjs. What is compared is the dock: the islands, the
+# gaps, the Properties group's tabs and the Properties panel in it, the stage's field and the timeline's island. The masks
+# are the parts other chunks own, each coming out when its chunk lands. The limits are the differing-pixel fractions the
+# guard measured on 2026-11-08 (debug build, headless, `styk image-diff` past a channel difference of 24, masks applied)
+# rounded up to three places, plus 0.002; what remains is the Properties panel's text edges.
+["dock"]
+reference = "docs/native/screens/dock/dock.png"
+max_difference = 0.006
+width = 1560
+height = 1000
+masks = [
+  [0, 0, 1560, 52, "K-shell: the band (compared in its own screens)"],
+  [8, 60, 1216, 44, "the stage chunk: the stage header (scene, view toggles, zoom)"],
+  [128, 118, 1020, 576, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
+  [18, 293, 56, 224, "the tools chunk: the tool rail's tools (the dock keeps its place)"],
+  [12, 716, 1536, 272, "the timeline chunk: the timeline panel (the dock keeps its island)"],
+  [1514, 120, 28, 28, "K-widgets and K-cmd: the target's menu button"],
+  [1248, 164, 288, 52, "K-cmd: the quick actions"],
+  [1232, 661, 320, 45, "the Library panel's chunk: Add to library"],
+]
+
+["dock-dark"]
+reference = "docs/native/screens/dock/dock-dark.png"
+max_difference = 0.005
+width = 1560
+height = 1000
+masks = [
+  [0, 0, 1560, 52, "K-shell: the band (compared in its own screens)"],
+  [8, 60, 1216, 44, "the stage chunk: the stage header (scene, view toggles, zoom)"],
+  [128, 118, 1020, 576, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
+  [18, 293, 56, 224, "the tools chunk: the tool rail's tools (the dock keeps its place)"],
+  [12, 716, 1536, 272, "the timeline chunk: the timeline panel (the dock keeps its island)"],
+  [1514, 120, 28, 28, "K-widgets and K-cmd: the target's menu button"],
+  [1248, 164, 288, 52, "K-cmd: the quick actions"],
+  [1232, 661, 320, 45, "the Library panel's chunk: Add to library"],
+]
+
+["dock-1440"]
+reference = "docs/native/screens/dock/dock-1440.png"
+max_difference = 0.007
+width = 1440
+height = 900
+masks = [
+  [0, 0, 1440, 52, "K-shell: the band (compared in its own screens)"],
+  [8, 60, 1096, 44, "the stage chunk: the stage header (scene, view toggles, zoom)"],
+  [156, 116, 844, 478, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
+  [18, 243, 56, 224, "the tools chunk: the tool rail's tools (the dock keeps its place)"],
+  [12, 616, 1416, 272, "the timeline chunk: the timeline panel (the dock keeps its island)"],
+  [1394, 120, 28, 28, "K-widgets and K-cmd: the target's menu button"],
+  [1128, 164, 288, 52, "K-cmd: the quick actions"],
+  [1112, 561, 320, 45, "the Library panel's chunk: Add to library"],
+]
+
+["dock-1440-dark"]
+reference = "docs/native/screens/dock/dock-1440-dark.png"
+max_difference = 0.006
+width = 1440
+height = 900
+masks = [
+  [0, 0, 1440, 52, "K-shell: the band (compared in its own screens)"],
+  [8, 60, 1096, 44, "the stage chunk: the stage header (scene, view toggles, zoom)"],
+  [156, 116, 844, 478, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
+  [18, 243, 56, 224, "the tools chunk: the tool rail's tools (the dock keeps its place)"],
+  [12, 616, 1416, 272, "the timeline chunk: the timeline panel (the dock keeps its island)"],
+  [1394, 120, 28, 28, "K-widgets and K-cmd: the target's menu button"],
+  [1128, 164, 288, 52, "K-cmd: the quick actions"],
+  [1112, 561, 320, 45, "the Library panel's chunk: Add to library"],
+]
+
+["dock-folded"]
+reference = "docs/native/screens/dock/dock-folded.png"
+max_difference = 0.004
+width = 720
+height = 800
+masks = [
+  [0, 0, 720, 44, "K-shell: the band (compared in its own screens)"],
+  [8, 50, 704, 40, "the stage chunk: the stage header (scene, view toggles, zoom)"],
+  [70, 130, 624, 353, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
+  [18, 208, 50, 200, "the tools chunk: the compact tool rail's tools (the dock keeps its place)"],
+  [12, 532, 696, 256, "the timeline chunk: the timeline panel (the dock keeps its island)"],
+]
+
+["dock-folded-dark"]
+reference = "docs/native/screens/dock/dock-folded-dark.png"
+max_difference = 0.003
+width = 720
+height = 800
+masks = [
+  [0, 0, 720, 44, "K-shell: the band (compared in its own screens)"],
+  [8, 50, 704, 40, "the stage chunk: the stage header (scene, view toggles, zoom)"],
+  [70, 130, 624, 353, "the stage: the artboard and the scene the engine draws (no project is open in a screen)"],
+  [18, 208, 50, 200, "the tools chunk: the compact tool rail's tools (the dock keeps its place)"],
+  [12, 532, 696, 256, "the timeline chunk: the timeline panel (the dock keeps its island)"],
+]

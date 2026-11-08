@@ -233,6 +233,14 @@ impl Core {
             Command::Stage(event) => self.stage_event(event),
             Command::Dock(event) => {
                 let now = self.overlays.now();
+                // A press on a header does not say which tab it landed on: the tree's last walk measured each tab.
+                let event = match event {
+                    crate::dock::Event::HeaderPressed { group, tab: None, x, y } => {
+                        let tab = self.overlays.target_at(x, y).and_then(crate::dock::ids::group_of).filter(|(g, _)| *g == group).map(|(_, i)| i);
+                        crate::dock::Event::HeaderPressed { group, tab, x, y }
+                    }
+                    other => other,
+                };
                 let effects = self.dock.handle(event, now);
                 self.dock_effects(effects)
             }

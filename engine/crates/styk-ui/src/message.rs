@@ -148,6 +148,7 @@ fn effect(effect: Effect) -> Task<Message> {
         Effect::ShortcutReleased(release) => Task::done(Message::ShortcutReleased(release)),
         Effect::MessageDismissed(id) => Task::done(Message::MessageDismissed(id)),
         Effect::Blur => operate(focus::unfocus()).discard(),
+        Effect::FocusTarget(id) => operate(focus::focus(id)).discard(),
         Effect::Focus(request) => operate(focus::focus(match request {
             FocusRequest::Rename => crate::inspector::RENAME_ID,
             FocusRequest::TargetName => crate::inspector::TARGET_NAME_ID,

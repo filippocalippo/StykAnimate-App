@@ -162,7 +162,7 @@ impl App {
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
             sheet
         });
-        let band_screen = screen.filter(|screen| screen.is_band());
+        let band_screen = screen.filter(|screen| screen.has_band());
         let clock_mode = launch.clock;
         // The one application clock: the real one, or the fixed one a script advances (`--clock fixed`).
         let (clock, fixed): (Arc<dyn styk_services::clock::Clock>, Option<styk_services::clock::FixedClock>) = match clock_mode {
@@ -321,7 +321,7 @@ impl App {
                 self.window = Some(id);
                 self.logical = size;
                 self.scale = scale_factor;
-                self.band.resized(size);
+                self.band.resized(size, scale_factor);
                 let owns_show = window::shell_shows(self.strategy);
                 let frame = self.shell.restore;
                 let attach = iced_window::run(id, move |w| shell::attach(w, frame, owns_show)).map(Message::Attached);
@@ -338,7 +338,7 @@ impl App {
             }
             Event::Resized(size) => {
                 self.logical = size;
-                self.band.resized(size);
+                self.band.resized(size, self.scale);
                 self.publish_regions();
                 self.sample(id)
             }
@@ -531,7 +531,11 @@ impl App {
         // Text is laid out only once the font system is ready: until then the view holds none.
         match (warm_up::proof(), self.sheet.as_ref()) {
             (Some(_), Some(sheet)) => sheet.view().map(Message::Sheet).boxed(),
-            (Some(ready), None) => iced::widget::stack![self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)), self.band.overlay_wake(), self.band.overlay_layer(self.theme)].map(Message::Band).boxed(),
+            (Some(ready), None) => {
+                // The docked window fills the window under the band; the band's own area holds nothing below it.
+                let below_band = iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed();
+                iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.dock_wake(), self.band.overlay_wake(), self.band.overlay_layer(self.theme)].map(Message::Band).boxed()
+            }
             (None, _) => styk_ui::prepaint(),
         }
     }
@@ -680,7 +684,8 @@ fn main() -> ExitCode {
         move || {
             let mut app = match app.borrow_mut().take() { Some(app) => app, None => unreachable!("iced initializes once") };
             app.band.open_all(&files);
-            (app, warm_up::warm_up(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady))
+            let layouts = app.band.load_layouts().map(Message::Band);
+            (app, Task::batch([layouts, warm_up::warm_up(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady)]))
         },
         App::update,
         App::view,
@@ -776,7 +781,7 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
     let result = match screen {
         Some(screen @ Screen::Inspector(..)) => headless::inspector_screenshot(screen, size, scale),
         Some(screen @ Screen::Stage(..)) => headless::stage_screenshot(screen, size, scale),
-        _ => headless::screenshot(theme, size, scale, sheet.as_ref(), screen.filter(|screen| screen.is_band())),
+        _ => headless::screenshot(theme, size, scale, sheet.as_ref(), screen.filter(|screen| screen.has_band())),
     }
     .and_then(|image| {
         mark!("first-frame");

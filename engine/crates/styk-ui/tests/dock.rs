@@ -1,0 +1,422 @@
+//! The docked window on mounted widgets: the dock's own widgets in the toolkit's headless renderer, their messages through
+//! the one handler (`message::update_at` into `Core::dispatch`), the tree's measured bounds and focus handed back to the core
+//! as the application does after every message, and the pointer and key mappings the application uses (`dock::track`,
+//! `dock::key`). What a gesture decides is `styk_core::dock`'s and is tested there; here the widgets are the unit, and what
+//! they make of a press, a drag and a key is judged by what the core ends up holding.
+use iced::keyboard::key::Named;
+use iced::keyboard::{Key, Modifiers};
+use iced::{Event, Point, Size, mouse};
+use styk_core::app::Core;
+use styk_core::commands::Command;
+use styk_core::dock::{self, ids};
+use styk_core::layout::{Axis, GroupId, Rect, Zone};
+use styk_design::Theme;
+use styk_design::widgets::focus;
+use styk_design::widgets::testing::{Driver, key_event};
+use styk_ui::dock::{Key as DockKey, Params};
+use styk_ui::message::{Message, update_at};
+
+const STAGE: GroupId = 1;
+const PROPERTIES: GroupId = 2;
+const TIMELINE: GroupId = 3;
+/// The band's height at a window this tall.
+const BAND: f32 = 52.0;
+
+struct World {
+    core: Core,
+    driver: Option<Driver<'static, Message>>,
+    now: u64,
+    size: Size,
+    /// The shell's focus state: F6 and Tab move it, from the same walks.
+    focus: styk_core::focus::FocusState,
+}
+
+fn element(core: &Core) -> iced::Element<'static, Message> {
+    let model = styk_ui::screens::inspector_model(styk_core::screens::InspectorScreen::Figure);
+    let presentation = styk_core::i18n::Presentation::english();
+    let params = Params { dock: core.dock(), theme: Theme::Light, presentation: &presentation, top: BAND };
+    styk_ui::dock::window(&params, Some(styk_ui::inspector::View::model(&model, &presentation, Theme::Light)), None)
+}
+
+impl World {
+    fn new(width: f32, height: f32) -> World {
+        let mut core = Core::default();
+        let size = Size::new(width, height);
+        core.dispatch(Command::Dock(dock::Event::Resized { width: f64::from(width), height: f64::from(height), scale: 1.0 }));
+        let mut world = World { driver: Some(Driver::new(element(&core), size, &styk_design::fonts::ALL)), core, now: 1_000, size, focus: styk_core::focus::FocusState::new() };
+        world.walk();
+        world
+    }
+
+    fn driver(&mut self) -> &mut Driver<'static, Message> {
+        self.driver.as_mut().expect("a driver")
+    }
+
+    /// The application's walk after a message: the tree's measured bounds and focus reach the core and the shell's state.
+    fn walk(&mut self) {
+        let snapshot = self.driver().snapshot();
+        focus::sync(&mut self.focus, &snapshot);
+        let _ = update_at(&mut self.core, Message::Snapshot(snapshot), self.now);
+    }
+
+    /// Delivers what the interface published, rebuilds the view from the core and walks it.
+    fn deliver(&mut self) {
+        loop {
+            let messages = self.driver().messages();
+            if messages.is_empty() {
+                break;
+            }
+            for message in messages {
+                let _ = update_at(&mut self.core, message, self.now);
+            }
+        }
+        let driver = self.driver.take().expect("a driver");
+        self.driver = Some(driver.rebuild(element(&self.core)));
+        self.walk();
+    }
+
+    /// A pointer event as the window delivers it: the widgets take it, then, while the dock tracks a press or a drag, the
+    /// application's subscription forwards it.
+    fn pointer(&mut self, event: mouse::Event) {
+        let tracking = self.core.dock().tracking();
+        if let mouse::Event::CursorMoved { position } = &event {
+            self.driver().point_at(*position);
+        }
+        self.driver().events(&[Event::Mouse(event.clone())]);
+        self.deliver();
+        if tracking && let Some(message) = styk_ui::dock::track(&Event::Mouse(event)) {
+            self.now += 5;
+            let _ = update_at(&mut self.core, message, self.now);
+            self.deliver();
+        }
+    }
+
+    fn moved(&mut self, x: f32, y: f32) {
+        self.pointer(mouse::Event::CursorMoved { position: Point::new(x, y) });
+    }
+
+    fn press(&mut self) {
+        self.pointer(mouse::Event::ButtonPressed(mouse::Button::Left));
+    }
+
+    fn release(&mut self) {
+        self.pointer(mouse::Event::ButtonReleased(mouse::Button::Left));
+    }
+
+    /// Presses at `from`, moves through `path` and lets go.
+    fn drag(&mut self, from: Point, path: &[(f32, f32)]) {
+        self.moved(from.x, from.y);
+        self.press();
+        for (x, y) in path {
+            self.moved(*x, *y);
+        }
+        self.release();
+    }
+
+    fn click(&mut self, at: Point) {
+        self.moved(at.x, at.y);
+        self.press();
+        self.release();
+    }
+
+    /// A key as the window delivers it: the dock's mapping first (the application's `dock_key`), then the widgets.
+    fn key(&mut self, key: Key, modifiers: Modifiers) {
+        let event = key_event(key.clone(), None, modifiers, true);
+        match styk_ui::dock::key(self.core.dock(), self.focus.focused(), &key, modifiers) {
+            DockKey::Send(event) => {
+                self.now += 5;
+                let _ = update_at(&mut self.core, Message::Command(Command::Dock(event)), self.now);
+            }
+            DockKey::Note(event) => {
+                let _ = update_at(&mut self.core, Message::Command(Command::Dock(event)), self.now);
+                self.driver().events(&[event_of(&key, modifiers)]);
+            }
+            DockKey::Pass => {
+                self.driver().events(&[event]);
+            }
+            DockKey::Swallow => {}
+        }
+        self.deliver();
+    }
+
+    fn bounds(&mut self, id: styk_core::focus::FocusId) -> Option<iced::Rectangle> {
+        self.driver().snapshot().bounds_of(id)
+    }
+
+    fn centre_of(&mut self, id: styk_core::focus::FocusId) -> Point {
+        let b = self.bounds(id).unwrap_or_else(|| panic!("{id:?} is not in the tree"));
+        Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0)
+    }
+
+    fn rect(&self, kind: &str) -> Rect {
+        let id = self.group_of(kind);
+        let s = self.core.dock().solution();
+        s.groups.get(&id).or(s.strips.get(&id)).copied().unwrap_or_else(|| panic!("{kind} is not placed"))
+    }
+
+    fn group_of(&self, kind: &str) -> GroupId {
+        self.core.dock().layout().groups().into_iter().find(|g| g.tabs.iter().any(|p| p.kind == kind)).map(|g| g.id).unwrap_or_else(|| panic!("{kind} is in no group"))
+    }
+
+    fn tabs_of(&self, group: GroupId) -> Vec<String> {
+        self.core.dock().layout().groups().into_iter().find(|g| g.id == group).map(|g| g.tabs.iter().map(|p| p.kind.clone()).collect()).unwrap_or_default()
+    }
+
+    fn resize(&mut self, width: f32, height: f32) {
+        self.size = Size::new(width, height);
+        // The window's size reaches the dock as the application sends it (`TopBand::resized`); the driver follows it.
+        self.core.dispatch(Command::Dock(dock::Event::Resized { width: f64::from(width), height: f64::from(height), scale: 1.0 }));
+        let driver = Driver::new(element(&self.core), self.size, &styk_design::fonts::ALL);
+        self.driver = Some(driver);
+        self.walk();
+    }
+
+    fn layout_now(&self) -> styk_core::layout::Layout {
+        self.core.dock().layout().clone()
+    }
+}
+
+fn event_of(key: &Key, modifiers: Modifiers) -> Event {
+    key_event(key.clone(), None, modifiers, true)
+}
+
+#[test]
+fn every_group_the_core_solved_is_mounted_with_its_tabs_and_dividers() {
+    let mut world = World::new(1560.0, 1000.0);
+    for tab in 0..3 {
+        assert!(world.bounds(ids::tab(PROPERTIES, tab)).is_some(), "tab {tab} of the inspector group is a target");
+    }
+    assert!(world.bounds(ids::body(STAGE)).is_some() && world.bounds(ids::body(TIMELINE)).is_some(), "the stage and the timeline are targets F6 can land on");
+    let dividers: Vec<_> = world.core.dock().dividers().into_iter().map(|d| (d.split, d.index)).collect();
+    assert_eq!(dividers.len(), 2);
+    for (split, index) in dividers {
+        assert!(world.bounds(ids::divider(split, index)).is_some(), "divider {split}/{index}");
+    }
+    // The tabs sit where the island's header says: 8 px in, 6 px down (`.shell-island > .shell-tabs`).
+    let header = world.core.dock().solution().groups[&PROPERTIES];
+    let first = world.bounds(ids::tab(PROPERTIES, 0)).unwrap();
+    assert!((first.x - (header.x as f32 + 10.0)).abs() <= 1.0 && (first.y - (header.y as f32 + 8.0)).abs() <= 1.0, "{first:?} in {header:?}");
+}
+
+#[test]
+fn a_tab_dragged_to_each_window_edge_docks_there_and_one_undo_puts_it_back() {
+    for (name, point) in [("left", (4.0, 400.0)), ("right", (1556.0, 400.0)), ("top", (700.0, 4.0)), ("bottom", (700.0, 996.0))] {
+        let mut world = World::new(1560.0, 1000.0);
+        let before = world.layout_now();
+        let library = world.centre_of(ids::tab(PROPERTIES, 2));
+        world.drag(library, &[(library.x - 30.0, library.y + 40.0), point]);
+        let moved = world.rect("library");
+        match name {
+            "left" => assert!(moved.x <= 8.5 && moved.h > 500.0, "{name}: {moved:?}"),
+            "right" => assert!((moved.x + moved.w - 1552.0).abs() < 1.5 && moved.h > 500.0, "{name}: {moved:?}"),
+            "top" => assert!(moved.y <= 60.5 && moved.w > 1000.0, "{name}: {moved:?}"),
+            _ => assert!((moved.y + moved.h - 992.0).abs() < 1.5 && moved.w > 1000.0, "{name}: {moved:?}"),
+        }
+        assert_eq!(world.tabs_of(PROPERTIES), ["properties", "vfx"], "{name}: the tab left its group");
+        // The drop's own mounted widgets show where it went: the moved panel's group has its own island and tab-less header.
+        assert!(world.bounds(ids::body(world.group_of("library"))).is_some());
+        world.key(Key::Character("z".into()), Modifiers::CTRL | Modifiers::ALT);
+        assert_eq!(world.layout_now(), before, "{name}: one undo");
+    }
+}
+
+#[test]
+fn a_tab_dropped_on_the_lower_quarter_of_the_stage_splits_it_and_on_its_middle_joins_it() {
+    let mut world = World::new(1560.0, 1000.0);
+    let stage = world.core.dock().solution().groups[&STAGE];
+    let vfx = world.centre_of(ids::tab(PROPERTIES, 1));
+    world.drag(vfx, &[(vfx.x - 40.0, vfx.y + 60.0), ((stage.x + stage.w / 2.0) as f32, (stage.y + stage.h - 20.0) as f32)]);
+    let (below, stage_now) = (world.rect("vfx"), world.rect("stage"));
+    assert!((below.y - (stage_now.y + stage_now.h)).abs() <= 8.5, "vfx sits under the stage: {below:?} under {stage_now:?}");
+    assert_eq!((below.x, below.w), (stage_now.x, stage_now.w));
+    // The library tab dropped in the middle of the stage's group becomes a tab of it.
+    let library = world.centre_of(ids::tab(PROPERTIES, 1));
+    let stage_now = world.rect("stage");
+    world.drag(library, &[(library.x - 40.0, library.y + 60.0), ((stage_now.x + stage_now.w / 2.0) as f32, (stage_now.y + stage_now.h / 2.0) as f32)]);
+    assert_eq!(world.tabs_of(STAGE), ["stage", "library"]);
+    assert!(world.bounds(ids::tab(STAGE, 1)).is_some(), "the stage's group shows its tab strip now");
+}
+
+#[test]
+fn dragging_a_tab_along_its_own_header_reorders_the_tabs() {
+    let mut world = World::new(1560.0, 1000.0);
+    let library = world.centre_of(ids::tab(PROPERTIES, 2));
+    let header = world.core.dock().solution().headers[&PROPERTIES];
+    world.drag(library, &[(library.x - 20.0, library.y), (header.x as f32 + 4.0, library.y)]);
+    assert_eq!(world.tabs_of(PROPERTIES), ["library", "properties", "vfx"]);
+    // The click that follows a drag activates nothing: the tab that was active still is.
+    assert_eq!(world.core.dock().layout().groups().into_iter().find(|g| g.id == PROPERTIES).map(|g| g.tabs[g.active].kind.clone()), Some("library".to_string()), "the dragged tab is the one in front, as a drop in a group makes it");
+}
+
+#[test]
+fn a_click_on_a_tab_activates_it_and_a_double_click_on_the_header_collapses_the_group_to_a_strip() {
+    let mut world = World::new(1560.0, 1000.0);
+    let vfx = world.centre_of(ids::tab(PROPERTIES, 1));
+    world.click(vfx);
+    let active = |w: &World| w.core.dock().layout().groups().into_iter().find(|g| g.id == PROPERTIES).map(|g| g.tabs[g.active].kind.clone());
+    assert_eq!(active(&world), Some("vfx".to_string()));
+    // Two presses on the empty part of the header within the double-click time: the group folds to its strip.
+    let header = world.core.dock().solution().headers[&PROPERTIES];
+    let empty = Point::new((header.x + header.w - 20.0) as f32, (header.y + 22.0) as f32);
+    world.click(empty);
+    world.click(empty);
+    assert!(world.core.dock().solution().strips.contains_key(&PROPERTIES), "collapsed");
+    assert!(world.bounds(ids::strip(PROPERTIES, 0)).is_some() && world.bounds(ids::tab(PROPERTIES, 0)).is_none(), "the strip's icons replace the tabs");
+    // A strip icon opens the flyout, and Escape closes it.
+    let icon = world.centre_of(ids::strip(PROPERTIES, 1));
+    world.click(icon);
+    assert_eq!(world.core.dock().open(), Some(PROPERTIES));
+    assert!(world.bounds(ids::tab(PROPERTIES, 0)).is_some(), "the flyout shows the group's tabs");
+    world.key(Key::Named(Named::Escape), Modifiers::default());
+    assert_eq!(world.core.dock().open(), None);
+}
+
+#[test]
+fn a_splitter_dragged_resizes_the_neighbours_live_and_one_undo_restores_both() {
+    let mut world = World::new(1560.0, 1000.0);
+    let before = world.layout_now();
+    let divider = world.core.dock().dividers().into_iter().find(|d| d.axis == Axis::Horizontal).map(|d| (d.split, d.index)).expect("a column divider");
+    let bar = world.centre_of(ids::divider(divider.0, divider.1));
+    world.moved(bar.x, bar.y);
+    world.press();
+    world.moved(bar.x - 20.0, bar.y);
+    world.moved(bar.x - 60.0, bar.y);
+    assert_eq!(world.rect("properties").w, 380.0, "the inspector follows the pointer while it is held");
+    assert_eq!(world.core.dock().resizing(), Some(divider));
+    world.release();
+    assert_eq!(world.rect("properties").w, 380.0);
+    assert_eq!(world.core.dock().resizing(), None);
+    world.key(Key::Character("z".into()), Modifiers::CTRL | Modifiers::ALT);
+    assert_eq!(world.layout_now(), before);
+}
+
+#[test]
+fn a_splitter_pressed_twice_in_a_double_click_resets_and_escape_during_a_drag_restores_the_start() {
+    let mut world = World::new(1560.0, 1000.0);
+    let divider = world.core.dock().dividers().into_iter().find(|d| d.axis == Axis::Horizontal).map(|d| (d.split, d.index)).expect("a column divider");
+    let bar = world.centre_of(ids::divider(divider.0, divider.1));
+    world.drag(bar, &[(bar.x - 50.0, bar.y)]);
+    assert_eq!(world.rect("properties").w, 370.0);
+    // Held, moved, and Escape: back to the start.
+    let bar = world.centre_of(ids::divider(divider.0, divider.1));
+    world.moved(bar.x, bar.y);
+    world.press();
+    world.moved(bar.x - 30.0, bar.y);
+    assert_eq!(world.rect("properties").w, 400.0);
+    world.key(Key::Named(Named::Escape), Modifiers::default());
+    world.release();
+    assert_eq!(world.rect("properties").w, 370.0);
+    // The splitter's own keys: Home resets to the default, an arrow moves 12 px.
+    let id = ids::divider(divider.0, divider.1);
+    world.driver().focus(id);
+    world.driver().press(Named::Home);
+    world.deliver();
+    assert_eq!(world.rect("properties").w, 320.0);
+    world.driver().press(Named::ArrowLeft);
+    world.deliver();
+    assert_eq!(world.rect("properties").w, 332.0);
+}
+
+#[test]
+fn the_right_dock_folds_at_800_and_unfolds_at_816_through_the_mounted_widgets() {
+    let mut world = World::new(1000.0, 800.0);
+    let has_tabs = |w: &mut World| w.bounds(ids::tab(PROPERTIES, 0)).is_some();
+    assert!(has_tabs(&mut world));
+    world.resize(800.0, 800.0);
+    assert!(!has_tabs(&mut world), "folded: the sheet shows nothing until it is opened");
+    world.resize(810.0, 800.0);
+    assert!(!has_tabs(&mut world), "810 is still folded: the dock waits for 816");
+    world.resize(820.0, 800.0);
+    assert!(has_tabs(&mut world), "820 unfolds it");
+    world.resize(805.0, 800.0);
+    assert!(has_tabs(&mut world), "and 805 does not fold it again");
+    world.resize(790.0, 800.0);
+    assert!(!has_tabs(&mut world));
+    // The sheet opens over the stage, shows the group's tabs and closes with Escape.
+    world.core.dispatch(Command::Dock(dock::Event::Open { group: PROPERTIES, tab: 0 }));
+    world.deliver();
+    assert!(has_tabs(&mut world), "the sheet is mounted");
+    world.key(Key::Named(Named::Escape), Modifiers::default());
+    assert!(!has_tabs(&mut world));
+    assert!(!world.core.dock().modified() && !world.core.dock().can_undo(), "folding never wrote the arrangement");
+}
+
+#[test]
+fn escape_cancels_a_drag_in_progress_and_leaves_the_arrangement_and_its_history_alone() {
+    let mut world = World::new(1560.0, 1000.0);
+    let before = world.layout_now();
+    let library = world.centre_of(ids::tab(PROPERTIES, 2));
+    world.moved(library.x, library.y);
+    world.press();
+    world.moved(library.x - 30.0, library.y + 40.0);
+    world.moved(4.0, 400.0);
+    let drag = world.core.dock().drag().expect("a drag is in progress");
+    assert!(matches!(drag.zone, Some(Zone::WindowEdge { .. })) && drag.preview.is_some(), "{drag:?}");
+    world.key(Key::Named(Named::Escape), Modifiers::default());
+    assert!(world.core.dock().drag().is_none());
+    world.release();
+    assert_eq!(world.layout_now(), before);
+    assert!(!world.core.dock().can_undo() && !world.core.dock().modified());
+}
+
+#[test]
+fn f6_moves_between_the_stage_the_inspector_and_the_timeline_and_ctrl_f6_back() {
+    let mut world = World::new(1560.0, 1000.0);
+    world.driver().focus(ids::tab(PROPERTIES, 0));
+    world.walk();
+    let f6 = |modifiers| key_event(Key::Named(Named::F6), None, modifiers, true);
+    let mut visited = Vec::new();
+    for _ in 0..3 {
+        let target = focus::navigate(&mut world.focus, &f6(Modifiers::default())).expect("F6 lands on a group");
+        world.driver().focus(target);
+        world.walk();
+        visited.push(target);
+    }
+    assert_eq!(visited, [ids::body(STAGE), ids::body(TIMELINE), ids::tab(PROPERTIES, 0)], "the inspector, then the stage, the timeline and round again");
+    let back = focus::navigate(&mut world.focus, &f6(Modifiers::CTRL)).expect("Ctrl+F6 goes back");
+    assert_eq!(back, ids::body(TIMELINE));
+}
+
+#[test]
+fn the_keyboard_move_previews_each_place_and_enter_moves_the_focused_panel() {
+    let mut world = World::new(1560.0, 1000.0);
+    let before = world.layout_now();
+    world.driver().focus(ids::tab(PROPERTIES, 1));
+    world.walk();
+    world.key(Key::Character("m".into()), Modifiers::CTRL | Modifiers::ALT);
+    let first = world.core.dock().drag().expect("a place is previewed");
+    assert!(first.preview.is_some());
+    // The overlay draws the preview and its name through the dock's own widgets.
+    world.key(Key::Named(Named::ArrowRight), Modifiers::default());
+    let second = world.core.dock().drag().expect("the next place");
+    assert_ne!(first.zone, second.zone);
+    // Any other key is swallowed while the panel moves.
+    world.key(Key::Character("q".into()), Modifiers::default());
+    assert!(world.core.dock().moving());
+    world.key(Key::Named(Named::Escape), Modifiers::default());
+    assert!(!world.core.dock().moving());
+    assert_eq!(world.layout_now(), before);
+    world.key(Key::Character("m".into()), Modifiers::CTRL | Modifiers::ALT);
+    world.key(Key::Named(Named::Enter), Modifiers::default());
+    assert_ne!(world.layout_now(), before);
+    assert!(world.core.dock().can_undo());
+}
+
+#[test]
+fn a_change_made_through_the_widgets_is_saved_and_a_new_window_loads_it_back() {
+    let mut world = World::new(1560.0, 1000.0);
+    let vfx = world.centre_of(ids::tab(PROPERTIES, 1));
+    world.drag(vfx, &[(vfx.x - 40.0, vfx.y + 60.0), (1556.0, 400.0)]);
+    let changed = world.layout_now();
+    let due = world.core.dock().deadline().expect("a write is queued");
+    assert!(world.core.dock_mut().take_save(due - 1).is_none(), "nothing before the debounce");
+    let file = world.core.dock_mut().take_save(due).expect("the write is due on the injected clock");
+    world.core.dock_mut().save_done(true, due);
+    let mut fresh = World::new(1560.0, 1000.0);
+    assert_ne!(fresh.layout_now(), changed);
+    let effects = fresh.core.dock_mut().loaded(dock::Stored::File(file), 5_000);
+    assert!(effects.is_empty(), "{effects:?}");
+    fresh.deliver();
+    assert_eq!(fresh.layout_now(), changed);
+    assert!(fresh.core.dock().deadline().is_none(), "loading writes nothing");
+}

@@ -146,7 +146,9 @@ fn fit_tree<'a>(
             continue;
         };
         let side = out.fit.sides[&g.id];
-        let compact = host.is_none() && matches!(t, Tier::Compact | Tier::Minimal);
+        // Today's compact and minimal widths fold the left column to a strip and the right to a sheet; the timeline stays
+        // docked (only a low window folds it, below).
+        let compact = host.is_none() && matches!(t, Tier::Compact | Tier::Minimal) && side != Side::Bottom;
         let low = host.is_none() && window.h <= 568. && side == Side::Bottom;
         let previous = e.previous.release.get(&g.id).copied();
         let held = previous.is_some_and(|size| window.w < size.w || window.h < size.h);
