@@ -553,6 +553,10 @@ impl Host {
     pub fn anchor_at(&self, x: f64, y: f64) -> Option<FocusId> {
         self.top().and_then(|top| top.anchor).filter(|id| self.bounds.iter().any(|(key, b)| key == id && x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height))
     }
+    /// The innermost focus target whose bounds, as the last walk of the tree measured them, hold this point.
+    pub fn target_at(&self, x: f64, y: f64) -> Option<FocusId> {
+        self.bounds.iter().rev().find(|(_, b)| x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height).map(|(id, _)| *id)
+    }
     pub fn press_sequence(&self) -> u64 { self.press_sequence }
     pub fn now(&self) -> u64 { self.now }
     fn schedule_animation(&mut self, now: u64, fired: bool) {

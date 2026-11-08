@@ -102,6 +102,8 @@ pub enum Expect {
     History(usize),
     /// What the recovery views show.
     Recovery(RecoveryExpect),
+    /// Something about the docked window.
+    Dock(DockExpect),
 }
 
 /// What a script says the recovery views show (1-based numbers count the copies in the chooser's order).
@@ -144,6 +146,33 @@ pub enum RecoveryStep {
     Prompt(String),
     /// Let the documents host's workers answer (a restore or a discard in flight).
     Settle,
+}
+
+/// What a script says about the docked window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DockExpect {
+    /// A panel's group is at this rectangle (x, y, width, height in logical window pixels, within a pixel).
+    Rect { panel: String, rect: [i32; 4] },
+    /// Whether the arrangement differs from the one it began from.
+    Modified(bool),
+    /// How many tabs the panel's group holds.
+    Tabs { panel: String, count: usize },
+}
+
+/// What a script does in the docked window, through the dock's own events: the pointer's press, moves and release.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum DockStep {
+    /// Drag a panel's tab to a place: `edge-left`, `edge-right`, `edge-top`, `edge-bottom`, another panel (a tab of its
+    /// group), or another panel and a side (`stage:below`: the quarter of its group on that side).
+    Drag { panel: String, to: String },
+    /// Hold the first column divider and move it this many pixels along its axis.
+    Resize(f64),
+    /// Double-click a panel's group header: collapse or expand it.
+    Collapse(String),
+    /// Undo the last layout change.
+    Undo,
 }
 
 /// What a script does in the Properties panel, through its widgets.
@@ -221,6 +250,8 @@ pub enum Step {
     Inspector(InspectorStep),
     /// A step in the recovery views.
     Recovery(RecoveryStep),
+    /// A step in the docked window.
+    Dock(DockStep),
     /// Check something.
     Expect(Expect),
     /// Write the window to a PNG (relative to the script).
@@ -384,7 +415,13 @@ fn expectation(words: &[&str], line: usize) -> Result<Expect, ScriptError> {
         ["recovery", "error", answer @ ("yes" | "no")] => Expect::Recovery(RecoveryExpect::Error(*answer == "yes")),
         ["recovery", "copies", n] => Expect::Recovery(RecoveryExpect::Copies(n.parse().map_err(|_| bad("recovery copies wants a count"))?)),
         ["recovery", "selected", n] => Expect::Recovery(RecoveryExpect::Selected(number(n, line, "recovery selected")?)),
-        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost>, width <n>, property <name> <number>, history <count> or recovery <offer shown|hidden, chooser open|closed, prompt open|closed, error yes|no, copies <n>, selected <n>>")),
+        ["dock", "rect", panel, x, y, w, h] => {
+            let number = |text: &str| text.parse::<i32>().map_err(|_| bad("dock rect wants four whole numbers"));
+            Expect::Dock(DockExpect::Rect { panel: (*panel).to_string(), rect: [number(x)?, number(y)?, number(w)?, number(h)?] })
+        }
+        ["dock", "modified", answer @ ("yes" | "no")] => Expect::Dock(DockExpect::Modified(*answer == "yes")),
+        ["dock", "tabs", panel, n] => Expect::Dock(DockExpect::Tabs { panel: (*panel).to_string(), count: n.parse().map_err(|_| bad("dock tabs wants a count"))? }),
+        _ => return Err(bad("expect wants: front <n>, order <n,n,..>, tabs <count>, workspace <name>, folds <list|none>, board <open|closed>, dirty <n> <yes|no>, tab <n> <none|edited|saving|saved>, export <primary|ghost>, width <n>, property <name> <number>, history <count>; dock rect <panel> <x> <y> <w> <h>, dock modified <yes|no>, dock tabs <panel> <count>, or recovery <offer shown|hidden, chooser open|closed, prompt open|closed, error yes|no, copies <n>, selected <n>>")),
     })
 }
 
@@ -600,6 +637,13 @@ impl Script {
                     ["prompt", button @ ("save" | "dont-save" | "cancel" | "retry")] => RecoveryStep::Prompt((*button).to_string()),
                     ["settle"] => RecoveryStep::Settle,
                     _ => return Err(wants("offer <not-now|manage|restore>, chooser <pick <n>|restore|discard|cancel>, prompt <save|dont-save|cancel|retry> or settle")),
+                }),
+                "dock" => Step::Dock(match words.as_slice() {
+                    ["drag", panel, to] => DockStep::Drag { panel: (*panel).to_string(), to: (*to).to_string() },
+                    ["resize", delta] => DockStep::Resize(delta.parse().ok().filter(|n: &f64| n.is_finite()).ok_or_else(|| wants("resize <pixels>"))?),
+                    ["collapse", panel] => DockStep::Collapse((*panel).to_string()),
+                    ["undo"] => DockStep::Undo,
+                    _ => return Err(wants("drag <panel> <place>, resize <pixels>, collapse <panel> or undo")),
                 }),
                 "screenshot" if !rest.is_empty() => Step::Screenshot(PathBuf::from(rest)),
                 "screenshot" => return Err(wants("a path")),

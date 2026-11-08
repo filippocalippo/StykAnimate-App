@@ -13,7 +13,7 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
-**Updated 2026-11-08 19:00.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
+**Updated 2026-11-09 00:30.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
 tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had only merged N0). Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
@@ -31,7 +31,7 @@ seed store `wt/shared-target` is back (crates.io dependencies; `node perf/make-s
 Windows only (the architecture stays portable). GPT-6 Astra implements back-end and logic, Sonnet the screens, one Opus
 implementer the reference slice (the interface architecture and the Inspector, `docs/native/patterns.md`); GPT-6.1 Sol is
 the only reviewer, by risk; logic stays out of the views; `cargo xtask check` guards the rules. In-flight chunks finish with
-no new review round unless a finding is a blocker.
+no new review round unless a finding is a blocker. **Process additions of 2026-11-08** (N8): a self-check against `native-common.md`'s Known findings before every hand-in; a half-page plan checked by Sol before coding for high-risk and new-owner chunks; only purely cosmetic findings in screen chunks may merge, each recorded in the workspace's polish list below and cleared before that workspace's gate; no idle implementers. Screen chunks with new behaviour are two steps: Astra's core part, then Sonnet's views.
 
 **In flight.**
 
@@ -96,13 +96,21 @@ high-risk or unclear one reverts its chunk); no catch-up merges into branches wi
 | N2 | Sonnet | **merged `337b2906`** (alone, pass green, pushed; Sol high: three majors and a minor, fixed): the stage's iced shader widget on K-stage's painter contract, navigation through the core, a coalesced `Progress` wake (the scheduler, the painter and the pen queue) instead of polling, focus loss resetting navigation, the paint worker's failure kept, a new painter on surface recreation (a vendored compositor change), the stage closed with its document; `stage-fit` screens (app-only: they need a real frame) and an automated interaction ending on `styk export`'s frame. Not yet placed in the live window: K-dock's views do that |
 | K-widgets-a | Sonnet | **merged `ff688d50`** (pass green, pushed; the catalogue is the union of the stage and controls screens, 27) (Sol high: a blocker, the select's menu never shown through `FieldFrame`, and two majors, fixed and re-checked clean): the shared controls in `styk-design::widgets` (buttons, switches, checkboxes, radios, segmented, sliders, number fields, select, colour field, chips, badges, the field frame), every Inspector control drawn through them, value rules in `styk_core::controls` and `number`, `InputRole` set in each constructor; the `controls` screens 0.0092/0.0091 (limit 0.011), identical in the preview. Open: the select opens by click only (to K-widgets-b) |
 | K-widgets-b | Sonnet, then Astra | **merged `201467db`** (pass green, pushed): menus, the select on the anchored menu (keyboard opening as today), popovers, tooltips, toasts, dialogs and sheets, and the panel parts (tabs, splitters, scroll areas, sections, list rows, progress, steppers); `Core` owns the overlay host and every decision and animation is a core deadline (Astra's half), the layer is mounted in the app and the tests drive mounted widgets (Sonnet's half); 16 screens, all in the preview. Sol high: two blockers and seven majors, then two more majors, all fixed |
-| K-dock views 1 | Sonnet | running (`perf/briefs/native/K-dock-views.md`): the main window laid out by `styk_core::layout`: the band, splits, tab groups, folding, the stage and the Inspector placed, drag and drop with the core's targets and preview, layout undo, F6, persistence through `LayoutStore` with today's layout imported. Part 2: floating OS windows, monitors, presets |
-| Lint | Astra | running: `styk-math`'s clippy findings allowed with reasons (V8-exact arithmetic untouched), so workspace clippy reaches every crate |
+| K-dock views 1 | Sonnet, then Astra | **merged `fcbfce40`** (pass green, 1,212 tests, pushed; `docs/native/docking-views.md`): the main window laid out by `styk_core::layout`: the band, splits, tab groups with closing (docked, flyouts, sheets), folding by the design's compact rule, flyout, sheet and tool-rail rectangles from the solver, the stage and the Inspector placed, drag and drop with the core's targets and preview, layout undo and arrange as registered commands, F6 by group regions, persistence through `LayoutStore` with cross-launch stamps, writer ids and late-load reconciliation, today's layout imported. Sol high: a blocker (cross-launch save loss) and ten majors, fixed in two steps (Astra's core, Sonnet's views), then two majors. Part 2: floating OS windows, monitors, presets |
+| Lint | Astra | **merged `6f62f7b1`**: `styk-math`'s findings allowed with reasons (arithmetic untouched); workspace clippy is `cargo clippy --workspace --all-targets --exclude styk-wasm` |
+| MP | Astra | **merged `7bc34e4e`**: a bounded, off-by-default memory probe (regions, heaps, stacks, images, DXGI video memory) shared by the CLI log and the developer tools; at A's 4K peak about 1.25 GiB of private regions have no known owner (very likely the graphics driver's; allocation provenance next) |
+| K-rec views | Sonnet, then Astra | ready, in review fixes: the recovery offer, chooser, busy and error states and the close prompt (10 screens), the band's labels through `i18n`; the close, quit and recovery wiring rewritten by Astra after Sol xhigh (a blocker: copies a running Electron owns; six majors), re-checked: one major left (a bounded shutdown escape for a stalled checkpoint), fixing |
+| K-timeline (core) | Astra | plan approved with changes (the Settings design's owner built minimally now; navigation geometry in part 1); building part 1 (`perf/briefs/native/K-timeline-core.md`) |
 
 The automation mode is one language, `styk_core::automation` (merged with K-shell, header `styk-auto/1`); K-dev's runners,
 K-stage's steps and R-slice's panel test move onto it. Then the skeleton gate (full suites, parity, the native smokes, screenshots, the benchmark, `cargo xtask check --wasm`, and
 the quiet-machine latency checks, `#[ignore]`d with their commands: the export's flush cancel 250 ms, the audio-pass cancel
 1 s, the decoder timeout 3 s, the counting allocator's measured cost).
+
+**Polish lists** (cosmetic findings merged with an entry; one fixer clears each list before its workspace's gate, which never passes with it non-empty):
+
+- Skeleton: empty.
+- Animate: empty.
 
 **Kept off the branches on purpose.** `t3/fix-save-differs` and `t3/resave-keeps-layout` change saved bytes: the owner's
 decision, unmerged. `t3/speed-joint-drag-frame` is an unfinished optimisation with no measured gain: not this phase's.

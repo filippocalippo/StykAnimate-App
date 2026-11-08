@@ -61,6 +61,8 @@ pub enum Wake {
     SaveCheck,
     /// The documents host's workers have something for the core (a finished open, save or recovery job).
     Documents,
+    /// The layout storage lane has a completed load or save.
+    Layouts,
 }
 
 /// The application supplies a bounded, nonblocking notification callback.

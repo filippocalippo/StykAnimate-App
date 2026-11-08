@@ -12,7 +12,7 @@ use crate::overlay::Kind;
 use styk_services::recovery::Slot;
 use std::time::Duration;
 
-enum SessionEnd { Checkpoint(Duration), Expired }
+enum SessionEnd { Checkpoint(Duration), Released, Expired }
 
 /// The chooser while it is open.
 struct Open {
@@ -250,7 +250,7 @@ impl Panel {
 
     pub(crate) fn session_end(&mut self, now: Duration, timeout: Duration) {
         // Repeated OS queries cannot extend a checkpoint's budget.
-        if self.session_end.is_none() { self.session_end = Some(SessionEnd::Checkpoint(now.saturating_add(timeout))); }
+        if matches!(self.session_end, None | Some(SessionEnd::Released)) { self.session_end = Some(SessionEnd::Checkpoint(now.saturating_add(timeout))); }
     }
 
     pub(crate) fn session_end_deadline(&self) -> Option<Duration> {
@@ -258,6 +258,7 @@ impl Panel {
     }
 
     pub(crate) fn session_end_expired(&self) -> bool { matches!(self.session_end, Some(SessionEnd::Expired)) }
+    pub(crate) fn session_end_requested(&self) -> bool { self.session_end.is_some() }
 
     pub(crate) fn session_end_tick(&mut self, now: Duration, documents: &mut Documents) -> Vec<Effect> {
         if !self.session_end_deadline().is_some_and(|due| now >= due) { return Vec::new(); }
@@ -279,7 +280,7 @@ impl Panel {
 
     fn checkpoint_finished(&mut self) -> Vec<Effect> {
         if matches!(self.session_end, Some(SessionEnd::Checkpoint(_))) {
-            self.session_end = None;
+            self.session_end = Some(SessionEnd::Released);
             vec![Effect::SessionCheckpointFinished]
         } else { Vec::new() }
     }
@@ -294,7 +295,7 @@ impl Panel {
                 if response && let Some(prompt) = self.closing.take() && is_open(host, prompt.overlay) {
                     effects.extend(close(host, focus, prompt.overlay));
                 }
-                if cancelled { self.quit_requested = false; }
+                if cancelled { self.quit_requested = false; self.session_end = None; }
                 effects.extend(self.effect(&answer, documents, host, focus));
                 effects
             }
@@ -306,6 +307,7 @@ impl Panel {
                 self.pending = None;
                 self.quit_requested = false;
                 let mut effects = self.checkpoint_finished();
+                self.session_end = None;
                 // Only Busy leaves K-doc's question alive. A stale/failed answer consumed it.
                 if response && let Some(prompt) = self.closing.take() && is_open(host, prompt.overlay) {
                     effects.extend(close(host, focus, prompt.overlay));
@@ -335,9 +337,11 @@ impl Panel {
             Doc::Recovery(crate::documents::recovery::Event::Started) | Doc::Started(_) | Doc::ScopeChanged(_) => return vec![Effect::PollDocuments],
             Doc::QuitReady => { self.quit_requested = false; let mut effects = self.checkpoint_finished(); effects.push(Effect::QuitReady); return effects; }
             Doc::Failed { .. } | Doc::Stale(_) | Doc::Cancelled(_) | Doc::Recovery(crate::documents::recovery::Event::Failed(_)) => {
-                if self.pending.is_none() && self.closing.is_none() && !documents.close_checkpoint_pending() {
+                if self.quit_requested && self.pending.is_none() && self.closing.is_none() && !documents.close_checkpoint_pending() {
                     self.quit_requested = false;
-                    return self.checkpoint_finished();
+                    let effects = self.checkpoint_finished();
+                    self.session_end = None;
+                    return effects;
                 }
                 return Vec::new();
             }

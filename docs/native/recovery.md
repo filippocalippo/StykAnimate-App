@@ -164,16 +164,25 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
   `%APPDATA%StykAnimate`, so the copies Electron left are offered) or, for an independent window, over its `workspaces/<pid>`
   directory (`Shell::workspace`), as this page's "Disk compatibility" says; the settings folder of K-store
   (`%LOCALAPPDATA%StykAnimatesettings`) is where preferences live, not recovery copies. `TopBand::new` attaches it with
-  `Documents::attach_recovery` on the application clock. The documents host's `notify` is `Wake::Documents`, a fourth coalesced
-  reason of the window's wake stream (`wakes.rs`); each wake is `top_band::Message::Documents`, which polls the host and hands every
-  effect to `Core::document_effect`. The lane's deadline (`Documents::recovery_deadline`) is one scheduled redraw
-  (`TopBand::recovery_wake`, the overlay deadline's adapter), so nothing runs while it has none. Closing asks the host
+  `Documents::attach_recovery` on the application clock. The documents host's `notify` is `Wake::Documents`; layout load/save receipts use `Wake::Layouts`
+  in the same coalesced window wake stream (`wakes.rs`). Each document wake polls the host and hands every
+  effect to `Core::document_effect`. One scheduled redraw (`TopBand::wake_widget`) follows `Core::wake_deadline`: the earliest
+  of recovery, the session-end bound, the overlay host and the layout save queue, so nothing runs while all are idle. Closing asks the host
   (`TopBand::ask_to_quit`, `Request::Quit`): unsaved projects open the close prompt with its recovery retry, the window ends on the
   host's `QuitReady` (`top_band::Request::QuitReady`) once the lane has finished its copies; an unattended run does not ask.
   `styk-app/src/recovery_wiring_tests.rs` drives `App::close`, returned iced tasks, the real coalesced wake
   stream, the mounted deadline widget and mounted recovery controls over a private local store.
   It never supplies periodic document polls. The playback, scrub, drawing, import and export
   owners do not yet report `set_recovery_activity`.
+
+**Quit order.** The documents host decides first: Busy keeps the intent, the close prompt stays until its answer is
+accepted, and Save/Discard/Cancel and recovery finish before `QuitReady` grants window exit. Input is then fenced so it cannot
+create new unsaved work while preferences drain. An ordinary quit flushes the layout `SaveQueue` without its debounce, waits
+for its worker receipt, then saves window placement and ends. A refused final layout write abandons the proposal while atomic
+storage preserves the last complete file, including layouts a later launch needs. Session end retains its identity after the
+checkpoint: once documents grant `QuitReady` (including bound expiry), the app cancels and detaches layout work, skips placement
+persistence, releases the shutdown block and ends immediately. A session request during an already approved ordinary quit
+also takes this path. Neither preference lane extends the platform-derived session bound; detached replies cannot restart quit.
 
 **OS session end.** The platform window subclass translates `WM_QUERYENDSESSION` and a forced
 `WM_ENDSESSION` into the same guarded quit. Query replies immediately with refusal while it posts
@@ -192,7 +201,7 @@ window. A configured zero means no wait. See [Windows' timeout query](https://le
 and [Vista's shutdown contract](https://learn.microsoft.com/en-us/windows/win32/shutdown/shutdown-changes-for-windows-vista).
 These OS values establish the bound; no measurement or test threshold selects it.
 
-`TopBand::recovery_wake` schedules the earliest recovery or session deadline even while a worker is
+`TopBand::wake_widget` includes the session deadline even while a worker is
 pending. Repeated queries cannot extend it. Expiry is checked before consuming worker replies: it
 cancels and detaches both document lanes through their existing asynchronous teardown, emits
 `SessionCheckpointFinished` and `QuitReady`, and skips the final window-placement save. It does not

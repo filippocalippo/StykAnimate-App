@@ -31,7 +31,11 @@ impl Log {
         styk_trace::counter!("memory.rust.live", heap);
         styk_trace::counter!("memory.gpu.live", allocator.as_ref().map_or(0, |r| r.total_allocated_bytes));
         styk_trace::counter!("memory.gpu.reserved", allocator.as_ref().map_or(0, |r| r.total_reserved_bytes));
-        let value = json!({"phase":phase,"tick":tick,"private":private,"rust_live":heap,
+        let (tx, rx) = mpsc::sync_channel(1);
+        styk_devtools_engine::memory::request(&styk_platform::diagnostics::NativeDiagnostics, Box::new(move |report| { let _ = tx.send(report); }))?;
+        // Offline CLI only: UI users receive the same service asynchronously.
+        let attribution = rx.recv().map_err(|e| e.to_string())??;
+        let value = json!({"attribution":attribution,"phase":phase,"tick":tick,"private":private,"rust_live":heap,
             "rust_peak":styk_alloc::peak_bytes(),"gpu":allocator.as_ref().map(|r| json!({
                 "allocated":r.total_allocated_bytes,"reserved":r.total_reserved_bytes,"owners":owners,
                 "blocks":r.blocks.iter().map(|b| b.size).collect::<Vec<_>>()
@@ -149,4 +153,17 @@ fn stage_run(args: &[String]) -> Result<(), String> {
     result?;
     println!("stage memory: complete");
     Ok(())
+}
+
+/// Offline entry point for the developer engine's one-shot process capture.
+pub fn capture(args: &[String]) -> i32 {
+    let result = (|| -> Result<(), String> {
+        if args.len() != 1 { return Err("styk memory-capture <new.styktrace>".into()); }
+        let (tx, rx) = mpsc::sync_channel(1);
+        styk_devtools_engine::memory::request_capture(&styk_platform::diagnostics::NativeDiagnostics, 2 * 1024 * 1024, Box::new(move |report| { let _ = tx.send(report); }))?;
+        let capture = rx.recv().map_err(|e| e.to_string())??;
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&args[0]).map_err(|e| e.to_string())?;
+        capture.write(&mut file)
+    })();
+    match result { Ok(()) => 0, Err(e) => { eprintln!("{e}"); 1 } }
 }

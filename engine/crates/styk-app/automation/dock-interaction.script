@@ -1,0 +1,45 @@
+styk-auto/1
+# The docked window's interaction check (docs/native/docking-views.md): a tab dragged to another group's side, a divider held,
+# a tab dragged to a window edge, a group collapsed, and the layout's own undo after each. The steps press, move and release
+# the dock's own events through the handler the widgets reach. Run from the repository root with a profile of its own, so
+# the run writes nothing of the person's:
+#   LOCALAPPDATA=<empty folder> STYK_USER_DATA_DIR=<empty folder> STYK_BACKGROUND_WINDOW=1 stykanimate --size 1560x1000 --clock fixed --automation engine/crates/styk-app/automation/dock-interaction.script
+resize 1560 1000
+wait 5
+expect dock rect stage 8 60 1216 646
+expect dock rect properties 1232 60 320 646
+expect dock rect timeline 8 712 1544 280
+expect dock tabs properties 3
+expect dock modified no
+screenshot ../../../../tmp/interaction/dock-opened.png
+
+# Library dragged onto the lower side of the stage splits the stage's column; one undo puts it back.
+dock drag library stage:below
+expect dock tabs properties 2
+expect dock rect library 8 346 1216 360
+expect dock modified yes
+screenshot ../../../../tmp/interaction/dock-split.png
+dock undo
+expect dock tabs properties 3
+expect dock rect stage 8 60 1216 646
+expect dock modified no
+
+# The divider between the stage and the inspector, held and moved 60 px left, is one undo.
+dock resize -60
+expect dock rect properties 1172 60 380 646
+dock undo
+expect dock rect properties 1232 60 320 646
+
+# VFX dragged to the left edge becomes a column of its own.
+dock drag vfx edge-left
+expect dock tabs properties 2
+expect dock rect vfx 8 60 320 932
+dock undo
+expect dock tabs properties 3
+
+# A double click on the inspector's header folds the group to its strip, and the stage takes the room.
+dock collapse properties
+expect dock rect properties 1512 60 40 646
+dock undo
+expect dock rect properties 1232 60 320 646
+expect dock modified no

@@ -13,6 +13,13 @@ pub trait Clock: Send + Sync {
     fn now(&self) -> Duration;
 }
 
+/// Persistence time is comparable between launches, unlike the monotonic scheduling clock.
+/// The host samples it and injects the value into the core; the writer is unique to this process session.
+pub trait WallClock: Send + Sync {
+    fn unix_millis(&self) -> u64;
+    fn writer(&self) -> &str;
+}
+
 #[cfg(any(test, feature = "test-fakes"))]
 #[path = "../tests/support/clock.rs"]
 pub mod test_fakes;

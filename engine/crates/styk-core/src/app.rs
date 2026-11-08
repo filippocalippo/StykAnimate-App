@@ -47,6 +47,8 @@ pub struct Core {
     select_commands: Option<(crate::focus::FocusId, Vec<Option<Command>>)>,
     presentation: Presentation,
     recovery: crate::recovery::Panel,
+    /// The docked window's arrangement, gestures and saves (`docs/native/docking-views.md`).
+    dock: crate::dock::Dock,
 }
 
 impl Default for Core {
@@ -65,6 +67,7 @@ impl Default for Core {
             select_commands: None,
             presentation: Presentation::english(),
             recovery: crate::recovery::Panel::default(),
+            dock: crate::dock::Dock::new(crate::layout::Size { w: 1560.0, h: 1000.0 }, 1.0, "unhosted"),
         }
     }
 }
@@ -209,6 +212,7 @@ impl Core {
 
     pub fn session_end_deadline(&self) -> Option<std::time::Duration> { self.recovery.session_end_deadline() }
     pub fn session_end_expired(&self) -> bool { self.recovery.session_end_expired() }
+    pub fn session_end_requested(&self) -> bool { self.recovery.session_end_requested() }
 
     /// Run before polling worker replies, including replies queued at the deadline.
     pub fn session_end_tick(&mut self, now: std::time::Duration) -> Vec<Effect> {
@@ -250,6 +254,14 @@ impl Core {
     /// At that wake dispatch `Command::Overlay { event: Event::Tick, now }`.
     pub fn overlay_deadline(&self) -> Option<u64> { self.overlays.next_deadline() }
 
+    /// One window wake for recovery, session end, overlays and an available layout lane.
+    /// An occupied lane resumes from its worker receipt, not repeated expired deadlines.
+    pub fn wake_deadline(&self, layouts_ready: bool) -> Option<u64> {
+        self.documents.recovery_deadline().into_iter().chain(self.session_end_deadline())
+            .map(|due| due.as_millis().min(u128::from(u64::MAX)) as u64)
+            .chain(self.overlay_deadline()).chain(layouts_ready.then(|| self.dock.deadline()).flatten()).min()
+    }
+
     fn overlay_event(&mut self, event: crate::overlay::host::Event, now: u64) -> Vec<Effect> {
         use crate::overlay::host::Purpose;
         let invoker = self.overlays.menus().iter().find_map(|m| match m.purpose() {
@@ -288,7 +300,53 @@ impl Core {
             Command::Recovery(event) => self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus),
             Command::Activate(id) => self.activate(id),
             Command::Stage(event) => self.stage_event(event),
+            Command::Dock(event) => {
+                let now = self.overlays.now();
+                // A press on a header does not say which tab it landed on: the tree's last walk measured each tab.
+                let event = match event {
+                    crate::dock::Event::HeaderPressed { group, tab: None, x, y } => {
+                        let tab = self.overlays.target_at(x, y).and_then(crate::dock::ids::group_of).filter(|(g, _)| *g == group).map(|(_, i)| i);
+                        crate::dock::Event::HeaderPressed { group, tab, x, y }
+                    }
+                    other => other,
+                };
+                let effects = self.dock.handle(event, now);
+                self.dock_effects(effects)
+            }
         }
+    }
+
+    /// The docked window: the arrangement, the solution for the window and the gesture in progress.
+    pub fn dock(&self) -> &crate::dock::Dock {
+        &self.dock
+    }
+
+    /// The dock, for the host that starts it (the window's size, the stored arrangements) and runs its writes.
+    pub fn dock_mut(&mut self) -> &mut crate::dock::Dock {
+        &mut self.dock
+    }
+
+    /// What the dock asked of the host, as the core's effects: a refusal is a message over the stage, a focus request
+    /// the target of the panel's tab strip (or of its body where it has none).
+    pub fn dock_effects(&mut self, asked: Vec<crate::dock::Effect>) -> Vec<Effect> {
+        use crate::dock::Effect as Asked;
+        self.focus.set_regions(self.dock.regions());
+        let mut effects = Vec::new();
+        for ask in asked {
+            match ask {
+                Asked::Message(msg) => {
+                    let text = self.presentation.text(&msg);
+                    let mut message = crate::overlay::messages::Message::new(self.overlays.fresh_id(), format!("dock:{}", msg.key), crate::overlay::messages::Tone::Warning, false, Vec::new());
+                    message.text = text;
+                    let now = self.overlays.now();
+                    effects.extend(self.overlay_event(crate::overlay::host::Event::ShowMessage(message), now));
+                }
+                Asked::Focus(panel) => {
+                    effects.extend(self.dock.focus_target(&panel).map(Effect::FocusTarget));
+                }
+            }
+        }
+        effects
     }
 
     /// A stage event for the active document's stage. The stage keeps navigation; what it does not take goes back to the
@@ -324,6 +382,21 @@ impl Core {
     fn run(&mut self, id: CommandId) -> Vec<Effect> {
         let mut effects = Vec::new();
         self.finish_panels(&mut effects);
+        match id.info().owner {
+            Owner::Dock => {
+                let focused = self.focus.focused().filter(|id| self.dock.panel_of(*id).is_some())
+                    .or_else(|| self.focus.focused_area().and_then(|area| self.dock.region_panel_target(area)));
+                let asked = self.dock.run(id, focused, self.overlays.now());
+                effects.extend(self.dock_effects(asked));
+                return effects;
+            }
+            Owner::Focus => {
+                self.focus.set_regions(self.dock.regions());
+                effects.extend(self.focus.cycle_area(id == CommandId::FocusNextRegion).map(Effect::FocusTarget));
+                return effects;
+            }
+            _ => {}
+        }
         let mut context = Context { documents: &mut self.documents, view: &mut self.view, session: &mut self.session };
         let result = match id.info().owner {
             Owner::History => crate::history::run(&mut context, id),
@@ -339,11 +412,49 @@ impl Core {
                 effects.push(Effect::NotAvailable(id));
                 return effects;
             }
+            Owner::Dock | Owner::Focus => return effects,
         };
         match result {
             Ok(()) => effects.push(Effect::RequestFrame),
             Err(message) => effects.push(warn(message)),
         }
         effects
+    }
+
+    /// Shared resolver and field/IME gates for the registered dock/focus commands. Other features
+    /// remain with their existing host; an unmodified/extra-modifier chord never starts a layout edit.
+    pub fn dock_shortcut(&mut self, chord: &crate::text_entry::Chord, input: crate::shortcuts::Input) -> Option<Vec<Effect>> {
+        let activation = self.shortcuts.resolve(chord, &[])?;
+        if !matches!(activation.command.info().owner, Owner::Dock | Owner::Focus) { return None; }
+        match self.shortcuts.press(&self.focus, chord, &[], input, |_| true) {
+            crate::shortcuts::Press::Run(activation) => Some(self.dispatch(Command::Run(activation.command))),
+            crate::shortcuts::Press::Consumed => Some(Vec::new()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod merged_notice_tests {
+    use super::*;
+    #[test]
+    fn session_quit_clearance_survives_an_unrelated_late_failure() {
+        let mut core = Core::new(Documents::new());
+        core.recovery.session_end(std::time::Duration::ZERO, std::time::Duration::from_secs(5));
+        let effects = core.document_effect(&crate::documents::Effect::QuitReady);
+        assert!(effects.contains(&Effect::QuitReady));
+        assert!(core.session_end_requested());
+        core.document_effect(&crate::documents::Effect::Recovery(crate::documents::recovery::Event::Failed(styk_services::recovery::RecoveryError::Missing)));
+        assert!(core.session_end_requested(), "a late failure cannot turn OS quit into an unbounded preferences flush");
+    }
+    #[test]
+    fn dock_and_recovery_notices_share_the_overlay_identity_owner() {
+        let mut core = Core::new(Documents::new());
+        core.show_notice(Notice { message: Msg::new("privacyUi.operationFailedPleaseTryAgain"), severity: Severity::Error });
+        let first = core.overlays().messages().current().unwrap().id;
+        core.dispatch(Command::Dock(crate::dock::Event::Close(crate::layout::PanelId::new("stage"))));
+        core.dispatch(Command::Overlay { event: crate::overlay::host::Event::MessageDismiss(first), now: 0 });
+        let next = core.overlays().messages().current().expect("the queued dock refusal");
+        assert_ne!(next.id, first, "a stale recovery action must not address a dock notice");
     }
 }

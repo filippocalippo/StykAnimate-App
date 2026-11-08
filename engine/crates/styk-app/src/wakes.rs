@@ -1,4 +1,4 @@
-//! Four coalesced wake reasons: bounded even if producers outpace the event loop.
+//! Coalesced wake reasons: bounded even if producers outpace the event loop.
 use iced::futures::{Stream, future::poll_fn, stream, task::AtomicWaker};
 use std::sync::{Arc, atomic::{AtomicU8, Ordering}};
 use std::task::Poll;
@@ -23,7 +23,7 @@ impl Wakes {
         shell::Wakes(Arc::new(move |wake| wakes.send(wake)))
     }
     pub fn send(&self, wake: Wake) {
-        let bit = match wake { Wake::Chrome => 1, Wake::Instance => 2, Wake::SaveCheck => 4, Wake::Documents => 8 };
+        let bit = match wake { Wake::Chrome => 1, Wake::Instance => 2, Wake::SaveCheck => 4, Wake::Documents => 8, Wake::Layouts => 16 };
         self.0.bits.fetch_or(bit, Ordering::Release);
         self.0.waker.wake();
     }
@@ -32,7 +32,7 @@ impl Wakes {
         while bits != 0 {
             let bit = 1 << bits.trailing_zeros();
             match self.0.bits.compare_exchange_weak(bits, bits & !bit, Ordering::AcqRel, Ordering::Acquire) {
-                Ok(_) => return Some(match bit { 1 => Wake::Chrome, 2 => Wake::Instance, 4 => Wake::SaveCheck, _ => Wake::Documents }),
+                Ok(_) => return Some(match bit { 1 => Wake::Chrome, 2 => Wake::Instance, 4 => Wake::SaveCheck, 8 => Wake::Documents, _ => Wake::Layouts }),
                 Err(now) => bits = now,
             }
         }
@@ -55,11 +55,13 @@ mod tests {
     fn coalescing_preserves_each_reason_without_growing_a_queue() {
         let wakes = Wakes::new();
         for _ in 0..10_000 {
-            wakes.send(Wake::Chrome); wakes.send(Wake::Instance); wakes.send(Wake::SaveCheck);
+            wakes.send(Wake::Chrome); wakes.send(Wake::Instance); wakes.send(Wake::SaveCheck); wakes.send(Wake::Documents); wakes.send(Wake::Layouts);
         }
         assert!(matches!(wakes.take(), Some(Wake::Chrome)));
         assert!(matches!(wakes.take(), Some(Wake::Instance)));
         assert!(matches!(wakes.take(), Some(Wake::SaveCheck)));
+        assert!(matches!(wakes.take(), Some(Wake::Documents)));
+        assert!(matches!(wakes.take(), Some(Wake::Layouts)));
         assert!(wakes.take().is_none());
         wakes.send(Wake::Instance);
         assert!(matches!(wakes.take(), Some(Wake::Instance)));

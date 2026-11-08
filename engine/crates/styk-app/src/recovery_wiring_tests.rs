@@ -52,6 +52,37 @@ impl RecoveryCopy for Copy {
 }
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
 const WINDOW: Size = Size::new(900.0, 600.0);
+
+struct LayoutStorage {
+    inner: styk_services::storage::fake::MemoryStorage,
+    paused: mpsc::SyncSender<()>,
+    load_gate: Option<Arc<Gate>>,
+}
+impl styk_services::storage::Storage for LayoutStorage {
+    fn load<'a>(&'a self, name: &'a str, max: usize) -> styk_services::files::FileFuture<'a, Option<Arc<[u8]>>> {
+        Box::pin(async move {
+            if let Some(gate) = &self.load_gate {
+                iced::futures::future::poll_fn(|cx| {
+                    gate.wake.register(cx.waker());
+                    if gate.pause.load(Ordering::SeqCst) { Poll::Pending } else { Poll::Ready(()) }
+                }).await;
+            }
+            self.inner.load(name, max).await
+        })
+    }
+    fn update<'a>(&'a self, name: &'a str, max: usize, update: styk_services::storage::Update, cancel: &'a Cancel) -> styk_services::files::FileFuture<'a, ()> {
+        let mut work = self.inner.update(name, max, update, cancel);
+        let mut notified = false;
+        Box::pin(iced::futures::future::poll_fn(move |cx| {
+            let result = work.as_mut().poll(cx);
+            if result.is_pending() && self.inner.staged() && !notified {
+                self.paused.try_send(()).unwrap(); notified = true;
+            }
+            if result.is_ready() && notified { self.paused.try_send(()).unwrap(); }
+            result
+        }))
+    }
+}
 struct Root(std::path::PathBuf);
 impl Root {
     fn new() -> Self {
@@ -77,6 +108,9 @@ struct Runtime {
 }
 impl Runtime {
     fn new() -> Self {
+        Self::with_layouts(None)
+    }
+    fn with_layouts(layouts: Option<Arc<dyn styk_services::storage::Storage>>) -> Self {
         let root = Root::new(); let wakes = wakes::Wakes::new();
         let shell::Start::Run(shell) = shell::start(&[], true, &wakes.callback()) else { panic!("sandbox shell") };
         let (outcome, receive) = mpsc::sync_channel(1);
@@ -84,14 +118,14 @@ impl Runtime {
         let clock = FixedClock::new(); let callback = wakes.callback();
         let gate = Arc::new(Gate::default());
         let store = Arc::new(Store { local: styk_platform::recovery::LocalRecovery::new(root.0.clone()), gate: gate.clone() });
-        app.band = top_band::TopBand::new(WINDOW, Arc::new(clock.clone()), None, Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(move || callback.send(shell::Wake::Documents)), Some(store)).unwrap();
+        app.band = top_band::TopBand::new(WINDOW, Arc::new(clock.clone()), None, Arc::new(styk_platform::spawn::ThreadSpawner), callback, Some(store), layouts.map(|store| Arc::new(styk_core::layout::LayoutStore::new(store)))).unwrap();
         app.band.core.documents.set_autosave_seconds(0.0);
         app.strategy = None; // Test the interactive guard without a real profile or a visible window.
         let (signal, ready) = mpsc::sync_channel(1);
         Self { app, root, clock, gate, checkpoint_finished: false, stream: Box::pin(wake_stream(&wakes)), messages: VecDeque::new(), signal: waker(Arc::new(Signal(signal))), ready, _outcome: receive }
     }
     fn task(&mut self, task: Task<Message>) {
-        let view = iced::widget::stack![self.app.band.overlay_wake(), self.app.band.recovery_wake(), self.app.band.overlay_layer(Theme::Light)].map(Message::Band).boxed();
+        let view = iced::widget::stack![self.app.band.wake_widget(), self.app.band.overlay_layer(Theme::Light)].map(Message::Band).boxed();
         let mut driver = Driver::new(view, WINDOW, &styk_design::fonts::ALL);
         self.messages.extend(driver.run(task));
     }
@@ -104,6 +138,7 @@ impl Runtime {
         });
         if let Some(message) = message { self.message(message); true } else { false }
     }
+    #[track_caller]
     fn until(&mut self, done: impl Fn(&App) -> bool) {
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
         while !done(&self.app) || !self.messages.is_empty() {
@@ -120,7 +155,7 @@ impl Runtime {
         use styk_services::Clock;
         self.clock.advance(due.saturating_sub(self.clock.now()));
         let sent = {
-            let mut driver = Driver::new(self.app.band.recovery_wake().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+            let mut driver = Driver::new(self.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
             driver.redraw(); driver.messages()
         };
         assert!(!sent.is_empty(), "the mounted deadline adapter must publish the wake");
@@ -134,7 +169,7 @@ impl Runtime {
             let due = Duration::from_millis(self.app.band.core.overlay_deadline().expect("prompt animation deadline"));
             self.clock.advance(due.saturating_sub(self.clock.now()));
             let sent = {
-                let mut driver = Driver::new(self.app.band.overlay_wake().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+                let mut driver = Driver::new(self.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
                 driver.redraw(); driver.messages()
             };
             assert!(!sent.is_empty(), "the mounted animation wake must advance the prompt");
@@ -243,6 +278,7 @@ fn session_end_retains_the_checkpoint_and_quit_until_the_worker_answers() {
     assert_eq!(rt.app.band.core.session_end_deadline(), None, "a completed checkpoint retires its timer");
     rt.click(ids::KEEP_EDITING); rt.drain();
     assert!(rt.app.band.core.documents.active().unwrap().dirty()); assert!(!rt.app.closing);
+    assert!(!rt.app.band.core.session_end_requested(), "Cancel also retires the OS quit intent");
 }
 #[test]
 fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_completion() {
@@ -271,7 +307,7 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
         rt.clock.advance(shell::session_end_timeout() + Duration::from_millis(1));
         // No gate release, notification or manual Documents tick can supply the missing wake.
         let sent = {
-            let mut driver = Driver::new(rt.app.band.recovery_wake().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+            let mut driver = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
             driver.redraw(); driver.messages()
         };
         assert!(!sent.is_empty(), "session-end must schedule a bounded wake even while recovery is pending");
@@ -287,6 +323,120 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
         assert!(rt._outcome.try_recv().is_err(), "a late reply cannot finish the window twice");
         assert!(rt.app.band.core.recovery().closing().is_none());
     }
+}
+
+#[test]
+fn merged_quit_guards_documents_then_flushes_or_abandons_layout_without_exceeding_session_end() {
+    use styk_services::storage::fake::{Failure, MemoryStorage};
+    use styk_core::layout::{PanelId, store::LayoutFile};
+    for (failure, session_first) in [(Failure::None, false), (Failure::Stage, false), (Failure::PauseBeforeCommit, false), (Failure::PauseBeforeCommit, true)] {
+        let (paused, receive) = mpsc::sync_channel(1);
+        let store = Arc::new(LayoutStorage { inner: MemoryStorage::default(), paused, load_gate: None });
+        let committed = LayoutFile::default().encode().unwrap();
+        store.inner.put("layouts.json", committed.clone());
+        let mut rt = Runtime::with_layouts(Some(store.clone())); rt.settled();
+        let load = rt.app.band.load_layouts(); rt.task(load.map(Message::Band));
+        rt.until(|app| app.band.layouts_idle());
+        rt.dirty(true);
+        rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(PanelId::new("vfx")))))));
+        assert!(rt.app.band.core.dock().save_pending());
+        store.inner.fail(failure);
+        if session_first { rt.message(Message::SessionEnd); } else { rt.close(); }
+        rt.prompt(); rt.drain();
+        assert!(!rt.app.quit_cleared && !rt.app.closing, "a pending layout must not bypass the document prompt");
+        rt.click(ids::DONT_SAVE);
+        rt.until(|app| app.quit_cleared);
+        if failure == Failure::PauseBeforeCommit && !session_first {
+            receive.recv_timeout(Duration::from_secs(15)).expect("the final layout write is paused");
+            assert!(!rt.app.closing, "ordinary quit waits for the final layout receipt");
+            let revision = rt.app.band.core.documents.active().unwrap().revision();
+            rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Run(styk_core::commands::CommandId::Undo)))));
+            assert_eq!(rt.app.band.core.documents.active().unwrap().revision(), revision, "document clearance fences edits while preferences drain");
+            rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(PanelId::new("library")))))));
+            assert!(!rt.app.band.core.dock().layout().closed.contains(&PanelId::new("library")), "the final layout is also frozen");
+            // The documents already granted QuitReady. A later OS session request
+            // must abandon this stalled preference write without another prompt.
+            rt.message(Message::SessionEnd); rt.drain();
+            rt.clock.advance(shell::session_end_timeout() + Duration::from_millis(1));
+        }
+        rt.until(|app| app.closing);
+        assert!(rt.app.quit_cleared, "only document QuitReady authorizes the window to end");
+        assert!(!rt.app.band.core.dock().save_pending());
+        let saved = store.inner.get("layouts.json").unwrap();
+        if failure == Failure::None {
+            let file = LayoutFile::decode(&saved).unwrap();
+            let entry = file.workspaces.get("animate").expect("quit must flush the queued layout before ending");
+            let state = styk_core::layout::store::state_from_value(&entry.value, styk_core::layout::Workspace::Animate).unwrap();
+            assert!(state.current.closed.contains(&PanelId::new("vfx")));
+        } else {
+            assert_eq!(saved, committed, "refusal and session-end cancellation preserve the committed file");
+        }
+        store.inner.fail(Failure::None);
+        if failure == Failure::PauseBeforeCommit && !session_first { receive.recv_timeout(Duration::from_secs(15)).expect("the detached layout write completed"); }
+        rt.drain();
+        assert_eq!(store.inner.get("layouts.json").unwrap(), saved, "late completion cannot replace the preserved file");
+    }
+}
+
+#[test]
+fn a_pending_layout_load_waits_for_its_receipt_without_spinning_the_save_deadline() {
+    use styk_services::{Clock, storage::fake::MemoryStorage};
+    use styk_core::layout::{PanelId, store::LayoutFile};
+    let gate = Arc::new(Gate::default()); gate.pause.store(true, Ordering::SeqCst);
+    let (paused, _receive) = mpsc::sync_channel(1);
+    let store = Arc::new(LayoutStorage { inner: MemoryStorage::default(), paused, load_gate: Some(gate.clone()) });
+    store.inner.put("layouts.json", LayoutFile::default().encode().unwrap());
+    let mut rt = Runtime::with_layouts(Some(store.clone())); rt.settled();
+    let load = rt.app.band.load_layouts(); rt.task(load.map(Message::Band));
+    rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(PanelId::new("vfx")))))));
+    rt.drain();
+    let due = rt.app.band.core.dock().deadline().unwrap();
+    rt.clock.advance(Duration::from_millis(due).saturating_sub(rt.clock.now()));
+    let mut driver = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+    driver.redraw();
+    assert!(driver.messages().is_empty(), "an occupied load lane cannot service a save deadline; wait for its real receipt");
+    drop(driver);
+    gate.release(); rt.until(|app| app.band.layouts_idle());
+    // The late load reconciles the edit and queues its normal debounce.
+    let due = rt.app.band.core.dock().deadline().unwrap();
+    rt.clock.advance(Duration::from_millis(due).saturating_sub(rt.clock.now()));
+    let sent = {
+        let mut driver = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+        driver.redraw(); driver.messages()
+    };
+    assert!(!sent.is_empty()); for message in sent { rt.message(message); }
+    rt.until(|app| !app.band.core.dock().save_pending());
+    let file = LayoutFile::decode(&store.inner.get("layouts.json").unwrap()).unwrap();
+    let state = styk_core::layout::store::state_from_value(&file.workspaces["animate"].value, styk_core::layout::Workspace::Animate).unwrap();
+    assert!(state.current.closed.contains(&PanelId::new("vfx")), "the late load cannot lose the edit");
+}
+
+#[test]
+fn the_unified_deadline_wakes_layout_before_recovery_without_periodic_polls() {
+    use styk_services::{Clock, storage::fake::MemoryStorage};
+    use styk_core::layout::{PanelId, store::LayoutFile};
+    let store = Arc::new(MemoryStorage::default());
+    store.put("layouts.json", LayoutFile::default().encode().unwrap());
+    let mut rt = Runtime::with_layouts(Some(store.clone())); rt.settled(); rt.dirty(false);
+    rt.app.band.core.documents.set_autosave_seconds(2.5);
+    rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(PanelId::new("vfx")))))));
+    let due = rt.app.band.core.wake_deadline(true).unwrap();
+    assert_eq!(Some(due), rt.app.band.core.dock().deadline());
+    assert!(Duration::from_millis(due) < rt.app.band.core.documents.recovery_deadline().unwrap());
+    rt.clock.advance(Duration::from_millis(due).saturating_sub(rt.clock.now()));
+    let sent = {
+        let mut driver = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+        driver.redraw(); driver.messages()
+    };
+    assert!(!sent.is_empty());
+    for message in sent { rt.message(message); }
+    rt.until(|app| !app.band.core.dock().save_pending());
+    assert!(LayoutFile::decode(&store.get("layouts.json").unwrap()).unwrap().workspaces.contains_key("animate"));
+    rt.advance_deadline();
+    let root = rt.root.0.clone();
+    // A fast write may finish within the returned tasks; wait for the durable
+    // outcome, not a busy state that can already have passed.
+    rt.until(|app| !app.band.core.documents.recovery_view().unwrap().busy && std::fs::read_dir(&root).unwrap().filter_map(Result::ok).any(|entry| entry.path().extension().is_some_and(|ext| ext == "styk")));
 }
 #[test]
 fn self_check_invalidated_checkpoint_allows_another_quit() {

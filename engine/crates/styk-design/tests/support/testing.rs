@@ -37,6 +37,7 @@ pub struct Driver<'a, Message> {
 
 impl<'a, Message: 'a> Driver<'a, Message> {
     /// Builds the interface for `element` in a window of `size`, drawn by the software renderer.
+    #[expect(clippy::expect_used, reason = "test harness: a failed setup aborts the test")]
     pub fn new(element: Element<'a, Message>, size: Size, fonts: &[&'static [u8]]) -> Self {
         for font in fonts {
             graphics::text::font_system().write().expect("write the font system").load_font(Cow::Borrowed(font));

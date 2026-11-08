@@ -168,7 +168,7 @@ impl App {
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
             sheet
         });
-        let band_screen = screen.filter(|screen| screen.is_band());
+        let band_screen = screen.filter(|screen| screen.has_band());
         let clock_mode = launch.clock;
         // The one application clock: the real one, or the fixed one a script advances (`--clock fixed`).
         let (clock, fixed): (Arc<dyn styk_services::clock::Clock>, Option<styk_services::clock::FixedClock>) = match clock_mode {
@@ -182,8 +182,12 @@ impl App {
         // primary window keeps them in the profile, an independent one in its workspace (`docs/native/recovery.md`).
         let recovery = (screen.is_none() && strategy.is_none() && launch.automation.is_none()).then(|| shell.recovery_directory()).flatten();
         let recovery = recovery.map(|path| Arc::new(styk_platform::recovery::LocalRecovery::new(path)) as Arc<dyn styk_services::recovery::Recovery>);
-        let documents_wake = wakes.callback();
-        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(move || documents_wake.send(shell::Wake::Documents)), recovery)?;
+        let spawner: Arc<dyn styk_services::Spawner> = Arc::new(styk_platform::spawn::ThreadSpawner);
+        // Screens and unattended runs must not read or change the person's layout.
+        let layouts = if screen.is_none() && strategy.is_none() {
+            Some(Arc::new(styk_core::layout::LayoutStore::new(Arc::new(styk_platform::storage::LocalStorage::for_user(spawner.as_ref()).map_err(|error| error.to_string())?))))
+        } else { None };
+        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, spawner, wakes.callback(), recovery, layouts)?;
         band.show_screen(band_screen);
         Ok(App {
             sheet,
@@ -258,6 +262,7 @@ impl App {
                 Task::none()
             }
             Message::Wake(wake) => self.wake(wake),
+            Message::SessionEnd if self.quit_cleared => self.finish_session_quit(),
             Message::SessionEnd => self.band.session_end().map(Message::Band),
             Message::Band(message) => self.band_update(message),
             Message::StepSaved(result) => {
@@ -304,6 +309,13 @@ impl App {
 
     /// A message of the top band, and what it asks of the window.
     fn band_update(&mut self, message: top_band::Message) -> Task<Message> {
+        // Document clearance is final: edits during the preference flush would
+        // otherwise acquire unsaved work after the person's Save/Discard answer.
+        // Worker receipts and deadlines still run until the window has ended.
+        if self.quit_cleared && !matches!(&message,
+            top_band::Message::Layouts | top_band::Message::Deadline | top_band::Message::Documents
+            | top_band::Message::Editor(styk_ui::Message::PollDocuments | styk_ui::Message::QuitReady | styk_ui::Message::SessionCheckpointFinished)
+        ) { return Task::none(); }
         let (requests, task) = self.band.update(message);
         let mut tasks = vec![task.map(Message::Band)];
         for request in requests {
@@ -317,6 +329,9 @@ impl App {
                 top_band::Request::SessionCheckpointFinished => {
                     if let Some(chrome) = &self.chrome { chrome.finish_session_checkpoint(); }
                 }
+                top_band::Request::LayoutProgress => {
+                    if self.quit_cleared { tasks.push(self.close()); }
+                },
                 top_band::Request::Resize(size) => tasks.extend(self.window.map(|id| iced_window::resize(id, size))),
                 top_band::Request::Capture(path) => {
                     self.capture_path = Some(path);
@@ -341,7 +356,7 @@ impl App {
                 self.window = Some(id);
                 self.logical = size;
                 self.scale = scale_factor;
-                self.band.resized(size);
+                self.band.resized(size, scale_factor);
                 let owns_show = window::shell_shows(self.strategy);
                 let frame = self.shell.restore;
                 let shutdown_reason = self.band.core.presentation().text(&styk_core::i18n::Msg::new("common.saving"));
@@ -359,7 +374,7 @@ impl App {
             }
             Event::Resized(size) => {
                 self.logical = size;
-                self.band.resized(size);
+                self.band.resized(size, self.scale);
                 self.publish_regions();
                 self.sample(id)
             }
@@ -411,6 +426,7 @@ impl App {
                 Task::none()
             }
             shell::Wake::Documents => self.band_update(top_band::Message::Documents),
+            shell::Wake::Layouts => self.band_update(top_band::Message::Layouts),
         }
     }
 
@@ -425,12 +441,11 @@ impl App {
         if self.strategy.is_none() && !self.quit_cleared {
             return self.band.ask_to_quit().map(Message::Band);
         }
+        if self.band.core.session_end_requested() { return self.finish_session_quit(); }
+        // Documents granted QuitReady. Flush the layout queue once; worker
+        // receipts continue this sequence through the shared wake stream.
+        if self.band.flush_layouts() { return Task::none(); }
         self.closing = true;
-        if self.band.core.session_end_expired() {
-            if let Some(chrome) = &self.chrome { chrome.allow_session_end(); }
-            // The OS budget is exhausted; window placement must not start another disk wait.
-            return self.finish(Outcome::Done);
-        }
         match self.shell.save_for_close() {
             Some(job) => Task::perform(async move {
                 let (send, receive) = iced::futures::channel::oneshot::channel();
@@ -439,6 +454,15 @@ impl App {
             }, Message::OutputSaved),
             None => self.finish(Outcome::Done),
         }
+    }
+
+    fn finish_session_quit(&mut self) -> Task<Message> {
+        // Document clearance still comes first. Preferences must never extend
+        // an OS shutdown: cancellation leaves the last atomic commit intact.
+        self.band.abandon_layouts();
+        self.closing = true;
+        if let Some(chrome) = &self.chrome { chrome.allow_session_end(); }
+        self.finish(Outcome::Done)
     }
 
     fn frame(&mut self) -> Task<Message> {
@@ -566,7 +590,11 @@ impl App {
         // Text is laid out only once the font system is ready: until then the view holds none.
         match (warm_up::proof(), self.sheet.as_ref()) {
             (Some(_), Some(sheet)) => sheet.view().map(Message::Sheet).boxed(),
-            (Some(ready), None) => iced::widget::stack![self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)), self.band.overlay_wake(), self.band.recovery_wake(), self.band.overlay_layer(self.theme)].map(Message::Band).boxed(),
+            (Some(ready), None) => {
+                // The docked window fills the window under the band; the band's own area holds nothing below it.
+                let below_band = iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed();
+                iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.wake_widget(), self.band.overlay_layer(self.theme)].map(Message::Band).boxed()
+            }
             (None, _) => styk_ui::prepaint(),
         }
     }
@@ -715,7 +743,8 @@ fn main() -> ExitCode {
         move || {
             let mut app = match app.borrow_mut().take() { Some(app) => app, None => unreachable!("iced initializes once") };
             app.band.open_all(&files);
-            (app, warm_up::warm_up(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady))
+            let layouts = app.band.load_layouts().map(Message::Band);
+            (app, Task::batch([layouts, warm_up::warm_up(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), std::sync::Arc::new(styk_platform::clock::SystemClock::new()), std::sync::Arc::new(styk_platform::font_smoothing::NativeTextEnvironment)).map(Message::FontsReady)]))
         },
         App::update,
         App::view,
@@ -811,7 +840,7 @@ fn run_headless(launch: &Launch, screen: Option<Screen>) -> ExitCode {
     let result = match screen {
         Some(screen @ Screen::Inspector(..)) => headless::inspector_screenshot(screen, size, scale),
         Some(screen @ Screen::Stage(..)) => headless::stage_screenshot(screen, size, scale),
-        _ => headless::screenshot(theme, size, scale, sheet.as_ref(), screen.filter(|screen| screen.is_band())),
+        _ => headless::screenshot(theme, size, scale, sheet.as_ref(), screen.filter(|screen| screen.has_band())),
     }
     .and_then(|image| {
         mark!("first-frame");

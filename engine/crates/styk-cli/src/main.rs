@@ -53,6 +53,8 @@ fn main() {
         #[cfg(feature = "app-tools")]
         Some("stage-memory") => memory::stage(&args[1..]),
         #[cfg(feature = "app-tools")]
+        Some("memory-capture") => memory::capture(&args[1..]),
+        #[cfg(feature = "app-tools")]
         Some("audio") if args.len() >= 3 => audio::audio(&args[1], &args[2], &args[3..]),
         #[cfg(not(feature = "app-tools"))]
         Some("audio") => {

@@ -128,6 +128,11 @@ and the default 1440 by 900 rectangles have an exact source golden. Nested unkno
 typed layout codec are retained and tested through `LayoutFile` and edits of their owning records.
 Inventory rows spanning the later UI and platform obligations remain open.
 
+## Views (K-dock views, part 1)
+
+`styk_core::dock` and `styk_ui::dock` put the model on screen: `docs/native/docking-views.md`. The tab insertion index follows the pointer inside its header, and `SaveQueue::deadline` tells the runtime when to wake.
+The authoritative design 3.2 governs fitting: compact/minimal fold left, top and bottom groups to strips and right groups to sheets.
+
 ## Implementer verification (2026-11-08)
 
 All compilation and test commands used the machine queue and the checkout's seeded target.
@@ -198,3 +203,61 @@ large fixture. Only that ignored measurement was rerun after correcting its sizi
 production source, passing full suites and guards were unchanged. The corrected measurement reported
 `1 passed; 0 failed`. These are queued microbenchmarks, not exclusive-machine or playback measurements.
 Logs are in `artifacts/docking-review/`.
+
+## Core review handoff for the views step (2026-11-08)
+
+- `layout::DividerDrag` owns a live divider candidate; dropping cancels it, `release` delegates to
+  `LayoutState::commit` for the one bounded history and dirty policy. A later operation cancels an old
+  gesture first. `Operation::ResetDivider` is the single reset policy: each pixel allocation uses its
+  subtree's panel preferences along that axis, flexible allocations return to weight one. The timeline
+  reset is 264 px (its preference); a newly created tall-window layout still starts at 280 px.
+- `layout::{default_layout, default_timeline_height, set_timeline}` owns initial/legacy sizes; `dock`
+  re-exports these for existing callers. No view or dock gesture rewrites allocations after an operation.
+- `Dock::open_rect()` returns the final host-local flyout/sheet rectangle from `solve`; use its x/y/w/h
+  verbatim (subtract only the view's origin). Left/right/top/bottom anchor at the corresponding strip's
+  inside edge with an 8 px gap, or at the content edge for a sheet, and clamp to available content.
+  `Solution::sheets` also contains unopened sheet placeholders; only `Dock::open_rect()` means open.
+- `Dock::regions()` supplies `FocusRegion { area, target }` in main-tree reading order: band, tools,
+  docked groups, stage headers/bodies, strips. `FocusState::set_regions` changes F6 order and landing
+  targets only; modal scopes and field input roles remain intact. `Dock::focus_area` maps measured
+  root-scope targets to these regions; the message snapshot adapter applies it only when a dock is mounted. Stage's body is
+  `ids::body(group)` even with other tabs; mount it there, and mount `ids::stage_header(group)`.
+  Floating window focus remains part 2.
+- Tab x/middle-click send `Command::Dock(Event::Close(panel))`; `Operation::Close` already atomically
+  refuses the last stage. `Event::Reopen` reveals/activates the restored panel, opening its folded group.
+- `CommandId::LayoutUndo` (`layout-undo`, Ctrl+Alt+Z; Cmd+Alt+Z in the Command key map) and
+  `LayoutArrange` (Ctrl+Alt+M) route through `Core::dispatch` to the dock. Exact modifier matching,
+  IME/field gates and all binding metadata use `Shortcuts`; tests check every existing scope for
+  collisions. Registered panel toggles/hides and `TimelineSheet` route to the same owner, including
+  commands emitted by the band's Properties button. F6/Ctrl+F6 route to the focus owner.
+- `dock::Effect::Message` and `DragView::label` carry `Msg`/`Option<Msg>`. Format with `Presentation`;
+  existing catalogue keys name Stage/Layers/Tools and existing drop actions. Native-only English
+  additions live in `styk-core/messages/en.json`, merged by build.rs with normal English fallback;
+  generated source-app catalogue mirrors and their exact comparison remain unchanged.
+- The host injects `WallClock::unix_millis()` through `Dock::set_wall_time` and its process-session
+  identity through `set_writer` before loading/editing. The minimal service/platform extension was
+  necessary because the previous clock exposed only elapsed time. `SystemWallClock` combines PID
+  and session-start nanoseconds for the writer. A local high-water stamp handles equal milliseconds
+  and rollback and observes loaded stamps. SaveQueue/gestures keep monotonic milliseconds; the
+  store receives Unix time for tombstone retention. Late loads reconcile all touched workspace
+  entries into the loaded backing file before any later save coalesces them.
+
+Views still must remove their popup position/size arithmetic and consume `open_rect`, mount Stage's
+body/header targets when tabbed, wire tab x/middle-click, and validate F6 with several rearranged
+groups on mounted widgets. The only drawing-file adaptation in this core step formats the new `Msg`
+drop label. Existing screenshot references/thresholds and frozen fixtures were not changed.
+
+Verification for this core step (all Cargo commands through the machine queue):
+- Before fixes, the new core regressions produced `30 passed; 10 failed` (the filter also ran existing
+  review tests). Closing the last stage already passed; that existing operation was kept.
+- Full core/UI/app tests: 735 passed, zero failures; app build and `cargo xtask check`: exit 0. The guard
+  compared 48 unchanged screenshot references and app/preview parity; normal and folded dock captures
+  were inspected. These do not certify the pending popup/close/focus view work.
+- Self-check found standalone inspectors being assigned dock regions; a mounted snapshot regression
+  failed before restricting the adapter to mounted docks. Final app/UI tests: 84 passed, zero failures
+  (including 13 mounted dock tests); final app build: exit 0.
+- The Properties test now clicks its mounted button. Removing its TopBand command dispatch made it fail;
+  removing `dock_shortcut_at` routing made the mounted keyboard-move test fail. Both passed after restore.
+- Unrestricted Clippy stopped at ten existing `clippy::eq_op` errors in unchanged `styk-math` (exit 101).
+  Clippy on all five changed crates with `--no-deps --all-targets`: exit 0, warnings retained.
+  Logs: `artifacts/a3-*.log`. No frozen fixtures, screenshot masks, limits or source-app catalogues changed.

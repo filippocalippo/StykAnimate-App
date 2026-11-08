@@ -98,6 +98,9 @@ pub struct Solution {
     pub hosts: BTreeMap<GroupId, Option<FloatId>>,
     pub visible: BTreeSet<PanelId>,
     pub stages: BTreeMap<PanelId, Rect>,
+    /// Tools overlay in the primary visible stage's host coordinates; absent when Tools is docked or no stage is visible.
+    /// Today's rail is 52 x 220 (44 x 187 in a compact/low window), 12 px inside its side and vertically centred.
+    pub tool_rail: Option<Rect>,
     pub strips: BTreeMap<GroupId, Rect>,
     pub sheets: BTreeMap<GroupId, Rect>,
     pub fit: FitState,
@@ -146,6 +149,7 @@ fn fit_tree<'a>(
             continue;
         };
         let side = out.fit.sides[&g.id];
+        // Design 3.2: compact/minimal fold left, top and bottom to strips, right to sheets.
         let compact = host.is_none() && matches!(t, Tier::Compact | Tier::Minimal);
         let low = host.is_none() && window.h <= 568. && side == Side::Bottom;
         let previous = e.previous.release.get(&g.id).copied();
@@ -304,12 +308,8 @@ pub fn solve(l: &Layout, e: &Env) -> Solution {
             .flatten()
             .and_then(|id| out.float_contents.get(&id).copied())
             .unwrap_or(rect);
-        let r = Rect {
-            x: rect.x,
-            y: rect.y,
-            w: g.flyout_px.min(rect.w),
-            h: rect.h,
-        };
+        let side = out.fit.sides.get(&id).copied().unwrap_or(Side::Right);
+        let r = open_rectangle(rect, out.strips.get(&id).copied(), side, g.flyout_px);
         out.sheets.insert(id, r);
         if let Some(p) = g.tabs.get(g.active) {
             out.visible.insert(p.clone());
@@ -318,10 +318,67 @@ pub fn solve(l: &Layout, e: &Env) -> Solution {
     if l.stage_tools.is_some() && out.visible.iter().any(|p| p.kind == "stage") {
         out.visible.insert(PanelId::new("tools"));
     }
+    out.tool_rail = l.stage_tools.and_then(|side| {
+        let stage = out.stages.iter().min_by_key(|(panel, _)| (panel.n, &panel.kind)).map(|(_, rect)| *rect)?;
+        let compact = w <= 800. || h <= 568.;
+        let (rail_w, rail_h) = if compact { (44., 187.) } else { (52., 220.) };
+        let x = if side == Side::Right { stage.x + stage.w - 12. - rail_w } else { stage.x + 12. };
+        Some(Rect { x, y: (stage.y + stage.h / 2. - rail_h / 2.).round(), w: rail_w, h: rail_h })
+    });
     if l.joined_layers && out.visible.contains(&PanelId::new("timeline")) {
         out.visible.insert(PanelId::new("layers"));
     }
     out
+}
+
+/// Final host-local rectangle for an open flyout/sheet. The strip's inside edge anchors a flyout;
+/// a sheet uses the corresponding host edge. Both are clamped to the host's content bounds.
+fn open_rectangle(bounds: Rect, strip: Option<Rect>, side: Side, extent: f64) -> Rect {
+    let mut available = bounds;
+    if let Some(strip) = strip {
+        match side {
+            Side::Left => { available.x = (strip.x + strip.w + 8.).min(bounds.x + bounds.w); available.w = (bounds.x + bounds.w - available.x).max(0.); }
+            Side::Right => available.w = (strip.x - 8. - bounds.x).clamp(0., bounds.w),
+            Side::Top => { available.y = (strip.y + strip.h + 8.).min(bounds.y + bounds.h); available.h = (bounds.y + bounds.h - available.y).max(0.); }
+            Side::Bottom => available.h = (strip.y - 8. - bounds.y).clamp(0., bounds.h),
+        }
+    }
+    let extent = if extent.is_finite() { extent.max(0.) } else { 0. };
+    match side {
+        Side::Left => Rect { w: extent.min(available.w), ..available },
+        Side::Right => { let w = extent.min(available.w); Rect { x: available.x + available.w - w, w, ..available } }
+        Side::Top => Rect { h: extent.min(available.h), ..available },
+        Side::Bottom => { let h = extent.min(available.h); Rect { y: available.y + available.h - h, h, ..available } }
+    }
+}
+
+/// A divider's live, uncommitted candidate. The document held by LayoutState stays committed;
+/// dropping this transaction cancels it. Release uses LayoutState's sole history/dirty policy.
+#[derive(Clone, Debug)]
+pub struct DividerDrag {
+    origin: Layout,
+    current: Layout,
+    solution: Solution,
+    pub split: NodeId,
+    pub index: usize,
+}
+impl DividerDrag {
+    pub fn new(layout: &Layout, solution: &Solution, split: NodeId, index: usize) -> Self {
+        Self { origin: layout.clone(), current: layout.clone(), solution: solution.clone(), split, index }
+    }
+    pub fn layout(&self) -> &Layout { &self.current }
+    pub fn moved(&mut self, delta: f64, workspace: Workspace) -> Result<(), LayoutError> {
+        let mut next = self.origin.clone();
+        next.resize_divider(&self.solution, self.split, self.index, delta, workspace)?;
+        self.current = next;
+        Ok(())
+    }
+    pub fn release(self, state: &mut LayoutState, workspace: Workspace) -> Result<bool, LayoutError> {
+        if state.current != self.origin { return Err(LayoutError::InvalidTarget); }
+        let changed = self.current != self.origin;
+        state.commit(self.current, workspace)?;
+        Ok(changed)
+    }
 }
 fn node_max(n: &Node, a: Axis, total: f64) -> f64 {
     let Node::Tabs(g) = n else {
@@ -790,12 +847,8 @@ impl DragSession {
 }
 fn zone_bounds(zone: &Zone, s: &Solution, e: &Env) -> Rect {
     match zone {
-        Zone::Tab { group, .. } => s
-            .headers
-            .get(group)
-            .or(s.groups.get(group))
-            .copied()
-            .unwrap_or_default(),
+        // The insertion index follows the pointer along the header: a tab zone has no area it is held in.
+        Zone::Tab { .. } => Rect::default(),
         Zone::Split { group, side } => {
             let r = s.groups.get(group).copied().unwrap_or_default();
             match side {
