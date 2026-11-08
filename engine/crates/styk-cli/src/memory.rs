@@ -41,13 +41,23 @@ impl Log {
     }
 }
 
-pub fn sample(log: &mut Option<Log>, phase: &str, tick: Option<u32>, device: Option<&wgpu::Device>, details: serde_json::Value) -> Result<(), String> {
-    if let Some(log) = log { log.sample(phase, tick, device, details)?; }
+pub fn sample(log: &mut Option<Log>, phase: &str, tick: Option<u32>, device: Option<&wgpu::Device>, details: impl FnOnce() -> serde_json::Value) -> Result<(), String> {
+    if let Some(log) = log { log.sample(phase, tick, device, details())?; }
     Ok(())
 }
 
 pub fn renderer_device(renderer: &styk_export::FrameRenderer) -> Option<&wgpu::Device> {
     match renderer { styk_export::FrameRenderer::Gpu(gpu, _) => Some(gpu.device()), _ => None }
+}
+
+#[test]
+fn disabled_memory_report_does_not_build_details() {
+    let mut calls = 0;
+    sample(&mut None, "frame", Some(181), None, || {
+        calls += 1;
+        json!({"frame_buffer":3840 * 2160 * 4})
+    }).unwrap();
+    assert_eq!(calls, 0, "disabled reporting must not construct diagnostic JSON");
 }
 
 struct Source(styk_engine::Engine);
@@ -77,17 +87,17 @@ fn stage_run(args: &[String]) -> Result<(), String> {
     let size = [w.parse::<u32>().map_err(|e| e.to_string())?, h.parse::<u32>().map_err(|e| e.to_string())?];
     if size.contains(&0) { return Err("size must be positive".into()); }
     let mut log = Log::open(Some(&args[3]))?;
-    sample(&mut log, "start", None, None, json!({}))?;
+    sample(&mut log, "start", None, None, || json!({}))?;
     let engine = styk_engine::Engine::new(|| 0., styk_engine::Budgets::for_device(None));
     let input = std::fs::read(&args[0]).map_err(|e| e.to_string())?;
     let extension = std::path::Path::new(&args[0]).extension().and_then(|s| s.to_str()).unwrap_or("styk");
     engine.open(&input, extension, "memory scenario").map_err(|e| e.to_string())?;
     drop(input);
     let generation = engine.generation().ok_or("no generation")?;
-    sample(&mut log, "document", None, None, json!({}))?;
+    sample(&mut log, "document", None, None, || json!({}))?;
     let gpu = styk_render::native_gpu::native_gpu(wgpu::Instance::enabled_backend_features().contains(wgpu::Backends::DX12),
         "stage memory", |a| wgpu::Limits::default().using_resolution(a.limits()))?;
-    sample(&mut log, "device", None, Some(&gpu.device), json!({"backend":format!("{:?}",gpu.adapter.get_info().backend)}))?;
+    sample(&mut log, "device", None, Some(&gpu.device), || json!({"backend":format!("{:?}",gpu.adapter.get_info().backend)}))?;
     let source: Arc<dyn FrameDocument> = Arc::new(Source(engine.clone()));
     for _ in 0..2 {
         let engine = engine.clone();
@@ -120,7 +130,7 @@ fn stage_run(args: &[String]) -> Result<(), String> {
                 if started.elapsed() > Duration::from_secs(120) { return Err("stage timeout".into()); }
                 let _ = rx.recv_timeout(Duration::from_millis(2));
             }
-            sample(&mut log, "frame", Some(tick as u32), Some(&gpu.device), json!({"frame_ms":started.elapsed().as_secs_f64()*1000.}))?;
+            sample(&mut log, "frame", Some(tick as u32), Some(&gpu.device), || json!({"frame_ms":started.elapsed().as_secs_f64()*1000.}))?;
         }
         Ok(())
     })();
@@ -135,7 +145,7 @@ fn stage_run(args: &[String]) -> Result<(), String> {
     drop(painter);
     drop(host);
     gpu.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string())?;
-    sample(&mut log, "closed", None, Some(&gpu.device), json!({}))?;
+    sample(&mut log, "closed", None, Some(&gpu.device), || json!({}))?;
     result?;
     println!("stage memory: complete");
     Ok(())

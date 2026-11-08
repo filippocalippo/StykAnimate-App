@@ -57,10 +57,12 @@ descriptors, selection policy and async artwork picking.
 
 After submitting a frame, the paint worker reads at most one cached successor in
 playback consumer order (including reverse requests and loop boundaries). While
-the submitted frame is drawing, it prepares that successor's sprites through the
-same bounded upload slices. Current and next pages are protected together, within
+the submitted frame is drawing, it prepares at most one successor upload slice.
+There is at most one outstanding pixel/metadata upload submission, plus one atlas
+growth copy when needed. A warm slice submits nothing. Current and next pages are protected together, within
 the existing sprite and working-byte limits; atlas capacity stays until teardown.
-Speculation stops when the current GPU submission completes, on a replaced ticket,
+After that slice the worker parks between completion polls; the GPU callback wakes
+it. No second slice is taken while completion is outstanding, on a replaced ticket,
 or on refusal. It never waits for a future decode after the current draw finishes,
 and a future decode/budget refusal does not discard the current complete picture.
 No new UI work, thread, frame cache or decode queue is introduced.
@@ -80,10 +82,14 @@ during GPU polling wakes and exits without waiting for a map/readback.
 
 `PaintLimits` admits bytes before allocations: output pictures (default 192 MiB,
 at most three), resident sprite pixels (512 MiB), and working textures/buffers
-(1 GiB, including picture lookup tables and old/new replacement overlap). Sprite arrays grow once per
-candidate; old/new arrays plus queued uploads are bounded multiples of the resident
-limit. Even failed or cancelled candidates submit/drain their pending uploads
-before another candidate starts. The renderer records one owned `FramePlan`
+(1 GiB, including picture lookup tables, upload staging and old/new replacement overlap).
+Upload admission includes decoded pixels, padded staging, table copies and the old
+atlas retained by a growth copy. The reservation lasts through GPU completion.
+An unchanged sprite map is not rewritten. Cancelled/refused owners are dropped on
+the worker; an unsubmitted batch is flushed once, an in-flight batch is never
+resubmitted, and completion is drained before another renderer is created. Close
+drops the owners and exits without waiting for GPU progress; wgpu retains backend
+references until its submitted commands retire. The renderer records one owned `FramePlan`
 (group placement, isolation rounds and effect recipes). Admission inspects it and
 drawing consumes that same plan after resource readiness; driver/pipeline bookkeeping is outside it.
 Document/assets and decode reservations remain engine-owned. The scheduler cache

@@ -1,6 +1,156 @@
 use super::*;
 use styk_services::{FixedClock, ManualSpawner};
 
+#[path = "../../../../styk-platform/src/spawn.rs"]
+mod platform_spawn;
+
+/// Holds delivery of real wgpu completions, not the renderer or paint loop.
+/// Production queue writes, submissions and resource destruction still run.
+#[derive(Default)]
+pub(super) struct Probe {
+    hold: AtomicBool,
+    drawn: AtomicBool,
+    retired: AtomicBool,
+    waits: std::sync::atomic::AtomicUsize,
+    uploads: std::sync::atomic::AtomicUsize,
+    bytes: std::sync::atomic::AtomicU64,
+    completions: Mutex<Vec<Arc<AtomicBool>>>,
+    on_draw: Mutex<Option<styk_services::Job>>,
+    changed: Condvar,
+    idle: Mutex<()>,
+}
+impl Probe {
+    pub fn waiting(&self) {
+        if self.drawn.load(Ordering::Acquire) { self.waits.fetch_add(1,Ordering::AcqRel); }
+        self.changed.notify_all();
+    }
+    pub fn draw_submitted(&self) {
+        self.drawn.store(true,Ordering::Release);
+        if let Some(job) = self.on_draw.lock().unwrap().take() { job(); }
+    }
+    pub fn upload_submitted(&self, bytes: u64) {
+        if self.drawn.load(Ordering::Acquire) {
+            self.uploads.fetch_add(1,Ordering::AcqRel);
+            self.bytes.fetch_add(bytes,Ordering::AcqRel);
+        }
+    }
+    pub fn hold_completion(&self, done: Arc<AtomicBool>) -> bool {
+        if !self.drawn.load(Ordering::Acquire) || !self.hold.load(Ordering::Acquire) { return false; }
+        self.completions.lock().unwrap().push(done);
+        self.changed.notify_all();
+        true
+    }
+    pub fn retired(&self) {
+        self.bytes.store(0,Ordering::Release);
+        self.retired.store(true,Ordering::Release);
+        self.changed.notify_all();
+    }
+    fn until(&self, predicate: impl Fn() -> bool) {
+        let start = std::time::Instant::now();
+        let mut guard = self.idle.lock().unwrap();
+        while !predicate() {
+            assert!(start.elapsed()<Duration::from_secs(45),"Painter ordering guard timed out");
+            guard=self.changed.wait_timeout(guard,Duration::from_millis(10)).unwrap().0;
+        }
+    }
+}
+
+struct PaintSource(styk_engine::Engine);
+impl frames::FrameDocument for PaintSource {
+    fn snapshot(&self, revision:u64, _:u64) -> Option<Arc<styk_engine::Generation>> {
+        self.0.generation().filter(|g|g.revision==revision)
+    }
+    fn picture_engine(&self) -> Option<styk_engine::Engine> { Some(self.0.clone()) }
+}
+impl Drop for PaintSource { fn drop(&mut self) { self.0.stop(); } }
+
+fn stalled_painter(seed_pixels: bool, cancel: bool, warm: bool) {
+    let mut input=styk_doc::json::parse(include_bytes!("../../../../styk-eval/tests/fixtures/drawlist/drawing-cel.json")).unwrap();
+    let next=input.get("keyframes").unwrap().as_arr().unwrap()[0].clone();
+    let mut empty=next.clone();
+    for key in ["objects","object_draw_order","object_draw_order_unique_ids"] {
+        empty.make_obj().unwrap().set(key,styk_doc::Value::array(Vec::new()));
+    }
+    let frames=input.make_obj().unwrap().get_mut("keyframes").unwrap().make_arr().unwrap();
+    frames.clear(); frames.extend([if warm { next.clone() } else { empty },next]);
+    let engine=styk_engine::Engine::for_export(||0.,styk_engine::Budgets::for_device(None));
+    engine.open(styk_doc::json::to_string(&input).as_bytes(),"json","Painter upload bounds").unwrap();
+    while engine.step() {}
+    let generation=engine.generation().unwrap();
+    if warm {
+        engine.decode_cels(&generation,&generation.assets.cels.keys().copied().collect::<Vec<_>>());
+        while engine.step() {}
+    }
+    let source:Arc<dyn frames::FrameDocument>=Arc::new(PaintSource(engine.clone()));
+    let (tx,_rx)=std::sync::mpsc::sync_channel(1);
+    let wake:frames::Wake=Arc::new(move||{let _=tx.try_send(());});
+    let clock=Arc::new(styk_services::SystemClock::new());
+    let frame_jobs=ManualSpawner::new();
+    let frames=frames::Frames::new(1,generation.revision,0,&source,frames::Config::default(),
+        &frame_jobs,clock.clone(),wake.clone()).unwrap();
+    let mut host=Host::new(frames,generation.prepared.doc.canvas,super::super::Viewport {
+        size:[64.,64.],..Default::default()
+    }).unwrap();
+    host.request(0.,1.,4,Default::default()).unwrap();
+    let current=host.frames().stage_ticket().unwrap();
+    let inputs=current.key().inputs.clone();
+    host.frames_mut().request(frames::Consumer::Playback(0),1.,inputs).unwrap();
+    host.frames().prepare_pending_for_test();
+    let next=current.next_playback().unwrap();
+    let has_image=|frame:WorkerFrame| frame.frame.list.prims.iter().any(|p|p.kind & 255 == styk_eval::drawlist::K_IMAGE);
+    assert_eq!(has_image(current.read().unwrap().unwrap()),warm);
+    assert!(has_image(next.read().unwrap().unwrap()));
+    let gpu=styk_render::native_gpu::native_gpu(false,"Painter submission bounds",|a|wgpu::Limits::default().using_resolution(a.limits())).unwrap();
+    let jobs=Arc::new(ManualSpawner::new());
+    let limits=PaintLimits::default();
+    let mut painter=Painter::new(&gpu.device,&gpu.queue,wgpu::TextureFormat::Rgba8Unorm,
+        &*jobs,clock,wake,limits).unwrap();
+    let shared=painter.shared.clone();
+    shared.probe.hold.store(true,Ordering::Release);
+    if seed_pixels {
+        let engine=engine.clone();
+        let generation=generation.clone();
+        *shared.probe.on_draw.lock().unwrap()=Some(Box::new(move||{
+            let cels=generation.assets.cels.keys().copied().collect::<Vec<_>>();
+            engine.decode_cels(&generation,&cels);
+            while engine.step() {}
+            assert!(engine.images_backlog().1>1,"fixture must supply several decoded tiles");
+        }));
+    }
+    painter.request(&host).unwrap();
+    styk_services::Spawner::spawn(&platform_spawn::ThreadSpawner,"real-painter-test",Box::new(move||{jobs.run_next();})).unwrap();
+    shared.probe.until(||shared.probe.waits.load(Ordering::Acquire)>=20);
+    let expected=usize::from(!warm);
+    assert_eq!(shared.probe.uploads.load(Ordering::Acquire),expected,"only one prefetch upload may be outstanding, and warm frames submit nothing");
+    assert_eq!(shared.probe.bytes.load(Ordering::Acquire)>0,!warm);
+    assert!(shared.probe.bytes.load(Ordering::Acquire)<=limits.working_bytes,"outstanding upload staging stays in the working budget");
+    if seed_pixels { assert!(engine.images_backlog().1>0,"the successor remains incomplete under the stalled upload"); }
+    assert!(matches!(painter.update(),PaintStatus::Pending),"no partially completed picture is published");
+    if cancel {
+        host.frames_mut().cancel(frames::Consumer::Stage).unwrap();
+        shared.changed.notify_one();
+        shared.probe.until(||shared.probe.retired.load(Ordering::Acquire));
+        assert!(!shared.closed.load(Ordering::Acquire),"cancellation reclaims before close");
+    } else { painter.close(); }
+    shared.probe.until(||shared.probe.retired.load(Ordering::Acquire));
+    assert_eq!(shared.probe.bytes.load(Ordering::Acquire),0);
+    assert_eq!(shared.probe.uploads.load(Ordering::Acquire),expected,"retirement must not resubmit an already submitted batch");
+    gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(!gpu.device.generate_allocator_report().unwrap().allocations.iter().any(|a|a.name.starts_with("styk ")),
+        "cancel/close drops real renderer owners before releasing the held completion signal");
+    painter.close(); host.close();
+    shared.probe.until(||painter.worker_exited());
+}
+
+#[test]
+fn real_painter_bounds_empty_prefetch_polls_under_stalled_completion() { stalled_painter(false,true,false); }
+#[test]
+fn real_painter_cancels_in_flight_prefetch_under_stalled_completion() { stalled_painter(true,true,false); }
+#[test]
+fn real_painter_closes_in_flight_prefetch_under_stalled_completion() { stalled_painter(true,false,false); }
+#[test]
+fn real_painter_does_not_submit_a_warm_prefetch() { stalled_painter(false,false,true); }
+
 #[test]
 fn prefetched_stage_frame_records_no_upload_when_drawn() {
     let engine = styk_engine::Engine::new(||0.,styk_engine::Budgets::for_device(None));
@@ -229,6 +379,7 @@ fn a_failure_cancelled_before_handoff_never_reaches_the_interface() {
         changed: Condvar::new(),
         idle: Mutex::new(()),
         wake: Arc::new(|| {}),
+        probe: Probe::default(),
     });
     let mut painter = Painter {
         shared: shared.clone(),

@@ -116,14 +116,16 @@ impl PictureState {
 
     /// The picture at `entry` is in layer `layer` of the sprite texture (`None`: it is not, its soft copy draws).
     /// Takes effect with [`PictureState::flush`].
-    pub(crate) fn set(&mut self, entry: &AtlasEntry, layer: Option<u32>) {
+    pub(crate) fn set(&mut self, entry: &AtlasEntry, layer: Option<u32>) -> bool {
         if let Some(&slot) = self.slots.get(&(entry.layer, corner(entry))) {
             let value = layer.map_or(0, |layer| layer + 1);
             if self.entries[slot][2] != value {
                 self.entries[slot][2] = value;
                 self.dirty = true;
+                return true;
             }
         }
+        false
     }
 
     pub(crate) fn flush(&mut self, queue: &wgpu::Queue) {

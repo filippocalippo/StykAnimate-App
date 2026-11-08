@@ -57,7 +57,9 @@ Pipelines and effect uniforms remain reusable.
 
 `styk video --memory-report <report.jsonl>` records process private bytes, counted
 Rust heap bytes and peak, and wgpu allocator totals and allocation labels. It also
-emits `styk-trace` memory counters. `styk stage-memory <input> <frames.styk-auto>
+emits `styk-trace` memory counters. Detail JSON is built lazily only when reporting
+is enabled; ordinary video frames do not construct diagnostic values.
+`styk stage-memory <input> <frames.styk-auto>
 <WxH> <report.jsonl>` drives the production K-stage host with `frame` automation
 steps, including normal close and reclamation. Both diagnostics require `app-tools`;
 they create no window. These quantities overlap and must not be added as if they

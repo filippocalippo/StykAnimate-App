@@ -151,7 +151,7 @@ impl FrameProducer for Producer {
         let mut timings = self.timings.lock().unwrap();
         timings.evaluate_ms += (drawing - started).as_secs_f64() * 1000.0;
         timings.draw_ms += drawing.elapsed().as_secs_f64() * 1000.0;
-        crate::memory::sample(&mut self.memory, "frame", Some(tick), crate::memory::renderer_device(&self.renderer), serde_json::json!({"frame_buffer":out.capacity(),"draw_ms":drawing.elapsed().as_secs_f64()*1000.}))?;
+        crate::memory::sample(&mut self.memory, "frame", Some(tick), crate::memory::renderer_device(&self.renderer), || serde_json::json!({"frame_buffer":out.capacity(),"draw_ms":drawing.elapsed().as_secs_f64()*1000.}))?;
         if self.sample.contains(&index) {
             let child = self.child.load(Ordering::Relaxed);
             timings.samples.push((index, win::private_bytes(None), if child != 0 { win::private_bytes(Some(child)) } else { 0 }));
@@ -247,14 +247,14 @@ fn make_renderer(engine: &Engine, frames: &styk_engine::export::ExportFrames, se
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| fail(format!("No GPU adapter: {e}")))?;
         let adapter_name = adapter.get_info().name;
-        crate::memory::sample(memory, "adapter", None, None, serde_json::json!({"backend":format!("{:?}",adapter.get_info().backend)})).map_err(fail)?;
+        crate::memory::sample(memory, "adapter", None, None, || serde_json::json!({"backend":format!("{:?}",adapter.get_info().backend)})).map_err(fail)?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk video export"), required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).map_err(|e| fail(e.to_string()))?;
-        crate::memory::sample(memory, "device", None, Some(&device), serde_json::json!({})).map_err(fail)?;
+        crate::memory::sample(memory, "device", None, Some(&device), || serde_json::json!({})).map_err(fail)?;
         let exporter = GpuExport::new(&device, &queue, settings, tile);
-        crate::memory::sample(memory, "exporter", None, Some(&device), serde_json::json!({})).map_err(fail)?;
+        crate::memory::sample(memory, "exporter", None, Some(&device), || serde_json::json!({})).map_err(fail)?;
         let mut renderer = FrameRenderer::Gpu(exporter, None);
         renderer.load_images(engine, frames).map_err(fail)?;
-        crate::memory::sample(memory, "uploaded", None, Some(&device), serde_json::json!({})).map_err(fail)?;
+        crate::memory::sample(memory, "uploaded", None, Some(&device), || serde_json::json!({})).map_err(fail)?;
         Ok((renderer, adapter_name))
     }
 }
@@ -282,7 +282,7 @@ fn open_other(path: &str, settings: Settings, cpu: bool) -> Result<Other, String
 
 fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, String> {
     let mut memory = crate::memory::Log::open(option(rest, "--memory-report")).map_err(fail)?;
-    crate::memory::sample(&mut memory, "start", None, None, serde_json::json!({})).map_err(fail)?;
+    crate::memory::sample(&mut memory, "start", None, None, || serde_json::json!({})).map_err(fail)?;
     let baseline = win::private_bytes(None);
     let started = Instant::now();
     let bytes = std::fs::read(path).map_err(|e| fail(format!("{path}: {e}")))?;
@@ -293,7 +293,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let frames = engine.export_frames(0).map_err(fail)?;
     let generation = frames.generation().clone();
     let after_open = win::private_bytes(None);
-    crate::memory::sample(&mut memory, "document", None, None, serde_json::json!({"input_bytes":bytes.len()})).map_err(fail)?;
+    crate::memory::sample(&mut memory, "document", None, None, || serde_json::json!({"input_bytes":bytes.len()})).map_err(fail)?;
     drop(bytes);
     let doc = &generation.prepared.doc;
     let (first, last) = match ticks.split_once('-') {
@@ -375,7 +375,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let settings = Settings::new(width, height, smoothing, styk_export::settings::MAX_PIXELS).map_err(fail)?;
 
     let (renderer, adapter_name) = make_renderer(&engine, &frames, settings, flag(rest, "--cpu"), number(rest, "--tile").map_err(fail)?.unwrap_or(styk_export::TILE_SIDE), &mut memory)?;
-    crate::memory::sample(&mut memory, "ready", None, crate::memory::renderer_device(&renderer), serde_json::json!({})).map_err(fail)?;
+    crate::memory::sample(&mut memory, "ready", None, crate::memory::renderer_device(&renderer), || serde_json::json!({})).map_err(fail)?;
     let after_renderer = win::private_bytes(None);
     // A cancel also ends a wait for the GPU.
     {
@@ -521,7 +521,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<String, St
     let result = run_video_export(&*service, Path::new(out), &request, &mut producer, mix.as_mut().map(|m| m as &mut dyn AudioSource), &cancel, &on_start);
     let finished = Instant::now();
     done.store(true, Ordering::Relaxed);
-    crate::memory::sample(&mut producer.memory, "end", None, crate::memory::renderer_device(&producer.renderer), serde_json::json!({})).map_err(fail)?;
+    crate::memory::sample(&mut producer.memory, "end", None, crate::memory::renderer_device(&producer.renderer), || serde_json::json!({})).map_err(fail)?;
     let export_ms = (finished - exporting).as_secs_f64() * 1000.0;
     let cancel_latency = cancel_when.lock().unwrap().map(|at| (finished - at).as_secs_f64() * 1000.0);
     let timings = timings.lock().unwrap();

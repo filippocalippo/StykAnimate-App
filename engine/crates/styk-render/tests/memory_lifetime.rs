@@ -81,12 +81,14 @@ fn exact_effect_slots_reuse_after_quiet_frames_and_release_at_close() {
     effects.prepare(renderer.device(), renderer.queue(), [256, 256]);
     let slot = effects.slot_texture(renderer.device(), 0).clone();
     assert_eq!(effects.stats.slot_bytes, 256 * 256 * 4);
-    for size in [[256,256],[0,0],[256,256]] {
+    for _ in 0..241 {
         effects.begin();
-        effects.prepare(renderer.device(), renderer.queue(), size);
+        effects.prepare(renderer.device(), renderer.queue(), [0,0]);
         assert_eq!(effects.stats.slot_bytes, 256 * 256 * 4);
-        assert_eq!(effects.slot_texture(renderer.device(), 0), &slot);
     }
+    effects.begin();
+    effects.prepare(renderer.device(), renderer.queue(), [256,256]);
+    assert_eq!(effects.slot_texture(renderer.device(), 0), &slot);
     drop((slot,effects));
     renderer.device().poll(wgpu::PollType::wait_indefinitely()).unwrap();
     assert!(!renderer.device().generate_allocator_report().unwrap().allocations.iter().any(|a| a.name == "styk effect slot"));

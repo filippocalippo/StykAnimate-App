@@ -1143,4 +1143,17 @@ impl Shared {
 }
 
 #[cfg(test)]
+impl Frames {
+    /// Run the production preparation steps without a concurrent scheduler in
+    /// worker-lifetime tests; the actual Painter still runs on its own worker.
+    pub(crate) fn prepare_pending_for_test(&self) {
+        let mut builder = FrameBuilder::default();
+        for _ in 0..SLOTS * 2 {
+            if !self.shared.step(&mut builder) { return; }
+        }
+        panic!("bounded frame preparations did not drain");
+    }
+}
+
+#[cfg(test)]
 mod tests;

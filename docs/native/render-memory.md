@@ -183,14 +183,20 @@ device-loss, dropped-owner and refusal tests remain. No test threshold was raise
    output buffers alone do not explain it. It does not establish a floor.
 3. **Pools deferred:** design and measure first in a later chunk, with the new
    native probe. Neither the 8-16 MiB policy nor 8-256 MiB geometric policy remains.
-4. **X2 native frame nondeterminism remains separate.** Four extra old-binary
-   samples agreed at A tick 181 and D571; their historical candidate differences
-   have no demonstrated baseline-self-variation exemption. Baseline variation is
-   demonstrated at A131, D541 and D544, and historical A138 samples disagree.
-   No tolerance or blanket exemption was introduced; see the retained
-   [PNG investigation](render-memory-followup.md#a-tick-181-and-process-attribution).
+4. **ND's DX12 platform floor remains separate.** The later ND investigation
+   reproduced A181's one-level difference on the baseline, despite RM's four
+   earlier samples agreeing. It traced the driver behavior to DX12
+   `MultisampleEnable` on this NVIDIA stack, independently of our renderer.
+   RM's strict Vulkan comparison and the named-frame DX12 classification are
+   recorded below. No tolerance, pixel correction or production backend change
+   is introduced. The earlier [PNG investigation](render-memory-followup.md#a-tick-181-and-process-attribution)
+   remains historical, not evidence against ND's longer reproduction.
+   The follow-up below also reproduces baseline B164 differences up to eight
+   levels and baseline A202 differences up to two levels. The stated one-level
+   DX12 criterion therefore remains unmet, with no tolerance change. These new
+   baseline cases need ND investigation; RM does not infer a new driver floor.
 
-## Equality, verification and provenance
+## Kept-set selection verification (bdbaee4c)
 
 Both exclusive matrices have exact H.264 equality for every run and binary.
 The new A/B confirmation compares complete files against **both** second-matrix
@@ -258,3 +264,175 @@ describe that separate process only; they do not establish an RM process floor.
   frozen fixtures, existing limits, the toolchain and prior parity limitation.
 - Leave the build target, dependency junction and raw evidence for Sol review;
   no merge, push, review delegation or new timing matrix is performed here.
+
+## Sol review follow-up
+
+The accepted no-pools selection and B trade-off stay. This follow-up bounds stage
+prefetch submissions and completes kept-binary frame equality; the selection's
+timings and owner tables above are not relabeled as new measurements.
+
+The real Painter worker now takes one successor upload slice, then waits on its
+completion signal using its existing parked polling loop. It never resubmits that
+batch, including on cancellation, or submits a warm/unchanged slice. An atlas
+growth may add one copy submission, so at most two upload-related submissions are
+outstanding. Unchanged page maps are not rewritten, and table synchronization
+reports whether it staged a write instead of treating every asset change as an
+upload. Admission counts the decoded
+pixels, padded GPU staging, concrete picture-table copies, map/warm-up writes and
+old atlas backing inside the existing working-byte budget, before upload/growth.
+Cancellation drops renderer owners on the worker before waiting for outstanding
+GPU work; no next renderer is created until that work completes. Close exits
+without waiting for GPU progress. wgpu's backend references retire with its GPU
+commands; RM does not destroy the app's shared device to force reclamation.
+
+Four `real_painter_*` tests run `Painter::new/request/update/close` and its actual
+worker, renderer, decoders and queue. A test-only gate holds delivery of actual
+wgpu completion callbacks while the loop executes. They cover missing decode
+output, an incomplete multi-slice cel upload, cancellation and close under the
+stall, and an already warm successor. They assert submission count, reserved
+bytes, no partial publication, and real allocator-owner release before the held
+completion is delivered. These are not tests of `Pictures::prefetch` alone.
+Restoring the old loop fails all four tests (`0 passed; 4 failed`), including
+the warm successor's empty submission. The scheduler preparations run through
+their production steps before the Painter worker starts; this removes a harness
+race in which a concurrent cache lock legitimately made `Ticket::read` pending.
+
+The effect test now runs **241 consecutive quiet preparations** before checking
+the original handle is reused and teardown removes the allocation. Restoring the
+original idle-release branch fails (`0 passed; 1 failed`, zero bytes versus
+262,144). It no longer claims that one quiet frame detects the 240-frame timer.
+The production memory sampler accepts lazy detail closures; disabled reporting
+never builds JSON. Restoring eager evaluation fails its test (`0 passed;
+1 failed`, one closure call versus zero). Logs are
+`artifacts/rm/review-painter-stable-fail-first.log` and
+`artifacts/rm/review-{effects,lazy}-fail-first.log`.
+
+Verification through the heavy queue (`STYK_BACKGROUND_WINDOW=1`):
+
+```text
+cargo check (render/export/engine/core/CLI app-tools): exit 0
+cargo clippy (same crates, all targets, --no-deps): exit 0, existing warnings
+cargo test (same five crates): 851 passed; 0 failed; 16 ignored
+final metadata refinement, render/core tests: 584 passed; 0 failed; 9 ignored
+final render/core check and clippy --no-deps: exit 0
+release styk-cli app-tools build: exit 0
+cargo xtask check: exit 0
+screenshots: active, 22 references (23 catalogue screens)
+```
+
+Logs: `artifacts/rm/review-final-scoped-verification.log` and
+`review-metadata-final.log`. Component-sheet still has no reference. The initial
+Clippy invocation without `--no-deps` stopped on ten existing `clippy::eq_op`
+errors in `styk-math`'s exact arithmetic (`review-final-verification.log`);
+the scoped invocation leaves that arithmetic and all lint settings unchanged.
+The final refinement makes an unchanged picture-table sync report no staged
+write; its owning crates were checked, tested and rebuilt before comparisons.
+
+### Kept-binary RGBA equality
+
+The rebuilt release binary has SHA-256
+`d0536e7490fb341f52cb8969700762e2fc31fce1ba31f1c013cf334adac3ffc7`;
+the retained baseline is
+`a0e0953dd9169710a06cf4a0f5835e1b04b7a8bbcd2c22b1ca492d3ecb597091`.
+`artifacts/rm/review-equality/results.json` records both identities and hashes of
+the changed Rust sources against parent `bdbaee4c`. Its retained `styk-kept.exe`
+is the binary compared. No production source changed after the comparison build.
+
+Every process draws the same ascending inclusive range: A/B/C 100-219, D 500-619,
+at 1920x1080 and 3840x2160, edges smoothing, matte over black. Vulkan runs before
+then kept. DX12/FXC runs before1, before2, kept, with before1 always the reference;
+it is never selected after seeing results. Inputs are read in place.
+
+**Vulkan: 960/960 pre-encoder RGBA SHA-256 hashes identical, zero differing
+pixels.** These are actual `FrameProducer::frame_into` output buffers, including
+production export prefetch, not H.264 or PNG file hashes. Every document/size
+combination compares all 120 frames, with zero differences.
+
+**DX12: 960/960 frames compared, four kept frames differ; the strict check exits
+1.** Differing PNGs are decoded to RGBA, every channel is compared without
+rounding, and every nonzero pixel/channel difference remains in the evidence.
+All observed differences are below; every other frame compares exactly.
+
+| Doc / size / tick | Before1 vs before2: pixels / max level | Before1 vs kept: pixels / max level | Result |
+| --- | ---: | ---: | --- |
+| A / 1080p / 181 | 2 / 1 | 2 / 1 | ND listed; kept equals before2 RGBA exactly |
+| A / 1080p / 202 | 33 / 2 | 0 / 0 | Baseline-only variation beyond ND's reported one-level cases |
+| B / 1080p / 164 | 0 / 0 | 3 / 8 | Outside the stated DX12 criterion; investigated below |
+| D / 4K / 541 | 6 / 1 | 2 / 1 | ND listed |
+| D / 4K / 543 | 5 / 1 | 5 / 1 | Same frame varies between the two baselines |
+
+The fresh A181 comparison directly reproduces the baseline variation missing
+from RM's earlier four samples. A202's baseline-only two-level variation is also
+reported; it is not used to excuse B164 or to widen the one-level criterion.
+Logs: `review-equality.log`, `review-equality-pillow.log`; individual RGBA counts,
+hashes and captures are in `artifacts/rm/review-equality/`.
+
+The first comparator launch hit Windows' missing Python alias; the queue's Conda
+interpreter then lacked Pillow. The existing Python 3.14/Pillow installation was
+used for pixel analysis. Both failures are retained. Completed captures and
+Vulkan comparisons were resumed, never rerendered or replaced; no tool was installed.
+
+#### B164: fixed additional baseline/kept pairs
+
+Four additional pairs were declared before running, alternating before then kept
+and drawing all 120 original frames before comparing tick 164. All completed;
+no repeat was discarded. Differences below are always against the original
+before1 RGBA, in **pixels / maximum channel level**:
+
+| Run | Before | Kept |
+| --- | ---: | ---: |
+| Initial sweep | before1: 0 / 0; before2: 0 / 0 | kept1: 3 / 8 |
+| Additional pair 1 | before3: 6 / 8 | kept2: 0 / 0 |
+| Additional pair 2 | before4: 3 / 8 | kept3: 3 / 8 |
+| Additional pair 3 | before5: 0 / 0 | kept4: 3 / 8 |
+| Additional pair 4 | before6: 3 / 8 | kept5: 3 / 8 |
+
+Before4 and before6 have **exactly the same RGBA SHA-256 as the original kept1**:
+`626e2b886381f8334129fe297167292039c99d2a296fdb8ddbcca00b7b397aeb`.
+Before1/before2/before5 and kept2 share
+`9540bdfced5d1d2361c0e7172297f13c64492d5fcf0ccc6a06173f70d0dfde31`.
+The discrepant pixels include (1240,849), RGB 238 versus 246, alpha 255.
+Thus the baseline reproduces the complete observed kept result, not merely a
+similar pixel count. This establishes baseline nondeterminism on B164, without
+claiming that its cause has been proved identical to ND's six named cases.
+
+`artifacts/rm/review-dx12-investigation/{plan,results}.json` retains the fixed plan,
+all hashes, counts and changed pixel values; its captures retain the whole range.
+The diagnostic run exits 0 for completion. **The original strict equality check
+still exits 1:** eight levels exceed the requested one-level criterion, even
+though the baseline reproduces them. No threshold, frame, baseline, or successful
+repeat is substituted. B164 and the baseline-only A202 case are handed back as
+new ND evidence; the instruction not to fix native frame nondeterminism in RM
+is retained. Vulkan equality is settled independently.
+
+### Decisions
+
+- Use one successor slice, plus at most one required atlas copy, as the fixed
+  outstanding bound. This retains upload-ahead without a new queue or semaphore
+  and charges concrete outstanding owners to the existing byte limit.
+- Gate completion delivery in tests, not GPU execution or a stand-in helper.
+  This deterministically exercises the real worker's stalled-completion path
+  without a driver hang, a wall-clock performance threshold or injected input.
+  Prepare tickets with the production frame steps before starting that worker,
+  avoiding a concurrent scheduler's legitimate pending-cache reads in the harness.
+- Keep current cancellation prompt but drain the old submission before making
+  another renderer; close may release ownership without waiting for the GPU.
+- Compare pre-encoder Vulkan RGBA hashes in matched ascending order, and decode
+  differing DX12 PNGs to RGBA. Run two fresh DX12 baselines in a fixed order;
+  preserve every mismatch rather than repeat for a favorable result.
+- Use ND's explicitly named six frame/size cases, or a frame that differs between
+  the two fresh baseline runs, only to classify one-level DX12 differences. Never
+  apply that classification to Vulkan or claim exact DX12 equality.
+- Investigate the unexpected B164 result with four fixed before/kept pairs, each
+  drawing the full original range in the original order. Keep the first failure
+  and all repeats; do not stop on a favorable sample or increase the one-level limit.
+- Preserve the failing DX12 verdict after the baseline reproduces B164 exactly.
+  The explicit one-level condition and the instruction to leave native frame
+  nondeterminism to ND take precedence over making this report claim acceptance.
+- Resume saved captures after comparator launcher failures, using the existing
+  Pillow interpreter; installing or changing machine-wide tools is unnecessary.
+- Scope Clippy to the affected crates with `--no-deps`, as in prior verification;
+  do not rewrite unrelated V8-exact arithmetic to satisfy dependency lint errors.
+- Do not merge merely for verification. When the orchestrator integrates RM,
+  retain 64b1d5b4's lineage-filtered task retirement in `publication.rs`; Sol
+  confirmed that it composes with RM's headless-picture consumer change.
