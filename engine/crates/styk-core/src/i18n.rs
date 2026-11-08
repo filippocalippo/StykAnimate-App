@@ -295,6 +295,8 @@ impl Presentation {
     }
 
     fn format(&self, msg: &Msg, depth: usize) -> String {
+        #[cfg(feature = "devtools")]
+        if let Some(template) = crate::dev_extension::catalogue(&msg.key) { return self.substitute(template, &msg.params, depth); }
         let count = msg.params.iter().find(|(name, _)| *name == "count").and_then(|(_, arg)| match arg {
             Arg::Num(value) if value.is_finite() => Some(*value),
             _ => None,

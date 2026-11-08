@@ -810,6 +810,8 @@ impl WorkerTicket {
     /// current frame and at most one cached playback successor for prefetch;
     /// each is admitted by the existing cache byte bound and dropped on the worker.
     pub fn read(&self) -> Result<Option<WorkerFrame>, Error> {
+        #[cfg(feature = "devtools")]
+        let _trace = styk_trace::span!("frame.prepare");
         if !self.current() {
             return Ok(None);
         }

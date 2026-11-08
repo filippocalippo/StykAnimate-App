@@ -4,6 +4,7 @@ pub fn protocol() -> Value {
     let operations:Vec<_>=crate::protocol::OPS.iter().map(|op|{
   let args=match *op {
    "trace.start"=>json!({"cap_mb":{"type":"integer","minimum":1,"maximum":256}}),
+   "param.set"=>json!({"name":{"type":"string","maxLength":128},"value":{"type":["number","integer","boolean","string"],"maxLength":2048}}),
    "doc.tree"|"doc.node"|"state.get"=>json!({"path":{"type":"array","maxItems":32,"items":{"type":"string","maxLength":2048}},"cursor":{"type":"integer","minimum":0}}),
    "trace.ring"|"threads.get"|"history.list"=>json!({"cursor":{"type":"integer","minimum":0}}),
    _=>json!({}),

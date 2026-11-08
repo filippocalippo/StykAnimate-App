@@ -235,6 +235,8 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        #[cfg(feature = "devtools")]
+        let _trace = styk_trace::span!("ui.dispatch");
         match message {
             Message::Sheet(message) => match self.sheet.as_mut() {
                 Some(sheet) => sheet.update(message).map(Message::Sheet),
@@ -605,7 +607,14 @@ impl App {
             (Some(ready), None) => {
                 // The docked window fills the window under the band; the band's own area holds nothing below it.
                 let below_band = iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed();
-                iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.wake_widget(), self.band.overlay_layer(self.theme)].map(Message::Band).boxed()
+                let layers=iced::widget::stack![self.band.dock_view(self.theme), self.band.view(self.theme, ready, self.max_button, below_band), self.band.wake_widget()];
+                // The developer overlay takes no input and sits under the menus and messages.
+                #[cfg(feature = "devtools")]
+                let layers=layers.push(self.band.developer_overlay(self.theme));
+                let layers=layers.push(self.band.overlay_layer(self.theme));
+                #[cfg(feature = "devtools")]
+                let layers=layers.push(self.band.developer_wake());
+                layers.map(Message::Band).boxed()
             }
             (None, _) => styk_ui::prepaint(),
         }
@@ -665,8 +674,22 @@ fn main() -> ExitCode {
         }
     };
     #[cfg(feature = "devtools")]
+    let developer_runtime = {
+        let spawner:Arc<dyn styk_services::Spawner>=Arc::new(styk_platform::spawn::ThreadSpawner);
+        let storage=match styk_platform::storage::LocalStorage::dev_extension_params(spawner.as_ref()) {Ok(s)=>Arc::new(s),Err(e)=>{eprintln!("developer storage: {e}");return ExitCode::FAILURE;}};
+        let clock=match styk_trace::clock::current(){Some(clock)=>clock,None=>{eprintln!("developer clock missing");return ExitCode::FAILURE;}};
+        let services=styk_devtools::runtime::Services{spawner,clock,files:Arc::new(styk_platform::files::LocalFiles),output:Arc::new(styk_platform::files::LocalFiles),storage,memory:Arc::new(styk_platform::diagnostics::NativeDiagnostics)};
+        let startup=styk_devtools::runtime::Startup{profiles:launch.params.iter().cloned().map(styk_services::files::FileTarget::new).collect(),overrides:launch.param.clone()};
+        match styk_devtools::runtime::Runtime::start(services,startup){Ok(runtime)=>runtime,Err(e)=>{eprintln!("developer runtime: {e}");return ExitCode::FAILURE;}}
+    };
+    #[cfg(feature = "devtools")]
+    {
+        let logs=developer_runtime.logs.clone();
+        if let Err(e)=iced_winit::dev_extension::install(Arc::new(move |level,module,args| logs.record(styk_trace::now_ns(),level,module,args))) {eprintln!("developer logs: {e}");return ExitCode::FAILURE;}
+    }
+    #[cfg(feature = "devtools")]
     let _control = if launch.control {
-        match styk_devtools::channel::shell_reader() {
+        match styk_devtools::channel::runtime_reader(developer_runtime.clone()) {
             Ok(reader) => Some(reader),
             Err(error) => {
                 eprintln!("control channel: {error}");
@@ -680,6 +703,10 @@ fn main() -> ExitCode {
     if launch.control {
         eprintln!("--control requires a developer build");
         return ExitCode::from(2);
+    }
+    #[cfg(feature = "devtools")]
+    if let Some(developer) = launch.screen.as_deref().and_then(styk_devtools::ui::screens::Screen::from_id) {
+        return run_developer_screen(&launch, developer);
     }
     let screen = match launch.screen.as_deref().map(|id| (id, Screen::from_id(id))) {
         Some((id, None)) => {
@@ -732,6 +759,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    #[cfg(feature = "devtools")]
+    // The process retains the registry even if its current window is dropped.
+    built.band.attach_developer(developer_runtime.clone());
     let _automation_deadline = match built.launch.automation.clone() {
         Some(script) => {
             if let Err(error) = built.band.run_script(&script) {
@@ -834,6 +864,23 @@ fn run_pen_lab(launch: &Launch, strategy: Option<Strategy>) -> ExitCode {
 fn run_pen_lab(_: &Launch, _: Option<Strategy>) -> ExitCode {
     eprintln!("the pen lab is in the developer build (cargo build --features devtools)");
     ExitCode::from(2)
+}
+
+/// A developer panel screen (`styk_devtools::ui::screens`): drawn offscreen into the `--screenshot` picture, in every mode.
+#[cfg(feature = "devtools")]
+fn run_developer_screen(launch: &Launch, screen: styk_devtools::ui::screens::Screen) -> ExitCode {
+    let Some(path) = &launch.screenshot else {
+        eprintln!("a developer screen needs --screenshot <png>");
+        return ExitCode::from(2);
+    };
+    let result = headless::developer_screenshot(screen, launch.size.unwrap_or(screen.size()), launch.scale.unwrap_or(1.0) as f32).and_then(|image| screenshot::write(path, &image));
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// An unattended run with no window: draws the interface offscreen into the `--screenshot` picture and exits.

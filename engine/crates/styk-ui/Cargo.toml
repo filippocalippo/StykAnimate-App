@@ -14,6 +14,7 @@ styk-core = { path = "../styk-core", default-features = false }
 styk-design = { path = "../styk-design", features = ["widgets"] }
 
 [features]
+devtools = ["styk-core/devtools"]
 default = ["engine"]
 engine = ["styk-core/engine"]
 headless = ["dep:iced_runtime"]

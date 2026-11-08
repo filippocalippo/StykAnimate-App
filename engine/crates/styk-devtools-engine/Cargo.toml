@@ -8,8 +8,11 @@ publish.workspace = true
 
 [dependencies]
 styk-core = { path = "../styk-core", features = ["inspect"] }
-styk-platform = { path = "../styk-platform", features = ["dev-control"] }
+styk-platform = { path = "../styk-platform", features = ["dev-control", "devtools"] }
 styk-services = { path = "../styk-services" }
 styk-trace = { path = "../styk-trace", features = ["enabled"] }
 serde_json = "1"
 serde = "1"
+
+[dev-dependencies]
+styk-services = { path = "../styk-services", features = ["test-fakes"] }

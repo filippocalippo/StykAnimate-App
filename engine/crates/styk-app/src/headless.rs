@@ -25,6 +25,14 @@ pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&She
     pollster::block_on(screenshot_async(theme, size, scale, sheet, band, None, None))
 }
 
+/// A developer panel screen: its fixture models drawn by the views the dock places.
+#[cfg(feature = "devtools")]
+pub fn developer_screenshot(screen: styk_devtools::ui::screens::Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
+    let scene = styk_ui::headless::Scene { view: styk_devtools::ui::screens::view(screen), ready: Box::new(|| true) };
+    let image = pollster::block_on(styk_ui::headless::screenshot(screen.theme(), size, scale, None, None, None, Some(scene), styk_platform::font_smoothing::current(), iced::time::Instant::now(), pause))?;
+    Ok(Image { width: image.width, height: image.height, rgba: image.rgba })
+}
+
 /// A Properties panel screen: its fixture's core, refreshed (never waited on) until the facts lane made what it shows.
 pub fn inspector_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
     let Screen::Inspector(context, _) = screen else { return Err("not a Properties panel screen".into()) };

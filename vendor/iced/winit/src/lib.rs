@@ -29,6 +29,8 @@ pub use winit;
 pub mod clipboard;
 pub mod conversion;
 pub mod presents;
+#[cfg(feature = "devtools")]
+pub mod dev_extension;
 
 mod error;
 mod proxy;

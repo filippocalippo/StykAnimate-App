@@ -33,6 +33,12 @@ pub struct LocalStorage {
 }
 
 impl LocalStorage {
+    /// Developer profiles have their own namespace and the same atomic storage implementation.
+    #[cfg(feature = "devtools")]
+    pub fn dev_extension_params(spawner:&dyn Spawner)->Result<Self,FileError>{
+        let base=std::env::var_os("LOCALAPPDATA").filter(|v|!v.is_empty()).ok_or_else(||FileError::Io("LOCALAPPDATA is unavailable".into()))?;
+        Self::new(PathBuf::from(base).join("StykAnimate").join("devtools").join("params"),spawner)
+    }
     /// Native preferences are separate from Electron's roaming profile and its import sources.
     /// Construction starts a worker but performs no disk I/O and creates no settings directory.
     pub fn for_user(spawner: &dyn Spawner) -> Result<Self, FileError> {

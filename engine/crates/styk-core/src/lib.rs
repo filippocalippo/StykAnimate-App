@@ -24,6 +24,8 @@ pub mod command_queue;
 pub mod error_policy;
 pub mod commands;
 pub mod controls;
+#[cfg(feature = "devtools")]
+pub mod dev_extension;
 #[cfg(feature = "engine")]
 pub mod documents;
 pub mod dock;

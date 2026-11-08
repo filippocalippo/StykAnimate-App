@@ -17,4 +17,5 @@ styk-ui = { path = "../styk-ui", optional = true }
 
 [features]
 default = []
-ui = ["dep:iced", "dep:styk-design", "dep:styk-ui"]
+panels = ["styk-core/devtools"]
+ui = ["panels", "dep:iced", "dep:styk-design", "dep:styk-ui", "styk-ui/devtools"]

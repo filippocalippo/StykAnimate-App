@@ -40,6 +40,21 @@ use styk_ui::shell as view;
 
 /// Frames to let pass after a step so the window shows its result before the next step (and before a capture).
 const SETTLE_FRAMES: u32 = 3;
+#[cfg(all(test,feature="devtools"))]
+#[path="developer_tests.rs"]
+mod developer_tests;
+
+#[cfg(feature = "devtools")]
+struct DeveloperWatch(Arc<styk_core::stage::Progress>);
+#[cfg(feature = "devtools")]
+impl std::hash::Hash for DeveloperWatch {
+    fn hash<H:std::hash::Hasher>(&self,state:&mut H){std::hash::Hash::hash(&Arc::as_ptr(&self.0),state);}
+}
+#[cfg(feature = "devtools")]
+fn developer_stream(watch:&DeveloperWatch)->impl iced::futures::Stream<Item=Message> + use<> {
+    use iced::futures::StreamExt;
+    styk_ui::stage::progress(watch.0.clone()).map(|_|Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Developer(styk_core::dev_extension::Event::Poll))))
+}
 
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -97,6 +112,14 @@ struct Run {
 }
 
 pub struct TopBand {
+    #[cfg(feature = "devtools")]
+    pub developer: Option<styk_devtools::panels::Host>,
+    #[cfg(feature = "devtools")]
+    developer_progress: Arc<styk_core::stage::Progress>,
+    #[cfg(feature = "devtools")]
+    developer_bridge: Option<styk_devtools::bridge::Bridge>,
+    #[cfg(feature = "devtools")]
+    developer_reply: Option<std::sync::mpsc::SyncSender<Result<styk_devtools::ParameterValue,String>>>,
     /// The open projects.
     pub core: styk_core::app::Core,
     /// The layout persistence service: the stored arrangements load through it and the dock's writes go through it.
@@ -161,7 +184,11 @@ fn load_layouts(store: &styk_core::layout::LayoutStore) -> styk_core::dock::Stor
 }
 
 impl Drop for TopBand {
-    fn drop(&mut self) { self.abandon_layouts(); self.abandon_settings(); }
+    fn drop(&mut self) {
+        #[cfg(feature="devtools")]
+        if let Some(bridge) = &self.developer_bridge { bridge.detach(); }
+        self.abandon_layouts(); self.abandon_settings();
+    }
 }
 
 /// The startup document the host is given (see `TopBand::new`).
@@ -207,6 +234,26 @@ fn workspace_named(name: &str) -> Workspace {
 }
 
 impl TopBand {
+    #[cfg(feature = "devtools")]
+    pub fn attach_developer(&mut self, runtime:styk_devtools::runtime::Runtime) {
+        self.developer_bridge=Some(runtime.bridge.clone());
+        let attached=runtime.bridge.attach(self.developer_progress.wake());
+        self.developer=Some(styk_devtools::panels::Host::new(runtime,self.developer_progress.wake()));
+        if let Err(e)=attached && let Some(host)=&mut self.developer {host.error=Some(styk_core::dev_extension::notice(e));}
+        self.reconcile_developer();
+    }
+    #[cfg(feature = "devtools")]
+    fn reconcile_developer(&mut self) {
+        use styk_core::dev_extension::Panel;
+        let open=Panel::ALL.map(|p|self.core.dock().layout().groups().iter().any(|g|g.tabs.iter().any(|id|id.kind==p.id())));
+        let stage=self.core.dock().solution().stages.values().next().map(|r|styk_devtools::panels::Bounds{x:r.x,y:r.y+f64::from(self.height()),width:r.w,height:r.h});
+        let now=self.now();
+        if let Some(host)=&mut self.developer {host.reconcile(open,stage,now);}
+    }
+    #[cfg(feature = "devtools")]
+    pub fn developer_wake(&self)->iced::Element<'static,Message> {
+        crate::overlay_wake::element(self.developer.as_ref().and_then(|h|h.deadline()),self.clock.clone(),|now|Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Developer(styk_core::dev_extension::Event::Tick(now)))))
+    }
     /// The band over a new, empty set of projects, with K-doc's document host attached: its worker, the local files and the
     /// one application clock.
     /// `wakes` carries layout receipts; the shared Progress subscription carries document, frame and Settings work. `recovery` is the
@@ -256,7 +303,7 @@ impl TopBand {
         core.dock_mut().set_writer(wall.writer());
         core.dock_mut().set_wall_time(wall.unix_millis());
         core.dock_mut().handle(styk_core::dock::Event::Resized { width: f64::from(window_size.width), height: f64::from(window_size.height), scale: 1.0 }, 0);
-        Ok(TopBand { core, layouts, layout_pending: None, progress: ProgressWatch(progress), fixture: None, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, wall, fixed, run: None, measured: false, screen: None })
+        Ok(TopBand { #[cfg(feature = "devtools")] developer_bridge:None, #[cfg(feature = "devtools")] developer_reply:None, #[cfg(feature = "devtools")] developer:None, #[cfg(feature = "devtools")] developer_progress:styk_core::stage::Progress::new(), core, layouts, layout_pending: None, progress: ProgressWatch(progress), fixture: None, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, wall, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
@@ -401,7 +448,28 @@ impl TopBand {
             Some(model) => (Some(styk_ui::inspector::View::model(model, presentation, theme)), None),
             None => (styk_ui::inspector::View::of(&self.core, theme), self.core.stage().map(|surface| styk_ui::stage::stage(surface, theme, |event| styk_ui::Message::Command(styk_core::commands::Command::Stage(event))))),
         };
-        styk_ui::dock::window(&params, inspector, stage).map(Message::Editor).boxed()
+        #[cfg(feature = "devtools")]
+        let docked = {
+            let developer = self.developer.as_ref().map(|host| styk_devtools::ui::Context::of(host, self.developer_surroundings(theme)));
+            styk_ui::dock::window_with(&params, inspector, stage, &mut |panel| developer.as_ref().and_then(|context| styk_devtools::ui::panel(context, panel)))
+        };
+        #[cfg(not(feature = "devtools"))]
+        let docked = styk_ui::dock::window(&params, inspector, stage);
+        docked.map(Message::Editor).boxed()
+    }
+
+    #[cfg(feature = "devtools")]
+    fn developer_surroundings(&self, theme: Theme) -> styk_devtools::ui::Surroundings<'_> {
+        styk_devtools::ui::Surroundings { presentation: self.core.presentation(), theme, composing: self.core.focus().composing() }
+    }
+
+    /// The performance overlay: the host's bounds and visibility, drawn without taking input.
+    #[cfg(feature = "devtools")]
+    pub fn developer_overlay(&self, theme: Theme) -> iced::Element<'_, Message> {
+        match &self.developer {
+            Some(host) => styk_devtools::ui::overlay(&styk_devtools::ui::Context::of(host, self.developer_surroundings(theme))).map(Message::Editor).boxed(),
+            None => iced::widget::space().width(0).height(0).boxed(),
+        }
     }
 
     /// The places in the band that keep the pointer, in physical pixels (`scale` physical pixels per logical one).
@@ -481,6 +549,8 @@ impl TopBand {
         if (self.run.is_some() && self.idle()) || self.shell.next_deadline().is_some() || self.core.timeline().playing() {
             subscriptions.push(window::frames().map(|_| Message::Frame));
         }
+        #[cfg(feature = "devtools")]
+        if self.developer.is_some() { subscriptions.push(Subscription::run_with(DeveloperWatch(self.developer_progress.clone()), developer_stream)); }
         Subscription::batch(subscriptions)
     }
 
@@ -557,6 +627,12 @@ impl TopBand {
         // The tree's focus state is read after anything that can change the tree.
         let reads_focus = !matches!(message, Message::Cursor(..) | Message::Frame | Message::Snapshot(_) | Message::Editor(_));
         let (requests, task) = match message {
+            #[cfg(feature = "devtools")]
+            Message::Editor(styk_ui::Message::DeveloperEffect(event)) => {
+                let now=self.now();
+                if let Some(host)=&mut self.developer { host.update(event,now); }
+                (Vec::new(),Task::none())
+            }
             Message::Progress => {
                 let now = self.now();
                 let task = self.pump();
@@ -569,6 +645,20 @@ impl TopBand {
             Message::Editor(styk_ui::message::Message::SessionCheckpointFinished) => (vec![Request::SessionCheckpointFinished], Task::none()),
             Message::Editor(message) => {
                 let now = self.now();
+                #[cfg(feature = "devtools")]
+                if matches!(&message,styk_ui::Message::Command(styk_core::commands::Command::Developer(styk_core::dev_extension::Event::Poll))) {
+                    if let Some(m)=self.developer_bridge.as_ref().and_then(|b|b.take()) {
+                        use styk_core::dev_extension::{Event,Value};
+                        let value=match m.value {styk_devtools::ParameterValue::Bool(v)=>Some(Value::Bool(v)),styk_devtools::ParameterValue::String(v)=>Some(Value::Enum(v)),styk_devtools::ParameterValue::Number(v)=>v.as_i64().map(Value::Integer).or_else(||v.as_f64().map(Value::Float)),_=>None};
+                        if let Some(value)=value {
+                            self.developer_reply=Some(m.reply);
+                            let command=styk_core::commands::Command::Developer(Event::ChannelSet{name:m.name,value});
+                            let poll=styk_ui::message::update_at(&mut self.core,message,now);
+                            let action=styk_ui::message::update_at(&mut self.core,styk_ui::Message::Command(command),now);
+                            return (Vec::new(),poll.chain(action).map(Message::Editor));
+                        } else {drop(m.reply.try_send(Err("invalid parameter value".into())));}
+                    }
+                }
                 // The focus tasks the core asks for run on the tree this message built, then the walk reads it back.
                 (Vec::new(), styk_ui::message::update_at(&mut self.core, message, now).map(Message::Editor).chain(TopBand::snapshot()))
             }
@@ -598,7 +688,12 @@ impl TopBand {
             Message::Deadline => (vec![Request::PreferencesProgress], self.deadline()),
         };
         let task = if reads_focus { Task::batch([task, TopBand::snapshot()]) } else { task };
-        (requests, Task::batch([task, self.follow_workspace()]))
+        let workspace_task=self.follow_workspace();
+        #[cfg(feature = "devtools")]
+        self.reconcile_developer();
+        #[cfg(feature = "devtools")]
+        if let Some(result)=self.developer.as_mut().and_then(|h|h.control_result.take()) && let Some(reply)=self.developer_reply.take(){drop(reply.try_send(result));}
+        (requests, Task::batch([task, workspace_task]))
     }
 
     /// The workspace the band pressed is the arrangement the dock shows (Build is the layout's `rig`); Home keeps the last.
@@ -1031,6 +1126,7 @@ impl TopBand {
         }
     }
 }
+
 
 #[cfg(test)]
 mod tests {

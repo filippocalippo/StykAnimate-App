@@ -37,6 +37,16 @@ pub fn docked<'a, Message: 'a>(content: Element<'a, Message>, theme: Theme) -> E
 /// today's empty state with its name. `inspector` is the Properties panel's view (the dock puts it in its group and the
 /// hairline under the tabs); `stage` is the stage widget, absent while no project is open (the stage's field shows alone).
 pub fn window<'a>(params: &Params<'_>, inspector: Option<crate::inspector::View<'_>>, stage: Option<Element<'a, crate::Message>>) -> Element<'a, crate::Message> {
+    window_inner(params, inspector, stage, &mut |_| None)
+}
+
+/// [`window`] with the developer tools' panels: `extra` gives the view of a panel the dock does not draw itself.
+#[cfg(feature = "devtools")]
+pub fn window_with<'a>(params: &Params<'_>, inspector: Option<crate::inspector::View<'_>>, stage: Option<Element<'a, crate::Message>>, extra: &mut dyn FnMut(&styk_core::layout::PanelId) -> Option<Element<'a, crate::Message>>) -> Element<'a, crate::Message> {
+    window_inner(params, inspector, stage, extra)
+}
+
+fn window_inner<'a>(params: &Params<'_>, inspector: Option<crate::inspector::View<'_>>, stage: Option<Element<'a, crate::Message>>, extra: &mut dyn FnMut(&styk_core::layout::PanelId) -> Option<Element<'a, crate::Message>>) -> Element<'a, crate::Message> {
     let theme = params.theme;
     let palette = theme.palette();
     let (mut inspector, mut stage) = (inspector, stage);
@@ -50,7 +60,7 @@ pub fn window<'a>(params: &Params<'_>, inspector: Option<crate::inspector::View<
                 Some(container(content).width(Length::Fill).height(Length::Fill).style(move |_| container::Style { background: Some(Background::Color(Color::from(field))), border: iced::Border { radius, ..iced::Border::default() }, ..container::Style::default() }).boxed())
             }
             "properties" => inspector.take().map(|view| hairline_over(crate::inspector::view(view), theme)),
-            _ => None,
+            _ => extra(panel),
         }
     };
     let content = view(params, &mut panel);
