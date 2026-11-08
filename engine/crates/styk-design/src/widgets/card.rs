@@ -20,6 +20,7 @@ pub struct Card<'a, Message> {
     shadows: &'static [BoxShadow],
     ring: Option<(f32, Rgba)>,
     underlay: Option<(f32, Rgba)>,
+    halo: Option<Rgba>,
     width: Length,
     height: Length,
     padding: Padding,
@@ -28,7 +29,7 @@ pub struct Card<'a, Message> {
 
 impl<'a, Message: 'a> Card<'a, Message> {
     pub fn new(content: impl Widget<Message, Theme, Renderer> + 'a) -> Self {
-        Card { content: content.boxed(), fill: None, radius: 0.0, shadows: &[], ring: None, underlay: None, width: Length::Shrink, height: Length::Shrink, padding: Padding::ZERO, clip: false }
+        Card { content: content.boxed(), fill: None, radius: 0.0, shadows: &[], ring: None, underlay: None, halo: None, width: Length::Shrink, height: Length::Shrink, padding: Padding::ZERO, clip: false }
     }
 
     pub fn fill(mut self, fill: Rgba) -> Self {
@@ -50,6 +51,12 @@ impl<'a, Message: 'a> Card<'a, Message> {
     /// An inset hairline (`box-shadow: inset 0 0 0 1px`).
     pub fn ring(mut self, width: f32, color: Rgba) -> Self {
         self.ring = Some((width, color));
+        self
+    }
+
+    /// A 3 px ring around the box, outside it and out of layout (`box-shadow: 0 0 0 3px var(--focus-halo)`).
+    pub fn halo(mut self, color: Rgba) -> Self {
+        self.halo = Some(color);
         self
     }
 
@@ -130,6 +137,10 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Card<'a, Message> {
     fn draw(&self, tree: &Tree, renderer: &mut Renderer, theme: &Theme, style: &renderer::Style, layout: Layout, cursor: mouse::Cursor, viewport: &Rectangle) {
         let bounds = layout.bounds();
         paint_shadows(renderer, bounds, self.radius, self.shadows, 1.0);
+        if let Some(color) = self.halo {
+            let grown = Rectangle { x: bounds.x - 3.0, y: bounds.y - 3.0, width: bounds.width + 6.0, height: bounds.height + 6.0 };
+            paint_ring(renderer, grown, self.radius + 3.0, 3.0, color);
+        }
         if let Some((drop, color)) = self.underlay {
             paint_fill(renderer, Rectangle { y: bounds.y + drop, ..bounds }, self.radius, color);
         }

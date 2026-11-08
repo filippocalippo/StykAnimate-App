@@ -74,6 +74,7 @@ pub mod color;
 pub mod control;
 pub mod dialog;
 pub mod dir;
+pub mod enter;
 pub mod field;
 pub mod focus;
 pub mod frame;
@@ -90,6 +91,7 @@ pub mod splitter;
 pub mod surface;
 pub mod toast;
 pub mod toggle;
+pub mod viewport;
 pub mod tooltip;
 #[cfg(feature = "testing")]
 #[path = "../tests/support/testing.rs"]

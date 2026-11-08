@@ -9,6 +9,7 @@ use super::color::ColorField;
 use super::dir::Dir;
 use super::field::EditField;
 use super::number_field::{NumberField, value_width};
+use super::parts::{Tab, Tabs, stepper};
 use super::segmented::{Segment, Segmented};
 use super::select::{Choice, Select};
 use super::slider::{Slide, Slider};
@@ -273,7 +274,9 @@ fn every_control<'a>() -> Element<'a, Msg> {
         .push(Segmented::new(FocusId(20), area, palette, vec![Segment::text("Animate"), Segment::text("Draw")], 0, Msg::Pick).buttons().into_element())
         .push(Button::new(FocusId(30), area, palette, "Export", Msg::Press("export")).into_element())
         .push(IconButton::new(FocusId(31), area, palette, "plus", Msg::Press("add")).into_element())
-        .push(Chip::new(FocusId(32), area, palette, "Figures", Msg::Press("chip")).into_element());
+        .push(Chip::new(FocusId(32), area, palette, "Figures", Msg::Press("chip")).into_element())
+        .push(Tabs::new(FocusId(40), area, palette, vec![Tab { label: "Props".into(), icon: None }, Tab { label: "Effects".into(), icon: None }], 0, |_| Msg::Idle).into_element())
+        .push(stepper(palette, FocusId(50), area, "3", false, false, |_| Msg::Idle));
     column.width(300.0).boxed()
 }
 
@@ -302,6 +305,10 @@ fn every_input_like_control_declares_its_role_and_keeps_delete_from_the_document
         (30, "button", InputRole::None),
         (31, "icon button", InputRole::None),
         (32, "chip", InputRole::None),
+        (40, "tabs, shown tab", InputRole::Radio),
+        (41, "tabs, other tab", InputRole::Radio),
+        (50, "stepper's minus", InputRole::Text),
+        (51, "stepper's plus", InputRole::Text),
     ] {
         focus.reconcile(Some(FocusId(id)));
         assert_eq!(focus.input_role(), role, "{kind} declares {role:?}");

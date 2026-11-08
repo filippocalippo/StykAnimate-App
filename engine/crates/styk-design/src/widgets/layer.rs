@@ -8,7 +8,7 @@
 
 use iced::Widget as _;
 use iced::advanced::layout::{Layout, Limits};
-use iced::advanced::widget::{self, Operation, Tree};
+use iced::advanced::widget::{self, Operation, Tree, tree};
 use iced::advanced::{Renderer as _, Shell, Widget, overlay, renderer};
 use iced::{Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse, touch};
 
@@ -64,12 +64,20 @@ pub struct Layer<'a, Message> {
     contents: Vec<Element<'a, Message>>,
     places: Vec<(Place<'a>, bool)>,
     on_pointer: Option<Box<dyn Fn(Pointer) -> Message + 'a>>,
+    on_leave: Option<Box<dyn Fn() -> Message + 'a>>,
 }
 
 impl<'a, Message: 'a> Layer<'a, Message> {
     pub fn new(children: Vec<Placed<'a, Message>>) -> Self {
         let (contents, places) = children.into_iter().map(|child| (child.content, (child.place, child.passive))).unzip();
-        Layer { contents, places, on_pointer: None }
+        Layer { contents, places, on_pointer: None, on_leave: None }
+    }
+
+    /// Reports the pointer leaving the last box that takes it (it was over one, and now is over none): what the pointer did
+    /// inside the boxes is no longer pending.
+    pub fn on_leave(mut self, f: impl Fn() -> Message + 'a) -> Self {
+        self.on_leave = Some(Box::new(f));
+        self
     }
 
     /// Reports every press and release, so the core can dismiss what a press outside dismisses.
@@ -81,7 +89,19 @@ impl<'a, Message: 'a> Layer<'a, Message> {
 
 impl<Message> widget::Meta for Layer<'_, Message> {}
 
+/// Whether the pointer was over a box that takes it at the last event.
+#[derive(Default)]
+struct Over(bool);
+
 impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Layer<'a, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Over>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Over(false))
+    }
+
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fill, Length::Fill)
     }
@@ -114,6 +134,14 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for Layer<'a, Message> {
     }
 
     fn update(&mut self, tree: &mut Tree, event: &Event, layout: Layout, cursor: mouse::Cursor, renderer: &Renderer, shell: &mut Shell<'_, Message>, viewport: &Rectangle) {
+        let over_any = cursor.position().is_some_and(|point| self.places.iter().zip(layout.iter(&tree.children)).any(|((_, passive), (layout, _))| !passive && layout.bounds().contains(point)));
+        let was_over = matches!(tree.state.downcast_ref::<Over>(), Over(true));
+        if was_over != over_any {
+            *tree.state.downcast_mut::<Over>() = Over(over_any);
+            if !over_any && let Some(leave) = &self.on_leave {
+                shell.publish(leave());
+            }
+        }
         let pointer = match event {
             Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Touch(touch::Event::FingerPressed { .. }) => Some(true),
             Event::Mouse(mouse::Event::ButtonReleased(_)) | Event::Touch(touch::Event::FingerLifted { .. }) => Some(false),

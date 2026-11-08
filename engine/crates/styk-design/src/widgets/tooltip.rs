@@ -14,7 +14,16 @@ use crate::Palette;
 use iced::widget::{Row, container};
 use iced::{Alignment, Element, Length, Padding, Rectangle, Size};
 use styk_core::overlay::placement::{Rect, Size as PlaceSize};
-use styk_core::overlay::tooltip::{Content, Tooltip};
+pub use styk_core::overlay::tooltip::Content;
+use styk_core::overlay::tooltip::Tooltip;
+
+/// What a target with a tooltip reports: the pointer or keyboard focus reached it (it shows after the core's delay), or the
+/// pointer left, focus left, or a press, scroll or Escape ended it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TipEvent {
+    Show { target: styk_core::focus::FocusId, content: Content, touch: bool, keyboard: bool },
+    Hide,
+}
 
 /// The tooltip pill for `content`.
 pub fn tooltip<'a, Message: 'a>(palette: &'static Palette, content: &Content) -> Element<'a, Message> {

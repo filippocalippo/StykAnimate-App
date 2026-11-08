@@ -280,7 +280,7 @@ impl Page {
                     error: None,
                     close: Some((FocusId(25), Message::Noop)),
                 };
-                page(palette, stack![base.boxed(), Layer::new(vec![modal(palette, 1, spec, window)]).boxed()].boxed())
+                page(palette, stack![base.boxed(), Layer::new(vec![modal(palette, 1, spec, window, 1.0)]).boxed()].boxed())
             }
             OverlayScreen::Parts => page(palette, parts_page(palette)),
         }
@@ -324,7 +324,7 @@ fn toasts(palette: &'static Palette) -> Element<'static, Message> {
         make(5, Tone::Info, false, vec![], "", "Click a joint to pick it", Some(Priority::Mode)),
         make(6, Tone::Warning, false, vec![], "", "Slow \u{b7} 14 of 24 fps", Some(Priority::Hint)),
     ];
-    let rows: Vec<Element<'static, Message>> = messages.iter().map(|message| toast::toast(palette, message, |_| Message::Noop)).collect();
+    let rows: Vec<Element<'static, Message>> = messages.iter().map(|message| toast::toast(palette, message, 1.0, 1.0, |_| Message::Noop)).collect();
     container(Column::with_children(rows).spacing(tokens::scale::SPACE_3).align_x(Alignment::Start)).padding(24.0).boxed()
 }
 
@@ -344,9 +344,10 @@ fn row<'a>(palette: &'static Palette, label: &str, height: f32, cells: Vec<Eleme
 }
 
 /// A row with one cell as wide as the table's five.
-fn wide_row<'a>(palette: &'static Palette, label: &str, height: f32, content: Element<'a, Message>) -> Element<'a, Message> {
+fn wide_row<'a>(palette: &'static Palette, label: &str, height: f32, cells: f32, top: bool, content: Element<'a, Message>) -> Element<'a, Message> {
     let label = container(words(label, TextStyle::from_role(&tokens::scale::TYPE_SMALL), palette.text_3)).width(Length::Fixed(LABEL)).height(Length::Fixed(height)).center_y(Length::Fixed(height));
-    let cell = container(content).width(Length::Fill).height(Length::Fixed(height)).padding(Padding { left: 8.0, ..Padding::ZERO }).center_y(Length::Fixed(height));
+    let cell = container(content).width(Length::Fixed(cells * CELL)).height(Length::Fixed(height)).padding(Padding { left: 8.0, ..Padding::ZERO });
+    let cell = if top { cell.align_y(Alignment::Start) } else { cell.center_y(Length::Fixed(height)) };
     Row::with_children(vec![label.boxed(), cell.boxed()]).boxed()
 }
 
@@ -376,7 +377,7 @@ fn parts_page(palette: &'static Palette) -> Element<'static, Message> {
     rows.push(row(palette, "Divider", 52.0, vec![container(parts::divider(palette)).width(Length::Fixed(132.0)).boxed()]));
     let first = Row::with_children(vec![parts::crumb_item(palette, id(), area, "Scene 1", None, None, noop.clone(), None), parts::crumb_sep(palette), parts::crumb_here(palette, "Punch", None)]).align_y(Alignment::Center);
     let second = Row::with_children(vec![parts::crumb_item(palette, id(), area, "Scene", Some("layers"), Some("960 × 540".into()), noop.clone(), Some(Preview::Hover)), parts::crumb_chip(palette, [255, 255, 255])]).align_y(Alignment::Center);
-    rows.push(wide_row(palette, "Crumb", 52.0, Row::with_children(vec![first.boxed(), Space::new().width(Length::Fixed(40.0)).boxed(), second.boxed()]).boxed()));
+    rows.push(wide_row(palette, "Crumb", 52.0, 3.0, false, Row::with_children(vec![first.boxed(), Space::new().width(Length::Fixed(40.0)).boxed(), second.boxed()]).boxed()));
     rows.push(heading(palette, "Lists and sections"));
     let list = |label: &str, selected: bool, hidden: bool, level: u32, preview: Option<Preview>, id: FocusId| container(ListRow::new(id, area, palette, label, noop.clone()).lead("layers").selected(selected).hidden(hidden).level(level).preview(preview).meta("1").into_element()).width(Length::Fixed(132.0)).boxed();
     rows.push(row(palette, "List row", 52.0, vec![list("Bubble", false, false, 0, None, id()), list("Bubble", false, false, 0, Some(Preview::Hover), id()), list("Bubble", true, false, 0, None, id()), list("Bubble", false, true, 1, None, id())]));
@@ -431,6 +432,8 @@ fn parts_page(palette: &'static Palette) -> Element<'static, Message> {
         palette,
         "Empty state",
         200.0,
+        4.0,
+        true,
         container(parts::empty_state(palette, Some("layers"), "No effects", Some("Add one from the list below.".into()), Some(Button::new(id(), area, palette, "Add effect", noop.clone()).variant(Variant::Outline).into_element()), false)).width(Length::Fill).boxed(),
     ));
     container(Column::with_children(rows).width(Length::Fixed(938.0 - 2.0 * PAD))).padding(PAD).boxed()

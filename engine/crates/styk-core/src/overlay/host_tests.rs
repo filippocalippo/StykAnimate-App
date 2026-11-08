@@ -380,3 +380,79 @@ fn unrelated_input_does_not_postpone_an_animation_wake() {
     host.event(Event::Time, &mut focus, 15);
     assert_eq!(host.next_deadline(), Some(16));
 }
+
+#[test]
+fn a_dialog_opens_on_the_stack_enters_for_240_ms_and_escape_asks_its_guard() {
+    use super::Kind;
+    let (mut host, mut focus) = (Host::default(), page());
+    let ok = FocusId(60);
+    let out = host.event(Event::OpenOverlay { kind: Kind::Dialog, guarded: true, targets: vec![FocusTarget::new(ok.0, FocusArea::Panels, TargetKind::Control)], initial: Some(ok) }, &mut focus, 1000);
+    assert!(out.effects.contains(&Effect::Blocking(true)));
+    let id = host.stack().entries()[0].id;
+    assert_eq!(host.phase(id), 0.0, "it enters at its start");
+    host.event(Event::Tick, &mut focus, 1120);
+    assert_eq!(host.phase(id), 0.5, "over 240 ms");
+    let out = host.event(Event::Escape, &mut focus, 1130);
+    assert_eq!(out.effects, vec![Effect::CheckClose { id, reason: Reason::Escape }]);
+    host.event(Event::ResolveClose { id, allow: true }, &mut focus, 1140);
+    assert!(host.stack().entries().is_empty());
+    assert_eq!(host.next_deadline(), None, "nothing runs once it is gone");
+}
+
+#[test]
+fn a_tooltip_shows_after_its_delay_at_its_target_and_hides_on_a_press() {
+    use super::tooltip::Content;
+    let (mut host, mut focus) = (Host::default(), page());
+    let content = Content { label: "Undo".into(), shortcut: "Ctrl+Z".into() };
+    host.event(Event::Bounds(vec![(FocusId(7), Rect { x: 10.0, y: 10.0, width: 32.0, height: 32.0 })]), &mut focus, 0);
+    host.event(Event::TooltipShow { target: FocusId(7), content: content.clone(), touch: false, keyboard: false }, &mut focus, 100);
+    assert_eq!(host.next_deadline(), Some(600));
+    host.event(Event::Tick, &mut focus, 600);
+    let (tip, at) = host.tooltip_anchor().expect("visible");
+    assert_eq!((tip.content.clone(), at.x), (content.clone(), 10.0));
+    host.event(Event::Pointer { pressed: true, inside: false, anchor: None, press: 1 }, &mut focus, 700);
+    assert!(host.tooltip_anchor().is_none(), "a press hides it");
+    host.event(Event::TooltipShow { target: FocusId(7), content, touch: true, keyboard: false }, &mut focus, 800);
+    assert_eq!(host.next_deadline(), None, "touch hover shows nothing");
+}
+
+#[test]
+fn a_task_message_loops_its_progress_and_stops_with_the_message() {
+    use super::messages::{Message, Tone};
+    let (mut host, mut focus) = (Host::default(), page());
+    host.event(Event::ShowMessage(Message::new(4, "export", Tone::Info, true, vec![])), &mut focus, 0);
+    let progress = message_progress_id(4);
+    host.event(Event::Tick, &mut focus, 650);
+    assert_eq!(host.phase(progress), 0.5);
+    assert!(host.next_deadline().is_some(), "a loop keeps asking for frames");
+    host.event(Event::MessageDismiss(4), &mut focus, 700);
+    assert_eq!(host.next_deadline(), None);
+}
+
+#[test]
+fn leaving_a_row_clears_its_fill_and_leaving_the_tree_cancels_what_was_pending() {
+    let (mut host, mut focus) = (Host::default(), page());
+    let id = open(&mut host, &mut focus, false);
+    host.event(Event::Hover { menu: id, index: 1 }, &mut focus, 0);
+    assert_eq!(host.menus()[0].hovered(), Some(1));
+    host.event(Event::Leave { menu: Some(id) }, &mut focus, 10);
+    assert_eq!(host.menus()[0].hovered(), None);
+    host.event(Event::Hover { menu: id, index: 2 }, &mut focus, 20);
+    host.event(Event::Leave { menu: None }, &mut focus, 30);
+    assert_eq!(host.next_deadline(), None, "the submenu's hover intent died with the pointer");
+}
+
+#[test]
+fn the_press_that_closed_an_openers_menu_does_not_open_it_again_on_release() {
+    let (mut host, mut focus) = (Host::default(), page());
+    let open = || Event::OpenMenu { entries: vec![row(CommandId::Undo, "Undo")], anchor: anchor(), invoker: Some(INVOKER), keyboard: false };
+    host.event(open(), &mut focus, 0);
+    assert_eq!(host.menus().len(), 1);
+    host.event(Event::Pointer { pressed: true, inside: false, anchor: Some(INVOKER), press: host.press_sequence() }, &mut focus, 10);
+    assert!(host.menus().is_empty(), "the press on the opener closed it");
+    host.event(open(), &mut focus, 20);
+    assert!(host.menus().is_empty(), "the release of that press did not reopen it");
+    host.event(Event::Pointer { pressed: false, inside: false, anchor: None, press: 0 }, &mut focus, 30);
+    host.event(open(), &mut focus, 40);
+    assert_eq!(host.menus().len(), 1, "a new press opens it again");
+}

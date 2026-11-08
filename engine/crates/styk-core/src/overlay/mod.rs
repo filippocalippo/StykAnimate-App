@@ -19,6 +19,10 @@ impl Kind {
     fn passive(self) -> bool {
         matches!(self, Self::Toast | Self::Tooltip)
     }
+    /// Kinds that need no entry of their own on the stack (a tooltip and a message are drawn by their own state).
+    pub(crate) fn passive_entry(self) -> bool {
+        self.passive()
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {

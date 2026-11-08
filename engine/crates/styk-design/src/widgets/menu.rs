@@ -13,7 +13,9 @@ use iced::Widget as _;
 use super::card::Card;
 use super::control::words;
 use super::focus::{Focusable, Keys, Ring, Scope};
+use super::enter::Enter;
 use super::layer::{Layer, Placed, Position};
+use super::viewport::Viewport;
 use crate::tokens::scale;
 use crate::typography::TextStyle;
 use crate::{Palette, Rgba};
@@ -47,6 +49,8 @@ pub enum Event {
     Hover { menu: u64, index: usize },
     /// A click on the item `index` of menu `menu`.
     Press { menu: u64, index: usize },
+    /// The pointer left a row of menu `menu` (`Some`), or left every menu of the layer (`None`).
+    Leave { menu: Option<u64> },
     /// A pointer press or release: where it landed and whether on a menu.
     Pointer { press: bool, inside: bool, x: f32, y: f32 },
 }
@@ -94,6 +98,7 @@ struct MenuRow<'a, Message> {
     look: Look,
     palette: &'static Palette,
     on_hover: Message,
+    on_leave: Message,
     on_press: Message,
 }
 
@@ -137,7 +142,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, Renderer> for MenuRow<'a, M
                 state.over = true;
                 shell.publish(self.on_hover.clone());
             }
-            IcedEvent::Mouse(mouse::Event::CursorMoved { .. }) if !over => state.over = false,
+            IcedEvent::Mouse(mouse::Event::CursorMoved { .. }) if !over && state.over => {
+                state.over = false;
+                shell.publish(self.on_leave.clone());
+            }
             IcedEvent::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) | IcedEvent::Touch(touch::Event::FingerPressed { .. }) if over => {
                 state.pressed = true;
                 shell.capture_event();
@@ -255,7 +263,7 @@ pub fn menu_box<'a, Message: Clone + 'a>(palette: &'static Palette, open: &'a Op
                     let reason = container(words(item.reason.clone(), micro, palette.text_3)).padding(Padding { left: scale::ICON_MD + scale::SPACE_2_5, ..Padding::ZERO });
                     container(Column::with_children(vec![line.boxed(), reason.boxed()]).spacing(scale::SPACE_1_5)).padding(Padding { top: scale::SPACE_1, right: scale::SPACE_2_5, bottom: scale::SPACE_1, left: scale::SPACE_2_5 }).boxed()
                 };
-                let row = MenuRow { content: body, look: Look { lit, ring: current && ring, danger: item.danger }, palette, on_hover: send(Event::Hover { menu: id, index }), on_press: send(Event::Press { menu: id, index }) };
+                let row = MenuRow { content: body, look: Look { lit, ring: current && ring, danger: item.danger }, palette, on_hover: send(Event::Hover { menu: id, index }), on_leave: send(Event::Leave { menu: Some(id) }), on_press: send(Event::Press { menu: id, index }) };
                 let key_send = send.clone();
                 let no_ring = Ring { color: Color::TRANSPARENT, width: 0.0, offset: 0.0, radius: 0.0 };
                 let target = Focusable::new(row_id(id, index), FocusArea::Panels, row.boxed(), no_ring)
@@ -266,7 +274,10 @@ pub fn menu_box<'a, Message: Clone + 'a>(palette: &'static Palette, open: &'a Op
             }
         }
     }
-    Card::new(Column::with_children(rows).width(Length::Shrink)).fill(palette.surface_raised).radius(scale::RADIUS_XL).shadows(palette.elevation_3).padding(Padding::new(scale::SPACE_1_5 + 1.0)).boxed()
+    // A menu taller than its room scrolls: the keyboard's row comes into view (`ring` says a key moved it).
+    let reveal = open.current().filter(|_| ring).map(|index| row_id(id, index));
+    let rows = Viewport::new(Column::with_children(rows).width(Length::Shrink).boxed(), palette.scrollbar_thumb_hover, palette.surface_raised).reveal(reveal);
+    Card::new(rows).fill(palette.surface_raised).radius(scale::RADIUS_XL).shadows(palette.elevation_3).padding(Padding::new(scale::SPACE_1_5 + 1.0)).boxed()
 }
 
 fn rect(bounds: Rectangle) -> Rect {
@@ -287,7 +298,9 @@ pub fn layer<'a, Message: Clone + 'a>(palette: &'static Palette, host: &'a Host,
             at.id()
         };
         let child_from = host.menus().iter().find(|menu| menu.parent() == Some(open.id())).and_then(|menu| menu.from_row());
-        let content = Scope::passive(ScopeId(root), menu_box(palette, open, child_from, ring, &send));
+        // A menu enters over `--dur-base`: the core's phase, 4 px up and fading in.
+        let entering = Enter::new(menu_box(palette, open, child_from, ring, &send), host.phase(open.id()), 4.0, palette.surface, scale::RADIUS_XL);
+        let content = Scope::passive(ScopeId(root), entering.boxed());
         let (anchor, rtl) = (open.anchor(), open.rtl());
         placed.push(Placed::new(content, move |natural, viewport| {
             let placed = Menu::place(anchor, PlaceSize { width: f64::from(natural.width), height: f64::from(natural.height) }, PlaceSize { width: f64::from(viewport.width), height: f64::from(viewport.height) }, f64::from(top_inset), rtl);
@@ -296,7 +309,8 @@ pub fn layer<'a, Message: Clone + 'a>(palette: &'static Palette, host: &'a Host,
     }
     placed.extend(extra);
     let pointer = send.clone();
-    Layer::new(placed).on_pointer(move |p| pointer(Event::Pointer { press: p.press, inside: p.inside, x: p.position.x, y: p.position.y })).boxed()
+    let leave = send.clone();
+    Layer::new(placed).on_pointer(move |p| pointer(Event::Pointer { press: p.press, inside: p.inside, x: p.position.x, y: p.position.y })).on_leave(move || leave(Event::Leave { menu: None })).boxed()
 }
 
 /// The rectangle the core uses for a measured widget.

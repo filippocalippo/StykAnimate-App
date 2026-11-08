@@ -31,8 +31,8 @@ The review tests first reproduced lost parent focus, blocked ancestor navigation
 
 ## The views (K-widgets-b)
 
-`styk_core::overlay::host` is the controller the views consume; `styk_ui::overlays::Overlays` carries it out in the toolkit;
-`styk_design::widgets` draws it. The views decide nothing the core decides.
+`styk_core::overlay::host` is the controller the views consume, and `Core` owns it (`Core::overlays()`, `Command::Overlay { event, now }`);
+`styk_ui::overlays::layer` draws it over the window; `styk_design::widgets` are the boxes. The views decide nothing the core decides.
 
 - **`overlay::host::Host`** owns the `Stack`, the open menu trees, the `Messages` and the `Tooltip`. `open` registers a root
   menu (one focus target per row, `row_id(menu, index)`, a disabled row included); `key`, `hover`, `press`, `pointer` and
@@ -48,13 +48,27 @@ The review tests first reproduced lost parent focus, blocked ancestor navigation
   placeholder the host never reports). The `Select` widget opens it from a press, Space, Enter and Alt+Down (`Open` carries the
   field's rectangle and whether a key asked) and still steps the value with plain Up and Down; its `InputRole::Select` is
   unchanged, and the rows keep it. The pick list is gone.
-- **`styk_ui::overlays::Overlays`** is the window's owner: it keeps the host, the bounds of the focus targets the last walk found
-  (`observe`), and the messages a select's options stand for (`Message::OpenSelect` carries them; the Inspector's selects send
-  it). `update` takes the application's milliseconds and returns an `Outcome` (focus requests as tasks and as data, the command
-  to run, the chosen option's message, the hotkey gate, guard checks). Core and toolkit agree on focus after every step: the tree
-  is rebuilt, then the focus tasks run on it, then the walk is given to `focus::sync`. The application window does not own an
-  `Overlays` yet: the opening of each menu belongs to the feature that has one (K-cmd, the band, the panels) and the wake to the
-  window's own scheduler (`Overlays::next_deadline`).
+- **The window.** `styk-app`'s band mounts `overlays::layer(core, ...)` over its content (`TopBand::overlay_layer`). Every message
+  its widgets send is `Message::Overlay | OpenSelect | Toast | Tooltip`; `message::update_at(core, message, now)` injects the application's
+  clock and routes it to `Core::dispatch(Command::Overlay { .. })`, and the effects come back as tasks (focus operations,
+  `OverlayChoice`, `MessageDismissed`, `ShortcutReleased`, `NotAvailable`). The runtime owns three things and nothing else:
+  the one wake (`overlay_wake`: at `Core::overlay_deadline()` it sends `Event::Tick`; `None` cancels it, so nothing redraws while no
+  animation or timer runs), the focus walk (after every message the tree is read and the snapshot is forwarded to the core as
+  well as to the band, which is how the host derives "focus is on the message" and measures an anchor), and the raw inputs
+  `message::raw_at` takes (a key no widget took while a dialog is open, a button release that numbers the presses). The tasks run
+  on the tree rebuilt from the new state, as the runtime does. Until a panel or button sends `Event::OpenMenu`, the dock mounts
+  the Inspector, or something shows a message, the layer is mounted and answering but has nothing to draw: the opener of each
+  menu belongs to the feature that has one (K-cmd, the band, the panels). The hotkey gate (`Effect::Blocking`) has no consumer
+  until the application's hotkeys are routed through `Core::shortcuts`.
+- **Animation is the core's.** `Host::phase(id)` is 0 to 1 through a menu's, a popover's (160 ms), a dialog's, sheet's or message's
+  (240 ms) entry, and through a loop (a task message's bar 1.3 s, a spinner 0.8 s; `Event::Animate`). `widgets::enter::Enter` draws
+  the entry (4 px or 8 px rise, the page's colour laid over it at the remaining opacity), `progress::Bar`/`Spinner` the loops. No
+  widget keeps an `Instant` or asks for a redraw; `Host::next_deadline` is the next frame while one runs, and `None` after.
+- **Tooltips** are `Focusable::tooltip` (also `IconButton` and `Button`): the pointer arriving, keyboard focus showing the ring, and a
+  press, Escape or leaving report `TipEvent`s; the core owns the 500 ms and 300 ms rules, and `overlays::layer` draws
+  `Host::tooltip_anchor()` at the bounds the last walk measured for the target, for hoverless input too (keyboard focus shows it).
+- **A tall menu scrolls** (`widgets::viewport::Viewport`): a bounded viewport with the wheel, a 6 px thumb and the 12 px fade, and the
+  keyboard's row brought into view when it changes.
 - **`widgets::layer::Layer`** places each box over the page at the rectangle `Menu::place`, `Tooltip::place` or
   `messages::position` gives it from its natural size, each in its own layer (a submenu's fill covers its parent's words), swallows
   the pointer over a box that takes it, and reports each press and release with whether it landed on a box, so `Host::pointer`
@@ -73,8 +87,6 @@ would). The references are today's menus, tooltip, messages, dialog and parts dr
 today's menu stylesheet anchored under today's select field. Looked at side by side at 100 % and 200 %, what remains is glyph
 rasterisation; the limits are in `screens/limits.toml`.
 
-**Not drawn, on purpose.** The popover's and menu's 160 ms entry fade, the dialog's 240 ms lift and the toast's entry (a frame
-shows the settled state; an animation needs a clock the views must not read), a menu taller than the window scrolling with its
-fade and scrollbar (the box is clipped to the room the core gives it), the stage header's `head` and `drop` message slots, and
+**Not drawn, on purpose.** The stage header's `head` and `drop` message slots, the stepper's typeable value (it shows the value), and
 the split button's hover shared across its halves while a pointer moves over it (the screen holds it with a flag; the live halves
-each take their own).
+each take their own). The entry fade is the page's colour over the box (iced has no group opacity), so the shadow is not faded.

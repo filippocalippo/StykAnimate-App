@@ -135,8 +135,12 @@ pub struct Button<'a, Message> {
     fill: bool,
     on_press: Option<Message>,
     preview: Option<Preview>,
+    tooltip: Option<Tip<'a, Message>>,
     _marker: std::marker::PhantomData<&'a ()>,
 }
+
+/// A tooltip a button names, and how its events reach the owner.
+type Tip<'a, Message> = (super::tooltip::Content, Box<dyn Fn(super::tooltip::TipEvent) -> Message + 'a>);
 
 impl<'a, Message: Clone + 'a> Button<'a, Message> {
     /// A button with `label` that sends `on_press`, the focus target `id` in `area`.
@@ -156,8 +160,15 @@ impl<'a, Message: Clone + 'a> Button<'a, Message> {
             fill: false,
             on_press: Some(on_press),
             preview: None,
+            tooltip: None,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// The button has a tooltip (`Focusable::tooltip`).
+    pub fn tooltip(mut self, content: super::tooltip::Content, on_event: impl Fn(super::tooltip::TipEvent) -> Message + 'a) -> Self {
+        self.tooltip = Some((content, Box::new(on_event)));
+        self
     }
 
     /// A glyph before the words (`.ui-icon`).
@@ -215,7 +226,7 @@ impl<'a, Message: Clone + 'a> Button<'a, Message> {
 
     /// The button as an element.
     pub fn into_element(self) -> Element<'a, Message> {
-        let Button { id, area, palette, label, icon, variant, size, words: role, danger, toggled, disabled, fill, on_press, preview, .. } = self;
+        let Button { id, area, palette, label, icon, variant, size, words: role, danger, toggled, disabled, fill, on_press, preview, tooltip, .. } = self;
         let colors = colors(palette, variant, danger, toggled, role);
         let height = size.height();
         let opacity = if disabled { DISABLED } else { 1.0 };
@@ -260,6 +271,9 @@ impl<'a, Message: Clone + 'a> Button<'a, Message> {
         let mut target = Focusable::new(id, area, surface.boxed(), Ring::of(palette, radius)).enabled(!disabled).ring_shown(preview == Some(Preview::Focus));
         if let Some(message) = message {
             target = target.on_activate(message);
+        }
+        if let Some((content, on_event)) = tooltip {
+            target = target.tooltip(content, on_event);
         }
         target.boxed()
     }
@@ -317,12 +331,26 @@ pub struct IconButton<'a, Message> {
     disabled: bool,
     on_press: Option<Message>,
     preview: Option<Preview>,
+    tooltip: Option<Tip<'a, Message>>,
+    input_role: styk_core::focus::InputRole,
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
 impl<'a, Message: Clone + 'a> IconButton<'a, Message> {
     pub fn new(id: FocusId, area: FocusArea, palette: &'static Palette, icon: &'static str, on_press: Message) -> Self {
-        IconButton { id, area, palette, icon, size: IconSize::Md, soft: false, danger: false, round: false, toggled: false, expanded: false, disabled: false, on_press: Some(on_press), preview: None, _marker: std::marker::PhantomData }
+        IconButton { id, area, palette, icon, size: IconSize::Md, soft: false, danger: false, round: false, toggled: false, expanded: false, disabled: false, on_press: Some(on_press), preview: None, tooltip: None, input_role: styk_core::focus::InputRole::None, _marker: std::marker::PhantomData }
+    }
+
+    /// The button has a tooltip (`Focusable::tooltip`).
+    pub fn tooltip(mut self, content: super::tooltip::Content, on_event: impl Fn(super::tooltip::TipEvent) -> Message + 'a) -> Self {
+        self.tooltip = Some((content, Box::new(on_event)));
+        self
+    }
+
+    /// What the button is to the shortcut routing when it is part of an input (a stepper's ends are a number input's).
+    pub fn input_role(mut self, role: styk_core::focus::InputRole) -> Self {
+        self.input_role = role;
+        self
     }
 
     pub fn size(mut self, size: IconSize) -> Self {
@@ -371,7 +399,7 @@ impl<'a, Message: Clone + 'a> IconButton<'a, Message> {
     }
 
     pub fn into_element(self) -> Element<'a, Message> {
-        let IconButton { id, area, palette, icon, size, soft, danger, round, toggled, expanded, disabled, on_press, preview, .. } = self;
+        let IconButton { id, area, palette, icon, size, soft, danger, round, toggled, expanded, disabled, on_press, preview, tooltip, input_role, .. } = self;
         let side = size.side();
         let radius = if round { pill(side) } else { size.radius() };
         let opacity = if disabled { DISABLED } else { 1.0 };
@@ -405,9 +433,12 @@ impl<'a, Message: Clone + 'a> IconButton<'a, Message> {
         if hover_ink != ink {
             surface = surface.hover_face(face(hover_ink));
         }
-        let mut target = Focusable::new(id, area, surface.boxed(), Ring::of(palette, radius)).enabled(!disabled).ring_shown(preview == Some(Preview::Focus));
+        let mut target = Focusable::new(id, area, surface.boxed(), Ring::of(palette, radius)).input_role(input_role).enabled(!disabled).ring_shown(preview == Some(Preview::Focus));
         if let Some(message) = message {
             target = target.on_activate(message);
+        }
+        if let Some((content, on_event)) = tooltip {
+            target = target.tooltip(content, on_event);
         }
         target.boxed()
     }

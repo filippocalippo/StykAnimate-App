@@ -251,6 +251,15 @@ impl TopBand {
         view::window(view::Params { shell: &self.shell, theme, ready, maximize }, content).map(Message::Ui).boxed()
     }
 
+    /// The overlay layer over the band: menus, lists, the stage's message and a tooltip, drawn from the Core-owned host. The band
+    /// is the only content the window shows until the docking view lands; the layer is mounted and answers regardless, and every
+    /// message it sends reaches `Core::dispatch` through `update_at`. A panel or button that opens a menu shows it by sending
+    /// `Command::Overlay { event: OpenMenu .. }`; none does yet, so today only a message pushed with `ShowMessage` (and the
+    /// Inspector's selects, once docked) show something.
+    pub fn overlay_layer(&self, theme: Theme) -> iced::Element<'_, Message> {
+        styk_ui::overlays::layer(&self.core, theme.palette(), self.height() + 6.0, None, Vec::new()).map(Message::Editor).boxed()
+    }
+
     /// The runtime maps the core's injected deadline onto iced's one scheduled redraw.
     pub fn overlay_wake(&self) -> iced::Element<'_, Message> {
         crate::overlay_wake::element(self.core.overlay_deadline().filter(|_| self.fixed.is_none()), self.clock.clone(), |now| {
@@ -262,7 +271,7 @@ impl TopBand {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![event::listen_with(|event, status, _| match &event {
-            Event::Keyboard(keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }) | Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Window(window::Event::Unfocused) => Some(Message::Raw(event.clone(), status == event::Status::Ignored)),
+            Event::Keyboard(keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }) | Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::ButtonReleased(_)) | Event::Window(window::Event::Unfocused) => Some(Message::Raw(event.clone(), status == event::Status::Ignored)),
             _ => None,
         })];
         if self.shell.tracking() {
@@ -329,11 +338,12 @@ impl TopBand {
 
     pub fn update(&mut self, message: Message) -> (Vec<Request>, Task<Message>) {
         // The tree's focus state is read after anything that can change the tree.
-        let reads_focus = !matches!(message, Message::Cursor(..) | Message::Frame | Message::Snapshot(_));
+        let reads_focus = !matches!(message, Message::Cursor(..) | Message::Frame | Message::Snapshot(_) | Message::Editor(_));
         let (requests, task) = match message {
             Message::Editor(message) => {
                 let now = self.now();
-                (Vec::new(), styk_ui::message::update_at(&mut self.core, message, now).map(Message::Editor))
+                // The focus tasks the core asks for run on the tree this message built, then the walk reads it back.
+                (Vec::new(), styk_ui::message::update_at(&mut self.core, message, now).map(Message::Editor).chain(TopBand::snapshot()))
             }
             Message::Ui(view::Message::Shell(event)) => (Vec::new(), self.dispatch(event)),
             Message::Ui(view::Message::Minimize) => (vec![Request::Minimize], Task::none()),
@@ -342,9 +352,13 @@ impl TopBand {
             Message::Cursor(x, y) => (Vec::new(), self.dispatch(shell::Event::PointerMoved(x, y))),
             Message::Released => (Vec::new(), self.dispatch(shell::Event::PointerReleased)),
             Message::Snapshot(snapshot) => {
+                // The core's own focus state follows the same walk: the host's focus decisions (a menu's rows, a dialog's scope, a
+                // message's buttons) read it.
+                let now = self.now();
+                let overlays = styk_ui::message::update_at(&mut self.core, styk_ui::message::Message::Snapshot(snapshot.clone()), now).map(Message::Editor);
                 let synced = focus::sync(&mut self.shell.focus, &snapshot);
                 let task = if synced.unfocus.is_some() { operate(focus::unfocus()).discard().chain(TopBand::snapshot()) } else { Task::none() };
-                (Vec::new(), task)
+                (Vec::new(), Task::batch([task, overlays]))
             }
             Message::Frame => self.frame(),
         };
@@ -362,6 +376,11 @@ impl TopBand {
     /// A key, a button or the window losing focus, as the window reports it.
     fn raw(&mut self, event: &Event, ignored: bool) -> Task<Message> {
         use shell::Event as E;
+        // The overlays take the inputs that are theirs first (a dialog's keys, a button's release).
+        let now = self.now();
+        if let Some(task) = styk_ui::message::raw_at(&mut self.core, event, ignored, now) {
+            return task.map(Message::Editor).chain(TopBand::snapshot());
+        }
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 if self.shell.board_open() {
@@ -677,6 +696,27 @@ mod tests {
     fn open(top: &mut TopBand, count: usize) {
         top.open_all(&vec![fixture(); count]);
         settle(top);
+    }
+
+    #[test]
+    fn the_overlay_messages_reach_the_core_through_the_window_and_the_deadline_it_asks_for_ends_them() {
+        use styk_core::commands::Command;
+        use styk_core::overlay::host::Event as Overlay;
+        use styk_core::overlay::messages::{Message as Toast, Tone};
+        let (mut top, _) = band();
+        let show = Overlay::ShowMessage(Toast::new(1, "saved", Tone::Success, false, vec![]));
+        let _ = top.update(Message::Editor(styk_ui::message::Message::Command(Command::Overlay { event: show, now: 100 })));
+        assert!(top.core.overlays().messages().current().is_some(), "the window routed the message to the core's host");
+        assert!(top.core.overlay_deadline().is_some(), "the core asks the runtime for a wake");
+        // The runtime wakes at each deadline the core gives (frames while the entry animates, then the message's end).
+        let mut wakes = 0;
+        while let Some(deadline) = top.core.overlay_deadline() {
+            wakes += 1;
+            assert!(wakes < 2000, "the deadlines end");
+            let _ = top.update(Message::Editor(styk_ui::message::Message::Command(Command::Overlay { event: Overlay::Tick, now: deadline })));
+        }
+        assert!(top.core.overlays().messages().current().is_none(), "the wake at the deadline the core gave ended the message");
+        assert_eq!(top.core.overlay_deadline(), None, "and nothing is scheduled any more");
     }
 
     #[test]

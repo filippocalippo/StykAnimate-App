@@ -298,10 +298,13 @@ impl Host {
     /// Keeps the models in step with what the stack closed: a closed child is acknowledged to its parent.
     fn sync(&mut self, effects: &[Effect]) {
         for effect in effects {
+            if let Effect::Closed { id, .. } = effect {
+                // Whatever closed (a menu, a dialog, a popover) stops entering.
+                self.animations.retain(|(key, _, _)| key != id);
+            }
             if let Effect::Closed { id, .. } = effect
                 && let Some(at) = self.index(*id)
             {
-                self.animations.retain(|(key, _, _)| key != id);
                 let gone = self.menus.remove(at);
                 if let Some(parent) = gone.parent.and_then(|parent| self.index(parent)) {
                     self.menus[parent].menu.submenu_closed();
@@ -525,6 +528,14 @@ pub enum Event {
     MessageAction { id: u64, index: usize },
     MessageDismiss(u64),
     ShowMessage(super::messages::Message),
+    /// A dialog, popover, palette or sheet opens on the stack; its `targets` are the focus targets of its content.
+    OpenOverlay { kind: Kind, guarded: bool, targets: Vec<FocusTarget>, initial: Option<FocusId> },
+    /// Escape reached the window with no menu holding it: the top overlay's Escape applies (and a tooltip hides).
+    Escape,
+    /// The pointer or keyboard focus reached a target that has a tooltip.
+    TooltipShow { target: FocusId, content: super::tooltip::Content, touch: bool, keyboard: bool },
+    /// The pointer left the target, or focus did, or a press, scroll or Escape ended it.
+    TooltipHide,
     Animate { id: u64, kind: Option<Animation> },
     Tick,
     Time,
@@ -559,12 +570,14 @@ impl Host {
     }
     pub fn event(&mut self, event: Event, focus: &mut FocusState, now: u64) -> Update {
         self.now = now;
-        let previous_menus: Vec<u64> = self.menus.iter().map(|m| m.id).collect();
+        let previous_overlays: Vec<u64> = self.stack.entries().iter().map(|e| e.id).collect();
         let previous_message = self.messages.current().map(|m| m.id);
         let bounds = self.bounds.clone();
         let lookup = |id| bounds.iter().find(|(key, _)| *key == id).map(|(_, rect)| *rect);
         let mut out = Update::default();
         match event {
+            // The press that closed this opener's menu (outside-press toggle) does not open it again on its release.
+            Event::OpenMenu { invoker: Some(invoker), keyboard: false, .. } if self.last_activation == Some((invoker, self.press_sequence)) => return out,
             Event::OpenMenu { entries, anchor, invoker, keyboard } => out = self.open(entries, anchor, Purpose::Commands, invoker, keyboard, None, focus),
             Event::Environment(reason) => out = self.environment(reason, focus),
             Event::ResolveClose { id, allow } => { out.effects = self.stack.resolve_close(id, allow, focus); self.sync(&out.effects); }
@@ -578,6 +591,7 @@ impl Host {
                 }
             }
             Event::Pointer { pressed, inside, anchor, press } => {
+                if pressed { self.tooltip.hide(now); }
                 if !pressed { self.press_sequence = self.press_sequence.wrapping_add(1); self.last_activation = None; }
                 if pressed && let Some(invoker) = anchor {
                     if self.last_activation == Some((invoker, press)) { return out; }
@@ -585,7 +599,7 @@ impl Host {
                 }
                 out = self.pointer(pressed, inside, anchor, focus);
             }
-            Event::Key { key, ctrl, meta, alt } => out = self.key(menu::Key { key: &key, ctrl, meta, alt, composing: focus.composing() }, &lookup, focus, now),
+            Event::Key { key, ctrl, meta, alt } => { if key == "Escape" { self.tooltip.hide(now); } out = self.key(menu::Key { key: &key, ctrl, meta, alt, composing: focus.composing() }, &lookup, focus, now); }
             Event::Hover { menu, index } => { self.leave(); out = self.hover(menu, index, focus, now); }
             Event::Leave { menu } => {
                 for open in &mut self.menus { if menu.is_none_or(|id| id == open.id) { open.menu.cancel_hover(); open.hovered = None; } }
@@ -605,19 +619,38 @@ impl Host {
                 let push = self.messages.push(message, now);
                 out.dismissed = push.dropped;
             }
+            Event::OpenOverlay { kind, guarded, targets, initial } => {
+                let id = self.fresh_id();
+                let mut overlay = Overlay::new(id, kind);
+                overlay.guarded = guarded;
+                if let Ok(effects) = self.stack.open(overlay, focus, targets, initial) { out.effects = effects; }
+                out.consumed = true;
+            }
+            Event::Escape => {
+                self.tooltip.hide(now);
+                out.effects = self.stack.escape(focus.composing(), focus);
+                self.sync(&out.effects);
+                out.consumed = !out.effects.is_empty();
+            }
+            Event::TooltipShow { target, content, touch, keyboard } => self.tooltip.schedule(super::tooltip::Tip { target: target.0, content }, now, touch, keyboard),
+            Event::TooltipHide => self.tooltip.hide(now),
             Event::Animate { id, kind } => {
                 self.animations.retain(|(key, _, _)| *key != id);
                 if let Some(kind) = kind { self.animations.push((id, kind, now)); }
             }
             Event::Tick => { let (update, expired) = self.tick(now, &lookup, focus); out = update; out.dismissed = expired; }
         }
-        for menu in &self.menus {
-            if !previous_menus.contains(&menu.id) { self.animations.push((menu.id, Animation::Entry(Kind::Menu), now)); }
+        for entry in self.stack.entries() {
+            // A tooltip or message is drawn by its own phase; every box the stack opened enters.
+            if !previous_overlays.contains(&entry.id) && !entry.kind.passive_entry() { self.animations.push((entry.id, Animation::Entry(entry.kind), now)); }
         }
         if previous_message != self.messages.current().map(|m| m.id) {
             self.message_hovered = false;
-            if let Some(id) = previous_message { self.animations.retain(|(key, _, _)| *key != message_animation_id(id)); }
-            if let Some(m) = self.messages.current() { self.animations.push((message_animation_id(m.id), Animation::Entry(Kind::Toast), now)); }
+            if let Some(id) = previous_message { self.animations.retain(|(key, _, _)| *key != message_animation_id(id) && *key != message_progress_id(id)); }
+            if let Some(m) = self.messages.current() {
+                self.animations.push((message_animation_id(m.id), Animation::Entry(Kind::Toast), now));
+                if m.task { self.animations.push((message_progress_id(m.id), Animation::Progress, now)); }
+            }
         }
         self.schedule_animation(now, false);
         self.focus_changed(focus, now);
@@ -627,3 +660,18 @@ impl Host {
 
 /// Entry animation key for the visible message, separate from menu IDs.
 pub fn message_animation_id(id: u64) -> u64 { (1 << 63) | id }
+/// The key of a task message's progress loop.
+pub fn message_progress_id(id: u64) -> u64 { (1 << 62) | id }
+
+impl Host {
+    /// Where a focus target was when the last walk of the tree found it.
+    pub fn bound_of(&self, id: FocusId) -> Option<Rect> {
+        self.bounds.iter().find(|(key, _)| *key == id).map(|(_, rect)| *rect)
+    }
+
+    /// The tooltip that shows now and the rectangle of the target it names.
+    pub fn tooltip_anchor(&self) -> Option<(&super::tooltip::Tip, Rect)> {
+        let tip = self.tooltip.visible()?;
+        Some((tip, self.bound_of(FocusId(tip.target))?))
+    }
+}

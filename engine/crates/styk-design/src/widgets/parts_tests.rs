@@ -110,7 +110,7 @@ fn a_splitter_reports_a_drag_with_how_far_it_went_and_its_keys() {
 #[test]
 fn a_popovers_close_button_is_a_focus_target_that_reports_a_press() {
     let body = Space::new().width(Length::Fixed(10.0)).height(Length::Fixed(10.0)).boxed();
-    let popover = popover(palette(), "Onion skin".into(), body, None, Some((FocusId(50), Msg::Close)));
+    let popover = popover(palette(), "Onion skin".into(), body, None, Some((FocusId(50), Msg::Close)), 1.0);
     let anchored = super::layer::Placed::new(popover, |_, _| super::layer::Position::at(40.0, 60.0));
     let mut d = driver(Layer::new(vec![anchored]).boxed());
     let close = centre(&mut d, 50);
@@ -121,7 +121,7 @@ fn a_popovers_close_button_is_a_focus_target_that_reports_a_press() {
 
 #[test]
 fn a_sheet_sits_at_the_top_right_under_the_band_and_takes_the_room_it_has() {
-    let panel = sheet(palette(), Space::new().width(Length::Fixed(10.0)).height(Length::Fixed(40.0)).boxed(), 52.0);
+    let panel = sheet(palette(), Space::new().width(Length::Fixed(10.0)).height(Length::Fixed(40.0)).boxed(), 52.0, 1.0);
     let mut d = driver(Layer::new(vec![panel]).boxed());
     let grey = iced::Color::from_rgb(0.5, 0.5, 0.5);
     let (pixels, size) = d.render(&iced::Theme::Light, grey, 1.0);

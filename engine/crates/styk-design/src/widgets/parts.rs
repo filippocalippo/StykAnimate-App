@@ -15,7 +15,7 @@ use crate::typography::TextStyle;
 use crate::{Palette, Rgba};
 use iced::widget::{Column, Row, Space, container, scrollable};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Radians, Rotation};
-use styk_core::focus::{FocusArea, FocusId};
+use styk_core::focus::{FocusArea, FocusId, InputRole};
 use styk_core::roving::Orientation;
 
 fn tint_of(color: Rgba) -> Background {
@@ -381,7 +381,7 @@ impl<'a, Message: Clone + 'a> Tabs<'a, Message> {
             .collect();
         let ring = Ring { offset: -2.0, ..Ring::of(palette, radius) };
         let on_move = choose.clone();
-        let group = RovingGroup::new(area, items, selected, ring, move |index| on_move(index)).orientation(Orientation::Horizontal).spacing(scale::SPACE_0_5).ring_shown(preview.filter(|(_, preview)| *preview == Preview::Focus).map(|(item, _)| item)).into_element();
+        let group = RovingGroup::new(area, items, selected, ring, move |index| on_move(index)).orientation(Orientation::Horizontal).spacing(scale::SPACE_0_5).input_role(InputRole::Radio).ring_shown(preview.filter(|(_, preview)| *preview == Preview::Focus).map(|(item, _)| item)).into_element();
         let well = palette.surface_well;
         container(group).padding(scale::SPACE_0_5).height(Length::Fixed(track)).style(move |_| container::Style { background: (!rule).then(|| tint_of(well)), border: Border { radius: (track / 2.0).into(), ..Border::default() }, ..container::Style::default() }).boxed()
     }
@@ -411,10 +411,10 @@ pub fn scroll<'a, Message: 'a>(palette: &'static Palette, content: Element<'a, M
 pub fn stepper<'a, Message: Clone + 'a>(palette: &'static Palette, first: FocusId, area: FocusArea, value: impl Into<String>, disabled: bool, focused: bool, on_step: impl Fn(i32) -> Message + 'a) -> Element<'a, Message> {
     let ink = if disabled { palette.text_1.faded(FIELD_DISABLED) } else { palette.text_1 };
     let shown = container(words(value, TextStyle::from_role(&scale::TYPE_VALUE), ink)).center_x(Length::Fixed(40.0)).center_y(Length::Fill);
-    let end = |id: FocusId, icon: &'static str, step: i32| IconButton::new(id, area, palette, icon, on_step(step)).size(IconSize::Xs).disabled(disabled).into_element();
+    let end = |id: FocusId, icon: &'static str, step: i32| IconButton::new(id, area, palette, icon, on_step(step)).size(IconSize::Xs).input_role(InputRole::Text).disabled(disabled).into_element();
     let row = Row::with_children(vec![end(first, "minus", -1), shown.boxed(), end(FocusId(first.0 + 1), "plus", 1)]).spacing(scale::SPACE_0_5).align_y(Alignment::Center);
     let card = Card::new(row).radius(scale::RADIUS_MD).height(Length::Fixed(scale::CONTROL_LG)).padding(scale::SPACE_0_5);
-    if focused { card.fill(palette.surface).ring(1.5, palette.accent_line) } else { card.fill(palette.surface_sunken) }.boxed()
+    if focused { card.fill(palette.surface).ring(1.5, palette.accent_line).halo(palette.focus_halo) } else { card.fill(palette.surface_sunken) }.boxed()
 }
 
 /// An empty state (`.ui-empty`): a glyph, a title, at most one quiet line and at most one action, centred (or at the start).

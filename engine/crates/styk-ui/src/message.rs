@@ -40,12 +40,16 @@ pub enum Message {
     OpenSelect(Box<SelectRequest>),
     /// A menu row, key or press reached the overlay layer: the overlay owner decides.
     Overlay(styk_design::widgets::menu::Event),
-    /// A stage message's action or close button.
+    /// A stage message's action or close button, or the pointer on it.
     Toast(styk_design::widgets::toast::Event),
+    /// A control with a tooltip: the pointer or keyboard focus reached it, or left it.
+    Tooltip(styk_design::widgets::tooltip::TipEvent),
     OverlayEffect(styk_core::overlay::Effect),
     OverlayChoice { invoker: styk_core::focus::FocusId, index: usize },
     MessageDismissed(u64),
     ShortcutReleased(styk_core::shortcuts::Release),
+    /// A command ran whose feature belongs to a later chunk: the window may say so.
+    NotAvailable(styk_core::commands::CommandId),
 }
 
 /// A select asking for its list.
@@ -88,7 +92,10 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
         }
         Message::Key(event) => {
             let task = match focus::navigate(core.focus_mut(), &event) { Some(id) => operate(focus::focus(id)).discard(), None => Task::none() };
-            Task::batch([task, overlay(core, styk_core::overlay::host::Event::FocusChanged)])
+            // Escape that no widget took belongs to the top overlay (a dialog, a popover), and ends a tooltip.
+            let escape = matches!(&event, iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape), .. }));
+            let overlay_event = if escape { styk_core::overlay::host::Event::Escape } else { styk_core::overlay::host::Event::FocusChanged };
+            Task::batch([task, overlay(core, overlay_event)])
         },
         Message::OpenSelect(request) => {
             let choices = request.picks.iter().map(|m| if let Message::Command(c) = m { Some(c.clone()) } else { None }).collect::<Vec<_>>();
@@ -103,6 +110,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
                 View::Key(k) => Event::Key { key: k.key, ctrl: k.ctrl, meta: k.meta, alt: k.alt },
                 View::Hover { menu, index } => Event::Hover { menu, index },
                 View::Press { menu, index } => Event::Press { menu, index },
+                View::Leave { menu } => Event::Leave { menu },
                 View::Pointer { press, inside, x, y } => Event::Pointer { pressed: press, inside, anchor: core.overlays().anchor_at(f64::from(x), f64::from(y)), press: core.overlays().press_sequence() },
             };
             overlay(core, event)
@@ -110,9 +118,14 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
         Message::Toast(event) => {
             use styk_design::widgets::toast::Event as View;
             use styk_core::overlay::host::Event;
-            overlay(core, match event { View::Hover(h) => Event::MessageHover(h), View::Focus(_) => Event::FocusChanged, View::Dismiss(id) => Event::MessageDismiss(id), View::Action { id, index } => Event::MessageAction { id, index } })
+            overlay(core, match event { View::Hover(h) => Event::MessageHover(h), View::Dismiss(id) => Event::MessageDismiss(id), View::Action { id, index } => Event::MessageAction { id, index } })
         }
-        Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) => Task::none(),
+        Message::Tooltip(event) => {
+            use styk_design::widgets::tooltip::TipEvent as View;
+            use styk_core::overlay::host::Event;
+            overlay(core, match event { View::Show { target, content, touch, keyboard } => Event::TooltipShow { target, content, touch, keyboard }, View::Hide => Event::TooltipHide })
+        }
+        Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
         Message::Snapshot(snapshot) => {
             let synced = focus::sync(core.focus_mut(), &snapshot);
             let effects = core.dispatch(Command::Overlay { now: core.overlays().now(), event: styk_core::overlay::host::Event::Bounds(snapshot.bounds.iter().map(|(id, b)| (*id, styk_design::widgets::menu::rect_of(*b))).collect()) });
@@ -140,7 +153,8 @@ fn effect(effect: Effect) -> Task<Message> {
             FocusRequest::TargetName => crate::inspector::TARGET_NAME_ID,
         }))
         .discard(),
-        Effect::Notice(_) | Effect::NotAvailable(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
+        Effect::NotAvailable(id) => Task::done(Message::NotAvailable(id)),
+        Effect::Notice(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
 }
 
@@ -148,6 +162,21 @@ fn effect(effect: Effect) -> Task<Message> {
 fn overlay(core: &mut Core, event: styk_core::overlay::host::Event) -> Task<Message> {
     let now = core.overlays().now();
     update(core, Message::Command(Command::Overlay { event, now }))
+}
+
+/// What the window does with a raw input the overlays care about, before the band sees it: a key no widget took while a
+/// dialog or popover is open (Tab stays inside it, Escape asks its guard), and a button release, which ends the press the
+/// overlays number (an opener pressed again is a new press). `None` leaves the event to the band.
+#[cfg(feature = "engine")]
+pub fn raw_at(core: &mut Core, event: &iced::Event, ignored: bool, now: u64) -> Option<Task<Message>> {
+    match event {
+        iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { .. }) if ignored && core.overlays().top().is_some() => Some(update_at(core, Message::Key(event.clone()), now)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_)) => {
+            let release = Message::Overlay(styk_design::widgets::menu::Event::Pointer { press: false, inside: false, x: 0.0, y: 0.0 });
+            Some(update_at(core, release, now))
+        }
+        _ => None,
+    }
 }
 
 /// Runtime entry: inject the application clock before routing an input. No view reads a clock.

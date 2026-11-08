@@ -80,6 +80,17 @@ pub fn paint_fill_corners(renderer: &mut iced::Renderer, bounds: Rectangle, corn
     renderer.fill_quad(Quad { bounds, border: Border { radius: iced::border::Radius { top_left: corners[0], top_right: corners[1], bottom_right: corners[2], bottom_left: corners[3] }, ..Border::default() }, shadow: Shadow::default(), snap: false }, Color::from(color));
 }
 
+/// `cubic-bezier(x1, y1, x2, y2)` at time `x` (0 to 1): the progress of an eased motion.
+pub fn cubic_bezier(p: [f32; 4], x: f32) -> f32 {
+    let at = |t: f32, a: f32, b: f32| 3.0 * (1.0 - t) * (1.0 - t) * t * a + 3.0 * (1.0 - t) * t * t * b + t * t * t;
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    for _ in 0..24 {
+        let mid = (low + high) / 2.0;
+        if at(mid, p[0], p[2]) < x { low = mid } else { high = mid }
+    }
+    at((low + high) / 2.0, p[1], p[3])
+}
+
 /// The radius a pill has on a box this high.
 pub fn pill(height: f32) -> f32 {
     height / 2.0

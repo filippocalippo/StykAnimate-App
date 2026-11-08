@@ -8,6 +8,7 @@ use iced::Widget as _;
 use super::button::{IconButton, IconSize};
 use super::card::Card;
 use super::control::words;
+use super::enter::{Enter, blend};
 use super::focus::Scope;
 use super::layer::{Placed, Position};
 use crate::tokens::scale;
@@ -97,9 +98,12 @@ pub fn dialog<'a, Message: Clone + 'a>(palette: &'static Palette, spec: Dialog<'
 
 /// The modal layer: the veil over the whole window of `window` size and the dialog centred on it, in the focus scope of
 /// overlay `id`.
-pub fn modal<'a, Message: Clone + 'a>(palette: &'static Palette, id: u64, spec: Dialog<'a, Message>, window: Size) -> Placed<'a, Message> {
+/// `phase` is the dialog's entry (`Host::phase`, 240 ms).
+pub fn modal<'a, Message: Clone + 'a>(palette: &'static Palette, id: u64, spec: Dialog<'a, Message>, window: Size, phase: f32) -> Placed<'a, Message> {
     let veil = palette.surface_backdrop;
-    let centred = container(Scope::new(ScopeId(id), dialog(palette, spec, window)))
+    let veiled = blend(palette.surface_backdrop, palette.surface);
+    let entering = Enter::new(dialog(palette, spec, window), phase, scale::SPACE_2, veiled, scale::RADIUS_2XL);
+    let centred = container(Scope::new(ScopeId(id), entering.boxed()))
         .center_x(Length::Fill)
         .center_y(Length::Fill)
         .style(move |_| container::Style { background: Some(Background::Color(veil.into())), ..container::Style::default() });
@@ -107,7 +111,8 @@ pub fn modal<'a, Message: Clone + 'a>(palette: &'static Palette, id: u64, spec: 
 }
 
 /// A popover: a non-modal panel anchored to its opener, with a title, a close button and a body.
-pub fn popover<'a, Message: Clone + 'a>(palette: &'static Palette, title: String, body: Element<'a, Message>, foot: Option<Element<'a, Message>>, close: Option<(FocusId, Message)>) -> Element<'a, Message> {
+/// `phase` is its entry (`Host::phase`, 160 ms).
+pub fn popover<'a, Message: Clone + 'a>(palette: &'static Palette, title: String, body: Element<'a, Message>, foot: Option<Element<'a, Message>>, close: Option<(FocusId, Message)>, phase: f32) -> Element<'a, Message> {
     let mut head: Vec<Element<'a, Message>> = vec![container(words(title, TextStyle::from_role(&scale::TYPE_UI_STRONG), palette.text_1)).width(Length::Fill).boxed()];
     if let Some((id, message)) = close {
         head.push(IconButton::new(id, FocusArea::Panels, palette, "close", message).size(IconSize::Sm).into_element());
@@ -121,11 +126,14 @@ pub fn popover<'a, Message: Clone + 'a>(palette: &'static Palette, title: String
         column.push(container(Space::new()).width(Length::Fill).height(1.0).style(move |_| container::Style { background: Some(Background::Color(line.into())), ..container::Style::default() }).boxed());
         column.push(container(foot).padding(Padding { top: scale::SPACE_2_5, right: scale::SPACE_3, bottom: scale::SPACE_3, left: scale::SPACE_3 }).align_right(Length::Fill).boxed());
     }
-    Card::new(Column::with_children(column)).fill(palette.surface_raised).radius(scale::RADIUS_XL).shadows(palette.elevation_3).padding(1.0).boxed()
+    let card = Card::new(Column::with_children(column)).fill(palette.surface_raised).radius(scale::RADIUS_XL).shadows(palette.elevation_3).padding(1.0);
+    Enter::new(card.boxed(), phase, scale::SPACE_1, palette.surface, scale::RADIUS_XL).boxed()
 }
 
 /// A sheet: a raised island over the stage, 320 px wide at most, anchored at the top right under the band.
-pub fn sheet<'a, Message: Clone + 'a>(palette: &'static Palette, content: Element<'a, Message>, top: f32) -> Placed<'a, Message> {
+/// `phase` is its entry (`Host::phase`, 240 ms).
+pub fn sheet<'a, Message: Clone + 'a>(palette: &'static Palette, content: Element<'a, Message>, top: f32, phase: f32) -> Placed<'a, Message> {
     let card = Card::new(container(content).width(Length::Fixed(320.0 - 2.0))).fill(palette.surface_raised).radius(scale::RADIUS_XL).shadows(palette.elevation_3).padding(1.0);
+    let card = Enter::new(card.boxed(), phase, scale::SPACE_1, palette.surface, scale::RADIUS_XL);
     Placed::new(card, move |natural: Size, viewport: Size| Position { x: viewport.width - 8.0 - natural.width, y: top, max_width: Some(viewport.width - 16.0), max_height: Some(viewport.height - top - 16.0) })
 }
