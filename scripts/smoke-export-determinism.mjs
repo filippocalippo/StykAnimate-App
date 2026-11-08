@@ -1,4 +1,6 @@
-// An export of the same document twice must give the same frames, byte for byte, in the desktop app with a real GPU.
+// Exact export-repeat diagnostic for the desktop reference. Chromium/D3D12 may hit the MSAA driver floor in
+// docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor (X2); differences are still reported without tolerance.
+// Native byte-for-byte export regression gates explicitly use Vulkan.
 //
 //   node scripts/smoke-export-determinism.mjs [--runs 14] [--pictures 64] [--keep <folder>] [--packaged]
 //   node scripts/smoke-export-determinism.mjs --file <document> --first <tick> --last <tick> [--runs 14]   a document of yours instead
@@ -125,7 +127,10 @@ try {
   console.log(JSON.stringify({ ...result, errors }));
   // The frames must show the pictures (a blank frame is the same in every run), and the runs must agree.
   if (!file && result.distinctFrames !== result.ticks) { console.error('The frames are not all different: the pictures were not drawn.'); failed = true; }
-  if (result.differing.length) { console.error(`${result.differing.length} frame(s) differ between runs.`); failed = true; }
+  if (result.differing.length) {
+    console.error(`${result.differing.length} frame(s) differ between runs. Chromium/D3D12 may hit the MSAA driver floor in docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor; inspect the differences, no tolerance is applied.`);
+    failed = true;
+  }
   if (errors.length) failed = true;
 } catch (error) {
   console.error(error);

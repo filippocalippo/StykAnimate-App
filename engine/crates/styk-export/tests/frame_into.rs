@@ -8,7 +8,10 @@ use styk_export::{CpuExport, GpuExport, Settings, Smoothing};
 use styk_render::wgpu;
 
 fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    // Exact frame comparisons use Vulkan: docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::VULKAN;
+    let instance = wgpu::Instance::new(descriptor);
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).ok()
 }
@@ -16,7 +19,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 #[test]
 fn a_frame_into_a_reused_buffer_equals_the_allocating_frame() {
     let Some((device, queue)) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/policy");
@@ -57,7 +60,7 @@ fn a_frame_into_a_reused_buffer_equals_the_allocating_frame() {
 #[test]
 fn an_interrupt_ends_the_frame_in_progress_and_every_later_one() {
     let Some((device, queue)) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/policy");
@@ -120,7 +123,7 @@ fn dropping_an_interrupted_exporter_does_not_wait_for_resources_that_wait_for_th
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Condvar, Mutex};
     let Some((device, queue)) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let settings = Settings::new(64, 64, Smoothing::Edges, styk_export::settings::MAX_PIXELS).unwrap();

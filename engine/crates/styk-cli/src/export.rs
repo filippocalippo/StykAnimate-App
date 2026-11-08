@@ -6,7 +6,8 @@
 //!               [--matte] [--transparent] [--tile N] [--cpu] [--repeat N] [--verify N]
 //!
 //! `--verify N` draws the whole range N times in a row and reports every frame whose pixels differ from the first pass (the same
-//! input must give the same bytes); the exit code is 1 when any does.
+//! input must give the same bytes); the exit code is 1 when any does. Use WGPU_BACKEND=vulkan for a repeatability gate;
+//! DX12 is a diagnostic of the floor in docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -67,6 +68,7 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
     let matte = rest.iter().any(|a| a == "--matte");
     let transparent = rest.iter().any(|a| a == "--transparent");
     let repeat = option(rest, "--repeat").and_then(|n| n.parse::<usize>().ok()).unwrap_or(1).max(1);
+    let verify = option(rest, "--verify").and_then(|n| n.parse::<usize>().ok()).unwrap_or(0);
     let open_ms = started.elapsed().as_secs_f64() * 1000.0;
 
     // Pictures: decoded by the engine's tasks (here on this thread, there are no workers).
@@ -89,6 +91,9 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
     } else {
         let native = styk_render::native_gpu::native_gpu(wgpu::Instance::enabled_backend_features().contains(wgpu::Backends::DX12), "styk export", |adapter| wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()))?;
         adapter_name = format!("{} ({:?}, {})", native.adapter.get_info().name, native.adapter.get_info().backend, native.attempt.name);
+        if verify > 0 && native.adapter.get_info().backend == wgpu::Backend::Dx12 {
+            eprintln!("DX12 exact-repeat diagnostic on {adapter_name}: the MSAA driver floor may fail this check (docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor). Use WGPU_BACKEND=vulkan for the repeatability gate; differences still fail without tolerance.");
+        }
         let (device, queue) = (native.device, native.queue);
         let mut exporter = GpuExport::new(&device, &queue, settings, tile);
         exporter.prepare_sprites(generation.lineage, &generation.assets);
@@ -100,7 +105,6 @@ fn run(path: &str, ticks: &str, out: &str, rest: &[String]) -> Result<(), String
     if folder {
         std::fs::create_dir_all(out).map_err(|e| format!("{out}: {e}"))?;
     }
-    let verify = option(rest, "--verify").and_then(|n| n.parse::<usize>().ok()).unwrap_or(0);
     if verify > 0 {
         return verify_runs(&frames, doc, (first, last), matte, verify, &mut gpu, &mut cpu_export);
     }

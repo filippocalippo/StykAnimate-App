@@ -24,7 +24,10 @@ struct Gpu {
 }
 
 fn gpu() -> Option<Gpu> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    // Exact frame comparisons use Vulkan: docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::VULKAN;
+    let instance = wgpu::Instance::new(descriptor);
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()), ..Default::default() })).ok()?;
     Some(Gpu { device, queue })
@@ -127,7 +130,7 @@ fn differing(a: &[u8], b: &[u8]) -> (usize, u8) {
 #[test]
 fn tiles_draw_the_pixels_of_the_whole_frame() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     // Generated effects; 3D faces; text; scene effects through the camera.
@@ -161,7 +164,7 @@ fn tiles_draw_the_pixels_of_the_whole_frame() {
 #[test]
 fn no_smoothing_draws_hard_edges_and_keeps_opacity() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     // Painted limbs, their background taken away: smooth edges leave partly covered pixels, crisp ones do not.
@@ -183,7 +186,7 @@ fn no_smoothing_draws_hard_edges_and_keeps_opacity() {
 #[test]
 fn smooth_sprites_average_a_frame_drawn_twice_as_large() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     // Sprites of generated effects, and additive, translucent particles.
@@ -217,7 +220,7 @@ fn smooth_sprites_average_a_frame_drawn_twice_as_large() {
 #[test]
 fn video_without_alpha_is_over_black() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let path = "engine/crates/styk-eval/tests/fixtures/drawlist/painted-limbs.json";
@@ -269,7 +272,7 @@ fn draw_in_turn(gpu: &Gpu, path: &str, settings: Settings, lists: &[(std::sync::
 #[test]
 fn a_frame_is_the_same_alone_and_after_the_frames_before_it() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     for (path, last) in [
@@ -335,7 +338,7 @@ fn glyph_frame(seed: u32, count: usize, scale: f64) -> (std::sync::Arc<styk_draw
 #[test]
 fn a_frame_of_glyphs_is_the_same_alone_and_after_other_frames() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     // Any document does: the lists are made here and only the view's size is the document's.
@@ -500,7 +503,7 @@ fn cel_frame_never_decoded(gpu: &Gpu) -> Vec<u8> {
 #[test]
 fn a_cel_the_engine_refused_to_decode_is_blank_not_the_pixels_its_layer_held_before() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let shown = cel_frame_in_two_layers(&gpu, false, false);
@@ -540,7 +543,7 @@ fn cel_frame_after_two_overlapping_attempts(gpu: &Gpu, first_refused: bool, seco
 #[test]
 fn an_older_attempt_to_decode_a_cel_never_touches_a_newer_ones_tiles_or_makes_it_refused() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     let shown = cel_frame_in_two_layers(&gpu, false, false);
@@ -582,7 +585,7 @@ fn open_bare(path: &str) -> (Engine, styk_engine::export::ExportFrames) {
 #[test]
 fn pictures_asked_for_as_frames_need_them_draw_the_frames_the_whole_layout_draws() {
     let Some(gpu) = gpu() else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return;
     };
     for (path, last) in [

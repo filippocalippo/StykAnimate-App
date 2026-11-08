@@ -40,7 +40,9 @@ export function previewParityCheck(root, target) {
       const captures = ['stykanimate', 'styk-screens'].map(binary => {
         const path = join(out, `${binary}-${id}.png`); files.push(path, path.replace(/\.png$/, '.png.partial'));
         const args = ['--screen', id, '--size', `${spec.width}x${spec.height}`, '--scale', '1', '--screenshot', path];
-        const options = {cwd: root, timeout: 45000, env: {...process.env, STYK_BACKGROUND_WINDOW: 'headless'}};
+        // Exact repeatability uses Vulkan; the DX12 MSAA driver floor is in docs/native/frame-parity.md.
+        // This affects app/preview byte identity only; the separate reference screen check keeps the shipping backend.
+        const options = {cwd: root, timeout: 45000, env: {...process.env, STYK_BACKGROUND_WINDOW: 'headless', WGPU_BACKEND: 'vulkan'}};
         if (binary === 'styk-screens') {
           const run = spawnSync(resolve(target, `debug/${binary}.exe`), args, {...options, encoding: 'utf8'});
           const reason = /^app-only: (.+)$/m.exec(run.stderr ?? '');

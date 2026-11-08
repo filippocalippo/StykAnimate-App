@@ -1093,6 +1093,9 @@ the browser against the engine's own pixels); `styk export <file>
 <ticks> <out> [--size WxH] [--smoothing edges|none|sprites] [--tile N] [--cpu] [--verify N]`
 (`--verify N` draws the range N times in a row and fails when a frame differs from the first pass: native wgpu gave
 the same bytes in 3,200 renders of tdd2 ticks 183-186 where the browser's WebGPU differs in about 1 in 25).
+For the repeatability gate, set `WGPU_BACKEND=vulkan`. DX12 has the independently reproduced
+[MSAA driver floor](../native/frame-parity.md#dx12-msaa-repeatability-driver-floor); `--verify` on DX12 remains an exact
+diagnostic that may fail, not a guarantee that this backend repeats every frame.
 
 `cargo test -p styk-raster` (the target's samples, the rasterization rules, effect windows
 against per-pixel shading; strokes covered by distance, no seams between adjacent triangles,
