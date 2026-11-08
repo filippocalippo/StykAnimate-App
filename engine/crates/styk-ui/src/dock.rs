@@ -83,9 +83,8 @@ pub enum Key {
     Note(styk_core::dock::Event),
 }
 
-/// The dock's keys: Escape over a gesture or a flyout, Shift, Ctrl+Alt+M (move the focused panel by keyboard), Ctrl+Alt+Z (undo
-/// the last layout change), and while a panel moves its arrows, Enter and Escape. `focused` is the target that holds focus.
-pub fn key(dock: &styk_core::dock::Dock, focused: Option<styk_core::focus::FocusId>, key: &iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> Key {
+/// The dock's keys: Escape over a gesture or a flyout, Shift, and while a panel moves its arrows, Enter and Escape. `focused` is the target that holds focus.
+pub fn key(dock: &styk_core::dock::Dock, _focused: Option<styk_core::focus::FocusId>, key: &iced::keyboard::Key, _modifiers: iced::keyboard::Modifiers) -> Key {
     use iced::keyboard::Key as K;
     use iced::keyboard::key::Named;
     use styk_core::dock::Event;
@@ -101,8 +100,6 @@ pub fn key(dock: &styk_core::dock::Dock, focused: Option<styk_core::focus::Focus
     match key.as_ref() {
         K::Named(Named::Escape) if dock.wants_escape() => Key::Send(Event::Escape),
         K::Named(Named::Shift) => Key::Note(Event::Shift(true)),
-        K::Character("m" | "M") if modifiers.control() && modifiers.alt() => focused.and_then(|id| dock.panel_of(id)).map_or(Key::Pass, |panel| Key::Send(Event::MoveByKeyboard(panel))),
-        K::Character("z" | "Z") if modifiers.control() && modifiers.alt() => Key::Send(Event::Undo),
         _ => Key::Pass,
     }
 }

@@ -1,4 +1,4 @@
-//! The docked main window: what the views draw and what they send (`docs/native/dockin-views.md`).
+//! The docked main window: what the views draw and what they send (`docs/native/docking-views.md`).
 //!
 //! `styk_core::layout` owns placement: the arrangement, the operations, the solver, the drop zones and the history. This
 //! module holds what a window adds to it and no view may decide: which workspace's arrangement shows, the solution for the
@@ -12,12 +12,16 @@
 mod place;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod review_tests;
 
-pub use place::{default_layout, default_timeline_height, keyboard_places, set_timeline, zone_label};
+pub use place::{keyboard_places, zone_label};
+pub use crate::layout::{default_layout, default_timeline_height, set_timeline};
 
 use crate::layout::store::{Entry, ImportResult, LayoutFile, MigrationGeometry, SaveQueue, Stamp, import_v2, state_from_value, state_to_value};
-use crate::layout::{DragSession, Env, GroupId, Layout, LayoutError, LayoutState, Node, NodeId, Operation, PanelId, Rect, Size, Solution, Sz, Workspace, Zone, solve, spec};
+use crate::layout::{DragSession, Env, GroupId, Layout, LayoutError, LayoutState, Node, NodeId, Operation, PanelId, Rect, Size, Solution, Workspace, Zone, solve};
 use styk_doc::Value;
+use crate::i18n::Msg;
 
 /// The time within which a second press on the same header or divider is a double click (Windows' default).
 pub const DOUBLE_CLICK_MS: u64 = 500;
@@ -90,7 +94,7 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
     /// Say this to the person (a refused drop, a layout that did not load).
-    Message(String),
+    Message(Msg),
     /// Move keyboard focus to this panel (a tab was activated, a flyout closed).
     Focus(PanelId),
 }
@@ -102,7 +106,7 @@ pub struct DragView {
     /// The place the pointer is over (`None`: nowhere the panel can go).
     pub zone: Option<Zone>,
     /// The name of the place.
-    pub label: &'static str,
+    pub label: Option<Msg>,
     /// The rectangle the panel would take, in window coordinates; `None` for a place that has no rectangle (a float).
     pub preview: Option<Rect>,
     pub pointer: (f64, f64),
@@ -112,14 +116,6 @@ pub struct DragView {
 struct Press {
     panel: PanelId,
     origin: (f64, f64),
-}
-
-#[derive(Clone, Debug)]
-struct Resize {
-    origin: Layout,
-    solution: Solution,
-    split: NodeId,
-    index: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -140,7 +136,7 @@ enum Gesture {
     Idle,
     Pressed(Press),
     Dragging { session: Box<DragSession>, source: PanelId, pointer: (f64, f64) },
-    Resizing(Box<Resize>),
+    Resizing(Box<crate::layout::DividerDrag>),
     Moving(Move),
 }
 
@@ -161,6 +157,8 @@ pub struct Dock {
     swallow_ends: bool,
     shift: bool,
     clock: u64,
+    wall_millis: u64,
+    last_stamp: u64,
     saves: SaveQueue,
     file: LayoutFile,
     writer: String,
@@ -188,6 +186,8 @@ impl Dock {
             swallow_ends: false,
             shift: false,
             clock: 0,
+            wall_millis: 0,
+            last_stamp: 0,
             saves: SaveQueue::default(),
             file: LayoutFile::default(),
             writer: writer.into(),
@@ -206,7 +206,10 @@ impl Dock {
     }
 
     pub fn layout(&self) -> &Layout {
-        &self.states[self.active].current
+        match &self.gesture {
+            Gesture::Resizing(resize) => resize.layout(),
+            _ => &self.states[self.active].current,
+        }
     }
 
     /// The solved window: group, header, divider, strip and sheet rectangles in window coordinates.
@@ -252,9 +255,9 @@ impl Dock {
 
     /// The panel a focus target stands for: a tab, or a group's body.
     pub fn panel_of(&self, id: crate::focus::FocusId) -> Option<PanelId> {
-        let (group, tab) = match ids::group_of(id) {
+        let (group, tab) = match ids::group_of(id).or_else(|| ids::strip_of(id)) {
             Some((group, index)) => (group, Some(index)),
-            None => (ids::body_of(id)?, None),
+            None => (ids::body_of(id).or_else(|| ids::stage_header_of(id))?, None),
         };
         self.panel_at(group, tab)
     }
@@ -278,12 +281,12 @@ impl Dock {
             Gesture::Dragging { session, source, pointer } => {
                 let forced = self.shift;
                 let zone = if forced { Some(Zone::Float { rect: Rect { x: pointer.0, y: pointer.1, w: 320.0, h: 400.0 } }) } else { session.zone.clone() };
-                let label = zone.as_ref().map_or("", zone_label);
+                let label = zone.as_ref().map(zone_label);
                 Some(DragView { source: source.clone(), zone, label, preview: if forced { None } else { session.preview }, pointer: *pointer })
             }
             Gesture::Moving(m) => {
                 let (zone, rect) = m.places.get(m.at)?;
-                Some(DragView { source: m.panel.clone(), zone: Some(zone.clone()), label: zone_label(zone), preview: Some(*rect), pointer: (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0) })
+                Some(DragView { source: m.panel.clone(), zone: Some(zone.clone()), label: Some(zone_label(zone)), preview: Some(*rect), pointer: (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0) })
             }
             _ => None,
         }
@@ -332,6 +335,7 @@ impl Dock {
         let mut effects = Vec::new();
         match stored {
             Stored::File(file) => {
+                self.last_stamp = self.last_stamp.max(file.workspaces.values().chain(file.user.values()).map(|e| e.stamp.millis).chain(file.tombstones.values().map(|s| s.millis)).max().unwrap_or(0));
                 for (i, (workspace, key)) in WORKSPACES.iter().enumerate() {
                     if self.touched[i] {
                         continue;
@@ -339,10 +343,14 @@ impl Dock {
                     let Some(entry) = file.workspaces.get(*key) else { continue };
                     match state_from_value(&entry.value, *workspace) {
                         Ok(state) => self.states[i] = state,
-                        Err(error) => effects.push(Effect::Message(format!("The saved {key} layout could not be read ({error:?}); the default is shown."))),
+                        Err(error) => effects.push(Effect::Message(Msg::new("dock.savedWorkspaceUnreadable").with("workspace", Msg::new(workspace_key(*workspace))).with("reason", format!("{error:?}")))),
                     }
                 }
                 self.file = file;
+                // Reconcile every local edit before another workspace edit coalesces the queued write.
+                for i in 0..WORKSPACES.len() {
+                    if self.touched[i] { self.changed(i); }
+                }
             }
             Stored::Legacy(profile) => {
                 let geometry = MigrationGeometry { window: self.window, stage: Rect { x: 8.0, y: 60.0, w: self.window.w, h: self.window.h }, client_x: 0.0, client_y: 0.0, scale: 1.0, setup: 0 };
@@ -364,13 +372,13 @@ impl Dock {
                 for (n, (name, mode, layout)) in user.into_iter().enumerate() {
                     let workspace = WORKSPACES.iter().find(|(_, key)| *key == mode).map_or(Workspace::Animate, |(w, _)| *w);
                     // A saved layout that cannot be kept is skipped, never the others.
-                    let stamp = Stamp { millis: now, writer: self.writer.clone() };
+                    let stamp = self.next_stamp();
                     if let Err(error) = self.file.save_user(&format!("imported-{n}"), &name, &[workspace], &layout, stamp) {
-                        effects.push(Effect::Message(format!("The saved layout \"{name}\" was not imported ({error:?}).")));
+                        effects.push(Effect::Message(Msg::new("dock.savedLayoutNotImported").with("name", name).with("reason", format!("{error:?}"))));
                     }
                 }
                 if !warnings.is_empty() {
-                    effects.push(Effect::Message(format!("Some panels of your earlier layout were put back at their usual places ({}).", warnings.len())));
+                    effects.push(Effect::Message(Msg::new("dock.importRepaired").with("count", warnings.len())));
                 }
                 for i in 0..3 {
                     self.changed(i);
@@ -379,9 +387,9 @@ impl Dock {
             Stored::Nothing => {}
             Stored::Newer => {
                 self.read_only = true;
-                effects.push(Effect::Message("Your saved layouts are from a newer version; they are left as they are.".into()));
+                effects.push(Effect::Message(Msg::new("dock.newerLayouts")));
             }
-            Stored::Unreadable(why) => effects.push(Effect::Message(format!("Your saved layouts could not be read ({why}); the defaults are shown."))),
+            Stored::Unreadable(why) => effects.push(Effect::Message(Msg::new("dock.layoutsUnreadable").with("reason", why))),
         }
         self.refit();
         effects
@@ -472,20 +480,27 @@ impl Dock {
                 self.cancel_gesture();
                 self.shift = false;
             }
-            Event::Close(panel) => self.edit(Operation::Close(panel), &mut effects),
-            Event::Reopen(panel) => self.edit(Operation::Reopen(panel), &mut effects),
+            Event::Close(panel) => {
+                let closes_open = self.open.is_some_and(|id| self.panel_at(id, None).as_ref() == Some(&panel));
+                self.edit(Operation::Close(panel.clone()), &mut effects);
+                if closes_open && self.layout().closed.contains(&panel) {
+                    self.open = None;
+                    self.refit();
+                }
+            }
+            Event::Reopen(panel) => self.reveal(panel, &mut effects),
             Event::DividerPressed { split, index } => {
                 self.cancel_gesture();
                 if self.double_click(Target::Divider(split, index), (0.0, 0.0), now) {
                     self.reset_divider(split, index, &mut effects);
                 } else {
-                    self.gesture = Gesture::Resizing(Box::new(Resize { origin: self.layout().clone(), solution: self.solution.clone(), split, index }));
+                    self.gesture = Gesture::Resizing(Box::new(crate::layout::DividerDrag::new(self.layout(), &self.solution, split, index)));
                 }
             }
             Event::DividerMoved(delta) => self.divider_moved(delta),
             Event::DividerReleased => {
                 if let Gesture::Resizing(resize) = std::mem::replace(&mut self.gesture, Gesture::Idle) {
-                    self.finish(resize.origin);
+                    self.finish(*resize, &mut effects);
                 }
             }
             Event::DividerStep { split, index, direction, shift } => {
@@ -512,14 +527,14 @@ impl Dock {
                     self.changed(self.active);
                     self.refit();
                 } else {
-                    effects.push(Effect::Message("There is no layout change to undo.".into()));
+                    effects.push(Effect::Message(Msg::new("dock.nothingToUndo")));
                 }
             }
             Event::MoveByKeyboard(panel) => {
                 self.cancel_gesture();
                 let places = keyboard_places(self.layout(), &panel, &self.env(), self.workspace());
                 if places.is_empty() {
-                    effects.push(Effect::Message("This panel stays where it is.".into()));
+                    effects.push(Effect::Message(Msg::new("dockKeyboard.thisPanelStaysWhereItIs")));
                 } else {
                     self.gesture = Gesture::Moving(Move { panel, places, at: 0 });
                 }
@@ -557,6 +572,62 @@ impl Dock {
         env
     }
 
+    /// Registry commands reach the same operations as tab/strip controls. Keyboard routing supplies focus,
+    /// never guesses a panel from its title or a fixed screen position.
+    pub fn run(&mut self, command: crate::commands::CommandId, focused: Option<crate::focus::FocusId>, now: u64) -> Vec<Effect> {
+        use crate::commands::CommandId as C;
+        self.clock = now;
+        match command {
+            C::LayoutUndo => return self.handle(Event::Undo, now),
+            C::LayoutArrange => return match focused.and_then(|id| self.panel_of(id)) {
+                Some(panel) => self.handle(Event::MoveByKeyboard(panel), now),
+                None => vec![Effect::Message(Msg::new("dockKeyboard.focusAPanelToMoveIt"))],
+            },
+            _ => {}
+        }
+        let (kind, hide, toggle) = match command {
+            C::PanelToggleProperties => ("properties", false, true),
+            C::PanelToggleVfx => ("vfx", false, true),
+            C::PanelToggleLibrary => ("library", false, true),
+            C::PanelToggleStructure => ("structure", false, true),
+            C::PanelToggleTimeline => ("timeline", false, true),
+            C::PanelHideProperties => ("properties", true, false),
+            C::PanelHideVfx => ("vfx", true, false),
+            C::PanelHideLibrary => ("library", true, false),
+            C::TimelineSheet => ("timeline", false, false),
+            _ => return vec![Effect::Message(Msg::new("dock.invalidTarget"))],
+        };
+        let panel = PanelId::new(kind);
+        if hide { return self.handle(Event::Close(panel), now); }
+        let group = self.layout().groups().into_iter().find(|g| g.tabs.contains(&panel)).map(|g| (g.id, g.tabs[g.active] == panel));
+        if toggle && let Some((id, true)) = group {
+            if self.open == Some(id) {
+                return self.handle(Event::Escape, now);
+            }
+            if focused.and_then(|id| self.panel_of(id)).as_ref() == Some(&panel) && self.solution.groups.contains_key(&id) {
+                let mut effects = Vec::new();
+                self.edit(Operation::Collapse(id, true), &mut effects);
+                return effects;
+            }
+        }
+        let mut effects = Vec::new();
+        self.reveal(panel, &mut effects);
+        effects
+    }
+
+    fn reveal(&mut self, panel: PanelId, effects: &mut Vec<Effect>) {
+        self.cancel_gesture();
+        if self.layout().closed.contains(&panel) { self.edit(Operation::Reopen(panel.clone()), effects); }
+        let group = self.layout().groups().into_iter().find_map(|g| g.tabs.iter().position(|p| p == &panel).map(|tab| (g.id, tab)));
+        if let Some((group, tab)) = group {
+            if self.solution.fit.folded.contains_key(&group) { self.open = Some(group); }
+            self.edit(Operation::Activate(group, tab), effects);
+            effects.push(Effect::Focus(panel));
+        } else {
+            effects.push(Effect::Message(Msg::new("dock.invalidTarget")));
+        }
+    }
+
     /// Solves the window again, carrying the folds so the hysteresis holds.
     fn refit(&mut self) {
         let env = self.env();
@@ -572,6 +643,7 @@ impl Dock {
 
     /// Applies an operation to a copy, keeps it in the layout's history and queues the save; a refusal changes nothing.
     fn edit(&mut self, operation: Operation, effects: &mut Vec<Effect>) {
+        self.cancel_gesture();
         let workspace = self.workspace();
         let mut next = self.layout().clone();
         match next.apply(operation, workspace) {
@@ -599,7 +671,7 @@ impl Dock {
         }
         let (_, key) = WORKSPACES[index];
         let value = state_to_value(&self.states[index]);
-        let stamp = Stamp { millis: self.clock, writer: self.writer.clone() };
+        let stamp = self.next_stamp();
         self.file.workspaces.insert(key.to_string(), Entry { stamp, value });
         // A file over the size limit is not saved; the arrangement stays in memory.
         if let Ok(bytes) = self.file.encode() {
@@ -609,12 +681,7 @@ impl Dock {
 
     fn cancel_gesture(&mut self) {
         match std::mem::replace(&mut self.gesture, Gesture::Idle) {
-            Gesture::Resizing(resize) => {
-                // The live layout followed the pointer; the origin is what it was.
-                self.states[self.active].current = resize.origin;
-                self.states[self.active].dirty = self.states[self.active].current != self.states[self.active].base;
-                self.refit();
-            }
+            Gesture::Resizing(_) => self.refit(),
             Gesture::Dragging { session, .. } => session.cancel(),
             Gesture::Pressed(_) | Gesture::Moving(_) | Gesture::Idle => {}
         }
@@ -663,7 +730,7 @@ impl Dock {
                     None => session.cancel(),
                     Some(Zone::Float { .. }) => {
                         session.cancel();
-                        effects.push(Effect::Message("Floating panels are not available yet: the panel stayed where it was.".into()));
+                        effects.push(Effect::Message(Msg::new("dock.floatsUnavailable")));
                     }
                     Some(_) => {
                         let mut next = self.layout().clone();
@@ -674,35 +741,26 @@ impl Dock {
                     }
                 }
             }
-            Gesture::Resizing(resize) => self.finish(resize.origin),
+            Gesture::Resizing(resize) => self.finish(*resize, effects),
             Gesture::Pressed(_) | Gesture::Moving(_) | Gesture::Idle => {}
         }
     }
 
     fn divider_moved(&mut self, delta: f64) {
         let workspace = self.workspace();
-        let Gesture::Resizing(resize) = &self.gesture else { return };
+        let Gesture::Resizing(resize) = &mut self.gesture else { return };
         self.last_press = None;
-        let mut next = resize.origin.clone();
-        if next.resize_divider(&resize.solution, resize.split, resize.index, delta, workspace).is_ok() {
-            let state = &mut self.states[self.active];
-            state.current = next;
-            state.dirty = state.current != state.base;
-            self.refit();
-        }
+        if resize.moved(delta, workspace).is_ok() { self.refit(); }
     }
 
-    /// A held divider ended with the layout it made: one history entry for the whole drag.
-    fn finish(&mut self, origin: Layout) {
-        let state = &mut self.states[self.active];
-        if state.current != origin {
-            state.history.push_back(origin);
-            while state.history.len() > 20 {
-                state.history.pop_front();
-            }
-            state.dirty = state.current != state.base;
-            self.changed(self.active);
+    fn finish(&mut self, resize: crate::layout::DividerDrag, effects: &mut Vec<Effect>) {
+        let workspace = self.workspace();
+        match resize.release(&mut self.states[self.active], workspace) {
+            Ok(true) => self.changed(self.active),
+            Ok(false) => {},
+            Err(error) => effects.push(Effect::Message(refusal(&error))),
         }
+        self.refit();
     }
 
     fn step_divider(&mut self, split: NodeId, index: usize, step: f64, effects: &mut Vec<Effect>) {
@@ -720,45 +778,93 @@ impl Dock {
         }
     }
 
-    /// A divider's default: each allocated side takes today's size for its panels (the timeline its default height, the
-    /// others their preferred size along the axis), a flexible side an equal weight.
     fn reset_divider(&mut self, split: NodeId, index: usize, effects: &mut Vec<Effect>) {
-        let workspace = self.workspace();
-        let height = self.window.h;
-        let mut next = self.layout().clone();
-        if let Err(error) = next.apply(Operation::ResetDivider { split, index }, workspace) {
-            effects.push(Effect::Message(refusal(&error)));
-            return;
+        self.edit(Operation::ResetDivider { split, index }, effects);
+    }
+
+    /// Host-injected wall time, exclusively for persistent stamps. Debounce/gestures keep monotonic time.
+    pub fn set_wall_time(&mut self, millis: u64) { self.wall_millis = millis; }
+
+    /// Set once by the host before loading/editing; generated by the platform for this process.
+    pub fn set_writer(&mut self, writer: impl Into<String>) { self.writer = writer.into(); }
+
+    fn next_stamp(&mut self) -> Stamp {
+        self.last_stamp = self.wall_millis.max(self.last_stamp.saturating_add(1));
+        Stamp { millis: self.last_stamp, writer: self.writer.clone() }
+    }
+
+    /// Final flyout/sheet rectangle, already anchored and clamped; views use it verbatim.
+    pub fn open_rect(&self) -> Option<Rect> { self.open.and_then(|id| self.solution.sheets.get(&id).copied()) }
+
+    /// Main-window F6 order (design 3.12). Views register descendants with their group's area;
+    /// Stage keeps separate header/body regions even when it is the active tab of a mixed group.
+    pub fn regions(&self) -> Vec<crate::focus::FocusRegion> {
+        use crate::focus::{FocusArea as A, FocusRegion as R};
+        let mut regions = vec![R { area: A::TopBand, target: None }];
+        if self.layout().stage_tools.is_some() && self.solution.visible.contains(&PanelId::new("tools")) {
+            regions.push(R { area: A::Tools, target: None });
         }
-        fn fix(node: &mut Node, split: NodeId, index: usize, height: f64) {
-            if let Node::Split { id, axis, kids } = node {
-                if *id == split {
-                    for kid in kids.iter_mut().skip(index).take(2) {
-                        if let Sz::Px(_) = kid.size {
-                            let mut groups = Vec::new();
-                            kid.node.groups(&mut groups);
-                            let size = if groups.iter().any(|g| g.tabs.iter().any(|p| p.kind == "timeline")) && *axis == crate::layout::Axis::Vertical {
-                                default_timeline_height(height)
-                            } else {
-                                groups.iter().flat_map(|g| g.tabs.iter()).filter_map(|p| spec(&p.kind)).map(|s| if *axis == crate::layout::Axis::Horizontal { s.pref.w } else { s.pref.h }).fold(0.0, f64::max)
-                            };
-                            if size > 0.0 {
-                                kid.size = Sz::Px(size);
-                            }
-                        }
-                    }
-                } else {
-                    for kid in kids {
-                        fix(&mut kid.node, split, index, height);
-                    }
-                }
+        let mut groups = Vec::new();
+        if let Some(root) = &self.layout().main { root.groups(&mut groups); }
+        for g in &groups {
+            if (self.solution.groups.contains_key(&g.id) || self.open == Some(g.id)) && (g.tabs.len() > 1 || g.tabs[g.active].kind != "stage") {
+                regions.push(R { area: A::DockGroup(g.id), target: Some(if g.tabs.len() > 1 { ids::tab(g.id, g.active) } else { ids::body(g.id) }) });
             }
         }
-        if let Some(root) = &mut next.main {
-            fix(root, split, index, height);
+        for g in &groups {
+            if self.solution.stages.contains_key(&g.tabs[g.active]) {
+                regions.push(R { area: A::StageHeader(g.id), target: Some(ids::stage_header(g.id)) });
+                regions.push(R { area: A::StageBody(g.id), target: Some(ids::body(g.id)) });
+            }
         }
-        self.commit(next, effects);
+        for g in groups {
+            if self.solution.strips.contains_key(&g.id) {
+                regions.push(R { area: A::DockStrip(g.id), target: Some(ids::strip(g.id, g.active)) });
+            }
+        }
+        regions
     }
+
+    pub fn focus_target(&self, panel: &PanelId) -> Option<crate::focus::FocusId> {
+        let g = self.layout().groups().into_iter().find(|g| g.tabs.contains(panel))?;
+        let index = g.tabs.iter().position(|p| p == panel)?;
+        if self.solution.strips.contains_key(&g.id) && self.open != Some(g.id) { return Some(ids::strip(g.id, index)); }
+        Some(if panel.kind == "stage" || g.tabs.len() == 1 { ids::body(g.id) } else { ids::tab(g.id, index) })
+    }
+
+    /// Assign a mounted target to its solved region without changing its field role or scope.
+    /// Explicit dock identities win; inner panel controls use their measured bounds in the solved group.
+    pub fn focus_area(&self, target: crate::focus::FocusId, bounds: Option<Rect>, fallback: crate::focus::FocusArea) -> crate::focus::FocusArea {
+        use crate::focus::FocusArea as A;
+        if let Some((group, _)) = ids::group_of(target) { return A::DockGroup(group); }
+        if let Some((group, _)) = ids::strip_of(target) { return A::DockStrip(group); }
+        if let Some(group) = ids::stage_header_of(target) { return A::StageHeader(group); }
+        if let Some(group) = ids::body_of(target) {
+            return if self.panel_at(group, None).is_some_and(|p| p.kind == "stage") { A::StageBody(group) } else { A::DockGroup(group) };
+        }
+        if matches!(fallback, A::TopBand | A::Tools) { return fallback; }
+        let Some(b) = bounds else { return fallback };
+        let (x, y) = (b.x + b.w / 2., b.y + b.h / 2.);
+        if let Some(group) = self.open && self.open_rect().is_some_and(|r| r.contains(x, y)) { return A::DockGroup(group); }
+        for g in self.layout().groups() {
+            if self.solution.hosts.get(&g.id) != Some(&None) { continue; }
+            if let Some(r) = self.solution.groups.get(&g.id) && r.contains(x, y) {
+                return if g.tabs[g.active].kind == "stage" {
+                    if y < r.y + 44. { A::StageHeader(g.id) } else { A::StageBody(g.id) }
+                } else { A::DockGroup(g.id) };
+            }
+        }
+        fallback
+    }
+
+    pub fn region_panel_target(&self, area: crate::focus::FocusArea) -> Option<crate::focus::FocusId> {
+        use crate::focus::FocusArea as A;
+        match area {
+            A::DockGroup(group) | A::StageHeader(group) | A::StageBody(group) | A::DockStrip(group) => self.panel_at(group, None).and_then(|panel| self.focus_target(&panel)),
+            _ => None,
+        }
+    }
+
 }
 
 /// What the stored layout answered.
@@ -776,12 +882,12 @@ pub enum Stored {
     Unreadable(String),
 }
 
-fn refusal(error: &LayoutError) -> String {
+fn refusal(error: &LayoutError) -> Msg {
     match error {
-        LayoutError::LastStage => "The last stage stays open.".into(),
-        LayoutError::InvalidTarget => "The panel cannot go there.".into(),
-        LayoutError::Limit => "That layout is too large.".into(),
-        other => format!("The layout was not changed ({other:?})."),
+        LayoutError::LastStage => Msg::new("dock.lastStage"),
+        LayoutError::InvalidTarget => Msg::new("dock.invalidTarget"),
+        LayoutError::Limit => Msg::new("dock.tooLarge"),
+        other => Msg::new("dock.notChanged").with("reason", format!("{other:?}")),
     }
 }
 
@@ -828,6 +934,18 @@ pub mod ids {
         FocusId(BASE + 0x180_0000 + u64::from(group) * 64 + index as u64)
     }
 
+    pub fn strip_of(id: FocusId) -> Option<(GroupId, usize)> {
+        let raw = id.0.checked_sub(BASE + 0x180_0000)?;
+        (raw < 0x80_0000).then_some(((raw / 64) as GroupId, (raw % 64) as usize))
+    }
+
+    pub fn stage_header(group: GroupId) -> FocusId { FocusId(BASE + 0x280_0000 + u64::from(group)) }
+
+    pub fn stage_header_of(id: FocusId) -> Option<GroupId> {
+        let raw = id.0.checked_sub(BASE + 0x280_0000)?;
+        (raw < 0x80_0000).then_some(raw as GroupId)
+    }
+
     /// The group a tab id belongs to, with its index.
     pub fn group_of(id: FocusId) -> Option<(GroupId, usize)> {
         let raw = id.0.checked_sub(BASE)?;
@@ -844,6 +962,9 @@ impl Dock {
             "library" => Some("shell.panel.library"),
             "structure" => Some("shell.panel.structure"),
             "timeline" => Some("shell.panel.timeline"),
+            "stage" => Some("chrome.stage"),
+            "layers" => Some("layers.title"),
+            "tools" => Some("dockTabs.tools"),
             _ => None,
         }
     }
@@ -858,4 +979,8 @@ impl Dock {
             _ => FocusArea::Panels,
         }
     }
+}
+
+fn workspace_key(workspace: Workspace) -> &'static str {
+    match workspace { Workspace::Animate => "dock.workspaceAnimate", Workspace::Draw => "dock.workspaceDraw", Workspace::Rig => "dock.workspaceBuild" }
 }

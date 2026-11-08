@@ -166,6 +166,7 @@ impl Layout {
                 kids[index + 1].size = second;
             }
             Operation::ResetDivider { split, index } => {
+                let axis = self.split_axis(split).ok_or(LayoutError::Missing)?;
                 let kids = self.split_mut(split)?;
                 if index + 1 >= kids.len() {
                     return Err(LayoutError::InvalidTarget);
@@ -173,7 +174,7 @@ impl Layout {
                 for k in &mut kids[index..=index + 1] {
                     k.size = match k.size {
                         Sz::Flex(_) => Sz::Flex(1.),
-                        Sz::Px(_) => Sz::Px(320.),
+                        Sz::Px(_) => Sz::Px(preferred_size(&k.node, axis)),
                     };
                 }
             }
@@ -213,6 +214,16 @@ impl Layout {
             Operation::Reset => *self = essentials(w),
         }
         Ok(())
+    }
+    fn split_axis(&self, id: NodeId) -> Option<Axis> {
+        fn find(n: &Node, id: NodeId) -> Option<Axis> {
+            match n {
+                Node::Split { id: own, axis, .. } if *own == id => Some(*axis),
+                Node::Split { kids, .. } => kids.iter().find_map(|k| find(&k.node, id)),
+                Node::Tabs(_) => None,
+            }
+        }
+        self.main.iter().chain(self.floats.iter().map(|f| &f.root)).find_map(|n| find(n, id))
     }
     fn split_mut(&mut self, id: u32) -> Result<&mut Vec<Kid>, LayoutError> {
         fn find(n: &mut Node, id: u32) -> Option<&mut Vec<Kid>> {
@@ -513,6 +524,19 @@ impl Layout {
             _ => return Err(LayoutError::InvalidTarget),
         }
         Ok(())
+    }
+}
+
+/// The preference of the subtree along an allocation's axis. Tabs share the largest preference;
+/// splits add preferences along their axis and share them across it (the normal six-pixel gutter).
+fn preferred_size(node: &Node, axis: Axis) -> f64 {
+    match node {
+        Node::Tabs(g) => g.tabs.iter().filter_map(|p| spec(&p.kind))
+            .map(|s| if axis == Axis::Horizontal { s.pref.w } else { s.pref.h })
+            .fold(1., f64::max),
+        Node::Split { axis: own, kids, .. } if *own == axis =>
+            kids.iter().map(|k| preferred_size(&k.node, axis)).sum::<f64>() + 6. * kids.len().saturating_sub(1) as f64,
+        Node::Split { kids, .. } => kids.iter().map(|k| preferred_size(&k.node, axis)).fold(1., f64::max),
     }
 }
 fn wrap(old: Node, new: Node, id: u32, side: Side, size: Sz) -> Node {

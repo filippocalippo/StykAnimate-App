@@ -163,9 +163,9 @@ fn shift_forces_float_and_part_one_refuses_it_visibly() {
     d.handle(Event::Shift(true), 1);
     d.handle(Event::HeaderPressed { group: PROPERTIES, tab: Some(1), x: start.0, y: start.1 }, 1);
     d.handle(Event::PointerMoved { x: 400.0, y: 300.0 }, 1);
-    assert_eq!(d.drag().map(|v| v.label), Some("Float here"));
+    assert_eq!(d.drag().and_then(|v| v.label), Some(Msg::new("dockKeyboard.floatHere")));
     let effects = d.handle(Event::PointerReleased, 2);
-    assert!(effects.iter().any(|e| matches!(e, Effect::Message(text) if text.contains("not available yet"))), "{effects:?}");
+    assert!(effects.iter().any(|e| matches!(e, Effect::Message(text) if text.key == "dock.floatsUnavailable")), "{effects:?}");
     assert_eq!(*d.layout(), before);
     // Dropped outside every window the same refusal answers, with or without Shift.
     d.handle(Event::Shift(false), 3);
@@ -238,7 +238,7 @@ fn a_divider_resizes_live_as_one_history_entry_and_escape_restores_the_start() {
 }
 
 #[test]
-fn a_double_click_on_a_divider_resets_to_todays_default_sizes() {
+fn a_double_click_on_a_divider_resets_to_panel_preferences() {
     let mut d = dock(1560.0, 1000.0);
     let vertical = d.solution().dividers.iter().find(|x| x.axis == crate::layout::Axis::Vertical).cloned().expect("the timeline is under the stage");
     d.handle(Event::DividerPressed { split: vertical.split, index: vertical.index }, 1);
@@ -246,7 +246,7 @@ fn a_double_click_on_a_divider_resets_to_todays_default_sizes() {
     d.handle(Event::DividerReleased, 1);
     assert_eq!(d.solution().groups[&TIMELINE].h, 380.0);
     d.handle(Event::DividerReset { split: vertical.split, index: vertical.index }, 2);
-    assert_eq!(d.solution().groups[&TIMELINE].h, 280.0, "the timeline's default height, not the column default");
+    assert_eq!(d.solution().groups[&TIMELINE].h, 264.0, "the timeline panel preference (design 3.4)");
     let horizontal = d.solution().dividers.iter().find(|x| x.axis == crate::layout::Axis::Horizontal).cloned().expect("a column divider");
     d.handle(Event::DividerStep { split: horizontal.split, index: horizontal.index, direction: -1, shift: false }, 3);
     assert_eq!(d.solution().groups[&PROPERTIES].w, 332.0, "an arrow key moves 12 px");
@@ -292,7 +292,7 @@ fn the_keyboard_move_steps_through_places_the_core_accepts_and_escape_leaves_the
     let before = d.layout().clone();
     d.handle(Event::MoveByKeyboard(panel("vfx")), 1);
     let first = d.drag().expect("a place is shown");
-    assert!(first.preview.is_some() && !first.label.is_empty());
+    assert!(first.preview.is_some() && first.label.is_some());
     d.handle(Event::MoveStep(1), 2);
     let second = d.drag().expect("the next place");
     assert_ne!(first.zone, second.zone);
@@ -318,7 +318,7 @@ fn a_closed_panel_comes_back_where_it_was_and_the_last_stage_stays() {
     assert_eq!(group_of(&d, "vfx"), PROPERTIES);
     assert_eq!(d.layout().groups().into_iter().find(|g| g.id == PROPERTIES).map(|g| g.tabs.clone()), before.groups().into_iter().find(|g| g.id == PROPERTIES).map(|g| g.tabs.clone()));
     let effects = d.handle(Event::Close(panel("stage")), 3);
-    assert!(effects.iter().any(|e| matches!(e, Effect::Message(text) if text.contains("last stage"))), "{effects:?}");
+    assert!(effects.iter().any(|e| matches!(e, Effect::Message(text) if text.key == "dock.lastStage")), "{effects:?}");
 }
 
 #[test]
@@ -416,7 +416,7 @@ fn the_first_launch_imports_todays_layout_and_keeps_its_saved_layouts() {
     );
     let mut d = dock(1560.0, 1000.0);
     let effects = d.loaded(Stored::Legacy(profile), 100);
-    assert!(!effects.iter().any(|e| matches!(e, Effect::Message(text) if text.contains("could not"))), "{effects:?}");
+    assert!(!effects.iter().any(|e| matches!(e, Effect::Message(text) if text.key == "dock.layoutsUnreadable")), "{effects:?}");
     assert_eq!(rect_of(&d, "properties").w, 360.0, "the stored right width");
     assert_eq!(rect_of(&d, "timeline").h, 300.0, "the stored timeline height");
     assert!(d.layout().closed.contains(&panel("library")), "the hidden panel is closed, not lost");
@@ -460,9 +460,9 @@ fn a_damaged_workspace_entry_falls_back_to_the_default_and_says_so() {
 #[test]
 fn dock_effects_become_core_effects() {
     let mut core = crate::app::Core::default();
-    let effects = core.dock_effects(vec![Effect::Focus(panel("vfx")), Effect::Message("hello".into())]);
+    let effects = core.dock_effects(vec![Effect::Focus(panel("vfx")), Effect::Message(Msg::new("dock.nothingToUndo"))]);
     assert!(effects.iter().any(|e| matches!(e, crate::commands::Effect::FocusTarget(id) if *id == ids::tab(PROPERTIES, 1))));
-    assert_eq!(core.overlays().messages().current().map(|m| m.text.as_str()), Some("hello"));
+    assert_eq!(core.overlays().messages().current().map(|m| m.text.as_str()), Some("There is no layout change to undo."));
 }
 
 #[test]
@@ -481,18 +481,13 @@ fn the_dock_is_reached_through_the_one_dispatch_and_follows_the_window() {
 
 
 #[test]
-fn the_compact_window_folds_the_right_dock_to_a_sheet_and_keeps_the_timeline_docked_as_today_does() {
-    // Today's window at 720 x 800: the stage over the timeline's island, the inspector a sheet behind the band's button.
+fn the_compact_window_folds_right_to_sheet_and_bottom_to_strip_per_design() {
     let d = dock(720.0, 800.0);
     let s = d.solution();
-    assert_eq!(s.groups[&STAGE], Rect { x: 8.0, y: 50.0, w: 704.0, h: 478.0 });
-    assert_eq!(s.groups[&TIMELINE], Rect { x: 8.0, y: 528.0, w: 704.0, h: 264.0 });
+    assert_eq!(s.groups[&STAGE], Rect { x: 8.0, y: 50.0, w: 704.0, h: 702.0 });
+    assert_eq!(s.strips[&TIMELINE], Rect { x: 8.0, y: 752.0, w: 704.0, h: 40.0 });
     assert!(s.sheets.contains_key(&PROPERTIES) && !s.groups.contains_key(&PROPERTIES));
-    // The divider beside the sheet has nothing to resize; the one between the stage and the timeline does.
-    let usable = d.dividers();
-    assert_eq!(usable.len(), 1);
-    assert_eq!(usable[0].axis, crate::layout::Axis::Vertical);
-    // A low window folds the timeline to its strip.
+    assert!(d.dividers().is_empty(), "folded groups have no usable dividers");
     assert!(dock(1000.0, 560.0).solution().strips.contains_key(&TIMELINE));
 }
 

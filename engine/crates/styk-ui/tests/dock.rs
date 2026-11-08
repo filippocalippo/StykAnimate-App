@@ -22,6 +22,24 @@ const TIMELINE: GroupId = 3;
 /// The band's height at a window this tall.
 const BAND: f32 = 52.0;
 
+#[test]
+fn standalone_panel_snapshot_keeps_its_regions_without_a_mounted_dock() {
+    let model = styk_ui::screens::inspector_model(styk_core::screens::InspectorScreen::Figure);
+    let presentation = styk_core::i18n::Presentation::english();
+    let element = styk_ui::inspector::view(styk_ui::inspector::View::model(&model, &presentation, Theme::Light));
+    let mut driver = Driver::new(element, Size::new(320., 900.), &styk_design::fonts::ALL);
+    let snapshot = driver.snapshot();
+    let expected: Vec<_> = snapshot.scopes.iter().filter(|(scope, _)| *scope == styk_core::focus::ScopeId::ROOT)
+        .flat_map(|(_, targets)| targets.iter().filter(|t| t.enabled).map(|t| (t.id, t.area))).collect();
+    assert!(!expected.is_empty());
+    let mut core = Core::default();
+    drop(update_at(&mut core, Message::Snapshot(snapshot), 1));
+    for (id, area) in expected {
+        core.focus_mut().focus(id);
+        assert_eq!(core.focus().focused_area(), Some(area), "no dock owns standalone controls");
+    }
+}
+
 struct World {
     core: Core,
     driver: Option<Driver<'static, Message>>,
@@ -132,7 +150,9 @@ impl World {
                 self.driver().events(&[event_of(&key, modifiers)]);
             }
             DockKey::Pass => {
-                self.driver().events(&[event]);
+                if styk_ui::message::dock_shortcut_at(&mut self.core, &event, true, self.now).is_none() {
+                    self.driver().events(&[event]);
+                }
             }
             DockKey::Swallow => {}
         }

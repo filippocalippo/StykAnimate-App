@@ -67,7 +67,7 @@ impl Default for Core {
             shortcuts: crate::shortcuts::Shortcuts::new(crate::shortcuts::Platform::Control, true),
             select_commands: None,
             presentation: Presentation::english(),
-            dock: crate::dock::Dock::new(crate::layout::Size { w: 1560.0, h: 1000.0 }, 1.0, "styk"),
+            dock: crate::dock::Dock::new(crate::layout::Size { w: 1560.0, h: 1000.0 }, 1.0, "unhosted"),
             dock_notices: 0,
         }
     }
@@ -260,22 +260,21 @@ impl Core {
     /// What the dock asked of the host, as the core's effects: a refusal is a message over the stage, a focus request
     /// the target of the panel's tab strip (or of its body where it has none).
     pub fn dock_effects(&mut self, asked: Vec<crate::dock::Effect>) -> Vec<Effect> {
-        use crate::dock::{Effect as Asked, ids};
+        use crate::dock::Effect as Asked;
+        self.focus.set_regions(self.dock.regions());
         let mut effects = Vec::new();
         for ask in asked {
             match ask {
-                Asked::Message(text) => {
+                Asked::Message(msg) => {
+                    let text = self.presentation.text(&msg);
                     self.dock_notices += 1;
-                    let mut message = crate::overlay::messages::Message::new(self.dock_notices, format!("dock:{text}"), crate::overlay::messages::Tone::Warning, false, Vec::new());
+                    let mut message = crate::overlay::messages::Message::new(self.dock_notices, format!("dock:{}", msg.key), crate::overlay::messages::Tone::Warning, false, Vec::new());
                     message.text = text;
                     let now = self.overlays.now();
                     effects.extend(self.overlay_event(crate::overlay::host::Event::ShowMessage(message), now));
                 }
                 Asked::Focus(panel) => {
-                    let found = self.dock.layout().groups().into_iter().find_map(|g| g.tabs.iter().position(|p| *p == panel).map(|i| (g.id, i, g.tabs.len())));
-                    if let Some((group, index, tabs)) = found {
-                        effects.push(Effect::FocusTarget(if tabs > 1 { ids::tab(group, index) } else { ids::body(group) }));
-                    }
+                    effects.extend(self.dock.focus_target(&panel).map(Effect::FocusTarget));
                 }
             }
         }
@@ -315,6 +314,21 @@ impl Core {
     fn run(&mut self, id: CommandId) -> Vec<Effect> {
         let mut effects = Vec::new();
         self.finish_panels(&mut effects);
+        match id.info().owner {
+            Owner::Dock => {
+                let focused = self.focus.focused().filter(|id| self.dock.panel_of(*id).is_some())
+                    .or_else(|| self.focus.focused_area().and_then(|area| self.dock.region_panel_target(area)));
+                let asked = self.dock.run(id, focused, self.overlays.now());
+                effects.extend(self.dock_effects(asked));
+                return effects;
+            }
+            Owner::Focus => {
+                self.focus.set_regions(self.dock.regions());
+                effects.extend(self.focus.cycle_area(id == CommandId::FocusNextRegion).map(Effect::FocusTarget));
+                return effects;
+            }
+            _ => {}
+        }
         let mut context = Context { documents: &mut self.documents, view: &mut self.view, session: &mut self.session };
         let result = match id.info().owner {
             Owner::History => crate::history::run(&mut context, id),
@@ -330,11 +344,24 @@ impl Core {
                 effects.push(Effect::NotAvailable(id));
                 return effects;
             }
+            Owner::Dock | Owner::Focus => return effects,
         };
         match result {
             Ok(()) => effects.push(Effect::RequestFrame),
             Err(message) => effects.push(warn(message)),
         }
         effects
+    }
+
+    /// Shared resolver and field/IME gates for the registered dock/focus commands. Other features
+    /// remain with their existing host; an unmodified/extra-modifier chord never starts a layout edit.
+    pub fn dock_shortcut(&mut self, chord: &crate::text_entry::Chord, input: crate::shortcuts::Input) -> Option<Vec<Effect>> {
+        let activation = self.shortcuts.resolve(chord, &[])?;
+        if !matches!(activation.command.info().owner, Owner::Dock | Owner::Focus) { return None; }
+        match self.shortcuts.press(&self.focus, chord, &[], input, |_| true) {
+            crate::shortcuts::Press::Run(activation) => Some(self.dispatch(Command::Run(activation.command))),
+            crate::shortcuts::Press::Consumed => Some(Vec::new()),
+            _ => None,
+        }
     }
 }

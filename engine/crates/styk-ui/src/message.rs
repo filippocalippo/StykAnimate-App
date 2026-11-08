@@ -126,7 +126,15 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             overlay(core, match event { View::Show { target, content, touch, keyboard } => Event::TooltipShow { target, content, touch, keyboard }, View::Hide => Event::TooltipHide })
         }
         Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
-        Message::Snapshot(snapshot) => {
+        Message::Snapshot(mut snapshot) => {
+            for (scope, targets) in &mut snapshot.scopes {
+                if *scope != styk_core::focus::ScopeId::ROOT { continue; }
+                if !targets.iter().any(|target| core.dock().panel_of(target.id).is_some()) { continue; }
+                for target in targets {
+                    let bounds = snapshot.bounds.iter().find(|(id, _)| *id == target.id).map(|(_, b)| styk_core::layout::Rect { x: f64::from(b.x), y: f64::from(b.y), w: f64::from(b.width), h: f64::from(b.height) });
+                    target.area = core.dock().focus_area(target.id, bounds, target.area);
+                }
+            }
             let synced = focus::sync(core.focus_mut(), &snapshot);
             let effects = core.dispatch(Command::Overlay { now: core.overlays().now(), event: styk_core::overlay::host::Event::Bounds(snapshot.bounds.iter().map(|(id, b)| (*id, styk_design::widgets::menu::rect_of(*b))).collect()) });
             Task::batch([Task::batch(effects.into_iter().map(effect)), match synced.unfocus {
@@ -178,6 +186,27 @@ pub fn raw_at(core: &mut Core, event: &iced::Event, ignored: bool, now: u64) -> 
         }
         _ => None,
     }
+}
+
+/// Only a keyboard event adapter: binding selection, exact modifiers and input gates belong to Shortcuts.
+#[cfg(feature = "engine")]
+pub fn dock_shortcut_at(core: &mut Core, event: &iced::Event, ignored: bool, now: u64) -> Option<Task<Message>> {
+    use iced::keyboard::{Event, Key, key::{Named, Physical}};
+    let iced::Event::Keyboard(Event::KeyPressed { key, physical_key, modifiers, repeat, .. }) = event else { return None };
+    let code = match physical_key {
+        Physical::Code(code) => format!("{code:?}"),
+        // Synthetic/headless inputs have no hardware code. The spelling is adapted, never matched to a command here.
+        Physical::Unidentified(_) => match key.as_ref() {
+            Key::Named(Named::F6) => "F6".into(),
+            Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_alphabetic() => format!("Key{}", c.to_uppercase()),
+            Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_digit() => format!("Digit{c}"),
+            _ => return None,
+        },
+    };
+    let chord = styk_core::text_entry::Chord { key: code, ctrl: modifiers.control(), alt: modifiers.alt(), shift: modifiers.shift(), meta: modifiers.logo(), alt_graph: false };
+    let timed = core.dispatch(Command::Overlay { event: styk_core::overlay::host::Event::Time, now });
+    let effects = core.dock_shortcut(&chord, styk_core::shortcuts::Input { repeat: *repeat, prevented: !ignored, blocked_by_overlay: core.overlays().top().is_some(), ..Default::default() })?;
+    Some(Task::batch(timed.into_iter().chain(effects).map(effect)))
 }
 
 /// Runtime entry: inject the application clock before routing an input. No view reads a clock.

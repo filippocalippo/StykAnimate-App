@@ -146,9 +146,8 @@ fn fit_tree<'a>(
             continue;
         };
         let side = out.fit.sides[&g.id];
-        // Today's compact and minimal widths fold the left column to a strip and the right to a sheet; the timeline stays
-        // docked (only a low window folds it, below).
-        let compact = host.is_none() && matches!(t, Tier::Compact | Tier::Minimal) && side != Side::Bottom;
+        // Design 3.2: compact/minimal fold left, top and bottom to strips, right to sheets.
+        let compact = host.is_none() && matches!(t, Tier::Compact | Tier::Minimal);
         let low = host.is_none() && window.h <= 568. && side == Side::Bottom;
         let previous = e.previous.release.get(&g.id).copied();
         let held = previous.is_some_and(|size| window.w < size.w || window.h < size.h);
@@ -306,12 +305,8 @@ pub fn solve(l: &Layout, e: &Env) -> Solution {
             .flatten()
             .and_then(|id| out.float_contents.get(&id).copied())
             .unwrap_or(rect);
-        let r = Rect {
-            x: rect.x,
-            y: rect.y,
-            w: g.flyout_px.min(rect.w),
-            h: rect.h,
-        };
+        let side = out.fit.sides.get(&id).copied().unwrap_or(Side::Right);
+        let r = open_rectangle(rect, out.strips.get(&id).copied(), side, g.flyout_px);
         out.sheets.insert(id, r);
         if let Some(p) = g.tabs.get(g.active) {
             out.visible.insert(p.clone());
@@ -324,6 +319,56 @@ pub fn solve(l: &Layout, e: &Env) -> Solution {
         out.visible.insert(PanelId::new("layers"));
     }
     out
+}
+
+/// Final host-local rectangle for an open flyout/sheet. The strip's inside edge anchors a flyout;
+/// a sheet uses the corresponding host edge. Both are clamped to the host's content bounds.
+fn open_rectangle(bounds: Rect, strip: Option<Rect>, side: Side, extent: f64) -> Rect {
+    let mut available = bounds;
+    if let Some(strip) = strip {
+        match side {
+            Side::Left => { available.x = (strip.x + strip.w + 8.).min(bounds.x + bounds.w); available.w = (bounds.x + bounds.w - available.x).max(0.); }
+            Side::Right => available.w = (strip.x - 8. - bounds.x).clamp(0., bounds.w),
+            Side::Top => { available.y = (strip.y + strip.h + 8.).min(bounds.y + bounds.h); available.h = (bounds.y + bounds.h - available.y).max(0.); }
+            Side::Bottom => available.h = (strip.y - 8. - bounds.y).clamp(0., bounds.h),
+        }
+    }
+    let extent = if extent.is_finite() { extent.max(0.) } else { 0. };
+    match side {
+        Side::Left => Rect { w: extent.min(available.w), ..available },
+        Side::Right => { let w = extent.min(available.w); Rect { x: available.x + available.w - w, w, ..available } }
+        Side::Top => Rect { h: extent.min(available.h), ..available },
+        Side::Bottom => { let h = extent.min(available.h); Rect { y: available.y + available.h - h, h, ..available } }
+    }
+}
+
+/// A divider's live, uncommitted candidate. The document held by LayoutState stays committed;
+/// dropping this transaction cancels it. Release uses LayoutState's sole history/dirty policy.
+#[derive(Clone, Debug)]
+pub struct DividerDrag {
+    origin: Layout,
+    current: Layout,
+    solution: Solution,
+    pub split: NodeId,
+    pub index: usize,
+}
+impl DividerDrag {
+    pub fn new(layout: &Layout, solution: &Solution, split: NodeId, index: usize) -> Self {
+        Self { origin: layout.clone(), current: layout.clone(), solution: solution.clone(), split, index }
+    }
+    pub fn layout(&self) -> &Layout { &self.current }
+    pub fn moved(&mut self, delta: f64, workspace: Workspace) -> Result<(), LayoutError> {
+        let mut next = self.origin.clone();
+        next.resize_divider(&self.solution, self.split, self.index, delta, workspace)?;
+        self.current = next;
+        Ok(())
+    }
+    pub fn release(self, state: &mut LayoutState, workspace: Workspace) -> Result<bool, LayoutError> {
+        if state.current != self.origin { return Err(LayoutError::InvalidTarget); }
+        let changed = self.current != self.origin;
+        state.commit(self.current, workspace)?;
+        Ok(changed)
+    }
 }
 fn node_max(n: &Node, a: Axis, total: f64) -> f64 {
     let Node::Tabs(g) = n else {

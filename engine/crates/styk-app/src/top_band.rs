@@ -30,7 +30,7 @@ use styk_design::widgets::focus;
 use styk_design::{Theme, warm_up};
 use styk_core::engine::{Budgets, Engine, Value, json};
 use styk_services::Spawner;
-use styk_services::clock::{Clock, FixedClock};
+use styk_services::clock::{Clock, FixedClock, WallClock};
 use styk_services::files::{FileTarget, Files as _};
 use styk_services::shell::Rect;
 use styk_services::shell::chrome::MaxButtonState;
@@ -104,6 +104,7 @@ pub struct TopBand {
     busy: bool,
     /// The one application clock: every deadline of the band and the automation's work read it.
     clock: Arc<dyn Clock>,
+    wall: Arc<dyn WallClock>,
     /// The same clock when it is the fixed one, so a script can advance it.
     fixed: Option<FixedClock>,
     run: Option<Run>,
@@ -189,8 +190,11 @@ impl TopBand {
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
         let mut core = styk_core::app::Core::new(documents);
+        let wall: Arc<dyn WallClock> = Arc::new(styk_platform::clock::SystemWallClock::default());
+        core.dock_mut().set_writer(wall.writer());
+        core.dock_mut().set_wall_time(wall.unix_millis());
         core.dock_mut().handle(styk_core::dock::Event::Resized { width: f64::from(window_size.width), height: f64::from(window_size.height), scale: 1.0 }, 0);
-        Ok(TopBand { core, layouts, fixture: None, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
+        Ok(TopBand { core, layouts, fixture: None, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, wall, fixed, run: None, measured: false, screen: None })
     }
 
     /// Starts the script the command line named.
@@ -277,7 +281,8 @@ impl TopBand {
     fn save_layouts(&mut self, now: u64) -> Task<Message> {
         let Some(file) = self.core.dock_mut().take_save(now) else { return Task::none() };
         let store = self.layouts.clone();
-        Task::perform(async move { store.save(&file, now, &styk_services::Cancel::new()).await.is_ok() }, Message::LayoutSaved)
+        let wall = self.wall.unix_millis();
+        Task::perform(async move { store.save(&file, wall, &styk_services::Cancel::new()).await.is_ok() }, Message::LayoutSaved)
     }
 
     /// The docked window under the band: every group at its rectangle, the Properties panel and the stage in theirs.
@@ -358,8 +363,9 @@ impl TopBand {
     }
 
     /// The application clock in milliseconds; the engine's clock follows it.
-    fn now(&self) -> u64 {
+    fn now(&mut self) -> u64 {
         let millis = self.clock.now().as_millis() as u64;
+        self.core.dock_mut().set_wall_time(self.wall.unix_millis());
         ENGINE_NOW_BITS.store((millis as f64).to_bits(), Ordering::Relaxed);
         millis
     }
@@ -387,7 +393,11 @@ impl TopBand {
                         Answer::Session(session) => shell::Event::Session(session),
                     })),
                     Effect::FocusTab(id) => tasks.push(TopBand::focus(ids::tab(id))),
-                    Effect::Activated(_) | Effect::Moved(..) | Effect::Edited | Effect::Command(_)
+                    Effect::Command(command) => {
+                        let now = self.now();
+                        tasks.push(styk_ui::message::update_at(&mut self.core, styk_ui::Message::Command(command), now).map(Message::Editor).chain(TopBand::snapshot()));
+                    }
+                    Effect::Activated(_) | Effect::Moved(..) | Effect::Edited
                     | Effect::DocumentCommand { .. } | Effect::FinishBuild | Effect::Refused(_) => {}
                 }
             }
@@ -499,6 +509,9 @@ impl TopBand {
                 }
                 if let Some(task) = self.dock_key(key, *modifiers) {
                     return task;
+                }
+                if let Some(task) = styk_ui::message::dock_shortcut_at(&mut self.core, event, ignored, now) {
+                    return task.map(Message::Editor).chain(TopBand::snapshot());
                 }
                 match key.as_ref() {
                     Key::Named(Named::Tab) if modifiers.control() => self.dispatch(E::CtrlTab { backwards: modifiers.shift(), held: true }),
@@ -1005,6 +1018,46 @@ mod tests {
             let _ = top.update(Message::Frame);
             assert_eq!(top.core.dock().workspace(), wanted, "{name}");
         }
+    }
+
+    #[test]
+    fn the_band_properties_command_reaches_the_dock_sheet() {
+        let (mut top, _) = band();
+        let size = Size::new(720., 800.);
+        top.resized(size, 1.);
+        let ready = warm_up::install_bundled(Default::default());
+        assert_eq!(top.core.dock().open(), None);
+        for wanted in [Some(2), None] {
+            let messages = {
+                let element = top.view(Theme::Light, ready, MaxButtonState::Idle, iced::widget::Space::new().boxed());
+                let mut driver = styk_design::widgets::testing::Driver::new(element, size, &styk_design::fonts::ALL);
+                let bounds = driver.snapshot().bounds_of(ids::PROPERTIES).expect("the mounted Properties opener");
+                driver.click(bounds.center());
+                driver.messages()
+            };
+            assert!(messages.iter().any(|m| matches!(m, Message::Ui(view::Message::Shell(shell::Event::Properties)))));
+            for message in messages { drop(top.update(message)); }
+            assert_eq!(top.core.dock().open(), wanted, "mounted opener reaches Shell, TopBand and Core");
+            if wanted.is_some() { assert!(top.core.dock().solution().visible.contains(&styk_core::layout::PanelId::new("properties"))); }
+        }
+    }
+
+    #[test]
+    fn production_layout_stamps_use_wall_time_and_distinct_session_writers() {
+        let (mut first, _) = band();
+        let (mut second, _) = band();
+        let mut stamps = Vec::new();
+        for top in [&mut first, &mut second] {
+            let before = top.wall.unix_millis();
+            drop(top.update(Message::Editor(styk_ui::Message::Command(styk_core::commands::Command::Dock(styk_core::dock::Event::Close(styk_core::layout::PanelId::new("vfx")))))));
+            let after = top.wall.unix_millis();
+            let file = top.core.dock_mut().take_save(200).expect("fixed monotonic clock's 200ms debounce");
+            let stamp = file.workspaces["animate"].stamp.clone();
+            assert!(stamp.millis >= before && stamp.millis <= after);
+            assert!(stamp.millis > 1_600_000_000_000, "Unix epoch time, not process elapsed time");
+            stamps.push(stamp);
+        }
+        assert_ne!(stamps[0].writer, stamps[1].writer);
     }
 
     #[test]

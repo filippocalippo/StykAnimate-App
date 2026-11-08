@@ -224,14 +224,15 @@ fn overlay<'a>(params: &Params<'_>, out: &mut Vec<Placed<'a, Message>>) {
     let Some(drag) = params.dock.drag() else { return };
     let palette = params.theme.palette();
     let name = title(params.presentation, &drag.source);
+    let label = drag.label.as_ref().map(|msg| params.presentation.text(msg)).unwrap_or_default();
     if let Some(r) = drag.preview {
         // `.ui-drop-zone`: the accent's soft fill at 72 %, a 1.5 px accent line inside, the radius of the islands.
         let soft = styk_design::Rgba { a: 0.72, ..palette.accent_soft };
         let zone = Card::new(Space::new()).fill(soft).ring(1.5, palette.accent_line).radius(scale::RADIUS_XL).width(Length::Fixed(r.w as f32)).height(Length::Fixed(r.h as f32));
         out.push(Placed::new(zone, at(r.x as f32, r.y as f32 - params.top)).passive());
-        out.push(pill(palette, drag.label, (r.x + r.w / 2.0) as f32, (r.y + r.h / 2.0) as f32 - params.top, true));
-    } else if !drag.label.is_empty() {
-        out.push(pill(palette, drag.label, drag.pointer.0 as f32, drag.pointer.1 as f32 - params.top + 28.0, true));
+        out.push(pill(palette, &label, (r.x + r.w / 2.0) as f32, (r.y + r.h / 2.0) as f32 - params.top, true));
+    } else if !label.is_empty() {
+        out.push(pill(palette, &label, drag.pointer.0 as f32, drag.pointer.1 as f32 - params.top + 28.0, true));
     }
     // The dragged panel's title follows the pointer.
     out.push(pill(palette, &name, drag.pointer.0 as f32 + 14.0, drag.pointer.1 as f32 - params.top + 14.0, false));
