@@ -1,6 +1,6 @@
 //! Today's physical key map and held-key lifecycle. All bindings live in the command registry.
 
-use crate::command_registry::{ENTRIES, Entry};
+use crate::commands::CommandId;
 use crate::focus::{FocusState, HistoryOwner, InputRole};
 use crate::text_entry::Chord;
 
@@ -76,7 +76,7 @@ pub(crate) fn same_binding_with_shift(a: &str, b: &str, platform: Platform) -> b
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Activation {
-    pub entry: &'static Entry,
+    pub command: CommandId,
     pub key: &'static str,
     /// Extra gesture Shift, separated from Shift that is part of the binding.
     pub shift: bool,
@@ -91,7 +91,8 @@ pub fn resolve(chord: &Chord, scopes: &[Scope], platform: Platform, desktop: boo
         // Exact bindings win over extra Shift even when the extra-Shift command comes first.
         for extra in [false, true] {
             let mut best: Option<(u16, Activation)> = None;
-            for entry in ENTRIES {
+            for &command in CommandId::ALL {
+                let entry = command.info();
                 let Some(shortcut) = &entry.shortcut else { continue; };
                 if shortcut.scope != scope || (extra && !shortcut.extra_shift) { continue; }
                 for binding in shortcut.bindings(platform, desktop) {
@@ -99,7 +100,7 @@ pub fn resolve(chord: &Chord, scopes: &[Scope], platform: Platform, desktop: boo
                     if extra { if key.shift { continue; } key.shift = true; }
                     if key.code == chord.key && key.ctrl == chord.ctrl && key.meta == chord.meta && key.alt == chord.alt && key.shift == chord.shift
                         && best.as_ref().is_none_or(|(order, _)| shortcut.order < *order) {
-                        best = Some((shortcut.order, Activation { entry, key: key.code, shift: if shortcut.extra_shift { extra } else { chord.shift }, continued: false }));
+                        best = Some((shortcut.order, Activation { command, key: key.code, shift: if shortcut.extra_shift { extra } else { chord.shift }, continued: false }));
                     }
                 }
             }
@@ -146,11 +147,11 @@ pub enum NativeRoute {
     Run,
 }
 
-pub fn native_route(entry: &Entry, focus: &FocusState, dialog: bool) -> NativeRoute {
-    let edit = match entry.id {
-        "cut" => Some(FieldAction::Cut), "copy" => Some(FieldAction::Copy), "paste" => Some(FieldAction::Paste),
-        "select-all" => Some(FieldAction::SelectAll), "undo" => Some(FieldAction::Undo), "redo" => Some(FieldAction::Redo),
-        "delete" => Some(FieldAction::Delete), _ => None,
+pub fn native_route(command: CommandId, focus: &FocusState, dialog: bool) -> NativeRoute {
+    let edit = match command {
+        CommandId::Cut => Some(FieldAction::Cut), CommandId::Copy => Some(FieldAction::Copy), CommandId::Paste => Some(FieldAction::Paste),
+        CommandId::SelectAll => Some(FieldAction::SelectAll), CommandId::Undo => Some(FieldAction::Undo), CommandId::Redo => Some(FieldAction::Redo),
+        CommandId::Delete => Some(FieldAction::Delete), _ => None,
     };
     if let Some(edit) = edit {
         if focus.history_owner() != HistoryOwner::Field && !dialog && matches!(edit, FieldAction::Undo | FieldAction::Redo) {
@@ -178,36 +179,36 @@ impl Shortcuts {
     /// Current physical holds, including a press pending admission. A refused press must be rejected immediately.
     pub fn held(&self) -> &[Activation] { &self.held }
 
-    pub fn press(&mut self, focus: &FocusState, chord: &Chord, scopes: &[Scope], input: Input, allow: impl FnOnce(&Entry) -> bool) -> Press {
+    pub fn press(&mut self, focus: &FocusState, chord: &Chord, scopes: &[Scope], input: Input, allow: impl FnOnce(CommandId) -> bool) -> Press {
         if input.composing || focus.composing() || chord.alt_graph { return Press::Ignored; }
         let resolved = resolve(chord, scopes, self.platform, self.desktop);
-        let entry = resolved.map(|activation| activation.entry);
+        let entry = resolved.map(|activation| activation.command.info());
         let in_input = focus.input_role() != InputRole::None;
         // The field capture handler precedes ordinary routing and has no repeat or general command predicate.
         if in_input && !input.home && !input.blocked_by_overlay
             && chord.works_in_text_fields_on(self.platform == Platform::Command)
-            && let Some(activation) = resolved.filter(|activation| activation.entry.field_key) {
+            && let Some(activation) = resolved.filter(|activation| activation.command.info().field_key) {
             return Press::Run(activation);
         }
         if input.home && entry.is_none_or(|entry| !entry.key_on_home) { return Press::Ignored; }
         let builder_input = matches!(focus.input_role(), InputRole::Checkbox | InputRole::Radio)
-            && entry.is_some_and(|entry| entry.id.starts_with("builder-") && entry.shortcut.is_some_and(|key| key.scope == Scope::Builder));
-        let history = entry.and_then(|entry| match entry.id { "undo" => Some(FieldAction::Undo), "redo" => Some(FieldAction::Redo), _ => None });
+            && entry.is_some_and(|entry| entry.id.is_builder_shortcut() && entry.shortcut.is_some_and(|key| key.scope == Scope::Builder));
+        let history = entry.and_then(|entry| match entry.id { CommandId::Undo => Some(FieldAction::Undo), CommandId::Redo => Some(FieldAction::Redo), _ => None });
         let feature_history = history.is_some() && focus.history_owner() != HistoryOwner::Field;
         if input.blocked_by_overlay || (in_input && !builder_input && !feature_history) {
-            return if entry.is_some_and(|entry| entry.id == "command-palette") { Press::Consumed } else { Press::Ignored };
+            return if entry.is_some_and(|entry| entry.id == CommandId::CommandPalette) { Press::Consumed } else { Press::Ignored };
         }
         if resolved.is_none() && input.drag {
             let plain = Chord::new(&chord.key, false, false, false);
-            if resolve(&plain, scopes, self.platform, self.desktop).is_some_and(|activation| activation.entry.id == "cancel") {
+            if resolve(&plain, scopes, self.platform, self.desktop).is_some_and(|activation| activation.command == CommandId::Cancel) {
                 return Press::CancelDrag;
             }
         }
         if input.prevented { return Press::Ignored; }
         let Some(mut activation) = resolved else { return Press::Ignored; };
-        let entry = activation.entry;
+        let entry = activation.command.info();
         let Some(shortcut) = entry.shortcut else { return Press::Ignored; };
-        if (input.polygon && !entry.polygon_key) || !allow(entry) || (input.repeat && !shortcut.repeat) { return Press::Consumed; }
+        if (input.polygon && !entry.polygon_key) || !allow(activation.command) || (input.repeat && !shortcut.repeat) { return Press::Consumed; }
         if feature_history && let Some(action) = history {
             return Press::FeatureHistory { owner: focus.history_owner(), action };
         }

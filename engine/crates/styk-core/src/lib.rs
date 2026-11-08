@@ -14,8 +14,6 @@ pub mod audio;
 pub mod automation;
 pub mod camera_actions;
 pub mod clipboard;
-#[path = "commands/registry.rs"]
-pub mod command_registry;
 pub mod command_queue;
 pub mod error_policy;
 pub mod commands;

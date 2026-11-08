@@ -6,7 +6,7 @@
 //! re-read the owning features before the next. Release capacity is reserved at press
 //! admission, so a full queue cannot lose a terminal key event.
 
-use crate::command_registry::{Entry, Polygon};
+use crate::commands::{CommandId, Polygon};
 use crate::documents::DocumentId;
 use crate::shortcuts::{Activation, Release};
 
@@ -21,7 +21,7 @@ pub enum Phase { Invoke, Press, Release { cancelled: bool } }
 /// Routing metadata for a registry command; the application's `Command` remains the execution API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Invocation {
-    pub entry: &'static Entry,
+    pub command: CommandId,
     pub document: Option<DocumentId>,
     pub source: Source,
     pub phase: Phase,
@@ -30,21 +30,21 @@ pub struct Invocation {
 }
 
 impl Invocation {
-    pub fn action(entry: &'static Entry, document: Option<DocumentId>) -> Self {
-        Self { entry, document, source: Source::Action, phase: Phase::Invoke, key: None, shift: false }
+    pub fn action(command: CommandId, document: Option<DocumentId>) -> Self {
+        Self { command, document, source: Source::Action, phase: Phase::Invoke, key: None, shift: false }
     }
     pub fn press(activation: Activation, document: Option<DocumentId>) -> Self {
-        Self { entry: activation.entry, document, source: Source::Keyboard, phase: Phase::Press,
+        Self { command: activation.command, document, source: Source::Keyboard, phase: Phase::Press,
             key: Some(activation.key), shift: activation.shift }
     }
     pub fn release(release: Release, document: Option<DocumentId>) -> Self {
         Self { phase: Phase::Release { cancelled: release.cancelled }, ..Self::press(release.activation, document) }
     }
     fn held_press(self) -> bool {
-        self.phase == Phase::Press && self.entry.shortcut.is_some_and(|shortcut| shortcut.hold)
+        self.phase == Phase::Press && self.command.info().shortcut.is_some_and(|shortcut| shortcut.hold)
     }
     fn terminal(self) -> bool { matches!(self.phase, Phase::Release { .. }) }
-    fn handle(self) -> bool { self.source == Source::Keyboard && self.entry.id.starts_with("handle-") }
+    fn handle(self) -> bool { self.source == Source::Keyboard && self.command.is_keyboard_handle() }
 }
 
 /// Read from the gesture/drawing owners, never maintained as a second busy state.
@@ -68,7 +68,7 @@ impl Activity {
 
     fn blocks(self, invocation: Invocation) -> bool {
         if invocation.terminal() { return false; }
-        if invocation.source == Source::Keyboard && matches!(invocation.entry.id, "cancel" | "play-pan") { return false; }
+        if invocation.source == Source::Keyboard && matches!(invocation.command, CommandId::Cancel | CommandId::PlayPan) { return false; }
         (self.gesture && !self.continues(invocation)) || self.stroke || self.loading || self.operation
             || if invocation.source == Source::Action { self.selection } else { self.selection_committing }
     }
@@ -146,7 +146,7 @@ impl GestureQueue {
         // A handle can pass unrelated waiters, never another handle event, including a blocked repeat.
         let ready = !earlier_handle && ((invocation.terminal() && !awaiting)
             || (!awaiting && activity.continues(invocation) && !activity.blocks(invocation))
-            || (invocation.source == Source::Keyboard && matches!(invocation.entry.id, "cancel" | "play-pan"))
+            || (invocation.source == Source::Keyboard && matches!(invocation.command, CommandId::Cancel | CommandId::PlayPan))
             || (self.is_empty() && !activity.blocks(invocation)));
         let incoming = if ready { None } else { Some(invocation) };
         if self.len + usize::from(!ready) + self.reservations(held, incoming) > CAPACITY {
@@ -193,8 +193,8 @@ impl GestureQueue {
 
 /// The wrapper's polygon gate is separate from the keyboard's earlier allow-list:
 /// e.g. Save is keyboard-allowed, but its wrapped action still asks to finish the polygon.
-pub fn polygon_action(entry: &Entry, polygon: bool) -> Polygon {
-    if polygon { entry.polygon } else { Polygon::Allow }
+pub fn polygon_action(command: CommandId, polygon: bool) -> Polygon {
+    if polygon { command.info().polygon } else { Polygon::Allow }
 }
 
 pub const POLYGON_MESSAGE: &str = "app.finishOrCancelThePolygonFirst";

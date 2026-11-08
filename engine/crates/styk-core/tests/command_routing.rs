@@ -1,7 +1,7 @@
 //! Review regressions enter through the production shortcut router and gesture queue.
 use std::process::Command;
 use styk_core::command_queue::{Activity, GestureQueue, Invocation, Next, Phase, Settlement, Submitted};
-use styk_core::command_registry;
+use styk_core::commands::CommandId;
 use styk_core::documents::DocumentId;
 use styk_core::engine::{json, Value};
 use styk_core::focus::{FocusArea, FocusId, FocusState, FocusTarget, HistoryOwner, InputRole, ScopeId, TargetKind};
@@ -40,7 +40,7 @@ fn reference_group(group: &str) {
                 assert_eq!(actual, Press::FeatureHistory { owner: HistoryOwner::Vfx, action: if id == "undo" { FieldAction::Undo } else { FieldAction::Redo } }, "{case:?}");
                 assert!(predicate_reached, "feature history still observes the command gate");
             }
-            Some(id) => assert!(matches!(actual, Press::Run(activation) if activation.entry.id == id), "{case:?}: {actual:?}"),
+            Some(id) => assert!(matches!(actual, Press::Run(activation) if activation.command.id() == id), "{case:?}: {actual:?}"),
             None => assert!(matches!(actual, Press::Ignored | Press::Consumed), "{case:?}: {actual:?}"),
         }
     }
@@ -82,7 +82,7 @@ fn review_live_handle_repeats_and_release_do_not_wait_on_their_own_gesture() {
         let chord = Chord::new("ArrowLeft", false, false, false);
         let Press::Run(first) = router.press(&FocusState::new(), &chord, &[Scope::Canvas], Input::default(), |_| true) else { panic!("first press"); };
         let first = Invocation::press(first, document);
-        let save = Invocation::action(command_registry::by_id("save").unwrap(), document);
+        let save = Invocation::action(CommandId::from_id("save").unwrap(), document);
         let barrier = if initially_queued { Activity { stroke: true, ..Activity::default() } } else { Activity::default() };
         assert_eq!(queue.submit(first, barrier, router.held()), if initially_queued { Submitted::Queued } else { Submitted::Ready(first) });
         if !initially_queued {

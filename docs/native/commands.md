@@ -1,17 +1,20 @@
 # Commands and shortcuts
 
-K-cmd's registry and input-policy modules are independent of the reference slice. While that slice is still on its
-branch, `styk-core/src/lib.rs` mounts `commands/registry.rs` as `command_registry`; it does not define a competing
-`Command`, `CommandId`, `Effect`, `Msg` or application dispatcher. No screen is added by this chunk.
+`styk_core::commands` is the one registry and command API. Views send `Command` to `Core::dispatch`, which routes to
+the feature named by `CommandId::info().owner`. Unported features answer `Effect::NotAvailable(CommandId)`; the registry
+does not implement their handlers. The former provisional `command_registry` module has been removed.
 
 ## Registry
 
-`commands/registry/data.rs` is one metadata table for all 276 identifiers in inventory appendix A. Entries hold the
+`commands/metadata/data.rs` declares all 276 `CommandId` variants and their metadata together. `CommandId::ALL` enumerates
+them; `id()` and `from_id()` translate the inventory spelling at serialisation and parity boundaries. `Info` holds the
 label key and numeric label parameters, glyph, category, search words, modes, requirements, toggle/destructive flags,
-palette visibility, aliases, default shortcuts and history ownership. Alias hints reference the target entry; they
+palette visibility, typed aliases, default shortcuts and history ownership. Alias hints reference the target command; they
 never introduce another keyboard binding. Scope precedence also removes hints claimed by a workspace-wide shortcut.
+Identity and metadata live in `commands/metadata.rs`, with no document or engine imports; engine-dependent `Command`
+payloads, effects and dispatch context are in `commands/execution.rs`. Both retain their public `commands` paths.
 
-`Entry::availability` consumes cheap facts from the feature owners at the time of use. It does not cache document or
+`Info::availability` consumes cheap `Gates` facts from the feature owners at the time of use. It does not cache document or
 UI state, evaluate geometry or run a handler. Unknown handlers return `Disabled::NotAvailable`, a mode mismatch hides
 the entry, and missing requirements fail closed. A feature handler remains responsible for its contextual preconditions
 (for example, camera-clipboard readiness). History metadata describes the owning feature's transaction: no entry for
@@ -20,7 +23,8 @@ The registry never creates a second session history.
 
 ## Input
 
-`shortcuts::resolve` reads only the registry, in today's scope and hotkey declaration order, with exact matches before
+`shortcuts::resolve` yields an activation carrying `CommandId`; native menu routing and queue invocations carry the same
+identity and match variants. It reads only the registry, in today's scope and hotkey declaration order, with exact matches before
 the optional gesture Shift. `Mod` is portable key-map data (Control or Command). Desktop-only defaults and Command's
 Control+Tab variant are preserved. The tests execute `src/hotkeys.mjs` on Windows with both modifier conventions;
 they do not build or run another OS or the web app.
@@ -91,12 +95,12 @@ until dismissed. Other failures are eight-second, dismissible errors. These dura
 `app.mjs`; the host supplies timers, the core reads no clock. The slice's message key and scalar parameters must pass
 through unchanged to its notice; external diagnostics remain verbatim. Logging/telemetry remain their owners' work.
 
-## Reference-slice attachment
+## Dispatch and verification
 
-After the orchestrator announces the slice's merge, merge `native-app` once and attach this metadata to its
-`CommandId::info` (including the implemented handler owner). Keep handlers in their feature modules. Extend its
-`Effect::NotAvailable` to every unported entry, route the common command inlet through the queue and gates, and apply
-the error policy to its notices. Do not keep the slice's small metadata match alongside this table. The four zoom
+The slice's small metadata match is replaced by `CommandId::info`, including its implemented handler owners.
+`Core::dispatch(Command::Run(id))` keeps those handlers in their feature modules and returns `Effect::NotAvailable(id)`
+for every unported entry. Input adapters pass the typed identity through the queue and gates before dispatch; feature
+owners still supply gesture settlement and focused history ownership. No missing feature handler is added here. The four zoom
 preset labels have no key in today's catalogue; `commands.zoomToPercent` with `{percent}` is reserved here for the
 equivalent “Zoom to {percent}%” message when attaching to the slice's native localization catalogue.
 
@@ -108,5 +112,6 @@ for control, VFX history, modified Cancel and repeat cases. Its live/queued nudg
 and verify that a single undo restores the gesture's baseline and a single redo restores its result.
 `tests/command_queue_order.rs` covers overlapping operations, queued directions, full-queue refusal/cancellation and
 live-key reservations. Its 2,000 seeded sequences of 60 steps use a separate admission/outcome ledger to check family
-order, release ownership, capacity, terminal completion and reservations after each step, including document switches
-and failed settlement. It never reads the queue's storage or uses its reservation implementation as the oracle.
+order, release ownership, capacity, terminal completion and reservations after each step, including document switches,
+failed settlement, Cancel and a gesture ending while its key remains held. R sets only the handle-edit modifier, never
+opens a gesture. It never reads the queue's storage or uses its reservation implementation as the oracle.

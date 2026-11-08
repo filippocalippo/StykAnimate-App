@@ -1,5 +1,5 @@
 use styk_core::command_queue::{Activity, GestureQueue, Invocation, Next, Settlement, Submitted, CAPACITY};
-use styk_core::command_registry;
+use styk_core::commands::CommandId;
 use styk_core::documents::DocumentId;
 use styk_core::focus::FocusState;
 use styk_core::shortcuts::{Activation, Input, Platform, Press, Scope, Shortcuts};
@@ -14,7 +14,7 @@ fn press(keys: &mut Shortcuts, key: &str, repeat: bool) -> Activation {
         Input { repeat, ..Input::default() }, |_| true) else { panic!("handle press"); };
     activation
 }
-fn save() -> Invocation { Invocation::action(command_registry::by_id("save").unwrap(), document()) }
+fn save() -> Invocation { Invocation::action(CommandId::from_id("save").unwrap(), document()) }
 
 #[test]
 fn a_release_cannot_overtake_a_repeat_blocked_by_an_overlapping_operation() {
@@ -106,7 +106,7 @@ fn live_keys_keep_terminal_space_and_a_refused_fresh_key_only_rolls_back() {
 }
 
 const HANDLE_KEYS: [&str; 5] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyR"];
-fn family(event: Invocation) -> bool { event.source == Source::Keyboard && event.entry.id.starts_with("handle-") }
+fn family(event: Invocation) -> bool { event.source == Source::Keyboard && event.command.id().starts_with("handle-") }
 
 /// An independent event ledger: it observes public admissions/outcomes, never the queue's storage or helpers.
 struct Audit {
@@ -143,7 +143,7 @@ impl Audit {
         for event in &self.pending {
             if let Some(key) = event.key {
                 match event.phase {
-                    Phase::Press if event.entry.shortcut.is_some_and(|s| s.hold) => { unmatched.insert(key); }
+                    Phase::Press if event.command.info().shortcut.is_some_and(|s| s.hold) => { unmatched.insert(key); }
                     Phase::Release { .. } => { unmatched.remove(key); }
                     _ => {}
                 }
@@ -155,12 +155,17 @@ impl Audit {
     }
 
     fn delivered(&mut self, event: Invocation, cancelled: bool) {
+        if !cancelled && event.command == CommandId::Cancel {
+            self.finish_gesture();
+            self.release_all(); // cancelKeyboardCommand also calls hotkeys.releaseAll().
+        }
         if !family(event) { return; }
         let key = event.key.unwrap();
         match event.phase {
             Phase::Press => {
                 self.resolved_starts.insert((event.document, key));
-                if !cancelled { self.live.insert(key); }
+                // R changes the handle-edit modifier only; arrows own the keyboard gesture.
+                if !cancelled && key != "KeyR" { self.live.insert(key); }
             }
             Phase::Release { .. } => {
                 assert!(self.resolved_starts.remove(&(event.document, key)),
@@ -221,6 +226,16 @@ impl Audit {
         for release in releases { assert!(self.submit(Invocation::release(release, self.document))); self.check(); }
     }
 
+    fn finish_gesture(&mut self) {
+        // A commit or cancellation can settle the gesture before the physical key comes up.
+        self.live.clear();
+        self.busy.gesture = false;
+    }
+
+    fn cancel(&mut self) {
+        self.press("Escape", false);
+    }
+
     fn pump(&mut self) {
         let outcome = self.queue.next(self.document, self.activity(), if self.failed { Settlement::Failed } else { Settlement::Ready });
         match outcome {
@@ -245,7 +260,7 @@ impl Audit {
     fn fill(&mut self) {
         self.busy.operation = true;
         for _ in 0..=CAPACITY {
-            let accepted = self.submit(Invocation::action(command_registry::by_id("save").unwrap(), self.document));
+            let accepted = self.submit(Invocation::action(CommandId::from_id("save").unwrap(), self.document));
             self.check();
             if !accepted { return; }
         }
@@ -263,7 +278,7 @@ fn seeded_sequences_preserve_family_order_terminal_capacity_and_exact_reservatio
             random ^= random << 13; random ^= random >> 7; random ^= random << 17;
             let key = HANDLE_KEYS[(random as usize >> 8) % HANDLE_KEYS.len()];
             if step == 20 { audit.fill(); } else {
-                match random % 16 {
+                match random % 18 {
                     0..=4 => audit.press(key, random & 64 != 0),
                     5..=8 => audit.release(key),
                     9..=10 => audit.pump(),
@@ -279,7 +294,9 @@ fn seeded_sequences_preserve_family_order_terminal_capacity_and_exact_reservatio
                     }
                     13 => { audit.release_all(); audit.failed = true; audit.pump(); }
                     14 => audit.fill(),
-                    _ => { audit.submit(Invocation::action(command_registry::by_id("undo").unwrap(), audit.document)); }
+                    16 => audit.cancel(),
+                    17 => audit.finish_gesture(),
+                    _ => { audit.submit(Invocation::action(CommandId::from_id("undo").unwrap(), audit.document)); }
                 }
             }
             audit.check();
@@ -290,5 +307,29 @@ fn seeded_sequences_preserve_family_order_terminal_capacity_and_exact_reservatio
         assert!(audit.queue.is_empty(), "seed {seed}: the queue cannot trap a terminal during final drain");
         assert_eq!(audit.terminals, audit.completed_terminals, "seed {seed}: no terminal may be lost");
         assert!(audit.resolved_starts.is_empty(), "seed {seed}: every admitted hold must end");
+    }
+}
+
+#[test]
+fn modifier_cancel_and_early_finish_leave_late_releases_owned_and_admissible() {
+    let mut audit = Audit::new(2000);
+    audit.press("KeyR", false);
+    assert!(!audit.activity().gesture, "R only sets the handle-edit modifier in app.mjs");
+    assert!(audit.submit(save()));
+    assert!(audit.queue.is_empty(), "R cannot hold an unrelated action behind a gesture");
+    audit.release("KeyR");
+    for cancelled in [false, true] {
+        audit.press("ArrowLeft", false);
+        assert!(audit.activity().gesture);
+        if cancelled { audit.cancel(); } else { audit.finish_gesture(); }
+        assert!(!audit.activity().gesture);
+        assert_eq!(audit.keys.held().len(), usize::from(!cancelled), "Cancel releases all; normal settlement leaves the key held");
+        audit.fill();
+        audit.release("ArrowLeft");
+        assert_eq!(audit.terminals, audit.completed_terminals, "late release reaches its owner even at capacity");
+        audit.busy = Activity::default();
+        for _ in 0..CAPACITY { audit.pump(); }
+        assert!(audit.queue.is_empty());
+        assert!(audit.resolved_starts.is_empty());
     }
 }

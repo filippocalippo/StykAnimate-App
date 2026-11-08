@@ -1,15 +1,29 @@
-//! Appendix A's command metadata, independent of the toolkit and feature handlers.
-//!
-//! During the reference slice's parallel implementation this module is mounted as
-//! `command_registry`. Its string identifiers are appendix A's identities; after
-//! the slice merges, its `CommandId::info` uses these entries. There is no second
-//! dispatch implementation here. Missing handlers must answer `NotAvailable`.
+//! The one command registry: identities and metadata, with no document or engine types.
 
 use crate::shortcuts::{Platform, Scope, Shortcut};
 
-#[path = "registry/data.rs"]
-mod data;
-pub use data::ENTRIES;
+/// The feature module whose handler owns a command; unported features fail explicitly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Owner { History, Selection, Camera, ViewState, NotYet }
+
+// Each row declares its identity, serialisation spelling and metadata once.
+macro_rules! commands {
+    ($($variant:ident => $id:literal, $info:expr;)*) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum CommandId { $($variant,)* }
+
+        impl CommandId {
+            pub const ALL: &'static [Self] = &[$(Self::$variant,)*];
+            pub const fn id(self) -> &'static str { match self { $(Self::$variant => $id,)* } }
+            pub fn from_id(id: &str) -> Option<Self> { match id { $($id => Some(Self::$variant),)* _ => None } }
+            pub const fn info(self) -> &'static Info {
+                match self { $(Self::$variant => { const INFO: Info = $info; &INFO },)* }
+            }
+        }
+    };
+}
+
+include!("metadata/data.rs");
 
 /// History ownership, not a request for the registry to mutate the session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,7 +76,7 @@ impl Requirement {
 
 /// Cheap facts read from the owning features at dispatch time. Never cached in the registry.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Context {
+pub struct Gates {
     pub mode: Option<Mode>,
     pub desktop: bool,
     pub new_window: bool,
@@ -82,7 +96,7 @@ pub struct Context {
     pub appearance: bool,
 }
 
-impl Context {
+impl Gates {
     pub fn satisfies(&self, requirement: Requirement) -> bool {
         match requirement {
             Requirement::Desktop => self.desktop,
@@ -128,9 +142,10 @@ pub enum Polygon {
 
 /// One entry is shared by menus, shortcuts, automation and the command palette.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Entry {
-    pub id: &'static str,
-    pub label_key: &'static str,
+pub struct Info {
+    pub id: CommandId,
+    pub owner: Owner,
+    pub label: &'static str,
     /// Only the parameterised zoom and brush-opacity labels use this scalar.
     pub label_number: Option<(&'static str, u16)>,
     pub icon: Option<&'static str>,
@@ -141,9 +156,9 @@ pub struct Entry {
     pub toggle: bool,
     pub danger: bool,
     pub palette: bool,
-    pub alias_of: Option<&'static str>,
+    pub alias_of: Option<CommandId>,
     /// The command whose shortcuts are shown, never an extra dispatch binding.
-    pub display_hotkey: Option<&'static str>,
+    pub display_hotkey: Option<CommandId>,
     pub shortcut: Option<Shortcut>,
     pub history: History,
     pub polygon: Polygon,
@@ -153,15 +168,15 @@ pub struct Entry {
     pub field_key: bool,
 }
 
-impl Entry {
-    const fn new(id: &'static str, label_key: &'static str, category: &'static str, history: History) -> Self {
-        Self { id, label_key, label_number: None, icon: None, category, keywords: &[], modes: &[], requires: &[],
+impl Info {
+    const fn new(id: CommandId, label: &'static str, category: &'static str, history: History) -> Self {
+        Self { id, owner: Owner::NotYet, label, label_number: None, icon: None, category, keywords: &[], modes: &[], requires: &[],
             toggle: false, danger: false, palette: true, alias_of: None, display_hotkey: None, shortcut: None,
             history, polygon: Polygon::Refuse, polygon_key: false, stays_on_home: false, key_on_home: false, field_key: false }
     }
 
     /// A feature supplies whether its handler exists. Unported features remain typed, visible and unavailable.
-    pub fn availability(&self, context: &Context, implemented: bool) -> Availability {
+    pub fn availability(&self, context: &Gates, implemented: bool) -> Availability {
         let wrong_mode = context.mode.filter(|mode| !self.modes.is_empty() && !self.modes.contains(mode));
         let disabled = if !implemented { Some(Disabled::NotAvailable) }
             else if wrong_mode.is_some() { self.modes.first().copied().map(Disabled::Mode) }
@@ -170,14 +185,14 @@ impl Entry {
     }
 
     pub fn displayed_shortcut(&self) -> Option<&'static Shortcut> {
-        by_id(self.display_hotkey.unwrap_or(self.id)).and_then(|entry| entry.shortcut.as_ref())
+        self.display_hotkey.unwrap_or(self.id).info().shortcut.as_ref()
     }
 
     /// Hide a hint claimed by a more specific, workspace-wide scope (today's registry).
     pub fn visible_bindings(&self, platform: Platform, desktop: bool, active: &[Scope]) -> Vec<&'static str> {
         let Some(own) = self.displayed_shortcut() else { return Vec::new(); };
         own.bindings(platform, desktop).iter().copied().filter(|binding| {
-            !ENTRIES.iter().filter_map(|entry| entry.shortcut.as_ref()).any(|other| {
+            !CommandId::ALL.iter().filter_map(|id| id.info().shortcut.as_ref()).any(|other| {
                 other.scope != own.scope && active.contains(&other.scope) && other.scope.rank() < own.scope.rank()
                     && other.bindings(platform, desktop).iter().any(|rival| {
                         crate::shortcuts::same_binding(binding, rival, platform)
@@ -189,6 +204,13 @@ impl Entry {
     }
 }
 
-pub fn by_id(id: &str) -> Option<&'static Entry> {
-    ENTRIES.iter().find(|entry| entry.id == id)
+impl CommandId {
+    /// The keyboard owner shares one gesture across these commands; R itself only sets its modifier.
+    pub const fn is_keyboard_handle(self) -> bool {
+        matches!(self, Self::HandleLeft | Self::HandleRight | Self::HandleUp | Self::HandleDown | Self::HandleEditHold)
+    }
+    /// The reference's checkbox/radio exception is narrower than the whole Builder scope.
+    pub const fn is_builder_shortcut(self) -> bool {
+        matches!(self, Self::BuilderHighlight | Self::BuilderStaticHandles | Self::BuilderCanvasColor | Self::BuilderOrder)
+    }
 }

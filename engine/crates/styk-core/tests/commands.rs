@@ -2,7 +2,7 @@
 use std::collections::BTreeSet;
 use std::process::Command;
 use styk_core::command_queue::{self, Activity, GestureQueue, Invocation, Next, Phase, Settlement, Submitted};
-use styk_core::command_registry::{self as registry, Context, Disabled, Entry, History, Mode, Polygon, Requirement};
+use styk_core::commands::{CommandId, Gates as Context, Disabled, Info, History, Mode, Polygon, Requirement};
 use styk_core::documents::DocumentId;
 use styk_core::engine::{Value, json};
 use styk_core::error_policy::{classify, Kind, Lifetime, Operation, Tone};
@@ -10,7 +10,7 @@ use styk_core::focus::{FocusArea, FocusId, FocusState, FocusTarget, ScopeId, Tar
 use styk_core::shortcuts::{self, Activation, Input, Platform, Press, Release, Scope, Shortcuts};
 use styk_core::text_entry::Chord;
 
-fn entry(id: &str) -> &'static Entry { registry::by_id(id).unwrap() }
+fn entry(id: &str) -> &'static Info { CommandId::from_id(id).unwrap().info() }
 fn text<'a>(value: &'a Value, key: &str) -> &'a str { value.get(key).and_then(Value::as_str).unwrap_or("") }
 fn flag(value: &Value, key: &str) -> bool { value.get(key).and_then(Value::as_bool).unwrap_or(false) }
 fn strings(value: &Value, key: &str) -> Vec<String> {
@@ -22,8 +22,8 @@ fn field(kind: TargetKind) -> FocusState {
     focus.reconcile(Some(FocusId(1)));
     focus
 }
-fn action(id: &str) -> Invocation { Invocation::action(entry(id), Some(DocumentId::preview(1))) }
-fn activation(id: &str, key: &'static str) -> Activation { Activation { entry: entry(id), key, shift: false, continued: false } }
+fn action(id: &str) -> Invocation { Invocation::action(entry(id).id, Some(DocumentId::preview(1))) }
+fn activation(id: &str, key: &'static str) -> Activation { Activation { command: entry(id).id, key, shift: false, continued: false } }
 fn busy() -> Activity { Activity { stroke: true, ..Activity::default() } }
 fn next(queue: &mut GestureQueue) -> Next { queue.next(Some(DocumentId::preview(1)), Activity::default(), Settlement::Ready) }
 
@@ -31,14 +31,30 @@ fn next(queue: &mut GestureQueue) -> Next { queue.next(Some(DocumentId::preview(
 fn registry_is_exactly_appendix_a_no_missing_extra_or_duplicate_identifiers() {
     let appendix = include_str!("../../../../docs/native/INVENTORY.md").split("## Appendix A:").nth(1).unwrap().split("## Appendix B:").next().unwrap();
     let expected: BTreeSet<_> = appendix.lines().filter(|line| line.starts_with("| CMD-")).map(|line| line.split('`').nth(1).unwrap()).collect();
-    let actual: BTreeSet<_> = registry::ENTRIES.iter().map(|entry| entry.id).collect();
+    let actual: BTreeSet<_> = CommandId::ALL.iter().map(|id| id.id()).collect();
     assert_eq!(actual, expected);
-    assert_eq!(actual.len(), registry::ENTRIES.len());
+    assert_eq!(actual.len(), CommandId::ALL.len());
     assert_eq!(actual.len(), 276);
-    for entry in registry::ENTRIES {
-        assert!(!entry.label_key.is_empty(), "{}", entry.id);
-        for alias in [entry.alias_of, entry.display_hotkey].into_iter().flatten() { assert!(registry::by_id(alias).is_some(), "{} -> {alias}", entry.id); }
+    for entry in CommandId::ALL.iter().map(|id| id.info()) {
+        assert_eq!(CommandId::from_id(entry.id.id()), Some(entry.id));
+        assert!(!entry.label.is_empty(), "{}", entry.id.id());
+        for alias in [entry.alias_of, entry.display_hotkey].into_iter().flatten() { assert!(CommandId::from_id(alias.id()).is_some(), "{} -> {}", entry.id.id(), alias.id()); }
     }
+}
+
+#[test]
+fn all_unported_commands_dispatch_the_typed_not_available_effect() {
+    use styk_core::app::Core;
+    use styk_core::commands::{Command as AppCommand, Effect, Owner};
+    let mut core = Core::default();
+    for &id in CommandId::ALL {
+        assert_eq!(id.info().id, id, "each variant must own its metadata");
+        if id.info().owner == Owner::NotYet {
+            assert_eq!(core.dispatch(AppCommand::Run(id)), [Effect::NotAvailable(id)], "{}", id.id());
+        }
+    }
+    assert_eq!(CommandId::from_id("not-a-command"), None);
+    assert_eq!(CommandId::from_id("Undo"), None, "serialised identities keep the exact inventory spelling");
 }
 
 #[test]
@@ -47,7 +63,7 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let reference = json::parse(&output.stdout).unwrap();
     let commands = reference.get("commands").unwrap().as_arr().unwrap();
-    assert_eq!(commands.len(), registry::ENTRIES.len());
+    assert_eq!(commands.len(), CommandId::ALL.len());
     let safe = strings(&reference, "polygonActions");
     let keys = strings(&reference, "polygonKeys");
     let home = strings(&reference, "homeActions");
@@ -56,7 +72,7 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
         let id = text(command, "id");
         let native = entry(id);
         if !id.starts_with("zoom-") || !id[5..].bytes().all(|c| c.is_ascii_digit()) {
-            assert_eq!(native.label_key, text(command, "labelKey"), "{id}: label");
+            assert_eq!(native.label, text(command, "labelKey"), "{id}: label");
         }
         assert_eq!(native.icon, command.get("icon").and_then(Value::as_str), "{id}: icon");
         assert_eq!(native.category, text(command, "category"), "{id}: category");
@@ -67,8 +83,8 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
         assert_eq!(native.toggle, flag(command, "toggle"), "{id}: toggle");
         assert_eq!(native.danger, flag(command, "danger"), "{id}: danger");
         assert_eq!(native.palette, command.get("palette").and_then(Value::as_bool).unwrap_or(true), "{id}: palette");
-        assert_eq!(native.alias_of, command.get("aliasOf").and_then(Value::as_str), "{id}: alias");
-        assert_eq!(native.display_hotkey, command.get("hotkey").and_then(Value::as_str), "{id}: hint alias");
+        assert_eq!(native.alias_of.map(CommandId::id), command.get("aliasOf").and_then(Value::as_str), "{id}: alias");
+        assert_eq!(native.display_hotkey.map(CommandId::id), command.get("hotkey").and_then(Value::as_str), "{id}: hint alias");
         if let Some(params) = command.get("labelParams") {
             assert_eq!(native.label_number, Some(("percent", params.get("percent").unwrap().as_f64().unwrap() as u16)));
         }
@@ -98,12 +114,12 @@ fn executable_reference_matches_metadata_every_shortcut_and_both_polygon_gates()
         let scope = Scope::parse(text(case, "scope")).unwrap();
         let platform = if flag(case, "mac") { Platform::Command } else { Platform::Control };
         let actual = shortcuts::resolve(&chord, &[scope], platform, true).unwrap();
-        assert_eq!(actual.entry.id, text(case, "id"), "{case:?}");
+        assert_eq!(actual.command.id(), text(case, "id"), "{case:?}");
         assert_eq!(actual.shift, flag(case, "shift"), "{case:?}");
         // Repeat suppression is part of dispatch, not just the metadata comparison.
         let mut router = Shortcuts::new(platform, true);
         let repeat = router.press(&FocusState::new(), &chord, &[scope], Input { repeat: true, ..Input::default() }, |_| true);
-        assert_eq!(matches!(repeat, Press::Run(_)), actual.entry.shortcut.unwrap().repeat, "{} repeat", actual.entry.id);
+        assert_eq!(matches!(repeat, Press::Run(_)), actual.command.info().shortcut.unwrap().repeat, "{} repeat", actual.command.id());
     }
     eprintln!("source parity: {} registry entries, {} shortcut cases", commands.len(), cases.len());
 }
@@ -140,13 +156,13 @@ fn availability_uses_current_feature_facts_and_unknown_handlers_stay_typed() {
 #[test]
 fn scope_precedence_and_hint_aliases_do_not_create_second_bindings() {
     let chord = Chord::new("KeyL", false, false, false);
-    assert_eq!(shortcuts::resolve(&chord, &[Scope::Drawing, Scope::Hover, Scope::Canvas], Platform::Control, true).unwrap().entry.id, "drawing-lasso");
-    assert_eq!(shortcuts::resolve(&chord, &[Scope::Hover, Scope::Canvas], Platform::Control, true).unwrap().entry.id, "locate-previous");
-    assert_eq!(shortcuts::resolve(&chord, &[], Platform::Control, true).unwrap().entry.id, "tool-line");
+    assert_eq!(shortcuts::resolve(&chord, &[Scope::Drawing, Scope::Hover, Scope::Canvas], Platform::Control, true).unwrap().command.id(), "drawing-lasso");
+    assert_eq!(shortcuts::resolve(&chord, &[Scope::Hover, Scope::Canvas], Platform::Control, true).unwrap().command.id(), "locate-previous");
+    assert_eq!(shortcuts::resolve(&chord, &[], Platform::Control, true).unwrap().command.id(), "tool-line");
     assert!(entry("tool-line").visible_bindings(Platform::Control, true, &[Scope::Drawing]).is_empty());
     assert_eq!(entry("play").visible_bindings(Platform::Control, true, &[]), ["Space"]);
     assert_eq!(entry("delete-single-segment").visible_bindings(Platform::Control, true, &[Scope::Builder]), ["Delete", "Backspace"]);
-    assert_eq!(shortcuts::resolve(&Chord::new("Space", false, false, false), &[], Platform::Control, true).unwrap().entry.id, "play-pan");
+    assert_eq!(shortcuts::resolve(&Chord::new("Space", false, false, false), &[], Platform::Control, true).unwrap().command.id(), "play-pan");
     assert!(entry("recent-project").visible_bindings(Platform::Control, false, &[]).is_empty());
     assert_eq!(entry("recent-project").visible_bindings(Platform::Command, true, &[]), ["Ctrl+Tab"]);
 }
@@ -165,7 +181,7 @@ fn every_field_chord_checks_all_modifiers_and_shift_f6_never_removes_keys() {
     }
     for (key, ctrl, alt, id) in [("F6", false, false, "focus-next-region"), ("F6", true, false, "focus-previous-region"), ("KeyM", true, true, "layout-arrange"), ("KeyL", true, true, "layout-menu")] {
         let mut chord = Chord::new(key, ctrl, alt, false);
-        assert_eq!(shortcuts::resolve(&chord, &[], Platform::Control, true).unwrap().entry.id, id);
+        assert_eq!(shortcuts::resolve(&chord, &[], Platform::Control, true).unwrap().command.id(), id);
         chord.meta = chord.ctrl; chord.ctrl = false;
         assert!(matches!(Shortcuts::new(Platform::Command, true).press(&focus, &chord, &[], Input::default(), |_| true), Press::Run(_)));
     }
@@ -304,10 +320,10 @@ fn a_refused_held_repeat_can_cancel_through_a_full_queue_without_losing_its_term
 #[test]
 fn polygon_draft_has_distinct_action_and_keyboard_safe_lists() {
     assert!(entry("save").polygon_key);
-    assert_eq!(command_queue::polygon_action(entry("save"), true), Polygon::Refuse);
-    assert_eq!(command_queue::polygon_action(entry("open"), true), Polygon::CancelDraft);
-    assert_eq!(command_queue::polygon_action(entry("toggle-grid"), true), Polygon::Allow);
-    assert_eq!(command_queue::polygon_action(entry("delete"), false), Polygon::Allow);
+    assert_eq!(command_queue::polygon_action(entry("save").id, true), Polygon::Refuse);
+    assert_eq!(command_queue::polygon_action(entry("open").id, true), Polygon::CancelDraft);
+    assert_eq!(command_queue::polygon_action(entry("toggle-grid").id, true), Polygon::Allow);
+    assert_eq!(command_queue::polygon_action(entry("delete").id, false), Polygon::Allow);
     let mut router = Shortcuts::new(Platform::Control, true);
     assert_eq!(router.press(&FocusState::new(), &Chord::new("Delete", false, false, false), &[], Input { polygon: true, ..Input::default() }, |_| true), Press::Consumed);
 }
@@ -332,16 +348,16 @@ fn native_menu_preserves_text_history_and_modal_document_gates() {
     use shortcuts::{FieldAction as F, NativeRoute as N, native_route};
     let text = field(TargetKind::TextEntry);
     for (id, action) in [("cut", F::Cut), ("copy", F::Copy), ("paste", F::Paste), ("select-all", F::SelectAll), ("undo", F::Undo), ("redo", F::Redo), ("delete", F::Delete)] {
-        assert_eq!(native_route(entry(id), &text, false), N::Field(action));
-        assert_eq!(native_route(entry(id), &text, true), N::Field(action));
-        assert_eq!(native_route(entry(id), &FocusState::new(), true), N::Blocked);
+        assert_eq!(native_route(entry(id).id, &text, false), N::Field(action));
+        assert_eq!(native_route(entry(id).id, &text, true), N::Field(action));
+        assert_eq!(native_route(entry(id).id, &FocusState::new(), true), N::Blocked);
     }
     let mut vfx = FocusTarget::new(1, FocusArea::Panels, TargetKind::TextEntry);
     vfx.history_owner = styk_core::focus::HistoryOwner::Vfx;
     let mut focus = text.clone();
     focus.register(ScopeId::ROOT, vec![vfx]);
-    assert_eq!(native_route(entry("undo"), &focus, false), N::FeatureHistory { owner: vfx.history_owner, action: F::Undo });
-    assert_eq!(native_route(entry("undo"), &focus, true), N::Field(F::Undo));
-    assert_eq!(native_route(entry("delete"), &FocusState::new(), false), N::Run);
-    assert_eq!(native_route(entry("save"), &text, true), N::Blocked);
+    assert_eq!(native_route(entry("undo").id, &focus, false), N::FeatureHistory { owner: vfx.history_owner, action: F::Undo });
+    assert_eq!(native_route(entry("undo").id, &focus, true), N::Field(F::Undo));
+    assert_eq!(native_route(entry("delete").id, &FocusState::new(), false), N::Run);
+    assert_eq!(native_route(entry("save").id, &text, true), N::Blocked);
 }
