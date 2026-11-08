@@ -217,3 +217,4 @@ mod tests {
         assert_ne!(receiver.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), caller);
     }
 }
+#[path = "memory_probe.rs"] mod memory_probe;

@@ -159,3 +159,12 @@ module, timestamp and image base against the PE, requires a nonempty symbol tabl
 to 16 KiB. Missing/mismatched maps fail. This supersedes the literal-string marker scan, which could
 miss optimized code. The release negative control links a real enabled-trace executable and must
 be rejected. Disabled-macro tests separately cover argument non-evaluation.
+
+## Process memory attribution
+
+The explicit `MemoryDiagnostics` service and developer engine's one-shot
+`memory::request_capture` collect bounded address-space and DXGI evidence on a
+platform worker. `styk memory-capture <new.styktrace>` writes a standalone capture;
+video `--memory-report` samples the same implementation. There is no automatic
+collector or control-channel operation. See [memory-probe.md](memory-probe.md)
+for bounds, overlapping counters and ownership limitations.
