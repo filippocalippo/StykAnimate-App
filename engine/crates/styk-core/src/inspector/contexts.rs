@@ -218,6 +218,8 @@ pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> 
             Some(_) if count > 1 => figures(document, records, &frame, inputs, count),
             Some(figure) if spatial_origin(records, figure.id) => spatial_rig(&figure, &object),
             Some(figure) => {
+                // `inspectorDescriptor` shows the instance as its style overlay resolves it.
+                let figure = facts::instance_figure(figure, &object);
                 let joint = facts::selection(document).joint;
                 match usize::try_from(joint).ok().and_then(|joint| figure.segments.get(joint)) {
                     Some(segment) => joint_context(document, records, &figure, &object, segment, inputs),
@@ -1070,7 +1072,7 @@ pub(crate) fn picker(document: &Document, frame: &Value, target: ColorTarget, sh
         return paint.ok().map(|paint| Picked { paint, gradients: true, alpha: true, from: None });
     }
     let object = facts::selected_object(document, frame)?;
-    let figure = facts::figure_of(document, &object)?;
+    let figure = facts::instance_figure(facts::figure_of(document, &object)?, &object);
     match target {
         ColorTarget::Background => None,
         ColorTarget::Figure => Some(solid(shown?, 1.0 - num(object.get("field28")).unwrap_or(0.0) / 255.0, true)),

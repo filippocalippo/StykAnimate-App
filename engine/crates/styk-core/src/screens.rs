@@ -132,13 +132,19 @@ impl FixturePublication {
 /// publishes later revisions.
 #[cfg(feature = "engine")]
 pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn Spawner>, wake: crate::frames::Wake) -> Result<(Core, Arc<FixturePublication>), String> {
+    core_with_files(bytes, name, spawner, wake, Arc::new(styk_services::files::fake::MemoryFiles::default()))
+}
+
+/// [`core_with_document`] whose documents services save into `files` (a test reads what a save wrote).
+#[cfg(feature = "engine")]
+pub fn core_with_files(bytes: &[u8], name: &str, spawner: Arc<dyn Spawner>, wake: crate::frames::Wake, files: Arc<styk_services::files::fake::MemoryFiles>) -> Result<(Core, Arc<FixturePublication>), String> {
     let opener = Engine::new(|| 0.0, Budgets::for_device(None));
     let prepared = PreparedDocument::open_bytes(&opener, Arc::from(bytes), name, &|| false).map_err(|error| error.message)?;
     let mut documents = Documents::new();
     let id = documents.open(prepared).map_err(|(error, _)| error.to_string())?;
     let startup = styk_doc::json::parse(STARTUP).map_err(|error| error.to_string())?;
     documents
-        .attach_host(HostOptions { engine: opener, spawner: spawner.clone(), files: Arc::new(styk_services::files::fake::MemoryFiles::default()), startup, clock: || 0.0, notify: wake.clone() })
+        .attach_host(HostOptions { engine: opener, spawner: spawner.clone(), files, startup, clock: || 0.0, notify: wake.clone() })
         .map_err(|error| format!("{error:?}"))?;
     let mut core = Core::new(documents);
     core.set_facts(Facts::start(spawner.as_ref(), wake).map_err(|error| error.0)?);
