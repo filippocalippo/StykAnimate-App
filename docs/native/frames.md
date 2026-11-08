@@ -34,9 +34,10 @@ not stop the document engine or its other jobs.
 - `revise` cancels all old requests immediately through atomic identities. The
   resource epoch must advance when image/cel bounds change without an edit. Revision
   and resource changes are not inferred by reading the engine on the interface.
-- `flush` tries the queue lock once. On contention, the latest request remains in a
-  bounded interface outbox and schedules a retry wake. Call it on progress and
-  subsequent event-loop turns.
+- `flush` returns immediately for an empty outbox, without taking the queue lock or
+  waking either the interface or workers. Otherwise it tries the queue lock once.
+  On contention, the latest request remains in a bounded interface outbox and
+  schedules a retry wake. Call it on progress and subsequent event-loop turns.
 - `with_ready` tries once and returns Busy, Pending, Evicted, Ready or a visible
   failure. It verifies the latest consumer identity and resolves a scalar cache
   index plus unique entry ID: no key scan or dense comparison runs on this path.

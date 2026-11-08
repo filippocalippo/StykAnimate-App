@@ -175,6 +175,10 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
   It never supplies periodic document polls. The playback, scrub, drawing, import and export
   owners do not yet report `set_recovery_activity`.
 
+Worker exchange contention queues a turn on the existing bounded worker channel. The worker
+notifies the interface after releasing the exchange, even when no job was admitted; a waiting
+interface does not schedule its own immediate retry. Empty frame outboxes likewise schedule nothing.
+
 **Quit order.** The documents host decides first: Busy keeps the intent, the close prompt stays until its answer is
 accepted, and Save/Discard/Cancel and recovery finish before `QuitReady` grants window exit. The documents host fences edits
 from accepted Save/Discard through cleanup and window teardown; the core uses that permission for all input commands. A failed
