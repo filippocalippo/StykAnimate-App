@@ -1,0 +1,12 @@
+styk-auto/1
+# The stage widget's automated interaction (N2): a repository fixture, a stage as large as its canvas, the view panned and
+# zoomed away and brought back exactly (every number is a power of two or a half), so the last frame is the document
+# exported at that view. Local alias only; the runner binds `fixture` to engine/tests/edit/startup.document.json.
+open fixture
+frame 0
+pan 120 -60
+zoom 2 300 200
+pan -33 17
+zoom 0.5 300 200
+pan -103.5 51.5
+frame 0

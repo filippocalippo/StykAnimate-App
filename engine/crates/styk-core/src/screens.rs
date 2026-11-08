@@ -74,6 +74,9 @@ pub struct FixturePublication {
 }
 
 impl FrameDocument for FixturePublication {
+    fn picture_engine(&self) -> Option<Engine> {
+        Some(self.engine.clone())
+    }
     fn snapshot(&self, revision: u64, _: u64) -> Option<Arc<styk_engine::Generation>> {
         self.generations.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&revision).cloned()
     }
@@ -156,5 +159,30 @@ pub fn inspector(screen: InspectorScreen, spawner: Arc<dyn Spawner>, wake: crate
         _ => {}
     }
     core.refresh();
+    Ok(core)
+}
+
+/// The stage clearances today's layout solver gives a window with the Animate tool rail on the left (top, right, bottom, left: the
+/// rail and its margin take 72 px on that side; `layout-solver.mjs` `stageInsetsFor`). The layout's own solver supplies them
+/// once the docking views place the stage; until then the fixture states them.
+const STAGE_INSETS: [f64; 4] = [24.0, 28.0, 24.0, 72.0];
+
+/// The core the Stage screen shows: the startup document (`engine/tests/edit/startup.document.json`, as the Properties
+/// panel's screens open it), fitted at tick 0 into a stage of `size` logical pixels, its painter made later by the
+/// widget on the toolkit's own device. Config of the frame scheduler is the defaults.
+pub fn stage(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, wake: crate::frames::Wake, size: [f64; 2]) -> Result<Core, String> {
+    stage_in(spawner, clock, wake, crate::stage::Viewport { size, insets: STAGE_INSETS, ..Default::default() })
+}
+
+/// The same in a stage region the caller states (the tests' is as large as the canvas, without clearances).
+pub fn stage_in(spawner: Arc<dyn Spawner>, clock: Arc<dyn styk_services::Clock>, wake: crate::frames::Wake, viewport: crate::stage::Viewport) -> Result<Core, String> {
+    let (mut core, publication) = core_with_document(STARTUP, "Reference.styk", spawner.clone(), wake.clone())?;
+    let document = core.documents.active().ok_or("no document is open")?;
+    let (id, lineage, revision) = (document.id(), document.lineage(), document.revision());
+    let source: Arc<dyn FrameDocument> = publication;
+    let frames = crate::frames::Frames::new(lineage, revision, 0, &source, crate::frames::Config::default(), spawner.as_ref(), clock.clone(), wake.clone()).map_err(|error| error.0)?;
+    let canvas = core.documents.active().ok_or("no document is open")?.with_document(|document| document.canvas).map_err(|error| error.to_string())?;
+    let host = crate::stage::Host::new(frames, canvas, viewport).map_err(|error| format!("{error:?}"))?;
+    core.set_stage(id, Arc::new(crate::stage::Surface::new(host, spawner, clock, wake, crate::stage::PaintLimits::default())));
     Ok(core)
 }

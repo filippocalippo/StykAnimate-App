@@ -1,0 +1,496 @@
+//! The stage as its widget uses it (`docs/native/stage.md`, "The stage widget"): one document's [`Host`], its
+//! [`Painter`] and the input policy that turns pointer, wheel, key, pen and size reports into navigation.
+//!
+//! The widget in `styk-ui` is glue. It reports what happened (a [`Event`], the size and density of its place) and
+//! calls three entry points on the render path: [`Surface::prepare`] (after the previous frame's encoder was
+//! submitted), [`Surface::present`] (recording into the widget's pass) and [`Surface::needs_frames`]. Everything it
+//! would otherwise decide lives here: pan or zoom for a wheel, line or pixel units, which presses the stage keeps,
+//! when a frame is requested and what is shown while one is pending.
+//!
+//! **One thread.** A surface is shared by the core (which runs [`Event`]s from `Core::dispatch`) and the widget's
+//! render path, both on the interface thread, so its lock is never contended; it is only ever taken with `try_lock`,
+//! and a call that finds it taken does nothing (D7: the interface never waits on a lock). The paint worker never
+//! touches it: it exchanges single owned pointers with the [`Painter`] (`docs/native/stage.md`).
+
+use super::input::{InputResult, Navigation, Pointer};
+use super::{Host, PaintLimits, PaintStatus, Painter, Viewport};
+use crate::engine::{SceneOptions, wgpu};
+use crate::frames::Wake;
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use styk_services::input::{InputEvent, Modifiers};
+use styk_services::{Clock, Spawner};
+
+/// Pixels a wheel line stands for: Chromium reports one notch of a mouse wheel as 100 pixels at the default scroll
+/// setting, and today's gains (`canvas-wheel-zoom.mjs`: a notch is a delta of 100) are tuned to that.
+pub const LINE_PIXELS: f64 = 100.0;
+
+/// What the person set for the canvas (`canvasZoomGesture`, `smoothZoom`, reduced motion). Settings land with their
+/// own chunk; until then these are today's defaults.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Gestures {
+    /// "Zoom gesture: scroll to zoom": plain scroll zooms. Otherwise Ctrl or Cmd with the wheel zooms and plain scroll pans.
+    pub scroll_zooms: bool,
+    /// Notches glide (Smooth zooming on, or automatic on a backend that is not WebGL2).
+    pub smooth: bool,
+    /// The system asks for reduced motion: notches zoom directly.
+    pub reduced_motion: bool,
+}
+
+impl Default for Gestures {
+    fn default() -> Gestures {
+        Gestures { scroll_zooms: false, smooth: true, reduced_motion: false }
+    }
+}
+
+/// The amount a wheel event reports, in the toolkit's sign: positive is away from the person (content moves down).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WheelDelta {
+    Lines([f64; 2]),
+    Pixels([f64; 2]),
+}
+
+impl WheelDelta {
+    /// The browser's `deltaX` and `deltaY` for it (positive scrolls down and right), which today's gains use.
+    pub fn browser(self) -> [f64; 2] {
+        match self {
+            WheelDelta::Lines([x, y]) => [-x * LINE_PIXELS, -y * LINE_PIXELS],
+            WheelDelta::Pixels([x, y]) => [-x, -y],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Wheel {
+    pub delta: WheelDelta,
+    /// Logical stage coordinates.
+    pub point: [f64; 2],
+    pub modifiers: Modifiers,
+}
+
+/// What the widget (or an automation step) tells the stage.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event {
+    /// A mouse button or a finger. Points are logical stage coordinates.
+    Pointer(Pointer),
+    Wheel(Wheel),
+    /// Space went down or up over the stage (Space and drag pans).
+    Space(bool),
+    /// The Pan tool became (or stopped being) the tool.
+    PanTool(bool),
+    /// What the platform's input queue held: pen samples with their provenance.
+    Pen(Vec<InputEvent>),
+    /// Pan by a delta (an automation step, the keyboard).
+    Pan([f64; 2]),
+    /// Zoom by a factor about a stage point.
+    Zoom { factor: f64, at: [f64; 2] },
+    FitCanvas,
+    /// The view eases one frame on: sent on each redraw while [`Surface::needs_frames`] says the view is moving.
+    Tick,
+    /// Show this tick of the animation.
+    Frame(f64),
+}
+
+/// What an event came to, for the owner that routes input the stage does not keep.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Outcome {
+    /// The view or the demanded frame changed: a redraw is due.
+    pub changed: bool,
+    /// Presses and moves the stage did not take (the tool owner's: none yet).
+    pub routed: Vec<Pointer>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// The surface is closed, or its lock was taken (it never is, but the interface never waits for it).
+    Unavailable,
+    /// The event named something the stage cannot take (a NaN, a size of zero).
+    Invalid,
+}
+
+/// The identity of a graphics context: the painter belongs to the device it was made on, and a new context (the
+/// surface was recreated) needs a new painter.
+pub type GpuId = u64;
+
+/// What `prepare`, `present` and the events did, in order, for the headless test of the contract.
+#[cfg(feature = "testing")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Call {
+    Observe,
+    Attach,
+    Request,
+    Flush,
+    Update,
+    Present,
+}
+
+/// The pointer the stage asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cursor {
+    Default,
+    Grab,
+    Grabbing,
+}
+
+/// The shared state of one document's stage.
+pub struct Surface {
+    inner: Mutex<Inner>,
+}
+
+struct Inner {
+    host: Host,
+    painter: Option<Painter>,
+    gpu: Option<GpuId>,
+    spawner: Arc<dyn Spawner>,
+    clock: Arc<dyn Clock>,
+    wake: Wake,
+    limits: PaintLimits,
+    gestures: Gestures,
+    navigation: Navigation,
+    tick: f64,
+    quality: f64,
+    samples: u8,
+    scene: SceneOptions,
+    /// The host's demand is not yet known to the painter (a view, size, tick or painter changed).
+    dirty: bool,
+    status: PaintStatus,
+    closed: bool,
+    #[cfg(feature = "testing")]
+    calls: Vec<Call>,
+}
+
+impl Surface {
+    /// `host` is composed by the document's owner (the frame scheduler, the injected spawner and clock). The painter
+    /// is created later, by [`Surface::prepare`], on the device the toolkit hands over.
+    pub fn new(host: Host, spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, wake: Wake, limits: PaintLimits) -> Surface {
+        Surface {
+            inner: Mutex::new(Inner {
+                host,
+                painter: None,
+                gpu: None,
+                spawner,
+                clock,
+                wake,
+                limits,
+                gestures: Gestures::default(),
+                navigation: Navigation::default(),
+                tick: 0.0,
+                quality: 1.0,
+                samples: 4,
+                scene: SceneOptions::default(),
+                dirty: true,
+                status: PaintStatus::Pending,
+                closed: false,
+                #[cfg(feature = "testing")]
+                calls: Vec::new(),
+            }),
+        }
+    }
+
+    fn with<R>(&self, run: impl FnOnce(&mut Inner) -> R) -> Option<R> {
+        let mut inner: MutexGuard<'_, Inner> = match self.inner.try_lock() {
+            Ok(inner) => inner,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return None,
+        };
+        Some(run(&mut inner))
+    }
+
+    pub fn set_gestures(&self, gestures: Gestures) {
+        self.with(|inner| inner.gestures = gestures);
+    }
+
+    /// Runs one event. Navigation changes the view and demands the frame it needs.
+    pub fn event(&self, event: Event) -> Result<Outcome, Error> {
+        self.with(|inner| inner.event(event)).ok_or(Error::Unavailable)?
+    }
+
+    /// The render path, first half: the size and density of the widget's place, the graphics context, then the
+    /// scheduler's progress and the painter's newest picture. Called after the previous frame's encoder was
+    /// submitted, so the picture it takes in is never one the GPU is still drawing.
+    pub fn prepare(&self, place: Place, gpu: Gpu<'_>) {
+        self.with(|inner| inner.prepare(place, gpu));
+    }
+
+    /// The render path, second half: records the last complete picture into the widget's pass (the widget set its
+    /// viewport and scissor). Nothing is drawn, and `false` is returned, until a first picture is complete.
+    pub fn present(&self, pass: &mut wgpu::RenderPass<'_>) -> bool {
+        self.with(|inner| inner.present(pass)).unwrap_or(false)
+    }
+
+    /// Whether the widget should be redrawn without further input: a picture is on its way, or the view is easing.
+    pub fn needs_frames(&self) -> bool {
+        self.with(|inner| inner.needs_frames()).unwrap_or(false)
+    }
+
+    /// Whether the view is easing or a gesture's idle window is open: the widget sends [`Event::Tick`] on each redraw.
+    pub fn moving(&self) -> bool {
+        self.with(|inner| inner.host.interacting()).unwrap_or(false)
+    }
+
+    /// The hand over the stage: open while Space is held or the Pan tool is the tool, closed while a pan drag is
+    /// captured (today's `panning` and `dragging` classes).
+    pub fn cursor(&self) -> Cursor {
+        self.with(|inner| inner.cursor()).unwrap_or(Cursor::Default)
+    }
+
+    /// The artboard's rectangle in the stage's logical pixels (left, top, width, height): where the document's canvas
+    /// lies under the current view, for the backing drawn beneath the picture (`placeArtboard`).
+    pub fn artboard(&self) -> Option<[f64; 4]> {
+        self.with(|inner| {
+            let (view, canvas) = (inner.host.view(), inner.host.canvas());
+            [view.pan[0], view.pan[1], f64::from(canvas[0]) * view.zoom, f64::from(canvas[1]) * view.zoom]
+        })
+    }
+
+    pub fn view(&self) -> Option<super::View> {
+        self.with(|inner| inner.host.view())
+    }
+
+    pub fn viewport(&self) -> Option<Viewport> {
+        self.with(|inner| inner.host.viewport())
+    }
+
+    /// The painter's last report: `Pending` until a picture is complete, `Failed` when the newest request was refused
+    /// (the previous picture stays), `Closed` after [`Surface::close`].
+    pub fn status(&self) -> PaintStatus {
+        self.with(|inner| inner.status.clone()).unwrap_or(PaintStatus::Closed)
+    }
+
+    /// Whether the picture on show answers the newest demand.
+    pub fn ready(&self) -> bool {
+        self.status() == PaintStatus::Ready
+    }
+
+    /// Closes the painter and the host. Neither joins a worker (`docs/native/stage.md`).
+    pub fn close(&self) {
+        self.with(Inner::close);
+    }
+
+    #[cfg(feature = "testing")]
+    pub fn take_calls(&self) -> Vec<Call> {
+        self.with(|inner| std::mem::take(&mut inner.calls)).unwrap_or_default()
+    }
+
+    #[cfg(feature = "testing")]
+    pub fn painter_exited(&self) -> bool {
+        self.with(|inner| inner.painter.as_ref().is_none_or(Painter::worker_exited)).unwrap_or(false)
+    }
+
+    #[cfg(feature = "testing")]
+    pub fn shown_key(&self) -> Option<super::PaintKey> {
+        self.with(|inner| inner.painter.as_ref().and_then(|p| p.shown_key().cloned())).flatten()
+    }
+
+    /// Screenshot and test seam: the shown picture's texture (never mapped on the interface thread).
+    #[cfg(feature = "testing")]
+    pub fn with_texture<R>(&self, read: impl FnOnce(&wgpu::Texture) -> R) -> Option<R> {
+        self.with(|inner| inner.painter.as_ref().and_then(|p| p.texture().map(read))).flatten()
+    }
+}
+
+impl Drop for Surface {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+/// Where the widget is: logical window pixels and the window's density.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Place {
+    pub origin: [f64; 2],
+    pub size: [f64; 2],
+    pub dpr: f64,
+}
+
+/// The toolkit's graphics context, the same device, queue and target format it draws with.
+#[derive(Clone, Copy)]
+pub struct Gpu<'a> {
+    pub id: GpuId,
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub format: wgpu::TextureFormat,
+}
+
+impl Inner {
+    fn now_ms(&self) -> f64 {
+        self.clock.now().as_secs_f64() * 1000.0
+    }
+
+    fn event(&mut self, event: Event) -> Result<Outcome, Error> {
+        if self.closed {
+            return Err(Error::Unavailable);
+        }
+        let mut outcome = Outcome::default();
+        let now = self.now_ms();
+        let before = self.host.view();
+        let result = match event {
+            Event::Pointer(pointer) => match self.host.pointer(pointer, self.navigation) {
+                Ok(InputResult::Route(routed)) => {
+                    outcome.routed.push(routed);
+                    Ok(())
+                }
+                Ok(_) => Ok(()),
+                Err(error) => Err(error),
+            },
+            Event::Wheel(wheel) => {
+                let [dx, dy] = wheel.delta.browser();
+                let zooms = self.gestures.scroll_zooms || wheel.modifiers.contains(Modifiers::CTRL) || wheel.modifiers.contains(Modifiers::META);
+                if zooms {
+                    self.host.wheel(dy, wheel.point, now, self.gestures.smooth, self.gestures.reduced_motion)
+                } else {
+                    self.host.wheel_pan([dx, dy], wheel.modifiers.contains(Modifiers::SHIFT), now)
+                }
+            }
+            Event::Space(held) => {
+                self.navigation.space = held;
+                Ok(())
+            }
+            Event::PanTool(on) => {
+                self.navigation.pan_tool = on;
+                Ok(())
+            }
+            Event::Pen(events) => {
+                let mut result = Ok(());
+                for event in events {
+                    match self.host.pen_navigation(event, self.navigation) {
+                        Ok(InputResult::Route(routed)) => outcome.routed.push(routed),
+                        Ok(_) => {}
+                        Err(error) => result = Err(error),
+                    }
+                }
+                result
+            }
+            Event::Pan(delta) => self.host.pan_by(delta),
+            Event::Zoom { factor, at } => self.host.zoom_by(factor, Some(at)),
+            Event::FitCanvas => self.host.fit_canvas(),
+            Event::Tick => self.host.advance(now).map(drop),
+            Event::Frame(tick) => {
+                if !tick.is_finite() || tick < 0.0 {
+                    return Err(Error::Invalid);
+                }
+                self.tick = tick;
+                self.dirty = true;
+                outcome.changed = true;
+                Ok(())
+            }
+        };
+        result.map_err(|_| Error::Invalid)?;
+        if self.host.view() != before {
+            self.dirty = true;
+            outcome.changed = true;
+        }
+        if self.dirty {
+            self.request();
+        }
+        Ok(outcome)
+    }
+
+    /// Demands the frame for the view and tick as they are now: the host's scheduler key, then the painter's ticket.
+    /// Metadata only; the painter's worker does the work.
+    fn request(&mut self) {
+        if self.closed {
+            return;
+        }
+        #[cfg(feature = "testing")]
+        self.calls.push(Call::Request);
+        if self.host.request(self.tick, self.quality, self.samples, self.scene.clone()).is_err() {
+            return;
+        }
+        match self.painter.as_mut() {
+            Some(painter) => {
+                if painter.request(&self.host).is_ok() {
+                    self.dirty = false;
+                    // A newer demand than the picture on show: pending until the painter reports its own.
+                    self.status = PaintStatus::Pending;
+                }
+            }
+            // Without a painter the demand waits for the one `prepare` creates.
+            None => self.dirty = true,
+        }
+    }
+
+    fn prepare(&mut self, place: Place, gpu: Gpu<'_>) {
+        if self.closed {
+            return;
+        }
+        #[cfg(feature = "testing")]
+        self.calls.push(Call::Observe);
+        let viewport = Viewport { origin: place.origin, size: place.size, dpr: place.dpr, ..self.host.viewport() };
+        if viewport.valid() && viewport != self.host.viewport() && self.host.resize(viewport).is_ok() {
+            self.dirty = true;
+        }
+        if !viewport.valid() {
+            return;
+        }
+        if self.gpu != Some(gpu.id) || self.painter.is_none() {
+            #[cfg(feature = "testing")]
+            self.calls.push(Call::Attach);
+            // A new context needs a new painter; the old one's pictures belong to the old device.
+            if let Some(mut old) = self.painter.take() {
+                old.close();
+            }
+            self.painter = Painter::new(gpu.device, gpu.queue, gpu.format, self.spawner.as_ref(), self.clock.clone(), self.wake.clone(), self.limits).ok();
+            self.gpu = Some(gpu.id);
+            self.status = PaintStatus::Pending;
+            self.dirty = true;
+        }
+        if self.dirty {
+            self.request();
+        }
+        #[cfg(feature = "testing")]
+        self.calls.push(Call::Flush);
+        self.host.frames_mut().flush();
+        if let Some(painter) = self.painter.as_mut() {
+            #[cfg(feature = "testing")]
+            self.calls.push(Call::Update);
+            self.status = painter.update();
+        }
+    }
+
+    fn present(&mut self, pass: &mut wgpu::RenderPass<'_>) -> bool {
+        #[cfg(feature = "testing")]
+        self.calls.push(Call::Present);
+        self.painter.as_ref().is_some_and(|painter| painter.present(pass))
+    }
+
+    fn cursor(&self) -> Cursor {
+        if self.host.pan_gesture.is_some() {
+            Cursor::Grabbing
+        } else if self.navigation.space || self.navigation.pan_tool {
+            Cursor::Grab
+        } else {
+            Cursor::Default
+        }
+    }
+
+    fn needs_frames(&self) -> bool {
+        !self.closed && (self.host.interacting() || self.dirty || self.status == PaintStatus::Pending)
+    }
+
+    fn close(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        if let Some(painter) = self.painter.as_mut() {
+            painter.close();
+        }
+        self.host.close();
+        self.status = PaintStatus::Closed;
+    }
+}
+
+impl Event {
+    /// The stage event an automation step (`styk_core::automation`) is: the steps the stage takes, in the same
+    /// logical stage pixels, run through the same dispatch as the widget's own events. Other steps are the runner's.
+    pub fn from_step(step: &crate::automation::Step) -> Option<Event> {
+        use crate::automation::Step;
+        match step {
+            Step::Pan(delta) => Some(Event::Pan(*delta)),
+            Step::Zoom { factor, at } => Some(Event::Zoom { factor: *factor, at: *at }),
+            Step::Pointer(pointer) => Some(Event::Pointer(*pointer)),
+            Step::Frame(tick) => Some(Event::Frame(*tick)),
+            _ => None,
+        }
+    }
+}

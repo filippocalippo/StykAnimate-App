@@ -268,3 +268,24 @@ masks = [
   [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
   [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
 ]
+
+# The stage (N2): today's stage region (`#viewport` with its artboard backing and scene canvas, alone on the page, 900 x 560,
+# fitted as the app fits it with the clearances of a window that has the Animate rail on the left) showing the Properties
+# screens' startup document at tick 0, captured as the others are (bundled Chromium through Playwright, device scale 1) by
+# engine/crates/styk-app/automation/stage-reference/screens.mjs. Not in the screen: the tool rail, handles, the camera outline,
+# the stage header and the HUD (other chunks' parts, not masked because the reference leaves them out too). Measured
+# 2026-11-08 (debug build, headless, `styk image-diff` past a channel difference of 24): 0 pixels differ in both themes; the
+# largest channel difference anywhere is 11 levels, in the artboard's soft shadow, which Chromium blurs with its own kernel.
+# Today's frame here is the one Chromium's WebGL2 path draws (no WebGPU adapter in the capture), the native one wgpu's; the
+# frame itself is FP's floor (docs/native/frame-parity.md).
+["stage-fit"]
+reference = "docs/native/screens/stage/stage-fit.png"
+max_difference = 0.001
+width = 900
+height = 560
+
+["stage-fit-dark"]
+reference = "docs/native/screens/stage/stage-fit-dark.png"
+max_difference = 0.001
+width = 900
+height = 560

@@ -21,6 +21,7 @@ use crate::focus::FocusState;
 use crate::frames::FrameDocument;
 use crate::i18n::{Msg, Presentation};
 use crate::inspector::Panel;
+use crate::stage::Surface;
 use crate::view_state::ViewState;
 
 /// What every panel does when a command runs or the active document changes.
@@ -36,6 +37,8 @@ pub struct Core {
     facts: Option<Facts>,
     /// Each document's published generations, which the workers read (K-doc supplies them).
     sources: HashMap<DocumentId, Arc<dyn FrameDocument>>,
+    /// Each document's stage, while it is open: the host and the painter (`docs/native/stage.md`).
+    stages: HashMap<DocumentId, Arc<Surface>>,
     session: Session,
     focus: FocusState,
     presentation: Presentation,
@@ -49,6 +52,7 @@ impl Default for Core {
             inspector: Panel::default(),
             facts: None,
             sources: HashMap::new(),
+            stages: HashMap::new(),
             session: Session::default(),
             focus: FocusState::default(),
             presentation: Presentation::english(),
@@ -77,6 +81,25 @@ impl Core {
     /// The published generations of a document, which the workers read.
     pub fn set_source(&mut self, document: DocumentId, source: Arc<dyn FrameDocument>) {
         self.sources.insert(document, source);
+    }
+
+    /// Gives a document its stage. A stage already attached to it is closed first.
+    pub fn set_stage(&mut self, document: DocumentId, stage: Arc<Surface>) {
+        if let Some(old) = self.stages.insert(document, stage) {
+            old.close();
+        }
+    }
+
+    /// The active document's stage, which the stage widget shows.
+    pub fn stage(&self) -> Option<Arc<Surface>> {
+        self.documents.active().and_then(|document| self.stages.get(&document.id())).cloned()
+    }
+
+    /// A document closed: its painter and host are closed and dropped (neither joins a worker).
+    pub fn close_stage(&mut self, document: DocumentId) {
+        if let Some(stage) = self.stages.remove(&document) {
+            stage.close();
+        }
     }
 
     pub fn view_state(&self) -> &ViewState {
@@ -135,7 +158,18 @@ impl Core {
             Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event),
             Command::Run(id) => self.run(id),
             Command::Activate(id) => self.activate(id),
+            Command::Stage(event) => self.stage_event(event),
         }
+    }
+
+    /// A stage event for the active document's stage. The stage keeps navigation; what it does not take goes back to the
+    /// tool owner, which no chunk has built yet, so it does nothing.
+    fn stage_event(&mut self, event: crate::stage::Event) -> Vec<Effect> {
+        if let Some(stage) = self.stage() {
+            // A refusal (a closed stage, a NaN from a device) leaves the view as it was.
+            drop(stage.event(event));
+        }
+        Vec::new()
     }
 
     /// Every panel finishes what it has open.

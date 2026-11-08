@@ -17,8 +17,16 @@ use styk_ui::screens::Screen;
 /// Draws the interface in `theme`, `size` logical pixels at `scale`, and returns the picture (RGBA, top row first).
 ///
 /// Fails when the machine has no graphics adapter the renderer can use.
+/// A stage screen: its fixture's core, the toolkit's device handed to the painter by the widget, redrawn until the picture on
+/// show answers the first demand (the paint worker finishes in its own time; nothing here waits for it).
+pub fn stage_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Result<Image, String> {
+    let clock: std::sync::Arc<dyn styk_services::Clock> = std::sync::Arc::new(styk_platform::clock::SystemClock::new());
+    let core = styk_core::screens::stage(std::sync::Arc::new(styk_platform::spawn::ThreadSpawner), clock, std::sync::Arc::new(|| {}), [f64::from(size.0), f64::from(size.1)])?;
+    pollster::block_on(screenshot_async(screen.theme(), size, scale, None, None, None, Some(&core)))
+}
+
 pub fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>) -> Result<Image, String> {
-    pollster::block_on(screenshot_async(theme, size, scale, sheet, band, None))
+    pollster::block_on(screenshot_async(theme, size, scale, sheet, band, None, None))
 }
 
 /// A Properties panel screen: its fixture's core, refreshed (never waited on) until the facts lane made what it shows.
@@ -37,7 +45,7 @@ pub fn inspector_screenshot(screen: Screen, size: (u32, u32), scale: f32) -> Res
             }
             pause().await?;
         }
-        screenshot_async(screen.theme(), size, scale, None, None, Some(&core)).await
+        screenshot_async(screen.theme(), size, scale, None, None, Some(&core), None).await
     })
 }
 
@@ -50,7 +58,7 @@ async fn pause() -> Result<(), String> {
     receive.await.map_err(|error| error.to_string())
 }
 
-async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>, inspector: Option<&styk_core::app::Core>) -> Result<Image, String> {
+async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Option<&Sheet>, band: Option<Screen>, inspector: Option<&styk_core::app::Core>, stage: Option<&styk_core::app::Core>) -> Result<Image, String> {
     let settings = iced::Settings { font: widgets::INTER, text_size: Pixels(16.0), ..iced::Settings::default() };
     let mut renderer = <iced::Renderer as Headless>::new(renderer::Settings::from(&settings), None).await.ok_or("no graphics adapter is available to draw offscreen")?;
     // Nothing here is an event loop to keep responsive: the font system is built and the bundled fonts installed in place.
@@ -62,6 +70,7 @@ async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Opt
     let shell = band.map(|screen| styk_ui::screens::band_shell(screen, size, styk_ui::shell::measure_labels(ready)));
     let panel = inspector.and_then(|core| styk_ui::inspector::View::of(core, theme));
     let view: iced::Element<'_, ()> = match (sheet, shell.as_ref()) {
+        _ if stage.is_some() => stage.and_then(|core| styk_ui::stage::view(core, None, theme)).map_or_else(|| styk_ui::loading(theme), |stage| stage.map(|_| ()).boxed()),
         _ if panel.is_some() => match panel {
             Some(panel) => styk_ui::dock::docked(styk_ui::inspector::view(panel), theme).map(|_| ()).boxed(),
             None => styk_ui::loading(theme),
@@ -86,7 +95,7 @@ async fn screenshot_async(theme: Theme, size: (u32, u32), scale: f32, sheet: Opt
     for _ in 0..400 {
         interface.draw(&mut renderer, &iced_theme, &renderer::Style { text_color: style.text_color }, mouse::Cursor::Unavailable);
         let rgba = Headless::screenshot(&mut renderer, physical, scale, style.background_color);
-        if !styk_design::glyphs::incomplete() {
+        if !styk_design::glyphs::incomplete() && stage.is_none_or(|core| core.stage().is_some_and(|surface| surface.ready())) {
             return Ok(Image { width: physical.width, height: physical.height, rgba });
         }
         pause().await?;

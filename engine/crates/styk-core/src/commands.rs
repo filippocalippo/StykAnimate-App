@@ -157,6 +157,8 @@ pub enum Command {
     Inspector(inspector::Event),
     /// Make another open document the active one (a project tab).
     Activate(crate::documents::DocumentId),
+    /// The stage: pointer, wheel, key, pen and frame demands for the active document's stage (`docs/native/stage.md`).
+    Stage(crate::stage::Event),
 }
 
 /// How a refusal or a failure reaches the person (the error policy: a message key and scalar parameters).

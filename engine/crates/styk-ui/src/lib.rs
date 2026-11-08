@@ -14,6 +14,7 @@ pub mod inspector;
 pub mod message;
 pub mod screens;
 pub mod shell;
+pub mod stage;
 
 pub use message::Message;
 
