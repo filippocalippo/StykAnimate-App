@@ -790,12 +790,8 @@ impl DragSession {
 }
 fn zone_bounds(zone: &Zone, s: &Solution, e: &Env) -> Rect {
     match zone {
-        Zone::Tab { group, .. } => s
-            .headers
-            .get(group)
-            .or(s.groups.get(group))
-            .copied()
-            .unwrap_or_default(),
+        // The insertion index follows the pointer along the header: a tab zone has no area it is held in.
+        Zone::Tab { .. } => Rect::default(),
         Zone::Split { group, side } => {
             let r = s.groups.get(group).copied().unwrap_or_default();
             match side {

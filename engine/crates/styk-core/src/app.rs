@@ -46,6 +46,10 @@ pub struct Core {
     shortcuts: crate::shortcuts::Shortcuts,
     select_commands: Option<(crate::focus::FocusId, Vec<Option<Command>>)>,
     presentation: Presentation,
+    /// The docked window's arrangement, gestures and saves (`docs/native/docking-views.md`).
+    dock: crate::dock::Dock,
+    /// Numbers the dock's notices so each is its own message.
+    dock_notices: u64,
 }
 
 impl Default for Core {
@@ -63,6 +67,8 @@ impl Default for Core {
             shortcuts: crate::shortcuts::Shortcuts::new(crate::shortcuts::Platform::Control, true),
             select_commands: None,
             presentation: Presentation::english(),
+            dock: crate::dock::Dock::new(crate::layout::Size { w: 1560.0, h: 1000.0 }, 1.0, "styk"),
+            dock_notices: 0,
         }
     }
 }
@@ -225,7 +231,47 @@ impl Core {
             Command::Run(id) => self.run(id),
             Command::Activate(id) => self.activate(id),
             Command::Stage(event) => self.stage_event(event),
+            Command::Dock(event) => {
+                let now = self.overlays.now();
+                let effects = self.dock.handle(event, now);
+                self.dock_effects(effects)
+            }
         }
+    }
+
+    /// The docked window: the arrangement, the solution for the window and the gesture in progress.
+    pub fn dock(&self) -> &crate::dock::Dock {
+        &self.dock
+    }
+
+    /// The dock, for the host that starts it (the window's size, the stored arrangements) and runs its writes.
+    pub fn dock_mut(&mut self) -> &mut crate::dock::Dock {
+        &mut self.dock
+    }
+
+    /// What the dock asked of the host, as the core's effects: a refusal is a message over the stage, a focus request
+    /// the target of the panel's tab strip (or of its body where it has none).
+    pub fn dock_effects(&mut self, asked: Vec<crate::dock::Effect>) -> Vec<Effect> {
+        use crate::dock::{Effect as Asked, ids};
+        let mut effects = Vec::new();
+        for ask in asked {
+            match ask {
+                Asked::Message(text) => {
+                    self.dock_notices += 1;
+                    let mut message = crate::overlay::messages::Message::new(self.dock_notices, format!("dock:{text}"), crate::overlay::messages::Tone::Warning, false, Vec::new());
+                    message.text = text;
+                    let now = self.overlays.now();
+                    effects.extend(self.overlay_event(crate::overlay::host::Event::ShowMessage(message), now));
+                }
+                Asked::Focus(panel) => {
+                    let found = self.dock.layout().groups().into_iter().find_map(|g| g.tabs.iter().position(|p| *p == panel).map(|i| (g.id, i, g.tabs.len())));
+                    if let Some((group, index, tabs)) = found {
+                        effects.push(Effect::FocusTarget(if tabs > 1 { ids::tab(group, index) } else { ids::body(group) }));
+                    }
+                }
+            }
+        }
+        effects
     }
 
     /// A stage event for the active document's stage. The stage keeps navigation; what it does not take goes back to the
