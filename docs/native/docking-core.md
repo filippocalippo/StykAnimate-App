@@ -128,6 +128,12 @@ and the default 1440 by 900 rectangles have an exact source golden. Nested unkno
 typed layout codec are retained and tested through `LayoutFile` and edits of their owning records.
 Inventory rows spanning the later UI and platform obligations remain open.
 
+## Views (K-dock views, part 1)
+
+`styk_core::dock` and `styk_ui::dock` put the model on screen: `docs/native/docking-views.md`. The views changed three things
+here: a tab zone no longer holds the pointer inside its header (the insertion index follows it), the compact and minimal tiers
+no longer fold the timeline (only a low window does, as today), and `SaveQueue::deadline` tells the runtime when to wake.
+
 ## Implementer verification (2026-11-08)
 
 All compilation and test commands used the machine queue and the checkout's seeded target.

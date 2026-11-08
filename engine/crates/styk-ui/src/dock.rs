@@ -1,5 +1,6 @@
-//! Where a panel sits until the docking chunk lands: today's default right dock (the Properties panel, 320 px wide,
-//! `.shell-panel`). A panel's view fills whatever bounds it is given; only this module decides them.
+//! Where the panels sit: the docked window (`docs/native/docking-views.md`) draws what `styk_core::dock` solved (`view`), and
+//! `docked` is the Properties panel alone at today's default size, for the panel's own screens. A panel's view fills whatever
+//! bounds it is given; only the core decides them.
 
 mod probe;
 mod view;

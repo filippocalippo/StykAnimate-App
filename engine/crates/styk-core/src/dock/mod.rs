@@ -818,6 +818,11 @@ pub mod ids {
         FocusId(BASE + 0x100_0000 + u64::from(split) * 64 + index as u64)
     }
 
+    /// A flyout's pin button.
+    pub fn pin(group: GroupId) -> FocusId {
+        FocusId(BASE + 0x200_0000 + u64::from(group))
+    }
+
     /// A strip's icon for tab `index`.
     pub fn strip(group: GroupId, index: usize) -> FocusId {
         FocusId(BASE + 0x180_0000 + u64::from(group) * 64 + index as u64)

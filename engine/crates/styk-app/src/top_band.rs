@@ -446,7 +446,23 @@ impl TopBand {
             }
         };
         let task = if reads_focus { Task::batch([task, TopBand::snapshot()]) } else { task };
-        (requests, task)
+        (requests, Task::batch([task, self.follow_workspace()]))
+    }
+
+    /// The workspace the band pressed is the arrangement the dock shows (Build is the layout's `rig`); Home keeps the last.
+    fn follow_workspace(&mut self) -> Task<Message> {
+        use styk_core::layout::Workspace as Arrangement;
+        let wanted = match self.shell.pressed() {
+            Some(Workspace::Animate) => Arrangement::Animate,
+            Some(Workspace::Draw) => Arrangement::Draw,
+            Some(Workspace::Build) => Arrangement::Rig,
+            None => return Task::none(),
+        };
+        if self.core.dock().workspace() == wanted {
+            return Task::none();
+        }
+        let now = self.now();
+        self.dock(styk_core::dock::Event::Workspace(wanted), now)
     }
 
     fn fail(&mut self, message: String) {
@@ -671,6 +687,7 @@ impl TopBand {
                     self.check_expectation(&expectation)?;
                     (Vec::new(), Task::none())
                 }
+                Step::Dock(step) => (Vec::new(), self.dock_step(step)?),
                 Step::Screenshot(path) => {
                     if let Some(run) = &mut self.run {
                         run.capturing = true;
@@ -764,6 +781,80 @@ impl TopBand {
                     _ => None,
                 });
                 same("Export", look.clone(), found.unwrap_or("hidden").to_string())
+            }
+            Expect::Dock(expectation) => self.check_dock(expectation),
+            other => Err(format!("this build cannot check {other:?}")),
+        }
+    }
+
+    /// A step in the docked window: the presses, moves and releases a person's pointer makes, sent through the same handler
+    /// the widgets' messages reach.
+    fn dock_step(&mut self, step: automation::DockStep) -> Result<Task<Message>, String> {
+        use automation::DockStep;
+        use styk_core::dock::Event as D;
+        use styk_core::layout::Rect as Place;
+        let now = self.now();
+        let (window, solution) = (self.core.dock().window(), self.core.dock().solution().clone());
+        let group_of = |kind: &str| -> Result<(styk_core::layout::GroupId, usize), String> {
+            self.core.dock().layout().groups().into_iter().find_map(|g| g.tabs.iter().position(|p| p.kind == kind).map(|tab| (g.id, tab))).ok_or_else(|| format!("{kind} is in no group"))
+        };
+        let rect_of = |group: styk_core::layout::GroupId| -> Result<Place, String> { solution.groups.get(&group).copied().ok_or_else(|| "that group is not shown".to_string()) };
+        let events: Vec<D> = match step {
+            DockStep::Drag { panel, to } => {
+                let (group, tab) = group_of(&panel)?;
+                let header = solution.headers.get(&group).copied().ok_or("that panel has no header")?;
+                let (x, y) = (header.x + 24.0, header.y + 22.0);
+                let target = match to.as_str() {
+                    "edge-left" => (4.0, window.h / 2.0),
+                    "edge-right" => (window.w - 4.0, window.h / 2.0),
+                    "edge-top" => (window.w / 2.0, 4.0),
+                    "edge-bottom" => (window.w / 2.0, window.h - 4.0),
+                    other => {
+                        let (kind, side) = other.split_once(':').map_or((other, None), |(kind, side)| (kind, Some(side)));
+                        let r = rect_of(group_of(kind)?.0)?;
+                        match side {
+                            None => (r.x + r.w / 2.0, r.y + r.h / 2.0),
+                            Some("left") => (r.x + r.w * 0.1, r.y + r.h / 2.0),
+                            Some("right") => (r.x + r.w * 0.9, r.y + r.h / 2.0),
+                            Some("above") => (r.x + r.w / 2.0, r.y + r.h * 0.1),
+                            Some("below") => (r.x + r.w / 2.0, r.y + r.h * 0.9),
+                            Some(side) => return Err(format!("{side:?} is not a side: left, right, above or below")),
+                        }
+                    }
+                };
+                vec![D::HeaderPressed { group, tab: Some(tab), x, y }, D::PointerMoved { x: x + 12.0, y: y + 12.0 }, D::PointerMoved { x: target.0, y: target.1 }, D::PointerReleased]
+            }
+            DockStep::Resize(delta) => {
+                let divider = self.core.dock().dividers().into_iter().find(|d| d.axis == styk_core::layout::Axis::Horizontal).ok_or("there is no column divider")?;
+                vec![D::DividerPressed { split: divider.split, index: divider.index }, D::DividerMoved(delta), D::DividerReleased]
+            }
+            DockStep::Collapse(panel) => {
+                let (group, _) = group_of(&panel)?;
+                let header = solution.headers.get(&group).copied().ok_or("that panel has no header")?;
+                let (x, y) = (header.x + header.w - 12.0, header.y + 22.0);
+                vec![D::HeaderPressed { group, tab: None, x, y }, D::PointerReleased, D::HeaderPressed { group, tab: None, x, y }, D::PointerReleased]
+            }
+            DockStep::Undo => vec![D::Undo],
+            other => return Err(format!("this build cannot run the dock step {other:?}")),
+        };
+        Ok(Task::batch(events.into_iter().map(|event| self.dock(event, now)).collect::<Vec<_>>()))
+    }
+
+    fn check_dock(&self, expectation: &automation::DockExpect) -> Result<(), String> {
+        use automation::DockExpect;
+        let dock = self.core.dock();
+        let group_of = |kind: &str| dock.layout().groups().into_iter().find(|g| g.tabs.iter().any(|p| p.kind == kind)).ok_or_else(|| format!("{kind} is in no group"));
+        match expectation {
+            DockExpect::Rect { panel, rect } => {
+                let group = group_of(panel)?;
+                let found = dock.solution().groups.get(&group.id).or(dock.solution().strips.get(&group.id)).copied().ok_or("that group is not shown")?;
+                let (a, b) = ([found.x, found.y, found.w, found.h], rect.map(f64::from));
+                if a.iter().zip(b).all(|(a, b)| (a - b).abs() <= 1.0) { Ok(()) } else { Err(format!("expected {panel}'s group at {b:?}, found {a:?}")) }
+            }
+            DockExpect::Modified(wanted) => if dock.modified() == *wanted { Ok(()) } else { Err(format!("expected the layout modified {wanted}, found {}", dock.modified())) },
+            DockExpect::Tabs { panel, count } => {
+                let found = group_of(panel)?.tabs.len();
+                if found == *count { Ok(()) } else { Err(format!("expected {count} tabs with {panel}, found {found}")) }
             }
             other => Err(format!("this build cannot check {other:?}")),
         }
@@ -884,6 +975,36 @@ mod tests {
 
     fn arrow(named: Named, modifiers: Modifiers) -> Event {
         Event::Keyboard(keyboard::Event::KeyPressed { key: Key::Named(named), modified_key: Key::Named(named), physical_key: Physical::Unidentified(NativeCode::Unidentified), location: Location::Standard, modifiers, text: None, repeat: false })
+    }
+
+    /// The docked window's interaction script, run step by step through the dock's handler: the drag of a tab, the held
+    /// divider, the undo.
+    #[test]
+    fn the_dock_interaction_script_runs_through_the_one_handler() {
+        let (mut top, _) = band();
+        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
+        let script = Script::parse(include_str!("../automation/dock-interaction.script")).unwrap();
+        for (line, step) in script.steps {
+            match step {
+                Step::Resize(width, height) => top.resized(Size::new(width as f32, height as f32), 1.0),
+                Step::Wait(_) | Step::Screenshot(_) => {}
+                step => drop(top.execute(line, step)),
+            }
+        }
+        let failures = top.run.as_ref().unwrap().failures.clone();
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn the_dock_shows_the_arrangement_of_the_workspace_the_band_presses() {
+        use styk_core::layout::Workspace as Arrangement;
+        let (mut top, _) = band();
+        assert_eq!(top.core.dock().workspace(), Arrangement::Animate);
+        for (name, wanted) in [("draw", Arrangement::Draw), ("build", Arrangement::Rig), ("animate", Arrangement::Animate)] {
+            let _ = top.click(Target::Workspace(name.to_string())).unwrap();
+            let _ = top.update(Message::Frame);
+            assert_eq!(top.core.dock().workspace(), wanted, "{name}");
+        }
     }
 
     #[test]

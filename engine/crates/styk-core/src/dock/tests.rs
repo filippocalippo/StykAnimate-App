@@ -517,3 +517,20 @@ fn two_presses_on_a_divider_in_a_double_click_reset_it_and_a_drag_between_them_d
     d.handle(Event::DividerReleased, 5_001);
     assert_eq!(d.solution().groups[&PROPERTIES].w, 330.0, "a press long after the last is a new first click");
 }
+
+#[test]
+fn the_scripts_dock_steps_and_expectations_parse_and_a_bad_one_names_what_it_wants() {
+    use crate::automation::{DockExpect, DockStep, Expect, Script, Step};
+    let script = Script::parse("styk-auto/1\ndock drag library stage:below\ndock resize -60\ndock collapse properties\ndock undo\nexpect dock rect stage 8 60 1216 646\nexpect dock modified yes\nexpect dock tabs properties 2\n").expect("parses");
+    let steps: Vec<Step> = script.steps.into_iter().map(|(_, step)| step).collect();
+    assert_eq!(steps[0], Step::Dock(DockStep::Drag { panel: "library".into(), to: "stage:below".into() }));
+    assert_eq!(steps[1], Step::Dock(DockStep::Resize(-60.0)));
+    assert_eq!(steps[2], Step::Dock(DockStep::Collapse("properties".into())));
+    assert_eq!(steps[3], Step::Dock(DockStep::Undo));
+    assert_eq!(steps[4], Step::Expect(Expect::Dock(DockExpect::Rect { panel: "stage".into(), rect: [8, 60, 1216, 646] })));
+    assert_eq!(steps[5], Step::Expect(Expect::Dock(DockExpect::Modified(true))));
+    assert_eq!(steps[6], Step::Expect(Expect::Dock(DockExpect::Tabs { panel: "properties".into(), count: 2 })));
+    for bad in ["dock", "dock drag library", "dock resize far", "expect dock rect stage 1 2 3", "expect dock modified maybe"] {
+        assert!(Script::parse(&format!("styk-auto/1\n{bad}\n")).is_err(), "{bad}");
+    }
+}
