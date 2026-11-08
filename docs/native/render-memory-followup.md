@@ -87,13 +87,22 @@ added. Tile pipelining stays enabled in every candidate. The previously rejected
 single-slot experiment is not repeated.
 
 The fixed matrix covers A-D, 120 frames, 3840x2160, H.264 Great, edges smoothing,
-two runs per executable: 56 exports. Per-document forward/reversed orders rotate,
+two runs per executable: 56 exports. Vulkan is explicitly pinned to the original
+video backend. Per-document forward/reversed orders rotate,
 with no consecutive repeat of one executable. Raw JSON, executable hashes, order,
 MP4s and both runs stay in a fresh timestamped directory. Output prints draw
 ms/frame and own-process peak private MiB. The summary uses both runs' mean draw
 time and maximum peak, and requires all H.264 bytes to match. The 20-minute total
 guard bounds each child call too; an incomplete matrix fails without selecting
 favorable runs. A 15 GiB free-space reserve is checked before each export.
+
+All six release builds completed through the heavy queue, one per variant,
+from source head `657432dd8aceb661a8b0fd4f6b6ad3eaed2ba279`. Their build command was
+`cargo build --manifest-path engine/Cargo.toml --release -p styk-cli --features app-tools --locked`
+with the queue environment. The final release target matches `all.exe` exactly:
+`a215a31b674082378b4e4fa0d5f91312a7f1f04906a2dd1ee9adea0151b489ed`.
+Artifact verification reports `binaries: 7`, all hashes matching, sources restored,
+and `timingMatrixRun: false`; see `artifacts/rm/handoff-audit.json`.
 
 ## A tick 181 and process attribution
 
@@ -106,6 +115,11 @@ therefore has **no demonstrated baseline-self-variation exemption**. No PNG
 threshold, exclusion or X2 renderer fix is introduced. Evidence is in
 `artifacts/rm/png-baselines/results.json` and its retained PNGs. The fixed repeats
 also reproduce baseline variation at A131, D541 and D544.
+The four new D571 samples and the original baseline hash also agree, so that
+earlier mismatch likewise has no demonstrated exemption. A138's new repeats agree
+with each other but differ from the prior baseline probe's PNG hashes. The
+historical hash comparison is retained separately; no broader exemption is inferred
+for stable frames.
 
 The earlier candidate's Vulkan RGBA, H.264 and normalized WebM checks had zero
 differences; these are not re-labelled as measurements of the retention build.
