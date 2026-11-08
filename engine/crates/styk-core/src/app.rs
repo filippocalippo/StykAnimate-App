@@ -46,6 +46,7 @@ pub struct Core {
     shortcuts: crate::shortcuts::Shortcuts,
     select_commands: Option<(crate::focus::FocusId, Vec<Option<Command>>)>,
     presentation: Presentation,
+    recovery: crate::recovery::Panel,
 }
 
 impl Default for Core {
@@ -63,6 +64,7 @@ impl Default for Core {
             shortcuts: crate::shortcuts::Shortcuts::new(crate::shortcuts::Platform::Control, true),
             select_commands: None,
             presentation: Presentation::english(),
+            recovery: crate::recovery::Panel::default(),
         }
     }
 }
@@ -170,11 +172,36 @@ impl Core {
         &self.session
     }
 
-    /// Rebuilds the view models whose inputs changed since the last call, and places pending fact requests.
-    pub fn refresh(&mut self) {
+    /// The recovery views: the offer, the chooser and the close prompt.
+    pub fn recovery(&self) -> &crate::recovery::Panel {
+        &self.recovery
+    }
+
+    /// The chooser dialog's overlay and model, while it is open.
+    pub fn recovery_chooser(&self) -> Option<(u64, crate::recovery::model::Chooser)> {
+        self.recovery.chooser(&self.documents)
+    }
+
+    /// The person's UTC offset in minutes (the platform reads it): recovery copies are listed in local time.
+    pub fn set_utc_offset(&mut self, minutes: i32) {
+        self.recovery.set_utc_offset(minutes);
+    }
+
+    /// An effect of the documents host that needs an answer from a person (a close or quit with unsaved work) or shows
+    /// something (the recovery lane): the application hands every effect it takes from `Documents::poll` or
+    /// `Documents::dispatch` here. What the core does with it comes back as effects, like a command's.
+    pub fn document_effect(&mut self, effect: &crate::documents::Effect) -> Vec<Effect> {
+        let effects = self.recovery.effect(effect, &mut self.overlays, &mut self.focus);
+        effects.into_iter().chain(self.refresh()).collect()
+    }
+
+    /// Rebuilds the view models whose inputs changed since the last call, and places pending fact requests. The effects
+    /// are the recovery views' (the offer's message, a dialog closing); the application carries them out like a command's.
+    pub fn refresh(&mut self) -> Vec<Effect> {
         self.prune_stages();
         let source = self.documents.active().and_then(|document| self.sources.get(&document.id())).cloned();
         self.inspector.refresh(&mut self.documents, &self.view, self.facts.as_mut(), source, &mut self.session);
+        self.recovery.refresh(&mut self.documents, &mut self.overlays, &mut self.focus, &self.presentation)
     }
 
     /// Toolkit adapters bind command choices; arbitrary owners receive `OverlayChoice` effects.
@@ -212,6 +239,7 @@ impl Core {
         effects.extend(update.effects.into_iter().map(Effect::Overlay));
         if let Some(id) = update.dismissed { effects.push(Effect::MessageDismissed(id)); }
         if let Some(command) = update.run { effects.extend(self.run(command)); }
+        if let Some(event) = update.act { effects.extend(self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus)); }
         if let Some(command) = command { effects.extend(self.dispatch(command)); }
         effects
     }
@@ -223,6 +251,7 @@ impl Core {
             Command::Overlay { event, now } => self.overlay_event(event, now),
             Command::Inspector(event) => self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event),
             Command::Run(id) => self.run(id),
+            Command::Recovery(event) => self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus),
             Command::Activate(id) => self.activate(id),
             Command::Stage(event) => self.stage_event(event),
         }

@@ -56,6 +56,8 @@ pub enum Wake {
     Instance,
     /// The quiet period after a window change may have passed.
     SaveCheck,
+    /// The documents host's workers have something for the core (a finished open, save or recovery job).
+    Documents,
 }
 
 /// The application supplies a bounded, nonblocking notification callback.

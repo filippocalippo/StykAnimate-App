@@ -12,6 +12,7 @@ use styk_core::shell::{Shell, TabView, Window};
 use styk_core::screens::InspectorScreen;
 use styk_design::Theme;
 use crate::overlay_sheet::OverlayScreen;
+use crate::recovery_sheet::RecoveryScreen;
 
 /// A screen of the catalogue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +31,8 @@ pub enum Screen {
     Controls(bool),
     /// An overlay or panel-parts screen (`crate::overlay_sheet`); dark when `true`.
     Overlay(OverlayScreen, bool),
+    /// A recovery screen (`crate::recovery_sheet`): the offer, the chooser, the close prompt; dark when `true`.
+    Recovery(RecoveryScreen, bool),
     /// The Properties panel in a context (`styk_core::screens`), docked at today's default size; dark when `true`.
     Inspector(InspectorScreen, bool),
     /// The stage: a repository fixture fitted into the stage region at tick 0; dark when `true`.
@@ -38,7 +41,7 @@ pub enum Screen {
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 43] = [
+    pub const ALL: [Screen; 53] = [
         Screen::ComponentSheet,
         Screen::Band,
         Screen::BandDark,
@@ -82,6 +85,16 @@ impl Screen {
         Screen::Overlay(OverlayScreen::Dialog, true),
         Screen::Overlay(OverlayScreen::Parts, false),
         Screen::Overlay(OverlayScreen::Parts, true),
+        Screen::Recovery(RecoveryScreen::Offer, false),
+        Screen::Recovery(RecoveryScreen::Offer, true),
+        Screen::Recovery(RecoveryScreen::Chooser, false),
+        Screen::Recovery(RecoveryScreen::Chooser, true),
+        Screen::Recovery(RecoveryScreen::Busy, false),
+        Screen::Recovery(RecoveryScreen::Busy, true),
+        Screen::Recovery(RecoveryScreen::Error, false),
+        Screen::Recovery(RecoveryScreen::Error, true),
+        Screen::Recovery(RecoveryScreen::ClosePrompt, false),
+        Screen::Recovery(RecoveryScreen::ClosePrompt, true),
     ];
 
     /// The ID the command line uses.
@@ -110,6 +123,16 @@ impl Screen {
             Screen::Overlay(OverlayScreen::Dialog, true) => "dialog-dark",
             Screen::Overlay(OverlayScreen::Parts, false) => "parts",
             Screen::Overlay(OverlayScreen::Parts, true) => "parts-dark",
+            Screen::Recovery(RecoveryScreen::Offer, false) => "recovery-offer",
+            Screen::Recovery(RecoveryScreen::Offer, true) => "recovery-offer-dark",
+            Screen::Recovery(RecoveryScreen::Chooser, false) => "recovery-chooser",
+            Screen::Recovery(RecoveryScreen::Chooser, true) => "recovery-chooser-dark",
+            Screen::Recovery(RecoveryScreen::Busy, false) => "recovery-busy",
+            Screen::Recovery(RecoveryScreen::Busy, true) => "recovery-busy-dark",
+            Screen::Recovery(RecoveryScreen::Error, false) => "recovery-error",
+            Screen::Recovery(RecoveryScreen::Error, true) => "recovery-error-dark",
+            Screen::Recovery(RecoveryScreen::ClosePrompt, false) => "close-prompt",
+            Screen::Recovery(RecoveryScreen::ClosePrompt, true) => "close-prompt-dark",
             Screen::Inspector(InspectorScreen::Scene, false) => "inspector-scene",
             Screen::Inspector(InspectorScreen::Scene, true) => "inspector-scene-dark",
             Screen::Inspector(InspectorScreen::Figure, false) => "inspector-figure",
@@ -145,14 +168,14 @@ impl Screen {
     /// The theme the screen is drawn in.
     pub const fn theme(self) -> Theme {
         match self {
-            Screen::BandDark | Screen::Controls(true) | Screen::Inspector(_, true) | Screen::Stage(true) | Screen::Overlay(_, true) => Theme::Dark,
+            Screen::BandDark | Screen::Controls(true) | Screen::Inspector(_, true) | Screen::Stage(true) | Screen::Overlay(_, true) | Screen::Recovery(_, true) => Theme::Dark,
             _ => Theme::Light,
         }
     }
 
     /// Whether the screen is the top band over its window (the band screens need the shell's layout).
     pub const fn is_band(self) -> bool {
-        !matches!(self, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..) | Screen::Inspector(..) | Screen::Stage(..))
+        !matches!(self, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..) | Screen::Recovery(..) | Screen::Inspector(..) | Screen::Stage(..))
     }
 
     /// The screen with this ID.

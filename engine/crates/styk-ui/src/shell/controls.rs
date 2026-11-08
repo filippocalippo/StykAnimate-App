@@ -144,7 +144,7 @@ pub(crate) enum Tone {
 /// A pill button with a glyph and a word (`.ui-button`), or the glyph alone once the band folds the word.
 pub(crate) struct WordButton {
     pub tone: Tone,
-    pub label: &'static str,
+    pub label: String,
     pub glyph: Option<&'static str>,
     pub folded: bool,
     pub width: f32,
@@ -171,7 +171,7 @@ pub(crate) fn word_button(button: WordButton) -> Element<'static, Message> {
     };
     let glyph = button.glyph.map(|name| icon(name, BUTTON_GLYPH, fg));
     let style = button_style();
-    let label = text(button.label).font(style.font).size(style.size).line_height(style.line()).color(fg);
+    let label = text(button.label.clone()).font(style.font).size(style.size).line_height(style.line()).color(fg);
     let content: Element<'static, Message> = match (glyph, button.folded) {
         (Some(glyph), true) => glyph.boxed(),
         (Some(glyph), false) => row![glyph, label].spacing(tokens::scale::SPACE_1_5).align_y(Alignment::Center).boxed(),
@@ -184,7 +184,7 @@ pub(crate) fn word_button(button: WordButton) -> Element<'static, Message> {
 /// One segment of the workspace switch (`.ui-segmented-item` in `.workspace-switch`).
 pub(crate) struct Segment {
     pub workspace: Workspace,
-    pub label: &'static str,
+    pub label: String,
     pub content: SegmentContent,
     pub width: f32,
     pub height: f32,
@@ -238,13 +238,13 @@ pub(crate) fn segment(segment: Segment) -> Element<'static, Message> {
             let dot = container(container(iced::widget::space()).width(DOT).height(DOT).style(move |_| container::Style::default().background(dot_color).border(Border { radius: (DOT / 2.0).into(), ..Border::default() })))
                 .center(DOT + 2.0 * RING)
                 .style(move |_| container::Style::default().background(if segment.pressed { soft } else { Color::TRANSPARENT }).border(Border { radius: ((DOT + 2.0 * RING) / 2.0).into(), ..Border::default() }));
-            let label = text(segment.label).font(style.font).size(style.size).line_height(style.line()).color(fg);
+            let label = text(segment.label.clone()).font(style.font).size(style.size).line_height(style.line()).color(fg);
             let pad = Padding { top: 0.0, bottom: 0.0, left: 1.0 + tokens::scale::SPACE_3 - RING, right: 1.0 + 16.0 };
             container(row![dot, label].spacing(space - RING).align_y(Alignment::Center)).padding(pad).center_y(Length::Fixed(segment.height)).boxed()
         }
         SegmentContent::Name => {
             let style = name_style();
-            let label = text(segment.label).font(style.font).size(style.size).line_height(style.line()).color(fg);
+            let label = text(segment.label.clone()).font(style.font).size(style.size).line_height(style.line()).color(fg);
             container(label).center_x(Length::Fixed(segment.width)).center_y(Length::Fixed(segment.height)).boxed()
         }
         SegmentContent::Glyph => {

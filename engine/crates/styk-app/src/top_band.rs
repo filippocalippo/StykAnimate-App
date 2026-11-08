@@ -55,6 +55,8 @@ pub enum Message {
     Snapshot(focus::Snapshot),
     /// A frame was drawn: time passes for the strip and the automation.
     Frame,
+    /// The documents host's workers have something (their wake), or the recovery lane's deadline is due: take it.
+    Documents,
 }
 
 /// What the wiring asks of the window.
@@ -72,6 +74,8 @@ pub enum Request {
     Theme(Theme),
     /// The script ended: `None` when every expectation held.
     Finished(Option<String>),
+    /// Every project is answered for and the recovery lane is done: the program may end.
+    QuitReady,
 }
 
 /// A script being run.
@@ -106,6 +110,8 @@ pub struct TopBand {
     measured: bool,
     /// A band screen of the catalogue shown in place of the open projects (`--screen band`).
     screen: Option<Screen>,
+    /// What the window is asked for by work that finished outside a message (the documents host's `QuitReady`).
+    outgoing: Vec<Request>,
 }
 
 /// What the stand-in for the workspace sessions answers.
@@ -159,7 +165,10 @@ fn workspace_named(name: &str) -> Workspace {
 impl TopBand {
     /// The band over a new, empty set of projects, with K-doc's document host attached: its worker, the local files and the
     /// one application clock.
-    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>) -> Result<TopBand, String> {
+    /// `notify` is the window's wake for the documents host's workers (it may be called from any thread); `recovery` is the
+    /// folder of the recovery store, where the lane keeps this window's copies and lists the ones an earlier run left (`None`:
+    /// no recovery, as in a run that must not touch the person's folders).
+    pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, notify: Arc<dyn Fn() + Send + Sync>, recovery: Option<PathBuf>) -> Result<TopBand, String> {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
         let mut documents = Documents::new();
@@ -177,11 +186,16 @@ impl TopBand {
                 files: Arc::new(styk_platform::files::LocalFiles),
                 startup,
                 clock: engine_clock,
-                // The interface polls the host on the frames it draws while an open is running.
-                notify: Arc::new(|| {}),
+                // The workers wake the window, which polls the host (`Message::Documents`).
+                notify: notify.clone(),
             })
             .map_err(|error| format!("the document host did not start: {error}"))?;
-        Ok(TopBand { core: styk_core::app::Core::new(documents), layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None })
+        if let Some(directory) = recovery {
+            documents.attach_recovery(Arc::new(styk_platform::recovery::LocalRecovery::new(directory)), clock.clone()).map_err(|error| format!("recovery did not start: {error}"))?;
+            // The first listing is queued by the first poll: ask for it.
+            notify();
+        }
+        Ok(TopBand { core: styk_core::app::Core::new(documents), layouts, shell: shell::Shell::new(window, view::metrics(), unmeasured), opened: Vec::new(), requests: VecDeque::new(), busy: false, clock, fixed, run: None, measured: false, screen: None, outgoing: Vec::new() })
     }
 
     /// Starts the script the command line named.
@@ -213,7 +227,7 @@ impl TopBand {
     /// The fonts are ready: measure the band's words.
     pub fn fonts_ready(&mut self) {
         if let Some(ready) = warm_up::proof() {
-            let labels = view::measure_labels(ready);
+            let labels = view::measure_labels(ready, self.core.presentation());
             match self.screen {
                 Some(screen) => {
                     let window = *self.shell.window();
@@ -248,7 +262,7 @@ impl TopBand {
     }
 
     pub fn view<'a>(&'a self, theme: Theme, ready: warm_up::Ready, maximize: MaxButtonState, content: iced::Element<'a, view::Message>) -> iced::Element<'a, Message> {
-        view::window(view::Params { shell: &self.shell, theme, ready, maximize }, content).map(Message::Ui).boxed()
+        view::window(view::Params { shell: &self.shell, theme, ready, presentation: self.core.presentation(), maximize }, content).map(Message::Ui).boxed()
     }
 
     /// The overlay layer over the band: menus, lists, the stage's message and a tooltip, drawn from the Core-owned host. The band
@@ -257,7 +271,9 @@ impl TopBand {
     /// `Command::Overlay { event: OpenMenu .. }`; none does yet, so today only a message pushed with `ShowMessage` (and the
     /// Inspector's selects, once docked) show something.
     pub fn overlay_layer(&self, theme: Theme) -> iced::Element<'_, Message> {
-        styk_ui::overlays::layer(&self.core, theme.palette(), self.height() + 6.0, None, Vec::new()).map(Message::Editor).boxed()
+        let window = self.shell.window();
+        let owned = styk_ui::recovery::owned(&self.core, theme.palette(), Size::new(window.width, window.height));
+        styk_ui::overlays::layer(&self.core, theme.palette(), self.height() + 6.0, None, owned).map(Message::Editor).boxed()
     }
 
     /// The runtime maps the core's injected deadline onto iced's one scheduled redraw.
@@ -267,6 +283,30 @@ impl TopBand {
                 event: styk_core::overlay::host::Event::Tick, now,
             }))
         })
+    }
+
+    /// The recovery lane's deadline (an autosave, a resting project's copy, a retry) mapped onto the same scheduled redraw: when it
+    /// is due the window polls the documents host. Nothing is scheduled while the lane has no deadline, and a run on the fixed clock
+    /// is advanced by its script, which polls.
+    pub fn recovery_wake(&self) -> iced::Element<'_, Message> {
+        let deadline = self.core.documents.recovery_deadline().map(|due| due.as_millis().min(u128::from(u64::MAX)) as u64);
+        crate::overlay_wake::element(deadline.filter(|_| self.fixed.is_none()), self.clock.clone(), |_| Message::Documents)
+    }
+
+    /// The window was asked to close. The documents host answers: nothing to ask (the program may end), or a confirmation for the
+    /// projects with unsaved work (the close prompt, with its recovery copy's retry) and `Request::QuitReady` once every project is
+    /// answered for and the recovery lane has finished. `true`: end now.
+    pub fn ask_to_quit(&mut self) -> (bool, Task<Message>) {
+        match self.core.documents.dispatch(Ask::Quit) {
+            Ok(Opened::QuitReady) => (true, Task::none()),
+            Ok(effect) => (false, styk_ui::message::run(self.core.document_effect(&effect)).map(Message::Editor)),
+            // Another request is running: the person asks again.
+            Err((HostError::Documents(styk_core::documents::DocumentsError::Busy), _)) => (false, Task::none()),
+            Err((error, _)) => {
+                self.fail(error.to_string());
+                (false, Task::none())
+            }
+        }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -361,7 +401,10 @@ impl TopBand {
                 (Vec::new(), Task::batch([task, overlays]))
             }
             Message::Frame => self.frame(),
+            Message::Documents => (Vec::new(), self.pump()),
         };
+        let mut requests = requests;
+        requests.append(&mut self.outgoing);
         let task = if reads_focus { Task::batch([task, TopBand::snapshot()]) } else { task };
         (requests, task)
     }
@@ -424,6 +467,8 @@ impl TopBand {
     fn pump(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         while let Some(effect) = self.core.documents.poll() {
+            // A close that needs an answer, the recovery lane's events: the core's views take them.
+            tasks.push(styk_ui::message::run(self.core.document_effect(&effect)).map(Message::Editor));
             match effect {
                 Opened::Opened(id) => {
                     self.busy = false;
@@ -435,6 +480,7 @@ impl TopBand {
                     self.fail(error.to_string());
                 }
                 Opened::Stale(_) | Opened::Cancelled(_) => self.busy = false,
+                Opened::QuitReady => self.outgoing.push(Request::QuitReady),
                 _ => {}
             }
         }
@@ -676,7 +722,7 @@ mod tests {
 
     fn band() -> (TopBand, FixedClock) {
         let fixed = FixedClock::new();
-        let top = match TopBand::new(Size::new(1560.0, 900.0), Arc::new(fixed.clone()), Some(fixed.clone()), Arc::new(styk_platform::spawn::ThreadSpawner)) {
+        let top = match TopBand::new(Size::new(1560.0, 900.0), Arc::new(fixed.clone()), Some(fixed.clone()), Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(|| {}), None) {
             Ok(top) => top,
             Err(error) => panic!("{error}"),
         };
@@ -766,7 +812,7 @@ mod tests {
         assert_eq!(fixed.now(), Duration::from_millis(2200));
         assert_eq!(engine_clock(), 2200.0, "the engine reads the same clock");
         // With the real clock there is nothing to advance, and saying so is a failure, not a no-op.
-        let mut real = match TopBand::new(Size::new(1560.0, 900.0), Arc::new(styk_platform::clock::SystemClock::new()), None, Arc::new(styk_platform::spawn::ThreadSpawner)) {
+        let mut real = match TopBand::new(Size::new(1560.0, 900.0), Arc::new(styk_platform::clock::SystemClock::new()), None, Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(|| {}), None) {
             Ok(top) => top,
             Err(error) => panic!("{error}"),
         };

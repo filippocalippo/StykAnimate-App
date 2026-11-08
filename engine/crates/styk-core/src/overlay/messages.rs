@@ -16,11 +16,24 @@ pub enum Tone {
     Warning,
     Error,
 }
+/// What an action does: run a registry command, or say something to an owner that is not one (the recovery offer).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Do {
+    Command(CommandId),
+    Recovery(crate::recovery::model::Event),
+}
+impl From<CommandId> for Do {
+    fn from(command: CommandId) -> Self {
+        Self::Command(command)
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Action {
-    pub command: CommandId,
+    pub command: Do,
     pub label: String,
     pub dismiss: bool,
+    /// Drawn with a hairline ring (`data-variant="outline"` on today's action): the offer's `Restore`.
+    pub outline: bool,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
@@ -28,6 +41,8 @@ pub struct Message {
     pub key: String,
     pub title: String,
     pub text: String,
+    /// A glyph of the design system's table in place of the tone's own (`icon:` in today's `show`).
+    pub icon: Option<String>,
     pub priority: Priority,
     pub tone: Tone,
     pub actions: Vec<Action>,
@@ -57,6 +72,7 @@ impl Message {
             key: key.into(),
             title: String::new(),
             text: String::new(),
+            icon: None,
             priority: if tone == Tone::Error {
                 Priority::Error
             } else {

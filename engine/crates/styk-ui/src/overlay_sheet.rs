@@ -315,7 +315,7 @@ fn toasts(palette: &'static Palette) -> Element<'static, Message> {
         }
         message
     };
-    let undo = Action { command: CommandId::Undo, label: "Undo".into(), dismiss: true };
+    let undo = Action { command: CommandId::Undo.into(), label: "Undo".into(), dismiss: true, outline: false };
     let messages = [
         make(1, Tone::Success, false, vec![], "Saved", "Rooftop fight", None),
         make(2, Tone::Warning, false, vec![undo], "Deleted", "3 figures", None),

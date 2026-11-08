@@ -112,6 +112,8 @@ pub struct Sheet {
     pub controls: bool,
     /// The page is one of the overlay screens ([`crate::overlay_sheet`]).
     pub overlay: Option<crate::overlay_sheet::Page>,
+    /// The page is one of the recovery screens ([`crate::recovery_sheet`]).
+    pub recovery: Option<crate::recovery_sheet::Page>,
     /// What the last walk of the tree found: where each target is.
     pub snapshot: focus::Snapshot,
 }
@@ -136,6 +138,7 @@ impl Sheet {
             status: String::new(),
             controls: false,
             overlay: None,
+            recovery: None,
             snapshot: focus::Snapshot::default(),
         }
     }
@@ -367,6 +370,7 @@ impl Sheet {
         match screen {
             Screen::ComponentSheet => Some(Sheet::new(screen.theme(), Dir::Ltr)),
             Screen::Controls(_) => Some(Sheet::controls_page(screen.theme())),
+            Screen::Recovery(page, _) => Some(Sheet { recovery: Some(crate::recovery_sheet::Page::new(page, screen.theme())), ..Sheet::new(screen.theme(), Dir::Ltr) }),
             Screen::Overlay(page, _) => Some(Sheet { overlay: Some(crate::overlay_sheet::Page::new(page, screen.theme())), ..Sheet::new(screen.theme(), Dir::Ltr) }),
             _ => None,
         }
@@ -377,6 +381,9 @@ impl Sheet {
             return crate::controls_sheet::page(self.theme);
         }
         if let Some(page) = &self.overlay {
+            return page.view();
+        }
+        if let Some(page) = &self.recovery {
             return page.view();
         }
         let palette = self.theme.palette();

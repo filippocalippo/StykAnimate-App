@@ -79,9 +79,10 @@ impl From<Command> for Message {
 pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     match message {
         Message::Command(command) => {
-            let effects = core.dispatch(command);
-            core.refresh();
-            Task::batch(effects.into_iter().map(effect))
+            let mut effects = core.dispatch(command);
+            // The views the command changed are brought in line; their effects (the recovery offer's message, a dialog that closed) go with it.
+            effects.extend(core.refresh());
+            run(effects)
         }
         Message::FocusField(key) => operate(focus::focus(crate::inspector::input_id(key))).discard(),
         Message::Focusing(inner, id) => Task::batch([update(core, *inner), operate(focus::focus(id)).discard()]),
@@ -135,6 +136,13 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             }])
         }
     }
+}
+
+/// The tasks of the effects the core answered with: the application hands the ones it takes from the core outside a message
+/// (the documents host's effects, `Core::document_effect`) here too.
+#[cfg(feature = "engine")]
+pub fn run(effects: Vec<Effect>) -> Task<Message> {
+    Task::batch(effects.into_iter().map(effect))
 }
 
 /// One effect as a task. Notices, frame requests and the colour picker belong to the shell, the stage and the picker

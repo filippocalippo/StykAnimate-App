@@ -71,9 +71,9 @@ fn menu_and_message_actions_reach_dispatch_with_their_registry_identity() {
 
     let mut slot = messages::Messages::default();
     slot.push(messages::Message::new(1, "save-again", messages::Tone::Warning, false, vec![messages::Action {
-        command: CommandId::Save, label: "Retry".into(), dismiss: true,
+        command: CommandId::Save.into(), label: "Retry".into(), dismiss: true, outline: false,
     }]), 0);
-    let command = slot.current().unwrap().actions[0].command;
+    let messages::Do::Command(command) = slot.current().unwrap().actions[0].command.clone() else { panic!("a registry action") };
     assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Save)]);
 }
 

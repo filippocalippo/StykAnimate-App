@@ -131,6 +131,8 @@ pub struct Update {
     pub effects: Vec<Effect>,
     /// A command row was activated: run it (`Command::Run`). The menu has been closed unless the row keeps it open.
     pub run: Option<CommandId>,
+    /// A message's action said something to an owner that is not a registry command.
+    pub act: Option<crate::recovery::model::Event>,
     /// A select's option was chosen (its index among the select's options).
     pub chose: Option<usize>,
     /// The event belonged to the menus and nothing else may act on it.
@@ -151,6 +153,7 @@ impl Update {
     fn merge(&mut self, other: Update) {
         self.effects.extend(other.effects);
         self.run = self.run.or(other.run);
+        self.act = self.act.take().or(other.act);
         self.chose = self.chose.or(other.chose);
         self.consumed |= other.consumed;
     }
@@ -516,6 +519,8 @@ pub enum Event {
     OpenMenu { entries: Vec<Entry>, anchor: Anchor, invoker: Option<FocusId>, keyboard: bool },
     Environment(Reason),
     ResolveClose { id: u64, allow: bool },
+    /// The owner of a dialog, popover or sheet closes it (its answer was given): focus returns as the stack decides.
+    CloseOverlay(u64),
     Select { invoker: FocusId, anchor: Rect, options: Vec<(String, bool)>, chosen: Option<usize>, keyboard: bool, press: u64 },
     Key { key: String, ctrl: bool, meta: bool, alt: bool },
     Hover { menu: u64, index: usize },
@@ -583,6 +588,7 @@ impl Host {
             Event::OpenMenu { entries, anchor, invoker, keyboard } => out = self.open(entries, anchor, Purpose::Commands, invoker, keyboard, None, focus),
             Event::Environment(reason) => out = self.environment(reason, focus),
             Event::ResolveClose { id, allow } => { out.effects = self.stack.resolve_close(id, allow, focus); self.sync(&out.effects); }
+            Event::CloseOverlay(id) => { out.effects = self.stack.finish(id, Reason::Selected, focus); self.sync(&out.effects); }
             Event::Select { invoker, anchor, options, chosen, keyboard, press } => {
                 if !keyboard && self.last_activation == Some((invoker, press)) { return out; }
                 if !keyboard { self.last_activation = Some((invoker, press)); }
@@ -614,7 +620,10 @@ impl Host {
             Event::MessageHover(hover) => self.message_hovered = hover,
             Event::MessageAction { id, index } => {
                 if let Some(action) = self.messages.current().filter(|m| m.id == id).and_then(|m| m.actions.get(index)).cloned() {
-                    out.run = Some(action.command);
+                    match action.command {
+                        super::messages::Do::Command(command) => out.run = Some(command),
+                        super::messages::Do::Recovery(event) => out.act = Some(event),
+                    }
                     if action.dismiss { out.dismissed = self.messages.dismiss(id, now); }
                 }
             }

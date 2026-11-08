@@ -47,6 +47,7 @@ pub mod layout;
 pub mod limits;
 pub mod number;
 pub mod overlay;
+pub mod recovery;
 #[cfg(feature = "engine")]
 pub mod range;
 pub mod roving;

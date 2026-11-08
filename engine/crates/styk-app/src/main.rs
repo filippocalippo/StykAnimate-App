@@ -19,6 +19,8 @@
 
 mod headless;
 #[cfg(test)]
+mod recovery_wiring_tests;
+#[cfg(test)]
 mod stage_widget_tests;
 #[cfg(feature = "devtools")]
 mod input_check;
@@ -138,6 +140,8 @@ struct App {
     /// Where the window is captured to for the automation, while it is.
     capture_path: Option<std::path::PathBuf>,
     closing: bool,
+    /// The documents host has answered for every project: closing no longer asks.
+    quit_cleared: bool,
     /// The window's logical size and scale factor, as the interface was last told.
     logical: Size,
     scale: f32,
@@ -157,7 +161,7 @@ enum CheckStep {
 
 impl App {
     fn new(launch: Launch, screen: Option<Screen>, strategy: Option<Strategy>, outcome: SyncSender<Outcome>, shell: Box<shell::Shell>, wakes: wakes::Wakes, foreground_before: isize) -> Result<App, String> {
-        let sheet = screen.filter(|screen| matches!(screen, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..))).map(|screen| {
+        let sheet = screen.filter(|screen| matches!(screen, Screen::ComponentSheet | Screen::Controls(_) | Screen::Overlay(..) | Screen::Recovery(..))).map(|screen| {
             let mut sheet = if let Screen::ComponentSheet = screen { Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr) } else { Sheet::for_screen(screen).unwrap_or_else(|| Sheet::new(Theme::default(), styk_design::widgets::Dir::Ltr)) };
             sheet.button_probe = Some(styk_platform::input::primary_button_down);
             sheet
@@ -172,7 +176,11 @@ impl App {
             }
             styk_core::ClockMode::System => (Arc::new(styk_platform::clock::SystemClock::new()), None),
         };
-        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner))?;
+        // Recovery belongs to a real run: a screen, a script or an unattended test never lists or writes the person's copies. The
+        // primary window keeps them in the profile, an independent one in its workspace (`docs/native/recovery.md`).
+        let recovery = (screen.is_none() && strategy.is_none() && launch.automation.is_none()).then(|| shell.workspace.clone().unwrap_or_else(styk_platform::shell::profile_dir));
+        let documents_wake = wakes.callback();
+        let mut band = top_band::TopBand::new(Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32), clock, fixed, Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(move || documents_wake.send(shell::Wake::Documents)), recovery)?;
         band.show_screen(band_screen);
         Ok(App {
             sheet,
@@ -197,6 +205,7 @@ impl App {
             band,
             capture_path: None,
             closing: false,
+            quit_cleared: false,
             logical: Size::new(window::DEFAULT_SIZE.0 as f32, window::DEFAULT_SIZE.1 as f32),
             scale: 1.0,
             rescales: Vec::new(),
@@ -297,6 +306,10 @@ impl App {
             match request {
                 top_band::Request::Minimize => tasks.extend(self.window.map(|id| iced_window::minimize(id, true))),
                 top_band::Request::Close => tasks.push(self.close()),
+                top_band::Request::QuitReady => {
+                    self.quit_cleared = true;
+                    tasks.push(self.close());
+                }
                 top_band::Request::Resize(size) => tasks.extend(self.window.map(|id| iced_window::resize(id, size))),
                 top_band::Request::Capture(path) => {
                     self.capture_path = Some(path);
@@ -387,15 +400,25 @@ impl App {
                 self.shell.save_check(&self.wakes.callback());
                 Task::none()
             }
+            shell::Wake::Documents => self.band_update(top_band::Message::Documents),
         }
     }
 
     fn close(&mut self) -> Task<Message> {
         // The core's close guard (unsaved work) decides here once documents exist; until then the program ends, once the
         // window state is written (by a worker: the interface thread does not wait for the disk).
-        if std::mem::replace(&mut self.closing, true) {
+        if self.closing {
             return Task::none();
         }
+        // The documents host decides first: unsaved projects are asked about (the close prompt) and the recovery lane finishes
+        // its copies; an unattended run has no one to ask.
+        if self.strategy.is_none() && !self.quit_cleared {
+            let (ready, task) = self.band.ask_to_quit();
+            if !ready {
+                return task.map(Message::Band);
+            }
+        }
+        self.closing = true;
         match self.shell.save_for_close() {
             Some(job) => Task::perform(async move {
                 let (send, receive) = iced::futures::channel::oneshot::channel();
@@ -531,7 +554,7 @@ impl App {
         // Text is laid out only once the font system is ready: until then the view holds none.
         match (warm_up::proof(), self.sheet.as_ref()) {
             (Some(_), Some(sheet)) => sheet.view().map(Message::Sheet).boxed(),
-            (Some(ready), None) => iced::widget::stack![self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)), self.band.overlay_wake(), self.band.overlay_layer(self.theme)].map(Message::Band).boxed(),
+            (Some(ready), None) => iced::widget::stack![self.band.view(self.theme, ready, self.max_button, styk_ui::loading(self.theme)), self.band.overlay_wake(), self.band.recovery_wake(), self.band.overlay_layer(self.theme)].map(Message::Band).boxed(),
             (None, _) => styk_ui::prepaint(),
         }
     }

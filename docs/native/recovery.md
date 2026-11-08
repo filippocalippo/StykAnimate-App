@@ -1,9 +1,8 @@
 # Native recovery and autosave (K-rec)
 
 The documents host owns recovery through `styk_core::documents::recovery`; the platform implements
-`styk_services::recovery::{Recovery, RecoveryCopy, Workspaces}`. There is no recovery view in this chunk.
-The chooser's `View` holds records, selection, visibility, busy state and a reported error. Views send
-`Request::Recovery(Command::{Refresh, Select, Restore, Discard, Dismiss})`; they never call storage.
+`styk_services::recovery::{Recovery, RecoveryCopy, Workspaces}`. The chooser's `View` holds records, selection, visibility, busy
+state and a reported error. Views never call storage: they send `Command::Recovery(Event)` to `Core::dispatch` ([The views](#the-views)).
 
 ## Composition and worker lifetime
 
@@ -104,6 +103,50 @@ Restore opens a dirty project beside the front tab, adopts the lease and removes
 chooser; the disk copy remains until replaced or a successful save/close removes it. Failed decoding,
 stale ownership or tab-limit refusal preserves the copy. Dismiss only hides the offer. The old Electron
 base64/IPC methods are not native APIs; their legacy on-disk copy is supported through the typed service.
+
+## The views
+
+`styk_core::recovery` is what a person sees of recovery and answers; `styk-ui` draws it. `recovery::model` is plain data (no engine
+type, built by pure functions so the engine-free preview draws the same models): the `Offer`, the `Chooser` (rows `name · time`, the
+selected row, busy, the error) and the `Closing` prompt. `Event` is everything a view says: `NotNow`, `Manage`, `Restore` (the
+offer), `Pick`, `RestoreChosen`, `DiscardChosen`, `CancelChooser` (the chooser), `Respond(Choice)` (the close prompt: `Save`,
+`Discard`, `Cancel`, `Retry`). `Command::Recovery(event)` reaches `recovery::Panel`, which turns each event into the documents host's
+request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a view calls the host.
+
+- **The offer** is the stage's message (priority recovery, the clock glyph, no timeout, no dismiss button): `Not now`, `Manage copies`
+  (when several copies are offered) and `Restore`, whose `Do::Recovery(event)` actions come back from the host as `Update::act`. It
+  is written from the host's view on `Core::refresh` (`in {name} from {time}?`, or the count) and written again when the copies
+  change. `Restore` restores the one copy it names and opens the chooser when several are offered.
+- **The chooser** is a modal dialog on the overlay stack opened by `Manage` (or a `Restore` among several). Its select is the host's
+  anchored menu; the list opens over the dialog. It closes on `Cancel`, Escape, the close button, a restore that landed, or the last
+  copy being discarded; a refused or failed restore or discard keeps it open with the reason under the body (`Changed`, `Owned` and
+  `Missing` in today's words). While the host works the submit buttons are busy.
+- **The close prompt** opens from the host's `ConfirmClose` and `ConfirmQuit` effects (`Core::document_effect`, which the window
+  hands every effect it takes from `Documents::poll` and `dispatch`). `Don't save`, `Cancel`, `Save`, and `Retry` while the recovery
+  copy's failure shows under the body (`Recovery copy could not be written: {reason}`); Escape and its close button are Cancel. `Save`'s
+  file dialog is the save flow's (K-doc, K-cmd): its `SaveDialog` effect has no consumer yet.
+- **Times** are written as today's English `Intl` writes them (`02:03 PM`, `11/8/26, 2:03 PM`) in the person's UTC offset
+  (`Core::set_utc_offset`; the platform supplies it, 0 until it does) in every language, until the catalogue has date formats.
+- **The window's wiring** (`styk-app`): a real run (no `--screen`, `--automation` or unattended strategy) builds
+  `styk_platform::recovery::LocalRecovery` over the primary profile (`styk_platform::shell::profile_dir()`: `STYK_USER_DATA_DIR`, else
+  `%APPDATA%StykAnimate`, so the copies Electron left are offered) or, for an independent window, over its `workspaces/<pid>`
+  directory (`Shell::workspace`), as this page's "Disk compatibility" says; the settings folder of K-store
+  (`%LOCALAPPDATA%StykAnimatesettings`) is where preferences live, not recovery copies. `TopBand::new` attaches it with
+  `Documents::attach_recovery` on the application clock. The documents host's `notify` is `Wake::Documents`, a fourth coalesced
+  reason of the window's wake stream (`wakes.rs`); each wake is `top_band::Message::Documents`, which polls the host and hands every
+  effect to `Core::document_effect`. The lane's deadline (`Documents::recovery_deadline`) is one scheduled redraw
+  (`TopBand::recovery_wake`, the overlay deadline's adapter), so nothing runs while it has none. Closing asks the host
+  (`TopBand::ask_to_quit`, `Request::Quit`): unsaved projects open the close prompt with its recovery retry, the window ends on the
+  host's `QuitReady` (`top_band::Request::QuitReady`) once the lane has finished its copies; an unattended run does not ask.
+  `styk-app/src/recovery_wiring_tests.rs` drives this over a real store with one copy. The playback, scrub, drawing, import and
+  export owners do not yet report `set_recovery_activity`, and `Save` in the prompt waits for the save flow (its `SaveDialog`
+  effect has no consumer), so a quit that chooses Save does not end yet.
+
+Screens: `recovery-offer`, `recovery-chooser`, `recovery-busy`, `recovery-error` and `close-prompt`, each in both themes, against
+today's own modules (`engine/crates/styk-app/automation/recovery-reference/screens.mjs`). The select's chevron is 12 px natively and
+16 px in today's dialog form. The interaction script is `engine/crates/styk-ui/tests/recovery.auto` (`recovery ...` steps and `expect
+recovery ...` in `styk_core::automation`), run through the widgets by `styk-ui/tests/recovery.rs`, which also drives Restore and
+Discard and the close prompt's Cancel through the mounted buttons to the core and the host. Logic tests: `styk-core/tests/recovery_views.rs`.
 
 ## Checks
 

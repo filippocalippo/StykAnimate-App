@@ -360,7 +360,7 @@ fn message_action_lookup_dismissal_and_keyboard_pause_belong_to_host() {
     let (mut host, mut focus) = (Host::default(), page());
     let action = message_button_id(9, 0);
     focus.register(ScopeId::ROOT, vec![FocusTarget::new(INVOKER.0, FocusArea::TopBand, TargetKind::Control), FocusTarget::new(action.0, FocusArea::TopBand, TargetKind::Control)]);
-    host.event(Event::ShowMessage(Message::new(9, "save", Tone::Info, false, vec![Action { command: CommandId::Save, label: "Save".into(), dismiss: true }])), &mut focus, 0);
+    host.event(Event::ShowMessage(Message::new(9, "save", Tone::Info, false, vec![Action { command: CommandId::Save.into(), label: "Save".into(), dismiss: true, outline: false }])), &mut focus, 0);
     assert_eq!(focus.tab(true), Some(action));
     host.event(Event::FocusChanged, &mut focus, 100);
     assert_eq!(host.messages().deadline(), None);

@@ -23,6 +23,8 @@ pub enum Command {
     Overlay { event: crate::overlay::host::Event, now: u64 },
     /// A registry command (a button, a menu item, a shortcut, a quick action, an automation step).
     Run(CommandId),
+    /// A recovery view: the offer's buttons, the chooser, the close prompt (`docs/native/recovery.md`).
+    Recovery(crate::recovery::model::Event),
     /// A Properties panel control: a field's gesture, a switch, a choice, a section's toggle.
     Inspector(inspector::Event),
     /// Make another open document the active one (a project tab).

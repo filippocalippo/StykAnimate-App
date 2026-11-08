@@ -26,13 +26,14 @@ pub async fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Optio
     let style = crate::window_style(theme);
     let iced_theme = crate::base_theme(theme);
     // A band screen: the band over its window, laid out for this size with its words measured.
-    let shell = band.map(|screen| crate::screens::band_shell(screen, size, crate::shell::measure_labels(ready)));
+    let english = styk_core::i18n::Presentation::english();
+    let shell = band.map(|screen| crate::screens::band_shell(screen, size, crate::shell::measure_labels(ready, &english)));
     let (scene_view, scene_ready) = match scene { Some(scene) => (Some(scene.view), Some(scene.ready)), None => (None, None) };
     let view: iced::Element<'_, ()> = match (sheet, shell.as_ref()) {
         _ if scene_view.is_some() => scene_view.unwrap_or_else(|| crate::loading(theme)),
         _ if panel.is_some() => match panel { Some(panel) => crate::dock::docked(crate::inspector::view(panel), theme).map(|_| ()).boxed(), None => crate::loading(theme) },
         (Some(sheet), _) => sheet.view().map(|_| ()).boxed(),
-        (None, Some(shell)) => crate::shell::window(crate::shell::Params { shell, theme, ready, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, crate::loading(theme)).map(|_| ()).boxed(),
+        (None, Some(shell)) => crate::shell::window(crate::shell::Params { shell, theme, ready, presentation: &english, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, crate::loading(theme)).map(|_| ()).boxed(),
         (None, None) => crate::view(theme, ready),
     };
     let mut interface: UserInterface<'_, (), iced::Theme, iced::Renderer> = UserInterface::build(view, bounds, Cache::default(), &mut renderer);
