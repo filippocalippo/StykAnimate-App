@@ -13,7 +13,7 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
-**Updated 2026-11-09 14:00.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
+**Updated 2026-11-09 00:45.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
 tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had only merged N0). Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
@@ -31,7 +31,7 @@ seed store `wt/shared-target` is back (crates.io dependencies; `node perf/make-s
 Windows only (the architecture stays portable). GPT-6 Astra implements back-end and logic, Sonnet the screens, one Opus
 implementer the reference slice (the interface architecture and the Inspector, `docs/native/patterns.md`); GPT-6.1 Sol is
 the only reviewer, by risk; logic stays out of the views; `cargo xtask check` guards the rules. In-flight chunks finish with
-no new review round unless a finding is a blocker. **Process additions of 2026-11-08** (N8): a self-check against `native-common.md`'s Known findings before every hand-in; a half-page plan checked by Sol before coding for high-risk and new-owner chunks; only purely cosmetic findings in screen chunks may merge, each recorded in the workspace's polish list below and cleared before that workspace's gate; no idle implementers. Screen chunks with new behaviour are two steps: Astra's core part, then Sonnet's views.
+no new review round unless a finding is a blocker. **Throughput decision of 2026-11-09** (N8): Opus 5.5 medium joins Astra as back-end and logic capacity, Sonnet stays on screens, five or six implementers run from the step-3 plan (`perf/briefs/native/step3-plan.md`), views build against a committed core interface, freezes stop merges only, chores go to a merge fixer and `perf/disk-clean.sh`. First priority: the visible loop (chunk V0). **Model balance of 2026-11-09** (N8, from the next chunk started): Opus 5.5 is the main back-end and logic implementer (medium by default, xhigh only for genuinely hard high-risk chunks, with a reason in the brief), Astra a minority (chiefly fix rounds on its own diffs), Sonnet the views, Sol the only reviewer by risk; the machine is the ceiling (3 heavy jobs, a saturated 6-core CPU), so the agent count stays where it is, final heavy runs are batched into one queued job, and V0 has priority in `perf/slot.mjs`. **Process additions of 2026-11-08** (N8): a self-check against `native-common.md`'s Known findings before every hand-in; a half-page plan checked by Sol before coding for high-risk and new-owner chunks; only purely cosmetic findings in screen chunks may merge, each recorded in the workspace's polish list below and cleared before that workspace's gate; no idle implementers. Screen chunks with new behaviour are two steps: Astra's core part, then Sonnet's views.
 
 **In flight.**
 
@@ -106,6 +106,22 @@ high-risk or unclear one reverts its chunk); no catch-up merges into branches wi
 | K-timeline (core) | Astra | part 1 **merged `866e9a7a`** (alone, pass green with 1,697 tests, pushed; Sol xhigh: two blockers and four majors, fixed and re-checked clean; the quit-order merge with the window-state lane resolved by hand and checked by Sol): navigation, selection, Edit together ranges, scrubbing with core geometry, FPS, playback on the audio or application clock, the Settings design's owner built minimally, the Settings flush in the quit order, saves byte-equal. Next: the core gaps the views found (key interpolation, editor drafts, the implicit selection, Edit together, layer facts, card scale, drag and wheel, the stop-preview state) and a three-lane quit regression, then the views, then Sol |
 | K-timeline views 1 | Sonnet | built at `6a591305` (the header, the Advanced sheet, the Simple strip; six screens within limits, identical in the preview; 14 mounted tests with mutations); waits for the core gaps, then drops its stopgap view arithmetic; one Sol review of the whole |
 | K-dev panels | Astra, then Sonnet | ready at `600ac90d` (core: Sol high, three majors fixed; views: Sol high, five majors fixed in two steps): the developer mark, the profiler, logs, live parameters and the pass-through overlay, release build clean; merging native-app into its branch (conflicts with the timeline's registry and routing), then merges alone |
+
+**Step 3 in flight** (`perf/briefs/native/step3-plan.md`; unmerged unless marked):
+
+| Chunk | Who | State |
+| --- | --- | --- |
+| V0 visible loop | Astra xhigh | in its final checks (queue priority) |
+| Timeline part 1 gaps and views | Astra core, Sonnet views | `t3/timeline-views-1` `edf88a82`; Sol xhigh: one blocker (redraw work grows with the document) and eight majors (deferred release lost, FPS commits only on Enter and seeded from the effective rate, preview incomplete, popovers placed by the view and outside the overlay host, two view decisions, tests that inject wakes); Astra fixing the core, then Sonnet the views; re-check of the blocker |
+| F4 session-end flake | Astra | **merged `5b4c032f`** (alone, pass green, pushed; Sol xhigh: no findings): two real idle wake loops (an empty frame outbox turned contention into a wake; a contended worker exchange woke the interface at once) fixed so a contended exchange wakes its worker, which resumes the interface after releasing it; the session-end test ordered by a worker gate (80/80 under contention) |
+| G1 gate tooling | Astra | `4a3002d9`; six smokes, 36-comparison save oracle; Sol high: three majors (benchmark workloads differ, export automation bypasses the app path, the Inspector smoke never runs), fixing; the Inspector smoke switches on after V0 |
+| B1 Inspector rest | Opus core, Sonnet views | core `c4de5d42` (40 save comparisons byte-equal); views merging it; then Sol xhigh on the whole |
+| B3 colour picker | Opus core, Sonnet views | core `3bffe54c` (on B1's paint model; merges after B1); views building. Open: palette persistence (a quit-order owner), the eyedropper (ST-089), Draw's live pickers |
+| T3 frame edits and easing | Astra xhigh core, Sonnet views | core `38d6a968` (20 rows, 112 native saves byte-equal, 41 timeline tests); views building on a merge of `edf88a82` and the core; merges after the timeline branch, Sol xhigh on the whole |
+| T5 onion, navigation, scopes | Opus core | interface `33fd32e6` (onion preferences in Settings' view memory, the header model, zoom and pan); logic in progress; views start once the timeline branch's fixes land (same header files) |
+| L1 Library panel (My library) | Opus core, Sonnet views | plan checked by Sol (three blockers fixed); interface `ac1e3bd9`; read paths in progress; views building |
+| B2 VFX panel | Astra xhigh | plan `ba9373f8` checked by Sol (randomness through the session, preset migration fixed); interface next. Lanes go with T4 |
+| M1 menus | Sonnet | building |
 
 The automation mode is one language, `styk_core::automation` (merged with K-shell, header `styk-auto/1`); K-dev's runners,
 K-stage's steps and R-slice's panel test move onto it. Then the skeleton gate (full suites, parity, the native smokes, screenshots, the benchmark, `cargo xtask check --wasm`, and

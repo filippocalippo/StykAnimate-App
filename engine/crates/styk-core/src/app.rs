@@ -437,8 +437,10 @@ impl Core {
             if !matches!(&command, Command::Blur | Command::Inspector(crate::inspector::Event::Field(_, crate::inspector::FieldEvent::Focus | crate::inspector::FieldEvent::Blur))) { self.pickers.invalidate_color(); }
         }
         self.session = Session::default();
-        let effects = match command {
+        let mut effects = match command {
             Command::DialogAnswer { .. } => Vec::new(), // handled before the quit fence: saves may be completing quit
+            #[cfg(feature = "devtools")]
+            Command::Developer(event) => self.dev_extension_dispatch(event),
             Command::Quit => {
                 self.quit_pending = true;
                 let mut effects = Vec::new();
@@ -590,6 +592,8 @@ impl Core {
         chord.alt_graph |= self.alt_graph;
         use crate::shortcuts::{Scope, Input, Press};
         let scopes = match self.focus.area() { Some(crate::focus::FocusArea::Timeline) => vec![if self.settings.animation().timeline_mode == crate::settings::TimelineMode::Simple { Scope::Simple } else { Scope::Timeline }], Some(crate::focus::FocusArea::Stage) => vec![Scope::Canvas], _ => Vec::new() };
+        #[cfg(feature = "devtools")]
+        let scopes = { let mut scopes = scopes; scopes.insert(0, Scope::Developer); scopes };
         let pressed = self.shortcuts.press(&self.focus, &chord, &scopes, Input { repeat, prevented, composing: self.focus.composing(), blocked_by_overlay: self.overlays.top().is_some(), home: self.documents.active().is_none(), ..Default::default() }, |id| id.info().owner != Owner::NotYet || matches!(id, CommandId::SelectAll | CommandId::Cancel));
         match pressed {
             Press::Run(activation) => {
@@ -813,6 +817,16 @@ impl Core {
         effects
     }
 
+    #[cfg(feature = "devtools")]
+    fn dev_extension_dispatch(&mut self,event:crate::dev_extension::Event)->Vec<Effect>{
+        let mut effects=Vec::new();
+        if let crate::dev_extension::Event::Panel{panel,open}=&event{
+            let asked=self.dock.developer_panel(*panel,*open,self.overlays.now());
+            effects.extend(self.dock_effects(asked));
+        }
+        effects.extend(crate::dev_extension::route(event));effects
+    }
+
     /// Routes a registry command to its owner, after the panels finish what they have open.
     fn run(&mut self, id: CommandId) -> Vec<Effect> {
         if id.info().owner == Owner::Timeline || (id == CommandId::Cancel && self.timeline.playing()) || (matches!(id, CommandId::SelectAll | CommandId::Cancel) && self.focus.area() == Some(crate::focus::FocusArea::Timeline) && self.focus.text_entry().is_none()) {
@@ -828,6 +842,8 @@ impl Core {
                 if let Some(request) = crate::file_actions::request(id, &self.documents) { effects.extend(self.file_request(request)); }
                 return effects;
             }
+            #[cfg(feature = "devtools")]
+            Owner::Developer => { effects.extend(self.dev_extension_dispatch(crate::dev_extension::command(id))); return effects; },
             Owner::Dock => {
                 let focused = self.focus.focused().filter(|id| self.dock.panel_of(*id).is_some())
                     .or_else(|| self.focus.focused_area().and_then(|area| self.dock.region_panel_target(area)));
@@ -844,6 +860,8 @@ impl Core {
         }
         let mut context = Context { documents: &mut self.documents, view: &mut self.view, session: &mut self.session };
         let result = match id.info().owner {
+            #[cfg(feature = "devtools")]
+            Owner::Developer => return effects,
             Owner::History => crate::history::run(&mut context, id),
             Owner::Selection => crate::selection_actions::run(&mut context, id),
             Owner::Camera => crate::camera_actions::run(&mut context, id),
@@ -869,9 +887,16 @@ impl Core {
     /// Shared resolver and field/IME gates for the registered dock/focus commands. Other features
     /// remain with their existing host; an unmodified/extra-modifier chord never starts a layout edit.
     pub fn dock_shortcut(&mut self, chord: &crate::text_entry::Chord, input: crate::shortcuts::Input) -> Option<Vec<Effect>> {
-        let activation = self.shortcuts.resolve(chord, &[])?;
-        if !matches!(activation.command.info().owner, Owner::Dock | Owner::Focus) { return None; }
-        match self.shortcuts.press(&self.focus, chord, &[], input, |_| true) {
+        #[cfg(feature="devtools")]
+        let scopes = &[crate::shortcuts::Scope::Developer][..];
+        #[cfg(not(feature="devtools"))]
+        let scopes = &[][..];
+        let activation = self.shortcuts.resolve(chord, scopes)?;
+        let accepted = matches!(activation.command.info().owner, Owner::Dock | Owner::Focus);
+        #[cfg(feature = "devtools")]
+        let accepted = accepted || activation.command.info().owner == Owner::Developer;
+        if !accepted { return None; }
+        match self.shortcuts.press(&self.focus, chord, scopes, input, |_| true) {
             crate::shortcuts::Press::Run(activation) => Some(self.dispatch(Command::Run(activation.command))),
             crate::shortcuts::Press::Consumed => Some(Vec::new()),
             _ => None,

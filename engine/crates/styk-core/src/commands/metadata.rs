@@ -4,20 +4,20 @@ use crate::shortcuts::{Platform, Scope, Shortcut};
 
 /// The feature module whose handler owns a command; unported features fail explicitly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Owner { History, Selection, Camera, ViewState, Files, Timeline, Dock, Focus, NotYet }
+pub enum Owner { History, Selection, Camera, ViewState, Files, Timeline, Dock, Focus, NotYet, #[cfg(feature = "devtools")] Developer }
 
 // Each row declares its identity, serialisation spelling and metadata once.
 macro_rules! commands {
-    ($($variant:ident => $id:literal, $info:expr;)*) => {
+    ($($(#[$attr:meta])* $variant:ident => $id:literal, $info:expr;)*) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub enum CommandId { $($variant,)* }
+        pub enum CommandId { $($(#[$attr])* $variant,)* }
 
         impl CommandId {
-            pub const ALL: &'static [Self] = &[$(Self::$variant,)*];
-            pub const fn id(self) -> &'static str { match self { $(Self::$variant => $id,)* } }
-            pub fn from_id(id: &str) -> Option<Self> { match id { $($id => Some(Self::$variant),)* _ => None } }
+            pub const ALL: &'static [Self] = &[$($(#[$attr])* Self::$variant,)*];
+            pub const fn id(self) -> &'static str { match self { $($(#[$attr])* Self::$variant => $id,)* } }
+            pub fn from_id(id: &str) -> Option<Self> { match id { $($(#[$attr])* $id => Some(Self::$variant),)* _ => None } }
             pub const fn info(self) -> &'static Info {
-                match self { $(Self::$variant => { const INFO: Info = $info; &INFO },)* }
+                match self { $($(#[$attr])* Self::$variant => { const INFO: Info = $info; &INFO },)* }
             }
         }
     };

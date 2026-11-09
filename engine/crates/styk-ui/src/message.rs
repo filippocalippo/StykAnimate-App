@@ -20,6 +20,8 @@ use styk_design::widgets::focus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
+    #[cfg(feature = "devtools")]
+    DeveloperEffect(styk_core::dev_extension::Event),
     /// The core accepted the shared lifecycle barrier; the application can hand this to its shell owner.
     ShellReady(styk_core::shell::Event),
     PollDocuments,
@@ -85,6 +87,8 @@ impl From<Command> for Message {
 #[cfg(feature = "engine")]
 pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     match message {
+        #[cfg(feature = "devtools")]
+        Message::DeveloperEffect(_) => Task::none(), // consumed by the application extension adapter
         Message::Command(command) => {
             let mut effects = core.dispatch(command);
             // The views the command changed are brought in line; their effects (the recovery offer's message, a dialog that closed) go with it.
@@ -167,6 +171,8 @@ pub fn run(effects: Vec<Effect>) -> Task<Message> {
 pub fn effect(effect: Effect) -> Task<Message> {
     match effect {
         Effect::Dialog { id, request } => Task::done(Message::Dialog { id, request }),
+        #[cfg(feature = "devtools")]
+        Effect::Developer(event) => Task::done(Message::DeveloperEffect(event)),
         Effect::ShellReady(event) => Task::done(Message::ShellReady(event)),
         Effect::RequestFrame | Effect::PollDocuments => Task::done(Message::PollDocuments),
         Effect::QuitReady => Task::done(Message::QuitReady),
@@ -220,6 +226,8 @@ pub fn dock_shortcut_at(core: &mut Core, event: &iced::Event, ignored: bool, now
         // Synthetic/headless inputs have no hardware code. The spelling is adapted, never matched to a command here.
         Physical::Unidentified(_) => match key.as_ref() {
             Key::Named(Named::F6) => "F6".into(),
+            #[cfg(feature = "devtools")]
+            Key::Named(Named::F11) => "F11".into(),
             Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_alphabetic() => format!("Key{}", c.to_uppercase()),
             Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_digit() => format!("Digit{c}"),
             _ => return None,

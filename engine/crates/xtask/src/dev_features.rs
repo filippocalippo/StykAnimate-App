@@ -27,7 +27,8 @@ fn validate(manifest: &str) -> Result<(), String> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
     {
         if line != "default = []"
-            && line != "ui = [\"dep:iced\", \"dep:styk-design\", \"dep:styk-ui\"]"
+            && line != "panels = [\"styk-core/devtools\"]"
+            && line != "ui = [\"panels\", \"dep:iced\", \"dep:styk-design\", \"dep:styk-ui\", \"styk-ui/devtools\"]"
         {
             return Err(format!("unreviewed devtools feature: {line}"));
         }

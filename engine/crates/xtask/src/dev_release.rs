@@ -1,4 +1,4 @@
-//! Check linked symbols, not strings embedded in optimized machine code.
+//! Check linked symbols and developer catalogue markers in optimized binaries.
 //! MSVC linker maps keep symbols without enabling release debug information.
 use std::{
     fs::File,
@@ -102,7 +102,11 @@ fn symbols(input: impl BufRead, image: &Pe, name: &str) -> Result<usize, String>
             {
                 count += 1;
                 // Both Rust v0 and legacy mangling retain the crate identifier.
-                if symbol.contains("styk_screens") || symbol.contains("styk_trace") || symbol.contains("styk_devtools") {
+                if symbol.contains("styk_screens")
+                    || symbol.contains("styk_trace")
+                    || symbol.contains("styk_devtools")
+                    || symbol.contains("dev_extension")
+                {
                     return Err(format!("release contains linked developer symbol {symbol}"));
                 }
             }
@@ -129,8 +133,50 @@ pub fn run(paths: &[String]) -> Result<(), String> {
         &image,
         name,
     )?;
+    catalogue(File::open(exe).map_err(|e| e.to_string())?)?;
     println!("release symbols: clean ({count} linked symbols; PE/map identity matched)");
     Ok(())
+}
+/// Catalogue data can be inlined into core code with no surviving developer symbol.
+fn catalogue(mut input: impl Read) -> Result<(), String> {
+    const KEYS: &[&[u8]] = &[
+        b"dev.profiler",
+        b"dev.parameters",
+        b"dev.overlay",
+        b"dev.saveProfile",
+        b"dev.loadProfile",
+        b"dev.logs",
+        b"dev.mark",
+        b"dev.start",
+        b"dev.stop",
+        b"dev.export",
+        b"dev.set",
+        b"dev.reset",
+        b"dev.close",
+        b"dev.filter",
+        b"dev.error",
+        b"dev.unavailable",
+        b"capture.cap_mb",
+    ];
+    let mut bytes = [0u8; 8192 + 32];
+    let mut tail = 0;
+    loop {
+        let n = input
+            .read(&mut bytes[tail..8192])
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Ok(());
+        }
+        let used = tail + n;
+        if KEYS
+            .iter()
+            .any(|key| bytes[..used].windows(key.len()).any(|w| w == *key))
+        {
+            return Err("release contains developer route/catalogue data".into());
+        }
+        tail = used.min(32);
+        bytes.copy_within(used - tail..used, 0);
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -168,5 +214,27 @@ mod tests {
     #[test]
     fn missing_evidence_is_not_a_pass() {
         assert!(run(&["missing.exe".into()]).is_err());
+    }
+    #[test]
+    fn inlined_catalogue_and_route_leaks_are_rejected() {
+        assert!(catalogue(b"ordinary product catalogue".as_slice()).is_ok());
+        for key in ["dev.profiler", "dev.parameters", "dev.overlay", "capture.cap_mb"] {
+            let mut bytes = vec![0; 8189];
+            bytes.extend_from_slice(key.as_bytes());
+            assert!(catalogue(bytes.as_slice()).is_err());
+        }
+        let pe = Pe {
+            timestamp: 0xab,
+            base: 0x1000,
+            size: 0x100,
+        };
+        assert!(
+            symbols(
+                map("_ZN9styk_core13dev_extension5routeE").as_bytes(),
+                &pe,
+                "app"
+            )
+            .is_err()
+        );
     }
 }

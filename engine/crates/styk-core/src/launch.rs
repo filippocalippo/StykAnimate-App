@@ -19,6 +19,10 @@ pub enum ClockMode {
 /// What the command line asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Launch {
+    #[cfg(feature = "devtools")]
+    pub params: Vec<PathBuf>,
+    #[cfg(feature = "devtools")]
+    pub param: Vec<String>,
     /// Opt-in current-user developer control channel. Rejected by shipping builds.
     pub control: bool,
     /// The documents to open, in order (the Electron app opens every one it is given).
@@ -78,6 +82,10 @@ impl Launch {
             };
             let mut value = |name: &str| inline.clone().or_else(|| args.next()).ok_or_else(|| LaunchError(format!("{name} needs a value")));
             match flag.as_str() {
+                #[cfg(feature = "devtools")]
+                "--param" => launch.param.push(value("--param")?),
+                #[cfg(feature = "devtools")]
+                "--params" => launch.params.push(PathBuf::from(value("--params")?)),
                 "--control" => launch.control = true,
                 "--automation" => launch.automation = Some(PathBuf::from(value("--automation")?)),
                 "--screenshot" => launch.screenshot = Some(PathBuf::from(value("--screenshot")?)),

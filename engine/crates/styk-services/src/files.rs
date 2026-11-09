@@ -29,6 +29,13 @@ pub trait Files: Send + Sync {
     /// Every failure before that boundary preserves the destination and removes only this call's stage.
     fn replace<'a>(&'a self, target: &'a FileTarget, bytes: &'a [u8], cancel: &'a Cancel) -> FileFuture<'a, ()>;
 }
+/// Developer export producer; invoked on the file worker, never on the interface.
+#[cfg(feature = "devtools")]
+pub type StreamBody<'a> = Box<dyn FnOnce(&mut dyn std::io::Write) -> Result<(), FileError> + Send + 'a>;
+#[cfg(feature = "devtools")]
+pub trait StreamFiles: Send + Sync {
+    fn replace_stream<'a>(&'a self, target: &'a FileTarget, body: StreamBody<'a>, cancel: &'a Cancel) -> FileFuture<'a, ()>;
+}
 
 /// Failure injection belongs to the service, so document tests exercise the real host workflow.
 pub mod fake {

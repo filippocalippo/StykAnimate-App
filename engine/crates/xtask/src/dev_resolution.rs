@@ -26,6 +26,9 @@ fn inspect(mut input: impl BufRead) -> Result<usize, String> {
         if line.starts_with("styk-screens ") {
             return Err("shipping resolution includes styk-screens".into());
         }
+        if line.contains("feature \"devtools\"") || line.split(" features=[").nth(1).is_some_and(|f| f.split(']').next().is_some_and(|f| f.split(',').any(|f| f.trim() == "devtools"))) {
+            return Err("shipping resolution enables a developer extension seam".into());
+        }
         if line.starts_with("styk-devtools ") || line.starts_with("styk-devtools-engine ") {
             return Err("shipping resolution includes styk-devtools".into());
         }
@@ -136,10 +139,20 @@ mod tests {
             "styk-screens v0.1.0 features=[]",
             "styk-devtools v0.1.0 features=[]",
             "styk-devtools-engine v0.1.0 features=[]",
+            "styk-core v0.1.0 features=[engine,devtools]",
+            "styk-ui feature \"devtools\"",
+            "iced_winit v0.15.0 features=[devtools]",
         ] {
             assert!(inspect(line.as_bytes()).is_err());
         }
         assert!(inspect(b"".as_slice()).is_err());
+    }
+    #[test]
+    #[ignore = "resolves real Cargo graphs; run explicitly in the machine queue"]
+    fn production_crate_developer_feature_is_rejected() {
+        let root=crate::root();let target=host().unwrap();
+        let error=resolve(&root,&target,"styk-core",&["--features","devtools"]).unwrap_err();
+        assert_eq!(error,"shipping resolution enables a developer extension seam");
     }
     #[test]
     #[ignore = "resolves real Cargo graphs; run explicitly in the machine queue"]

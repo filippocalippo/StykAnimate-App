@@ -9,6 +9,12 @@ pub mod capture;
 pub mod protocol;
 pub mod scenario;
 pub mod stats;
+pub mod params;
+pub mod logs;
+pub mod sampling;
+pub mod runtime;
+pub mod bridge;
+pub use serde_json::Value as ParameterValue;
 
 use styk_trace::{RecordKind, snapshot};
 #[cfg(test)]

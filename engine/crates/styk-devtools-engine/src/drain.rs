@@ -15,6 +15,7 @@ const MAX_CURSOR_BYTES: usize = 1024 * 1024;
 const MAX_CURSORS: usize = MAX_CURSOR_BYTES / 128;
 // Each live drain can retain a snapshot, ring scratch, cursor maps and bounded encoding scratch.
 const DRAIN_BYTES: usize = styk_trace::MAX_SNAPSHOT_BYTES
+    + 17 * (crate::capture::MAX_CHUNK + std::mem::size_of::<Vec<u8>>())
     + MAX_CURSOR_BYTES
     + styk_trace::MAX_ARCHIVE_BYTES
     + crate::capture::MAX_CHUNK;
@@ -33,6 +34,8 @@ pub fn accounting() -> (usize, u64) {
     )
 }
 pub struct Drain {
+    notes: SyncSender<Vec<u8>>,
+    note_drops: Arc<std::sync::atomic::AtomicU64>,
     stop: Arc<AtomicBool>,
     wake: SyncSender<()>,
     result: Arc<Mutex<Option<Result<Capture, String>>>>,
@@ -56,6 +59,9 @@ impl Drain {
         let mut capture = Capture::new(cap)?;
         let stop = Arc::new(AtomicBool::new(false));
         let (wake, receiver) = sync_channel(1);
+        let (notes,note_receiver)=sync_channel::<Vec<u8>>(16);
+        let note_drops=Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let missed_notes=note_drops.clone();
         let result = Arc::new(Mutex::new(None));
         let output = result.clone();
         let cancelled = stop.clone();
@@ -63,16 +69,21 @@ impl Drain {
    let _reservation=reservation;
    let mut cursors=BTreeMap::<u32,u64>::new();
    loop {
+    for note in note_receiver.try_iter().take(16) { if note.len()+4+512>cap.saturating_sub(capture.bytes()) || capture.push(&note).is_err(){missed_notes.fetch_add(1,Ordering::Relaxed);} }
     append(&mut capture,&mut cursors,styk_trace::snapshot(),cap);
     if cancelled.load(Ordering::Acquire){break;}
     // Worker-only wait, woken by stop/drop. No interface caller waits or joins.
     let _=receiver.recv_timeout(Duration::from_millis(100));
    }
-   let footer=serde_json::json!({"name":"capture.accounting","ph":"C","pid":1,"tid":0,"ts":clock.now().as_micros() as u64,"args":{"capture_dropped":capture.dropped,"trace_overwritten_or_refused":styk_trace::dropped(),"clock_missing":styk_trace::clock::missing_reads()}});
+   let footer=serde_json::json!({"name":"capture.accounting","ph":"C","pid":1,"tid":0,"ts":clock.now().as_micros() as u64,"args":{"capture_dropped":capture.dropped,"metadata_dropped":missed_notes.load(Ordering::Relaxed),"trace_overwritten_or_refused":styk_trace::dropped(),"clock_missing":styk_trace::clock::missing_reads()}});
    let finished=serde_json::to_vec(&footer).map_err(|e|e.to_string()).and_then(|bytes|capture.push(&bytes)).map(|()|capture);
    if let Ok(mut result)=output.lock(){*result=Some(finished);}
   })).map_err(|e|e.to_string())?;
-        Ok(Self { stop, wake, result })
+        Ok(Self { stop, wake, result, notes, note_drops })
+    }
+    pub fn note(&self,bytes:&[u8])->Result<(),String>{
+        if bytes.len()>crate::capture::MAX_CHUNK || self.notes.try_send(bytes.to_vec()).is_err(){self.note_drops.fetch_add(1,Ordering::Relaxed);return Err("capture metadata queue full".into());}
+        let _=self.wake.try_send(());Ok(())
     }
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Release);

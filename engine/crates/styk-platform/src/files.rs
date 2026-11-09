@@ -77,7 +77,15 @@ impl Files for LocalFiles {
     }
 
     fn replace<'a>(&'a self, target: &'a FileTarget, bytes: &'a [u8], cancel: &'a Cancel) -> FileFuture<'a, ()> {
-        Box::pin(async move {
+        Box::pin(async move { replace_body(target, cancel, |file| {
+            for piece in bytes.chunks(PIECE) { cancelled(cancel)?; file.write_all(piece).map_err(io)?; }
+            Ok(())
+        }) })
+    }
+}
+
+// One atomic replacement implementation for document bytes and streamed tool exports.
+fn replace_body(target: &FileTarget, cancel: &Cancel, body: impl FnOnce(&mut File) -> Result<(), FileError>) -> Result<(), FileError> {
             cancelled(cancel)?;
             let destination = target.path();
             if destination.file_name().is_none() { return Err(FileError::Io("the destination has no file name".into())); }
@@ -101,11 +109,8 @@ impl Files for LocalFiles {
                 }
             };
             observe(WriteStep::Created, destination, &stage.path)?;
-            for piece in bytes.chunks(PIECE) {
-                cancelled(cancel)?;
-                file.write_all(piece).map_err(io)?;
-                observe(WriteStep::Written, destination, &stage.path)?;
-            }
+            body(&mut file)?;
+            observe(WriteStep::Written, destination, &stage.path)?;
             cancelled(cancel)?;
             file.sync_all().map_err(io)?;
             observe(WriteStep::Flushed, destination, &stage.path)?;
@@ -117,6 +122,39 @@ impl Files for LocalFiles {
             stage.committed = true;
             observe(WriteStep::Renamed, destination, &stage.path)?;
             Ok(())
-        })
+}
+
+#[cfg(feature = "devtools")]
+impl styk_services::files::StreamFiles for LocalFiles {
+    fn replace_stream<'a>(&'a self, target: &'a FileTarget, body: styk_services::files::StreamBody<'a>, cancel: &'a Cancel) -> FileFuture<'a, ()> {
+        struct Output<'a> { file: &'a mut File, cancel: &'a Cancel }
+        impl Write for Output<'_> {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.cancel.is_cancelled() { return Err(std::io::Error::other("cancelled")); }
+                self.file.write(&bytes[..bytes.len().min(PIECE)])
+            }
+            fn flush(&mut self) -> std::io::Result<()> { self.file.flush() }
+        }
+        Box::pin(async move { replace_body(target, cancel, |file| body(&mut Output { file, cancel })) })
+    }
+}
+
+#[cfg(all(test,feature="devtools"))]
+mod developer_tests {
+    use super::*;
+    use styk_services::{files::StreamFiles,worker::run_future};
+    #[test]
+    fn streamed_export_preserves_destination_on_failure_and_cancel() {
+        let folder=std::env::temp_dir().join(format!("styk-stream-{}-{}",std::process::id(),SERIAL.fetch_add(1,Ordering::Relaxed)));
+        fs::create_dir(&folder).unwrap();let path=folder.join("capture.json");
+        fs::write(&path,b"original").unwrap();let target=FileTarget::new(&path);
+        let failed=run_future(LocalFiles.replace_stream(&target,Box::new(|out|{out.write_all(b"partial").map_err(io)?;Err(FileError::Full)}),&Cancel::new()));
+        assert_eq!(failed,Err(FileError::Full));assert_eq!(fs::read(&path).unwrap(),b"original");
+        let cancel=Cancel::new();let during=cancel.clone();
+        assert!(run_future(LocalFiles.replace_stream(&target,Box::new(move|out|{out.write_all(b"partial").map_err(io)?;during.cancel();out.write_all(b"later").map_err(io)}),&cancel)).is_err());
+        assert_eq!(fs::read(&path).unwrap(),b"original");
+        run_future(LocalFiles.replace_stream(&target,Box::new(|out|out.write_all(b"complete").map_err(io)),&Cancel::new())).unwrap();
+        assert_eq!(fs::read(&path).unwrap(),b"complete");
+        fs::remove_file(path).unwrap();fs::remove_dir(folder).unwrap();
     }
 }
