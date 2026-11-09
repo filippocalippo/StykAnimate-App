@@ -53,7 +53,7 @@ export const TUTORIALS = Object.freeze([
         done: now => now.selected === null, doneKey: 'tutorials.tour.deselect.done', demo: {kind: 'click', at: 'corner'}},
       {id: 'select', target: FIGURE, sayKey: 'tutorials.tour.select.say', moreKey: 'tutorials.tour.select.more',
         done: now => now.selected !== null, doneKey: 'tutorials.tour.select.done', demo: {kind: 'click'}},
-      {id: 'panels', target: {selector: '#right-dock .shell-tabs'}, sayKey: 'tutorials.tour.panels.say', moreKey: 'tutorials.tour.panels.more'},
+      {id: 'panels', target: {selector: '.shell-tabs:has(#properties-tab)'}, sayKey: 'tutorials.tour.panels.say', moreKey: 'tutorials.tour.panels.more'},
       {id: 'timeline', target: {selector: '#animation-timeline'}, sayKey: 'tutorials.tour.timeline.say', moreKey: 'tutorials.tour.timeline.more'},
       {id: 'workspaces', target: {selector: '.workspace-switch'}, sayKey: 'tutorials.tour.workspaces.say', moreKey: 'tutorials.tour.workspaces.more'},
     ],

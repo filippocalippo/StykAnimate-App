@@ -3,79 +3,72 @@ import {localizedText, appendLocalized, localizedAttribute, localizedMarkup} fro
 import {t as interfaceText} from '../localization.mjs';
 
 /**
- * The dock host: lays the editor's static shell (index.html) out from the
- * layout solver, and is the single owner of which panel shows where.
+ * The dock host (docs/DOCKING.md): draws the workspace's arrangement
+ * (dock-model.mjs) as the solver (dock-solve.mjs) fits it, and is the only
+ * owner of which panel shows where.
  *
- * - The stored layout comes from layout-store.mjs (the workspace preferences
- *   IPC on desktop, localStorage in the browser), loaded before the first
- *   commit. The solver fits it into the `#app` box; the host applies the
- *   solution in one synchronous commit: `:root[data-tier|data-height|
- *   data-left]`, the band's fold steps (`.titlebar[data-band]`, from the
- *   band's widths that topbar.mjs measures and the solver reads as
- *   `bandMin`), the workspace grid (CSS custom properties on `.workspace`),
- *   the islands, tabs, strips and sheets of each side, the floating
- *   islands, the timeline's state and the splitters. Nothing animates its
- *   size; resizes and splitter drags commit once per frame.
+ * - The state loads from dock-store.mjs before the first commit. Each commit
+ *   solves the arrangement for the `#app` box and applies it synchronously:
+ *   `:root[data-tier|data-height|data-chrome]`, the band's folds, the stage's
+ *   cell (the workspace grid has one named area, the stage, where the tool
+ *   bar and the stage's own overlays keep their places), and every group as
+ *   an island placed by its rectangle (absolutely, inside the workspace).
+ *   Writes compare first, so a commit that changes nothing restyles nothing.
  * - Panel roots (`#properties-panel`, `#vfx-panel`, `#user-library`,
- *   `#builder-outliner`, `.timeline-panel`) are moved with append() and never
- *   re-created; they move only when their place changes, so scroll positions
- *   and focus survive a commit. Tabs (`#properties-tab`, `#vfx-tab`,
- *   `#library-tab`) move with their panel. Feature modules never hide each
- *   other: they hear `onVisibility` from the panel registry.
- * - Sheets are islands shown as `popover="manual"` in place (the band's
- *   Properties button at compact width, a strip's icon, the timeline body at
- *   the low height tier), so every root keeps its DOM ancestry while it
- *   renders in the top layer. They close on Escape and on a press outside
- *   them and outside any other open overlay.
- * - Fitting never writes the stored layout; only a person's action does
- *   (a tab, a splitter, a toggle, the workspace API).
- *
- * Transitional (until the stage header and the hidden log of M3b): the
- * status bar under the workspace is passed to the solver as `footer`, and
- * the stage island's header row is measured (the canvas toolbar, plus
- * Build's bar) instead of the stage header's 40px. Until M5's painter draws
- * 24px Camera and Scene rows and 28px short-tier rows, `timelineRows` (the
- * painter's ruler and row heights) sizes the default timeline, so it shows
- * the content rows it promises.
+ *   `#builder-outliner`, `#animation-timeline`) are moved, never re-created,
+ *   and only when their place changes, so scroll positions and focus
+ *   survive. A group of the timeline alone is the timeline's own island.
+ * - A collapsed group is a 40px strip of icons beside the stage, or its
+ *   header above or below it; an icon or a tab opens the panel as a flyout
+ *   beside it. Groups the window folds to the sheet open from the band's
+ *   Properties button. Flyouts and the sheet close on Escape (captured, so
+ *   the editor's Cancel does not also run), on a press outside, and when
+ *   focus leaves them.
+ * - Dividers and floats change the arrangement live once per frame through
+ *   a transient override; the release stores it once. Fitting never writes.
  */
 import {icon} from '../icons.mjs';
 import {PANEL_CATALOG, createPanelRegistry} from './panel-registry.mjs';
-import {createLayoutStore, desktopLayoutBackend, storageLayoutBackend} from './layout-store.mjs';
+import {createDockStore, desktopDockBackend, storageDockBackend} from './dock-store.mjs';
 import {
-  activatePanel, applyPreset, canPlacePanel, canSavePreset, deletePreset, movePanel, normalizeMode, renamePreset, resetLayout,
-  resetMode, savePreset, setSharedSize, toggleFocus, updatePreset,
-} from './layout-schema.mjs';
-import {SHELL_METRICS, solveLayout} from './layout-solver.mjs';
+  STAGE, activatePanel, closePanel, dockFloat, findPanel, findGroup, groupsOf, moveGroup, movePanel, panelsOf, placeFloat,
+  reopenPanel, resizeChildren, setCollapsed, setTools, walk,
+} from './dock-model.mjs';
+import {
+  applyPreset, defaultLayout, deleteLayout, exportLayout, focusActive, importLayout, isModified, normalizeMode, presetLayout,
+  renameLayout, resetAll, resetWorkspace, saveLayout, setLayout, toggleFocus, updateLayout, MAX_SAVED_LAYOUTS,
+} from './dock-workspaces.mjs';
+import {HEADER, dividerChanges, dividerReset, solveDock} from './dock-solve.mjs';
+import {SHELL_METRICS} from './layout-solver.mjs';
 import {MENUBAR_FOLD, watchBand} from './topbar.mjs';
 import {COLLECTIONS} from './dock-keyboard.mjs';
+import {groupHeaderAt} from './dock-tabs.mjs';
 
-const SIDES = Object.freeze(['left', 'right']);
 const DEFAULT_ROOTS = Object.freeze({properties: '#properties-panel', vfx: '#vfx-panel', library: '#user-library',
   structure: '#builder-outliner', timeline: '#animation-timeline'});
-const SIDE_NAMES = Object.freeze({left: interfaceText("dockHost.leftPanels"), right: interfaceText("dockHost.inspector")});
 const STEP = 12, BIG_STEP = 40;
 /** Tall timeline stores this share of the window (the solver's 60% maximum). */
 const TALL_TIMELINE = 0.6;
+/** Two presses on a header within this time collapse or expand its group. */
+const DOUBLE_PRESS_MS = 500;
 
-const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
 const px = value => `${Math.round(value)}px`;
 
-/** The browser's localStorage, or null where the page may not use it. */
 function browserStorage(win) {
   try { return win.localStorage ?? null; } catch { return null; }
 }
 
 /**
- * Loads the stored layout, then lays the shell out. Resolves to the dock
- * host (see createDockHost), whose `workspace` is `window.styk.workspace`.
+ * Loads the stored state, then lays the shell out. Resolves to the dock host
+ * (see createDockHost), whose `workspace` is `window.styk.workspace`.
  */
 export async function installShell({document: doc = globalThis.document, window: win = globalThis.window, desktop,
   legacy, platform, onError, onBeforeChange, timelineRows, ready = null, catalog = PANEL_CATALOG, touch = null} = {}) {
   const registry = createPanelRegistry({catalog});
   const backend = desktop?.getWorkspacePreferences && desktop?.setWorkspacePreferences
-    ? desktopLayoutBackend(desktop) : storageLayoutBackend(browserStorage(win));
+    ? desktopDockBackend(desktop) : storageDockBackend(browserStorage(win));
   const workspace = doc.querySelector('.workspace');
-  const store = createLayoutStore({...backend, catalog: () => registry.constraints(), legacy, onError: error => {
+  const store = createDockStore({...backend, catalog: () => registry.constraints(), legacy, onError: error => {
     workspace?.dispatchEvent(new CustomEvent('styk-workspace-persistence-error', {detail: {message: error?.message || String(error)}}));
     onError?.(error);
   }});
@@ -96,16 +89,6 @@ export function paintedMetrics(timelineRows, metrics = SHELL_METRICS) {
   return {...metrics, height, timeline: {...metrics.timeline, pinnedRow: pinnedRow ?? metrics.timeline.pinnedRow}};
 }
 
-/**
- * Applies solutions to the shell's DOM. `registry` is the panel registry
- * (panel-registry.mjs), `store` the layout store (loaded), `timelineRows`
- * the timeline painter's heights (see paintedMetrics), `ready` a promise of
- * the editor being ready (the band's first measurement waits for it where it
- * can; topbar.mjs), `touch` the touch mode (src/touch/touch-mode.mjs: its
- * `state` and `on`), whose layouts the touch stylesheet arranges: the host
- * then solves for the workspace's own box, folds the menubar into the mark
- * and leaves the sheets' places to the stylesheet (docs/TOUCH.md).
- */
 export function createDockHost({document: doc = globalThis.document, window: win = globalThis.window, registry, store,
   platform, onBeforeChange, timelineRows, ready = null, touch = null} = {}) {
   const metrics = paintedMetrics(timelineRows);
@@ -116,75 +99,85 @@ export function createDockHost({document: doc = globalThis.document, window: win
   const viewport = doc.getElementById('viewport');
   const band = doc.querySelector('.titlebar');
   const footer = doc.querySelector('.statusbar');
-  const hosts = Object.fromEntries(SIDES.map(side => [side, workspace.querySelector(`.shell-${side}`)]));
-  const bottom = doc.getElementById('animation-timeline');
+  const timeline = doc.getElementById('animation-timeline');
   const body = doc.getElementById('timeline');
   const sheetButton = doc.querySelector('.shell-sheet-button');
   const bodyButton = doc.querySelector('.shell-timeline-sheet');
   const expandButton = doc.getElementById('expand-timeline');
   const abort = new AbortController(), signal = abort.signal;
   const listeners = {solve: new Set()};
-  const islands = Object.fromEntries(SIDES.map(side => [side, [...hosts[side].querySelectorAll(':scope > .shell-island:not(.shell-sheet)')]]));
-  const sheetIslands = {}, strips = {}, floats = new Map();
-  const sheets = Object.fromEntries(SIDES.map(side => [side, {open: false, active: null, invoker: null}]));
-  const splitters = {};
-  // Every tab element, attached or not: a tab moves with its panel and is never re-created.
-  const tabElements = new Map([...workspace.querySelectorAll('[role="tab"][data-panel]')].map(tab => [tab.dataset.panel, tab]));
-  const written = new Map();
-  /** Writes a custom property only when it changes, so a commit that changes nothing restyles nothing. */
-  const setVar = (element, name, value) => {
-    const key = `${element.className}|${name}`;
-    if (written.get(key) === value) return;
-    written.set(key, value);
-    element.style.setProperty(name, value);
+  workspace.dataset.dock = '';
+  // Panel roots and tabs that are nowhere on screen (closed, folded and not open, another workspace's) wait here.
+  let parking = workspace.querySelector(':scope > .shell-parking');
+  if (!parking) {
+    parking = doc.createElement('div');
+    parking.className = 'shell-parking';
+    parking.hidden = true;
+    appendLocalized(workspace, parking);
+  }
+  const islands = new Map(), strips = new Map(), dividerEls = new Map();
+  const tabElements = new Map([...doc.querySelectorAll('[role="tab"][data-panel]')].map(tab => [tab.dataset.panel, tab]));
+  const written = new WeakMap();
+  /** Writes a style property only when it changes. */
+  const setStyle = (element, name, value) => {
+    let map = written.get(element);
+    if (!map) written.set(element, map = new Map());
+    if (map.get(name) === value) return;
+    map.set(name, value);
+    if (value === null) element.style.removeProperty(name); else element.style.setProperty(name, value);
   };
-  let floatHost = null, solution = null, override = null, frame = 0, destroyed = false, bodyOpen = false, bodyInvoker = null;
-  // The floating tool bar's columns: two where one column of tools would not fit #viewport's height.
+  const setAttr = (element, name, value) => {
+    if (value === null || value === false) { if (element.hasAttribute(name)) element.removeAttribute(name); return; }
+    const text = value === true ? '' : String(value);
+    if (element.getAttribute(name) !== text) element.setAttribute(name, text);
+  };
+  let solution = null, override = null, frame = 0, destroyed = false, origin = {x: 0, y: 0};
+  let flyout = null;          // {group, panel, invoker}
+  const sheet = {open: false, active: null, invoker: null, element: null};
+  let bodyOpen = false, bodyInvoker = null;
   let railColumns = 1;
   let currentMode = normalizeMode(workspace.dataset.mode);
+  const headerPress = {key: null, time: 0};
 
   const descriptor = id => registry.get(id);
-  const title = id => descriptor(id)?.titleKey ? interfaceText(descriptor(id).titleKey) : descriptor(id)?.title ?? id;
+  const title = id => (descriptor(id)?.titleKey ? interfaceText(descriptor(id).titleKey) : descriptor(id)?.title ?? id);
   const rootOf = id => registry.root(id) ?? doc.querySelector(DEFAULT_ROOTS[id] ?? `[data-panel="${id}"]`);
   const report = error => { globalThis.reportError?.(error); };
   const mode = () => normalizeMode(workspace.dataset.mode);
+  const catalog = () => registry.constraints();
+  const layoutNow = () => store.state.workspaces[mode()].layout;
+  const fallback = () => defaultLayout(mode(), {catalog: catalog()});
 
   // ---------------------------------------------------------------------
   // Solving
 
-  /** The touch mode's state while the touch interface is on, else null. */
   const touchState = () => (touch?.state?.active ? touch.state : null);
 
   function env() {
-    // #viewport's top in the stage island: the stage header, and in Build the builder's row under it.
     const head = viewport && stage && !stage.hidden ? Math.round(viewport.getBoundingClientRect().top - stage.getBoundingClientRect().top) || undefined : undefined;
     const touching = touchState();
-    // The touch layouts place the band, the wing and the tab bar around the workspace themselves (touch.css), so the
-    // solver fits the workspace's own box.
     if (touching) {
-      // The touch band always has its menubar folded into the mark: its fold steps are the folded pass's.
       const widths = bandWatch?.forWidth(0);
       const bandMin = widths?.minimal ? {...widths.minimal, minimal: widths.minimal} : 0;
       return {width: workspace.offsetWidth, height: workspace.offsetHeight, mode: mode(), platform, footer: 0,
-        bandMin, metrics, measured: {band: 0, stageHead: head}, railColumns, touch: touching};
+        bandMin, metrics, measured: {band: 0, stageHead: head}, railColumns, touch: touching, panels: catalog()};
     }
-    // The window, the band above the workspace and (until M3b) the status bar below it.
-    // The band's and the stage header's measured heights (the height tier's values unless the UI scale changed them).
     const chrome = band?.offsetHeight || undefined;
     const below = footer && !footer.hidden ? footer.offsetHeight : 0;
     return {width: app.clientWidth, height: app.clientHeight, mode: mode(), platform, footer: below,
-      bandMin: bandWatch?.forWidth(app.clientWidth) ?? 0, metrics, measured: {band: chrome, stageHead: head}, railColumns};
+      bandMin: bandWatch?.forWidth(app.clientWidth) ?? 0, metrics, measured: {band: chrome, stageHead: head}, railColumns, panels: catalog()};
   }
 
-  /** Solves the stored layout (or a splitter's transient size) and applies it now. */
+  /** Solves the workspace's arrangement (or a gesture's transient one) and applies it now. */
   function commit() {
     if (frame) { win.cancelAnimationFrame(frame); frame = 0; }
     if (destroyed) return solution;
     try {
-      const layout = override ? override(store.layout) : store.layout;
+      const layout = override ? override(layoutNow()) : layoutNow();
       const focused = doc.activeElement;
-      solution = solveLayout(layout, env());
-      apply(solution);
+      solution = solveDock(layout, env());
+      solution.layout = layout;
+      apply(solution, layout);
       keepFocus(focused);
       for (const listener of [...listeners.solve]) {
         try { listener(solution); } catch (error) { report(error); }
@@ -192,154 +185,91 @@ export function createDockHost({document: doc = globalThis.document, window: win
     } catch (error) { report(error); }
     return solution;
   }
+  function schedule() {
+    if (!frame && !destroyed) frame = win.requestAnimationFrame(() => { frame = 0; commit(); });
+  }
+
+  /** Solves an arrangement without applying it (a drop preview). */
+  const solveOnly = layout => solveDock(layout, env());
+
   /**
-   * A commit that moves or hides the focused tab, panel or strip button (a
-   * tab menu's Dock left, Hide or Fold, Focus mode) must not drop focus to
-   * the page (WCAG 2.4.3): focus goes to the panel's tab where it is docked
-   * or floating, its strip button where it is folded, the band's Properties
-   * button where it is a sheet, else the stage. No layout is read.
+   * A commit that moves or hides the focused element must not drop focus to
+   * the page: focus goes to the panel's tab, its strip icon, the band's
+   * Properties button where it is in the sheet, else the stage.
    */
   function keepFocus(focused) {
     if (!focused || focused === doc.body || focused === doc.documentElement) return;
-    const lost = !focused.isConnected || doc.activeElement === doc.body || !doc.activeElement
-      || Boolean(focused.closest('[hidden], .shell-sheet[popover]:not(:popover-open), .shell-timeline-body[popover]:not(:popover-open)'));
+    const lost = !focused.isConnected || doc.activeElement === doc.body || !doc.activeElement || Boolean(focused.closest('[hidden], .shell-parking'));
     if (!lost) return;
     const id = focused.closest?.('[data-panel]')?.dataset.panel ?? focused.dataset?.stripFor ?? null;
-    const shown = element => element?.isConnected && !element.hidden && !element.closest('[hidden]');
-    const where = id ? presentation(id) : null;
+    const usable = element => element?.isConnected && !element.closest('[hidden], .shell-parking') && element.getClientRects().length;
     let target = null;
-    if (where === 'docked' || where === 'float') {
-      const tab = tabOf(id);
-      target = shown(tab) && !tab.parentElement?.hidden ? tab : [...(rootOf(id)?.querySelectorAll(COLLECTIONS) ?? [])].find(shown) ?? null;
-    } else if (where === 'strip') target = [...SIDES.map(side => strips[side]?.querySelector(`:scope > [data-panel="${id}"]`))].find(shown) ?? null;
-    else if (where === 'sheet' && sideOf(id) === 'right') target = shown(sheetButton) ? sheetButton : null;
+    const where = id ? presentation(id) : null;
+    if (where === 'docked' || where === 'float') target = [tabElements.get(id), ...(rootOf(id)?.querySelectorAll(COLLECTIONS) ?? [])].find(usable) ?? null;
+    else if (where === 'strip') target = [...workspace.querySelectorAll(`.shell-strip-button[data-panel="${id}"], .shell-island [role="tab"][data-panel="${id}"]`)].find(usable) ?? null;
+    else if (where === 'sheet') target = usable(sheetButton) ? sheetButton : null;
     (target ?? viewport)?.focus({preventScroll: true});
-  }
-  /** Coalesces continuous changes (a resize, a drag) into one commit per frame. */
-  function schedule() {
-    if (!frame && !destroyed) frame = win.requestAnimationFrame(() => { frame = 0; commit(); });
   }
 
   // ---------------------------------------------------------------------
   // Applying
 
-  function apply(s) {
-    root.dataset.tier = s.tier;
-    root.dataset.height = s.height;
-    root.dataset.chrome = s.chrome;
+  function apply(s, layout) {
+    setAttr(root, 'data-tier', s.tier);
+    setAttr(root, 'data-height', s.height);
+    setAttr(root, 'data-chrome', s.chrome);
     applyBand(s);
-    root.dataset.left = s.regions.left.state;
-    workspace.dataset.rail = s.rail.side;
-    // Along the stage's bottom on an upright phone (the touch interface), down its side everywhere else.
-    if (s.rail.orientation === 'horizontal') workspace.dataset.railOrientation = 'horizontal';
-    else delete workspace.dataset.railOrientation;
+    const leftGroups = s.groups.filter(group => group.side === 'left');
+    setAttr(root, 'data-left', leftGroups.some(group => group.state === 'docked') ? 'docked' : leftGroups.length ? 'strip' : 'hidden');
+    setAttr(workspace, 'data-rail', s.rail.side);
+    setAttr(workspace, 'data-rail-orientation', s.rail.orientation === 'horizontal' ? 'horizontal' : null);
     const tools = workspace.querySelector('.shell-rail > .tool-dock');
-    if (tools && tools.getAttribute('aria-orientation') !== s.rail.orientation) tools.setAttribute('aria-orientation', s.rail.orientation);
-    workspace.dataset.bottomSpan = s.regions.bottom.span;
-    if (s.mode === 'rig') workspace.dataset.builderTimeline = s.regions.bottom.state === 'hidden' ? 'hidden' : 'visible';
-    else delete workspace.dataset.builderTimeline;
+    if (tools) setAttr(tools, 'aria-orientation', s.rail.orientation);
+    const timelineShown = s.panels.timeline?.presentation !== 'hidden' && s.panels.timeline?.presentation !== 'unavailable';
+    if (s.mode === 'rig') setAttr(workspace, 'data-builder-timeline', timelineShown ? 'visible' : 'hidden');
+    else setAttr(workspace, 'data-builder-timeline', null);
+    origin = {x: s.rects.workspace.x, y: touchState() ? 0 : s.rects.workspace.y};
     applyGrid(s);
-    for (const side of SIDES) applySide(s, side);
-    applyFloating(s);
-    applyBottom(s);
+    applyPanels(s, layout);
+    applyDividers(s);
     applyControls(s);
     applyVisibility(s);
   }
 
-  /** The band's fold steps, and at the minimal tier the menubar folded into the mark. */
   function applyBand(s) {
     if (!band) return;
-    // The touch interface always reaches the menus through the mark (docs/TOUCH.md); a tablet's band folds its words too.
     const steps = (s.touch ? [MENUBAR_FOLD, ...s.band] : s.tier === 'minimal' ? [MENUBAR_FOLD, ...s.band] : s.band).join(' ');
     if ((band.getAttribute('data-band') ?? '') === steps) return;
     if (steps) band.setAttribute('data-band', steps); else band.removeAttribute('data-band');
   }
 
+  /** The workspace grid: one named area, the stage's rectangle, so what sits on the stage keeps its CSS. */
   function applyGrid(s) {
-    const across = SHELL_METRICS.width[s.tier], down = SHELL_METRICS.height[s.height];
-    const extent = side => {
-      const region = s.regions[side];
-      if (region.state === 'docked') return region.size + (region.strip ? across.columnGap + region.strip : 0);
-      return region.state === 'strip' ? region.strip : 0;
-    };
-    const names = [], columns = [];
-    const add = (name, size) => { names.push(name); columns.push(size); };
-    // The rail floats inside the stage (layout/rail.css places it); it takes no column.
-    if (extent('left')) add('left', px(extent('left')));
-    add('stage', 'minmax(0, 1fr)');
-    if (extent('right')) add('right', px(extent('right')));
-    const b = s.regions.bottom, shown = b.state !== 'hidden';
-    const lower = names.map(name => (b.span === 'stage' && name !== 'stage' ? name : 'bottom'));
-    const set = (name, value) => setVar(workspace, name, value);
-    set('--shell-columns', columns.join(' '));
-    set('--shell-rows', shown ? `minmax(0, 1fr) ${px(b.size)}` : 'minmax(0, 1fr)');
-    set('--shell-areas', shown ? `"${names.join(' ')}" "${lower.join(' ')}"` : `"${names.join(' ')}"`);
-    set('--shell-gap', px(across.columnGap));
-    set('--shell-row-gap', px(down.rowGap));
-    set('--shell-pad-start', px(across.padEnd));
-    set('--shell-pad-end', px(across.padEnd));
-    set('--shell-pad-bottom', px(down.padBottom));
-    set('--shell-pad-top', px(s.padTop ?? down.padBottom));
-    set('--shell-rail', px(s.rail.width));
-    // The floating tool bar's top in the stage island (the solver's rect: #viewport's top and the bar's margin).
-    set('--shell-rail-top', px(s.rail.rect.y - s.stage.y));
-    set('--shell-left', px(s.regions.left.size));
-    set('--shell-right', px(s.regions.right.size));
-    set('--shell-bottom', px(shown ? b.size : 0));
+    const x = Math.round(s.stage.x - origin.x), y = Math.round(s.stage.y - origin.y);
+    setStyle(workspace, '--shell-columns', `${px(x)} ${px(s.stage.width)} minmax(0, 1fr)`);
+    setStyle(workspace, '--shell-rows', `${px(y)} ${px(s.stage.height)} minmax(0, 1fr)`);
+    setStyle(workspace, '--shell-areas', '". . ." ". stage ." ". . ."');
+    setStyle(workspace, '--shell-gap', '0px');
+    setStyle(workspace, '--shell-row-gap', '0px');
+    for (const name of ['--shell-pad-start', '--shell-pad-end', '--shell-pad-top']) setStyle(workspace, name, '0px');
+    // The touch stylesheet keeps the bottom padding for the safe area; the grid's last track takes it.
+    setStyle(workspace, '--shell-pad-bottom', '0px');
+    setStyle(workspace, '--shell-rail', px(s.rail.width));
+    setStyle(workspace, '--shell-rail-top', px(s.rail.rect.y - s.stage.y));
+    setStyle(workspace, '--shell-gutter-x', px(s.gaps.x));
+    setStyle(workspace, '--shell-gutter-y', px(s.gaps.y));
   }
 
-  /** The panels of a side that wait off the grid: folded to a strip or a sheet, or hidden. */
-  const offGrid = (s, side) => Object.entries(s.panels)
-    .filter(([id, panel]) => panel.side === side && ['strip', 'sheet', 'hidden'].includes(panel.presentation) && id !== 'timeline')
-    .map(([id]) => id);
-  const byOrder = (s, ids) => {
-    const records = store.layout.modes[s.mode]?.panels ?? [];
-    const order = id => records.find(record => record.id === id)?.order ?? 999;
-    return [...ids].sort((a, b) => order(a) - order(b));
+  const place = (element, rect) => {
+    setStyle(element, 'position', 'absolute');
+    setStyle(element, 'left', px(rect.x - origin.x));
+    setStyle(element, 'top', px(rect.y - origin.y));
+    setStyle(element, 'width', px(rect.width));
+    setStyle(element, 'height', px(rect.height));
   };
 
-  function applySide(s, side) {
-    const region = s.regions[side], host = hosts[side];
-    host.dataset.state = region.state;
-    const waiting = byOrder(s, offGrid(s, side));
-    host.hidden = region.state === 'hidden' && !waiting.length;
-    host.setAttribute('aria-label', region.groups.length ? region.groups.flatMap(group => group.tabs).map(title).join(', ') : SIDE_NAMES[side]);
-    // Docked islands, stacked by their share of the side's height.
-    region.groups.forEach((group, index) => {
-      const island = islandAt(side, index);
-      island.hidden = false;
-      island.style.flex = region.groups.length > 1 ? `0 0 ${px(group.rect.height)}` : '';
-      fill(island, group.tabs, group.active);
-    });
-    islands[side].slice(region.groups.length).forEach(island => { island.hidden = true; island.style.flex = ''; });
-    // The strip's icons, then the sheet island that holds everything off the grid.
-    const stripped = region.state === 'sheet' ? [] : region.panels.strip;
-    const strip = stripFor(side);
-    strip.hidden = !stripped.length;
-    host.toggleAttribute('data-strip', Boolean(stripped.length));
-    syncStrip(strip, stripped);
-    const sheet = sheetFor(side), state = sheets[side];
-    const openable = waiting.filter(id => s.panels[id].presentation !== 'hidden');
-    if (!openable.includes(state.active)) state.active = openable[0] ?? null;
-    if (state.open && !state.active) closeSheet(side, {restoreFocus: false, recommit: false});
-    fill(sheet, waiting, state.active, {hide: waiting.filter(id => s.panels[id].presentation === 'hidden')});
-    sheet.dataset.side = side;
-    if (state.open) placeSheet(side);
-  }
-
-  function islandAt(side, index) {
-    let island = islands[side][index];
-    if (!island) {
-      island = makeIsland(`${side}-${index}`);
-      const after = islands[side].at(-1) ?? null;
-      if (after) after.after(island); else hosts[side].prepend(island);
-      islands[side][index] = island;
-    }
-    return island;
-  }
-
   function makeIsland(key) {
-    const island = doc.createElement('div');
+    const island = doc.createElement('section');
     island.className = 'ui-island shell-island';
     island.dataset.island = key;
     const tabs = doc.createElement('div');
@@ -350,59 +280,77 @@ export function createDockHost({document: doc = globalThis.document, window: win
     return island;
   }
 
-  function sheetFor(side) {
-    if (!sheetIslands[side]) {
-      const sheet = makeIsland(`${side}-sheet`);
-      sheet.classList.add('ui-sheet', 'shell-sheet');
-      sheet.setAttribute('popover', 'manual');
-      sheet.setAttribute('role', 'dialog');
-      sheet.setAttribute('aria-label', SIDE_NAMES[side]);
-      sheet.id = `${side}-sheet`;
-      appendLocalized(hosts[side], sheet);
-      sheetIslands[side] = sheet;
-      sheet.addEventListener('focusout', event => {
-        if (sheets[side].open && leaves(event, [sheet, sheets[side].invoker])) closeSheet(side, {restoreFocus: false});
-      }, {signal});
+  function islandFor(id) {
+    let island = islands.get(id);
+    if (!island) {
+      island = makeIsland(id);
+      island.dataset.group = id;
+      islands.set(id, island);
     }
-    return sheetIslands[side];
+    return island;
   }
 
-  function stripFor(side) {
-    if (!strips[side]) {
-      const strip = doc.createElement('div');
+  function tabOf(id) {
+    let tab = tabElements.get(id);
+    if (!tab) {
+      tab = doc.createElement('button');
+      tab.type = 'button';
+      tab.className = 'ui-tab';
+      tab.id = `${id}-tab`;
+      tab.setAttribute('role', 'tab');
+      tab.dataset.panel = id;
+      if (descriptor(id)?.titleKey) localizedText(tab, descriptor(id).titleKey); else tab.textContent = title(id);
+      tabElements.set(id, tab);
+    }
+    localizedAttribute(tab, 'title', 'dockHost.dragToMovePanelRightClickForLayout', {});
+    const target = rootOf(id);
+    if (target?.id) tab.setAttribute('aria-controls', target.id);
+    return tab;
+  }
+
+  /** Puts `nodes` into `parent` in order from `start`, moving only what is out of place. */
+  function order(parent, nodes, start = 0) {
+    nodes.forEach((node, index) => {
+      const at = parent.children[start + index] ?? null;
+      if (at !== node) parent.insertBefore(node, at);
+    });
+  }
+
+  /** Fills an island: its tabs in order, the active one selected, then the panel roots (`roots` false: tabs only). */
+  function fill(island, ids, active, {roots = true} = {}) {
+    const tablist = island.querySelector(':scope > .shell-tabs');
+    const tabs = ids.map(tabOf);
+    order(tablist, tabs);
+    for (const tab of [...tablist.children]) if (!tabs.includes(tab)) parking.append(tab);
+    tablist.hidden = !ids.length;
+    tablist.setAttribute('aria-label', ids.map(title).join(', '));
+    island.setAttribute('aria-label', ids.map(title).join(', '));
+    for (const id of ids) {
+      const tab = tabOf(id), selected = id === active;
+      tab.hidden = false;
+      setAttr(tab, 'aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    }
+    if (roots) order(island, ids.map(rootOf).filter(Boolean), 1);
+    island.dataset.panels = ids.join(' ');
+  }
+
+  function stripFor(id) {
+    let strip = strips.get(id);
+    if (!strip) {
+      strip = doc.createElement('div');
       strip.className = 'ui-strip shell-strip';
       strip.dataset.ui = '';
+      strip.dataset.group = id;
       strip.setAttribute('role', 'toolbar');
-      localizedAttribute(strip, 'aria-label', "dockHost.folded", {value: SIDE_NAMES[side]});
       strip.setAttribute('aria-orientation', 'vertical');
-      if (side === 'left') hosts[side].prepend(strip); else appendLocalized(hosts[side], strip);
-      strips[side] = strip;
+      strips.set(id, strip);
     }
-    return strips[side];
+    return strip;
   }
 
-  function syncStrip(strip, ids) {
-    const buttons = ids.flatMap(id => {
-      let button = strip.querySelector(`:scope > [data-panel="${id}"]`);
-      if (!button) {
-        button = doc.createElement('button');
-        button.type = 'button';
-        button.className = 'ui-icon-button shell-strip-button';
-        button.dataset.panel = id;
-        button.setAttribute('aria-haspopup', 'dialog');
-        localizedMarkup(button, icon(descriptor(id)?.icon ?? 'panel-right'));
-      }
-      if (descriptor(id)?.titleKey) localizedAttribute(button, 'aria-label', descriptor(id).titleKey); else button.setAttribute('aria-label', title(id));
-      button.dataset.tip = title(id);
-      return [button, ...stripActions(id)];
-    });
-    order(strip, buttons);
-    for (const button of [...strip.children]) if (!buttons.includes(button)) button.remove();
-  }
-
-  // A folded panel's own one-click actions ([data-strip-action="order"] in its root: Structure's Fit figure,
-  // Timeline and Snapping) stay one click away as strip buttons under its icon. Each one clicks its source,
-  // so the source's handlers stay the one path, and mirrors the source's name, glyph and state.
+  // A folded panel's own one-click actions ([data-strip-action="order"] in its root) stay one click away as
+  // strip buttons under its icon. Each one clicks its source and mirrors its name, glyph and state.
   const stripMirrors = new Map();
   const MIRRORED = ['aria-pressed', 'aria-expanded', 'aria-controls', 'disabled'];
   function stripActions(id) {
@@ -437,82 +385,205 @@ export function createDockHost({document: doc = globalThis.document, window: win
     });
   }
 
-  /** Puts `nodes` into `parent` in order from `start`, moving only what is out of place. */
-  function order(parent, nodes, start = 0) {
-    nodes.forEach((node, index) => {
-      const at = parent.children[start + index] ?? null;
-      if (at !== node) parent.insertBefore(node, at);
-    });
-  }
-
-  function tabOf(id) {
-    let tab = tabElements.get(id);
-    if (!tab) {
-      tab = doc.createElement('button');
-      tab.type = 'button';
-      tab.className = 'ui-tab';
-      tab.id = `${id}-tab`;
-      tab.setAttribute('role', 'tab');
-      tab.dataset.panel = id;
-      if (descriptor(id)?.titleKey) localizedText(tab, descriptor(id).titleKey); else tab.textContent = title(id);
-      localizedAttribute(tab, "title", "dockHost.dragToMovePanelRightClickForLayout", {});
-      tabElements.set(id, tab);
-    }
-    const target = rootOf(id);
-    if (target?.id) tab.setAttribute('aria-controls', target.id);
-    return tab;
-  }
-
-  /** Moves the panels' tabs and roots into an island and shows the active one. */
-  function fill(island, ids, active, {hide = []} = {}) {
-    const tablist = island.querySelector(':scope > .shell-tabs');
-    const tabs = ids.map(tabOf);
-    order(tablist, tabs);
-    for (const tab of [...tablist.children]) if (!tabs.includes(tab)) tab.remove();
-    const roots = ids.map(rootOf).filter(Boolean);
-    order(island, roots, 1);
-    const shown = ids.filter(id => !hide.includes(id));
-    tablist.hidden = !shown.length;
-    tablist.setAttribute('aria-label', shown.map(title).join(', ') || SIDE_NAMES.right);
-    for (const id of ids) {
-      const tab = tabOf(id), selected = id === active;
-      tab.hidden = hide.includes(id);
-      tab.setAttribute('aria-selected', String(selected));
-      tab.tabIndex = selected ? 0 : -1;
-    }
-    island.dataset.panels = ids.join(' ');
-  }
-
-  function applyFloating(s) {
-    const live = new Set(s.floating.map(item => item.panel));
-    for (const [id, island] of floats) if (!live.has(id)) { island.remove(); floats.delete(id); }
-    if (!s.floating.length) { floatHost?.remove(); floatHost = null; return; }
-    if (!floatHost) {
-      floatHost = doc.createElement('div');
-      floatHost.className = 'shell-floats';
-      appendLocalized(stage, floatHost);
-    }
-    for (const item of s.floating) {
-      let island = floats.get(item.panel);
-      if (!island) {
-        island = makeIsland(`float-${item.panel}`);
-        island.dataset.floating = '';
-        island.setAttribute('role', 'region');
-        appendLocalized(floatHost, island);
-        floats.set(item.panel, island);
+  function syncStrip(strip, ids, group) {
+    const buttons = ids.flatMap(id => {
+      let button = strip.querySelector(`:scope > [data-panel="${id}"]`);
+      if (!button) {
+        button = doc.createElement('button');
+        button.type = 'button';
+        button.className = 'ui-icon-button shell-strip-button';
+        button.dataset.panel = id;
+        button.setAttribute('aria-haspopup', 'dialog');
+        localizedMarkup(button, icon(descriptor(id)?.icon ?? 'panel-right'));
       }
-      if (descriptor(item.panel)?.titleKey) localizedAttribute(island, 'aria-label', descriptor(item.panel).titleKey); else island.setAttribute('aria-label', title(item.panel));
-      Object.assign(island.style, {inlineSize: px(item.w), blockSize: px(item.h), transform: `translate(${Math.round(item.x)}px, ${Math.round(item.y)}px)`});
-      fill(island, [item.panel], item.panel);
-      island.querySelector(':scope > .shell-tabs').hidden = false;
+      if (descriptor(id)?.titleKey) localizedAttribute(button, 'aria-label', descriptor(id).titleKey); else button.setAttribute('aria-label', title(id));
+      button.dataset.tip = title(id);
+      button.dataset.group = group;
+      return [button, ...stripActions(id)];
+    });
+    order(strip, buttons);
+    for (const button of [...strip.children]) if (!buttons.includes(button)) button.remove();
+  }
+
+  function sheetIsland() {
+    if (!sheet.element) {
+      const element = makeIsland('right-sheet');
+      element.classList.add('ui-sheet', 'shell-sheet');
+      element.setAttribute('popover', 'manual');
+      element.setAttribute('role', 'dialog');
+      localizedAttribute(element, 'aria-label', 'dockHost.inspector', {});
+      element.id = 'right-sheet';
+      element.dataset.side = 'right';
+      appendLocalized(workspace, element);
+      element.addEventListener('focusout', event => {
+        if (sheet.open && leaves(event, [element, sheet.invoker])) closeSheet({restoreFocus: false});
+      }, {signal});
+      sheet.element = element;
+    }
+    return sheet.element;
+  }
+
+  let flyoutElement = null;
+  function flyoutIsland() {
+    if (!flyoutElement) {
+      flyoutElement = makeIsland('flyout');
+      flyoutElement.classList.add('ui-sheet', 'shell-sheet', 'shell-flyout');
+      flyoutElement.setAttribute('popover', 'manual');
+      flyoutElement.setAttribute('role', 'dialog');
+      appendLocalized(workspace, flyoutElement);
+      flyoutElement.addEventListener('focusout', event => {
+        if (flyout && leaves(event, [flyoutElement, flyout.invoker])) closeFlyout({restoreFocus: false});
+      }, {signal});
+    }
+    return flyoutElement;
+  }
+
+  /** Where every panel root and island goes for a solution; moves only what changed. */
+  function applyPanels(s, layout) {
+    const live = new Set();
+    const parked = new Set(registry.list().map(item => item.id));
+    const show = element => { if (element.hidden) element.hidden = false; };
+    // Docked and folded groups.
+    for (const group of s.groups) {
+      const timelineAlone = group.timeline;
+      if (timelineAlone && group.state !== 'strip') {
+        // The timeline's own island: docked, or its header with the body as a sheet.
+        if (timeline.parentElement !== workspace) workspace.insertBefore(timeline, parking);
+        show(timeline);
+        setAttr(timeline, 'data-group', group.id);
+        setAttr(timeline, 'data-state', group.state === 'header' ? 'strip' : 'docked');
+        timeline.classList.add('shell-placed');
+        place(timeline, group.rect);
+        parked.delete('timeline');
+        continue;
+      }
+      if (group.state === 'strip') {
+        const strip = stripFor(group.id);
+        live.add(strip);
+        if (strip.parentElement !== workspace) workspace.insertBefore(strip, parking);
+        localizedAttribute(strip, 'aria-label', 'dockHost.folded', {value: group.tabs.map(title).join(', ')});
+        setAttr(strip, 'data-side', group.side);
+        syncStrip(strip, group.tabs, group.id);
+        place(strip, group.rect);
+        continue;
+      }
+      const island = islandFor(group.id);
+      live.add(island);
+      if (island.parentElement !== workspace) workspace.insertBefore(island, parking);
+      setAttr(island, 'data-state', group.state);
+      setAttr(island, 'data-side', group.side);
+      setAttr(island, 'data-floating', null);
+      setAttr(island, 'role', 'region');
+      island.hidden = false;
+      const docked = group.state === 'docked';
+      fill(island, group.tabs, group.active, {roots: docked});
+      if (docked) for (const id of group.tabs) { parked.delete(id); prepare(id, island); }
+      place(island, group.rect);
+    }
+    // Floats.
+    for (const float of s.floats) {
+      const island = islandFor(float.group);
+      live.add(island);
+      if (island.parentElement !== workspace) workspace.insertBefore(island, parking);
+      setAttr(island, 'data-state', float.collapsed ? 'header' : 'docked');
+      setAttr(island, 'data-floating', float.id);
+      setAttr(island, 'role', 'dialog');
+      island.hidden = false;
+      fill(island, float.tabs, float.active, {roots: !float.collapsed});
+      if (!float.collapsed) for (const id of float.tabs) { parked.delete(id); prepare(id, island); }
+      let grip = island.querySelector(':scope > .shell-float-grip');
+      if (!grip) {
+        grip = doc.createElement('span');
+        grip.className = 'shell-float-grip';
+        grip.setAttribute('aria-hidden', 'true');
+        appendLocalized(island, grip);
+      } else if (island.lastElementChild !== grip) island.append(grip);
+      grip.hidden = float.collapsed;
+      place(island, float.rect);
+    }
+    // The open flyout keeps its panel; a flyout whose group is no longer folded closes.
+    if (flyout) {
+      const group = s.groups.find(item => item.id === flyout.group && item.state !== 'docked');
+      if (!group || !group.tabs.includes(flyout.panel)) closeFlyout({restoreFocus: false, recommit: false});
+    }
+    if (flyout) {
+      const group = s.groups.find(item => item.id === flyout.group);
+      const element = flyoutIsland();
+      fill(element, group.tabs, flyout.panel, {roots: true});
+      for (const id of group.tabs) { parked.delete(id); prepare(id, element); }
+      element.dataset.group = group.id;
+      element.dataset.side = group.side;
+      placeFlyout(group);
+    }
+    // The sheet: every panel the window folded there.
+    const sheetIds = s.sheet;
+    if (!sheetIds.includes(sheet.active)) sheet.active = sheetIds[0] ?? null;
+    if (sheet.open && !sheet.active) closeSheet({restoreFocus: false, recommit: false});
+    if (sheetIds.length || sheet.element) {
+      const element = sheetIsland();
+      fill(element, sheetIds, sheet.active, {roots: true});
+      for (const id of sheetIds) { parked.delete(id); prepare(id, element); }
+      if (sheet.open) placeSheet();
+    }
+    // Everything else waits in the parking.
+    for (const id of parked) {
+      const panel = rootOf(id);
+      if (panel && panel.parentElement !== parking) parking.append(panel);
+      const tab = tabElements.get(id);
+      const inUse = tab && s.groups.some(group => group.tabs.includes(id) && group.state === 'header') || s.floats.some(float => float.tabs.includes(id));
+      if (tab && !inUse && tab.parentElement !== parking && !tab.closest('.shell-flyout, .shell-sheet')) parking.append(tab);
+      if (id === 'timeline') {
+        timeline.classList.remove('shell-placed');
+        setAttr(timeline, 'data-state', 'hidden');
+      }
+    }
+    arrangeDom(s, layout);
+    for (const [id, island] of islands) if (!live.has(island) && island.parentElement !== parking) { island.hidden = true; parking.append(island); if (!findGroup(layout, id)) islands.delete(id); }
+    for (const [id, strip] of strips) if (!live.has(strip)) { strip.remove(); if (!findGroup(layout, id)) strips.delete(id); }
+    applyBody(s);
+  }
+
+  /**
+   * Keeps the islands in reading order in the DOM (the order of Tab), around
+   * the stage, which never moves: only an element out of order is moved.
+   */
+  function arrangeDom(s, layout) {
+    const before = [], after = [];
+    let seen = false;
+    walk(layout.root, node => {
+      if (node.type === STAGE) { seen = true; return; }
+      if (node.type !== 'group') return;
+      const group = s.groups.find(item => item.id === node.id);
+      if (!group) return;
+      const element = group.timeline && group.state !== 'strip' ? timeline : group.state === 'strip' ? strips.get(group.id) : islands.get(group.id);
+      if (element?.parentElement === workspace) (seen ? after : before).push(element);
+    });
+    for (const float of s.floats) { const element = islands.get(float.group); if (element) after.push(element); }
+    const FOLLOWING = 4;
+    let anchor = stage;
+    for (const element of before.reverse()) {
+      if (!(element.compareDocumentPosition(anchor) & FOLLOWING)) workspace.insertBefore(element, anchor);
+      anchor = element;
+    }
+    anchor = stage;
+    for (const element of after) {
+      if (!(anchor.compareDocumentPosition(element) & FOLLOWING)) anchor.after(element);
+      anchor = element;
     }
   }
 
-  function applyBottom(s) {
-    const b = s.regions.bottom;
-    bottom.hidden = b.state === 'hidden';
-    bottom.dataset.state = b.state;
-    const folded = b.state === 'strip';
+  /** A panel root that moves into an island: the timeline loses its own island look there. */
+  function prepare(id, island) {
+    if (id !== 'timeline') return;
+    timeline.classList.remove('shell-placed');
+    setAttr(timeline, 'data-state', 'docked');
+    setAttr(timeline, 'data-group', island.dataset.group ?? null);
+    for (const name of ['position', 'left', 'top', 'width', 'height']) setStyle(timeline, name, null);
+  }
+
+  function applyBody(s) {
+    const group = s.groups.find(item => item.timeline && item.state === 'header');
+    const folded = Boolean(group);
     if (!folded && bodyOpen) closeBody({restoreFocus: false, recommit: false});
     if (folded && !body.hasAttribute('popover')) body.setAttribute('popover', 'manual');
     if (!folded && body.hasAttribute('popover')) body.removeAttribute('popover');
@@ -525,106 +596,243 @@ export function createDockHost({document: doc = globalThis.document, window: win
 
   function applyControls(s) {
     if (sheetButton) {
-      const right = s.regions.right;
-      if (sheetButton.hidden !== (right.state !== 'sheet')) sheetButton.hidden = right.state !== 'sheet';
-      sheetButton.setAttribute('aria-expanded', String(sheets.right.open));
-      sheetButton.setAttribute('aria-controls', sheetFor('right').id);
+      const none = !s.sheet.length;
+      if (sheetButton.hidden !== none) sheetButton.hidden = none;
+      sheetButton.setAttribute('aria-expanded', String(sheet.open));
+      if (sheet.element) sheetButton.setAttribute('aria-controls', sheet.element.id);
     }
     if (expandButton) {
       const tall = isTall();
       expandButton.setAttribute('aria-pressed', String(tall));
-      localizedAttribute(expandButton, 'aria-label', (tall ? "dockHost.restoreTimelineHeight" : "dockHost.expandTimeline"), (tall ? {} : {}));
+      localizedAttribute(expandButton, 'aria-label', tall ? 'dockHost.restoreTimelineHeight' : 'dockHost.expandTimeline', {});
     }
-    for (const side of SIDES) {
-      for (const button of strips[side]?.children ?? []) {
-        // A panel's strip button says whether its sheet is open; a mirrored action (no data-panel) keeps its source's state.
+    for (const strip of strips.values()) {
+      for (const button of strip.children) {
         if (!button.dataset.panel) continue;
-        const open = sheets[side].open && sheets[side].active === button.dataset.panel;
-        button.setAttribute('aria-expanded', String(open));
-        button.setAttribute('aria-pressed', String(open));
+        const open = flyout?.panel === button.dataset.panel;
+        setAttr(button, 'aria-expanded', String(open));
+        setAttr(button, 'aria-pressed', String(open));
       }
     }
-    applySplitters(s);
   }
 
   function applyVisibility(s) {
-    const open = SIDES.filter(side => sheets[side].open && sheets[side].active).map(side => sheets[side].active);
+    const open = [];
+    if (sheet.open && sheet.active) open.push(sheet.active);
+    if (flyout) open.push(flyout.panel);
     if (bodyOpen) open.push('timeline');
     registry.applySolution(s, {open});
-    for (const descriptorData of registry.list()) {
-      const {id} = descriptorData;
+    for (const item of registry.list()) {
+      const {id} = item;
       if (id === 'timeline') continue;
-      const panelRoot = rootOf(id);
-      if (!panelRoot) continue;
+      const panel = rootOf(id);
+      if (!panel) continue;
       const visible = registry.isVisible(id);
-      if (panelRoot.hidden === visible) panelRoot.hidden = !visible;
+      if (panel.hidden === visible) panel.hidden = !visible;
     }
   }
 
   // ---------------------------------------------------------------------
-  // Sheets
+  // Dividers
 
-  function placeSheet(side) {
-    const sheet = sheetIslands[side];
-    if (!sheet) return;
-    // The touch stylesheet places sheets at the window's edges (touch.css).
+  function applyDividers(s) {
+    const live = new Set();
+    for (const divider of s.dividers) {
+      live.add(divider.key);
+      let el = dividerEls.get(divider.key);
+      if (!el) {
+        el = makeDivider(divider.key);
+        dividerEls.set(divider.key, el);
+        workspace.insertBefore(el, parking);
+      }
+      el.hidden = false;
+      el.dataset.axis = divider.axis;
+      setAttr(el, 'aria-orientation', divider.axis === 'row' ? 'vertical' : 'horizontal');
+      setAttr(el, 'aria-valuemin', String(divider.min));
+      setAttr(el, 'aria-valuemax', String(divider.max));
+      setAttr(el, 'aria-valuenow', String(divider.now));
+      localizedAttribute(el, 'aria-valuetext', 'dockHost.sizePixels', {count: divider.now});
+      const names = divider.tabs.map(id => (descriptor(id)?.titleKey ? {messageKey: descriptor(id).titleKey} : title(id)));
+      localizedAttribute(el, 'aria-label', 'dockHost.resizePanels', {panels: {format: 'list', value: names.length ? names : [{messageKey: 'dockHost.stage'}]}});
+      place(el, divider.rect);
+    }
+    for (const [key, el] of dividerEls) if (!live.has(key)) { if (dragging?.key === key) continue; el.remove(); dividerEls.delete(key); }
+  }
+
+  let dragging = null;
+  const dividerOf = key => solution?.dividers.find(item => item.key === key) ?? null;
+  function makeDivider(key) {
+    const el = doc.createElement('div');
+    el.className = 'ui-splitter shell-splitter';
+    el.dataset.splitter = key;
+    el.dataset.ui = '';
+    el.tabIndex = 0;
+    el.setAttribute('role', 'separator');
+    const coordinate = (event, axis) => (axis === 'row' ? event.clientX : event.clientY);
+    const finish = cancel => {
+      if (!dragging || dragging.key !== key) return;
+      const {pointerId, divider, value} = dragging;
+      dragging = null;
+      delete el.dataset.dragging;
+      override = null;
+      if (el.hasPointerCapture?.(pointerId)) el.releasePointerCapture(pointerId);
+      if (!cancel && value !== undefined) edit(layout => resizeChildren(layout, divider.path, dividerChanges(divider, value)));
+      else commit();
+    };
+    el.addEventListener('pointerdown', event => {
+      const divider = dividerOf(key);
+      if (event.button !== 0 || dragging || !divider) return;
+      event.preventDefault();
+      el.focus({preventScroll: true});
+      onBeforeChange?.();
+      dragging = {key, pointerId: event.pointerId, origin: coordinate(event, divider.axis), divider};
+      el.setPointerCapture(event.pointerId);
+      el.dataset.dragging = 'true';
+    }, {signal});
+    el.addEventListener('pointermove', event => {
+      if (dragging?.key !== key || dragging.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      const {divider} = dragging;
+      const delta = coordinate(event, divider.axis) - dragging.origin;
+      dragging.value = divider.now + (divider.control === 'a' ? delta : -delta);
+      const changes = dividerChanges(divider, dragging.value);
+      override = layout => resizeChildren(layout, divider.path, changes);
+      schedule();
+    }, {signal});
+    el.addEventListener('pointerup', event => { if (dragging?.pointerId === event.pointerId) finish(false); }, {signal});
+    el.addEventListener('pointercancel', () => finish(true), {signal});
+    el.addEventListener('lostpointercapture', () => finish(true), {signal});
+    el.addEventListener('dblclick', event => {
+      event.preventDefault();
+      const divider = dividerOf(key);
+      if (divider) edit(layout => resizeChildren(layout, divider.path, dividerReset(divider)));
+    }, {signal});
+    el.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && dragging?.key === key) { event.preventDefault(); event.stopPropagation(); finish(true); return; }
+      const divider = dividerOf(key);
+      if (!divider) return;
+      const forward = divider.control === 'a' ? 1 : -1;
+      const grow = divider.axis === 'row' ? {ArrowRight: forward, ArrowLeft: -forward} : {ArrowDown: forward, ArrowUp: -forward};
+      if (event.key === 'Home' || event.key === 'Enter') edit(layout => resizeChildren(layout, divider.path, dividerReset(divider)));
+      else if (grow[event.key] || event.key === 'End') {
+        const value = event.key === 'End' ? divider.max : divider.now + grow[event.key] * (event.shiftKey ? BIG_STEP : STEP);
+        edit(layout => resizeChildren(layout, divider.path, dividerChanges(divider, value)));
+      } else return;
+      event.preventDefault();
+      event.stopPropagation();
+    }, {signal});
+    return el;
+  }
+
+  // ---------------------------------------------------------------------
+  // Flyouts, the sheet and the timeline body
+
+  function placeFlyout(group) {
+    const element = flyoutElement;
+    if (!element) return;
+    const area = workspace.getBoundingClientRect();
+    const box = {x: group.rect.x - origin.x + area.left, y: group.rect.y - origin.y + area.top, w: group.rect.width, h: group.rect.height};
+    const preferred = Math.max(256, ...group.tabs.map(id => (id === 'timeline' ? 480 : descriptor(id)?.pref ?? 320)));
+    const room = {left: box.x - area.left - 8, right: area.right - (box.x + box.w) - 8};
+    let left, top, width, height;
+    if (group.state === 'strip') {
+      width = Math.min(preferred, Math.max(room.left, room.right));
+      left = group.side === 'right' || room.right < width ? box.x - 8 - width : box.x + box.w + 8;
+      top = box.y;
+      height = box.h;
+    } else {
+      width = Math.max(320, box.w);
+      left = Math.min(box.x, area.right - width - 8);
+      height = Math.min(group.tabs.includes('timeline') ? 360 : 480, Math.max(160, (group.side === 'top' ? area.bottom - box.y - box.h : box.y - area.top) - 16));
+      top = group.side === 'top' ? box.y + box.h + 8 : box.y - 8 - height;
+    }
+    // Inline: the sheet component's own inset (the window's right edge) would beat the layout layer's.
+    setStyle(element, 'inset', 'auto');
+    setStyle(element, 'top', px(Math.max(area.top, top)));
+    setStyle(element, 'left', px(Math.max(area.left + 4, left)));
+    setStyle(element, 'inline-size', px(width));
+    setStyle(element, 'block-size', px(Math.max(120, height)));
+    setStyle(element, 'max-block-size', px(Math.max(120, height)));
+  }
+
+  function openFlyout(groupId, panel, {invoker = doc.activeElement, focus = true} = {}) {
+    onBeforeChange?.();
+    closeSheet({restoreFocus: false, recommit: false});
+    flyout = {group: groupId, panel, invoker: invoker instanceof win.HTMLElement ? invoker : null};
+    const element = flyoutIsland();
+    commit();
+    if (!element.matches(':popover-open')) {
+      try { element.showPopover(); } catch (error) { report(error); }
+    }
+    const group = solution.groups.find(item => item.id === groupId);
+    if (group) placeFlyout(group);
+    if (focus) focusPanel(panel);
+  }
+
+  function closeFlyout({restoreFocus = true, recommit = true} = {}) {
+    if (!flyout) return;
+    const element = flyoutElement;
+    const hadFocus = element?.contains(doc.activeElement);
+    const {invoker} = flyout;
+    flyout = null;
+    if (element?.matches(':popover-open')) {
+      try { element.hidePopover(); } catch (error) { report(error); }
+    }
+    if (recommit) commit();
+    if (restoreFocus && hadFocus && invoker?.isConnected) invoker.focus({preventScroll: true});
+  }
+
+  function placeSheet() {
+    const element = sheet.element;
+    if (!element) return;
     if (touchState()) {
-      for (const name of ['--sheet-top', '--sheet-start', 'max-block-size', 'block-size']) sheet.style.removeProperty(name);
+      for (const name of ['--sheet-top', '--sheet-start', 'max-block-size', 'block-size']) element.style.removeProperty(name);
       return;
     }
     const area = workspace.getBoundingClientRect();
-    const strip = side === 'left' && solution?.regions.left.strip ? solution.regions.left.strip : 0;
-    // Down to the stage island's bottom (the timeline's header stays in view), or the workspace's when the stage spans it.
     const floor = Math.min(area.bottom - 8, stage.getBoundingClientRect().bottom);
-    sheet.style.setProperty('--sheet-top', px(area.top));
-    sheet.style.setProperty('--sheet-start', px(SHELL_METRICS.width.wide.padEnd + strip + SHELL_METRICS.width.wide.columnGap));
-    // Inline: the sheet component's own cap (the window) would beat the layout layer's. The right sheet
-    // (Properties at compact width) is as tall as its content; a strip's sheet keeps that whole height for
-    // its lists (Structure's tree is virtual, so it has no content height of its own).
-    const cap = px(Math.max(120, floor - area.top));
-    sheet.style.setProperty('max-block-size', cap);
-    if (side === 'left') sheet.style.setProperty('block-size', cap); else sheet.style.removeProperty('block-size');
+    element.style.setProperty('--sheet-top', px(area.top));
+    element.style.setProperty('max-block-size', px(Math.max(120, floor - area.top)));
   }
 
-  function openSheet(side, id, {invoker = doc.activeElement, focus = true} = {}) {
-    const state = sheets[side];
+  function openSheet(id, {invoker = doc.activeElement, focus = true} = {}) {
     onBeforeChange?.();
-    // Focus returns to what opened the sheet, not to a tab inside it.
-    if (!state.open) state.invoker = invoker instanceof win.HTMLElement ? invoker : null;
-    state.active = id;
-    state.open = true;
-    const sheet = sheetFor(side);
+    closeFlyout({restoreFocus: false, recommit: false});
+    if (!sheet.open) sheet.invoker = invoker instanceof win.HTMLElement ? invoker : null;
+    sheet.active = id ?? sheet.active ?? solution?.sheet[0] ?? null;
+    sheet.open = true;
+    const element = sheetIsland();
     commit();
-    if (!sheet.matches(':popover-open')) {
-      try { sheet.showPopover(); } catch (error) { report(error); }
+    if (!element.matches(':popover-open')) {
+      try { element.showPopover(); } catch (error) { report(error); }
     }
-    placeSheet(side);
-    if (focus) focusPanel(id);
+    placeSheet();
+    if (focus && sheet.active) focusPanel(sheet.active);
   }
 
-  function closeSheet(side, {restoreFocus = true, recommit = true} = {}) {
-    const state = sheets[side], sheet = sheetIslands[side];
-    if (!state.open) return;
-    const hadFocus = sheet?.contains(doc.activeElement);
-    state.open = false;
-    if (sheet?.matches(':popover-open')) {
-      try { sheet.hidePopover(); } catch (error) { report(error); }
+  function closeSheet({restoreFocus = true, recommit = true} = {}) {
+    if (!sheet.open) return;
+    const element = sheet.element;
+    const hadFocus = element?.contains(doc.activeElement);
+    sheet.open = false;
+    if (element?.matches(':popover-open')) {
+      try { element.hidePopover(); } catch (error) { report(error); }
     }
     if (recommit) commit();
-    if (restoreFocus && hadFocus && state.invoker?.isConnected) state.invoker.focus({preventScroll: true});
-    state.invoker = null;
+    if (restoreFocus && hadFocus && sheet.invoker?.isConnected) sheet.invoker.focus({preventScroll: true});
+    sheet.invoker = null;
   }
 
   function placeBody() {
-    const rect = bottom.getBoundingClientRect(), area = workspace.getBoundingClientRect();
-    const room = Math.max(120, rect.top - area.top - 12);
-    body.style.setProperty('--sheet-bottom', px(win.innerHeight - rect.top + 6));
+    const rect = timeline.getBoundingClientRect(), area = workspace.getBoundingClientRect();
+    const above = rect.top - area.top > area.bottom - rect.bottom;
+    const room = Math.max(120, (above ? rect.top - area.top : area.bottom - rect.bottom) - 12);
+    body.style.setProperty('--sheet-bottom', px(above ? win.innerHeight - rect.top + 6 : Math.max(8, win.innerHeight - rect.bottom - 6 - Math.min(room, 360))));
     body.style.setProperty('--sheet-block', px(Math.min(room, 360)));
   }
 
-  /** Opens the timeline body as a sheet (the low height tier) and, like the side sheets, moves focus into it. */
   function openBody({invoker = doc.activeElement, focus = true} = {}) {
-    if (solution?.regions.bottom.state !== 'strip') return false;
+    if (!solution?.groups.some(group => group.timeline && group.state === 'header')) return false;
     onBeforeChange?.();
     bodyOpen = true;
     bodyInvoker = invoker instanceof win.HTMLElement ? invoker : null;
@@ -652,224 +860,133 @@ export function createDockHost({document: doc = globalThis.document, window: win
 
   /** A press or key inside another overlay (a menu, a picker, a dialog) leaves the shell's sheets alone. */
   const insideOverlay = target => Boolean(target?.closest?.('dialog[open], #menu, [popover]:popover-open:not(.shell-sheet, .shell-timeline-body)'));
-  doc.addEventListener('pointerdown', event => {
-    for (const side of SIDES) {
-      const sheet = sheetIslands[side];
-      if (!sheets[side].open || sheet?.contains(event.target)) continue;
-      if (event.target.closest?.(`.shell-strip-button, .shell-sheet-button`) || insideOverlay(event.target)) continue;
-      closeSheet(side, {restoreFocus: false});
-    }
-    if (bodyOpen && !body.contains(event.target) && !event.target.closest?.('.shell-timeline-sheet') && !insideOverlay(event.target))
-      closeBody({restoreFocus: false});
-  }, {capture: true, signal});
-  // Escape inside a sheet closes it (captured, so the editor's Cancel does not also run).
-  doc.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || event.defaultPrevented || insideOverlay(event.target)) return;
-    for (const side of SIDES) {
-      const state = sheets[side];
-      if (state.open && (sheetIslands[side]?.contains(event.target) || event.target === state.invoker)) { event.preventDefault(); closeSheet(side); return; }
-    }
-    // The timeline body's sheet closes from anywhere in the timeline (its header too).
-    if (bodyOpen && (bottom.contains(event.target) || event.target === bodyInvoker)) { event.preventDefault(); closeBody(); }
-  }, {capture: true, signal});
-  // A sheet closes when focus leaves it for something it could cover (WCAG 2.4.11), as a press outside does:
-  // not for its invoker, another overlay, or (the timeline's) its own header.
   const leaves = (event, keep) => {
     const next = event.relatedTarget;
     return next instanceof win.Element && !keep.some(element => element?.contains?.(next)) && !insideOverlay(next);
   };
+  doc.addEventListener('pointerdown', event => {
+    const target = event.target;
+    if (sheet.open && !sheet.element?.contains(target) && !target.closest?.('.shell-sheet-button') && !insideOverlay(target)) closeSheet({restoreFocus: false});
+    if (flyout && !flyoutElement?.contains(target) && !target.closest?.(`.shell-strip-button, [data-group="${flyout.group}"] [role="tab"]`) && !insideOverlay(target)) closeFlyout({restoreFocus: false});
+    if (bodyOpen && !body.contains(target) && !target.closest?.('.shell-timeline-sheet') && !insideOverlay(target)) closeBody({restoreFocus: false});
+  }, {capture: true, signal});
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.defaultPrevented || insideOverlay(event.target)) return;
+    if (sheet.open && (sheet.element?.contains(event.target) || event.target === sheet.invoker)) { event.preventDefault(); closeSheet(); return; }
+    if (flyout && (flyoutElement?.contains(event.target) || event.target === flyout.invoker)) { event.preventDefault(); closeFlyout(); return; }
+    if (bodyOpen && (timeline.contains(event.target) || event.target === bodyInvoker)) { event.preventDefault(); closeBody(); }
+  }, {capture: true, signal});
   body.addEventListener('focusout', event => {
-    if (bodyOpen && leaves(event, [bottom, bodyInvoker])) closeBody({restoreFocus: false});
+    if (bodyOpen && leaves(event, [timeline, bodyInvoker])) closeBody({restoreFocus: false});
   }, {signal});
 
   // ---------------------------------------------------------------------
-  // Tabs, strips and the timeline's own controls
+  // Tabs, strips, headers and floats
 
   workspace.addEventListener('click', event => {
-    const tab = event.target.closest?.('.shell-tabs [role="tab"][data-panel]');
-    if (tab) { showPanel(tab.dataset.panel, {focus: false}); return; }
+    const tab = event.target.closest?.('.shell-island [role="tab"][data-panel]');
+    if (tab) {
+      const id = tab.dataset.panel;
+      const island = tab.closest('.shell-island');
+      if (island?.classList.contains('shell-sheet')) {
+        if (island === sheet.element) { sheet.active = id; commit(); }
+        else if (flyout) { flyout.panel = id; commit(); }
+        return;
+      }
+      if (island?.dataset.state === 'header') {
+        if (flyout?.panel === id) closeFlyout(); else openFlyout(island.dataset.group, id, {invoker: tab});
+        return;
+      }
+      showPanel(id, {focus: false});
+      return;
+    }
     const strip = event.target.closest?.('.shell-strip-button[data-panel]');
     if (strip) {
-      const side = SIDES.find(item => strips[item]?.contains(strip));
-      if (sheets[side].open && sheets[side].active === strip.dataset.panel) closeSheet(side);
-      else openSheet(side, strip.dataset.panel, {invoker: strip});
+      if (flyout?.panel === strip.dataset.panel) closeFlyout();
+      else openFlyout(strip.dataset.group, strip.dataset.panel, {invoker: strip});
     }
   }, {signal});
-  workspace.addEventListener('keydown', event => {
+  doc.addEventListener('keydown', event => {
     const tab = event.target.closest?.('.shell-tabs [role="tab"]');
-    if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    if (!tab || !workspace.contains(tab) || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     const tabs = [...tab.parentElement.querySelectorAll(':scope > [role="tab"]:not([hidden])')];
     const index = tabs.indexOf(tab);
+    const rtl = win.getComputedStyle(tab).direction === 'rtl';
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
-      : (index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length;
+      : (index + ((event.key === 'ArrowRight') !== rtl ? 1 : tabs.length - 1)) % tabs.length;
     event.preventDefault();
     event.stopPropagation();
-    showPanel(tabs[next].dataset.panel, {focus: false});
+    tabs[next].click();
     tabs[next].focus();
+  }, {signal});
+  // Double-press on a group's header (outside its tabs) collapses or expands it; on a float's, docks it back.
+  workspace.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    const groupId = groupHeaderAt(event)?.group;
+    if (!groupId) return;
+    const now = event.timeStamp;
+    if (headerPress.key === groupId && now - headerPress.time < DOUBLE_PRESS_MS) {
+      headerPress.key = null;
+      const float = solution?.floats.find(item => item.group === groupId);
+      if (float) workspaceApi.dockFloat(float.id);
+      else workspaceApi.collapse(groupId);
+      return;
+    }
+    headerPress.key = groupId;
+    headerPress.time = now;
   }, {signal});
   expandButton?.addEventListener('click', () => toggleTall(), {signal});
 
   // ---------------------------------------------------------------------
-  // Splitters
+  // Editing the arrangement
 
-  function splitterFor(name) {
-    if (splitters[name]) return splitters[name];
-    const el = doc.createElement('div');
-    el.className = 'ui-splitter shell-splitter';
-    el.dataset.splitter = name;
-    el.dataset.ui = '';
-    el.tabIndex = 0;
-    el.setAttribute('role', 'separator');
-    const stacked = name.endsWith('-islands'), side = name.split('-')[0];
-    const vertical = !stacked && name !== 'bottom';
-    el.setAttribute('aria-orientation', vertical ? 'vertical' : 'horizontal');
-    // In the tab order beside the region it resizes (the grid places it; dock.css).
-    if (stacked) { el.classList.add('shell-island-splitter'); appendLocalized(hosts[side], el); }
-    else if (name === 'right') hosts.right.before(el);
-    else if (name === 'left') hosts.left.after(el);
-    else bottom.before(el);
-    const sign = stacked || name === 'left' ? 1 : -1;
-    const coordinate = event => (vertical ? event.clientX : event.clientY);
-    let drag = null;
-    const finish = cancel => {
-      if (!drag) return;
-      const {pointerId, key, size} = drag;
-      drag = null;
-      delete el.dataset.dragging;
-      override = null;
-      if (el.hasPointerCapture?.(pointerId)) el.releasePointerCapture(pointerId);
-      if (!cancel && size !== undefined) store.update(layout => resizedLayout(layout, name, size, key));
-      commit();
-    };
-    el.addEventListener('pointerdown', event => {
-      if (event.button !== 0 || drag || !solution?.aria[name]) return;
-      event.preventDefault();
-      el.focus({preventScroll: true});
-      drag = {pointerId: event.pointerId, origin: coordinate(event), start: sizeOf(name), key: keyOf(name)};
-      el.setPointerCapture(event.pointerId);
-      el.dataset.dragging = 'true';
-    }, {signal});
-    el.addEventListener('pointermove', event => {
-      if (drag?.pointerId !== event.pointerId) return;
-      event.preventDefault();
-      const bounds = solution?.aria[name];
-      if (!bounds) return;
-      drag.size = Math.round(clamp(drag.start + sign * (coordinate(event) - drag.origin), bounds.min, bounds.max));
-      const {key, size} = drag;
-      override = layout => resizedLayout(layout, name, size, key);
-      schedule();
-    }, {signal});
-    el.addEventListener('pointerup', event => { if (drag?.pointerId === event.pointerId) finish(false); }, {signal});
-    el.addEventListener('pointercancel', () => finish(true), {signal});
-    el.addEventListener('lostpointercapture', () => finish(true), {signal});
-    win.addEventListener('blur', () => finish(true), {signal});
-    el.addEventListener('dblclick', event => { event.preventDefault(); resetSize(name); }, {signal});
-    el.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && drag) { event.preventDefault(); event.stopPropagation(); finish(true); return; }
-      const grow = stacked ? {ArrowDown: 1, ArrowUp: -1} : name === 'right' ? {ArrowLeft: 1, ArrowRight: -1} : name === 'left' ? {ArrowRight: 1, ArrowLeft: -1} : {ArrowUp: 1, ArrowDown: -1};
-      if (event.key === 'Home' || event.key === 'Enter') resetSize(name);
-      else if ((grow[event.key] || event.key === 'End') && solution?.aria[name]) {
-        const bounds = solution.aria[name];
-        const size = event.key === 'End' ? bounds.max
-          : Math.round(clamp(sizeOf(name) + grow[event.key] * (event.shiftKey ? BIG_STEP : STEP), bounds.min, bounds.max));
-        store.update(layout => resizedLayout(layout, name, size));
-        commit();
-      } else return;
-      event.preventDefault();
-      event.stopPropagation();
-    }, {signal});
-    splitters[name] = {el, cancel: () => finish(true)};
-    return splitters[name];
-  }
-
-  const keyOf = name => (name === 'bottom' ? 'bottom' : solution?.regions[name]?.sizeKey ?? name);
-  const sizeOf = name => solution?.aria[name]?.now ?? 0;
-  function resizedLayout(layout, name, size, key = keyOf(name)) {
-    if (!name.endsWith('-islands')) return setSharedSize(layout, key, size);
-    const side = name.split('-')[0], groups = solution?.regions[side]?.groups;
-    if (groups?.length !== 2) return layout;
-    const total = groups.reduce((sum, group) => sum + group.rect.height, 0);
-    const share = size === null ? .5 : clamp(size / Math.max(1, total), 0, 1);
-    const m = mode(), entry = layout.modes[m];
-    return {...layout, modes: {...layout.modes, [m]: {...entry, weights: {...entry.weights, [side]: [share, 1 - share]}}}};
-  }
-  function resetSize(name) {
-    store.update(layout => resizedLayout(layout, name, null));
-    commit();
-  }
-
-  function applySplitters(s) {
-    for (const name of ['left', 'right', 'bottom', 'left-islands', 'right-islands']) {
-      const bounds = s.aria[name];
-      const {el} = splitterFor(name);
-      el.hidden = !bounds;
-      if (!bounds) continue;
-      el.setAttribute('aria-valuemin', String(bounds.min));
-      el.setAttribute('aria-valuemax', String(bounds.max));
-      el.setAttribute('aria-valuenow', String(bounds.now));
-      localizedAttribute(el,'aria-valuetext','dockHost.sizePixels',{count:bounds.now});
-      if (name.endsWith('-islands')) {
-        const side = name.split('-')[0], groups = s.regions[side].groups;
-        el.style.insetBlockStart = px(groups[0].rect.height + metrics.gutter / 2);
-        localizedAttribute(el, 'aria-label', side === 'left' ? 'dockHost.resizeStackedLeftPanels' : 'dockHost.resizeStackedRightPanels', {});
-        el.setAttribute('aria-controls', groups.flatMap(group => group.tabs.map(id => rootOf(id)?.id)).filter(Boolean).join(' '));
-        continue;
-      }
-      const region = s.regions[name];
-      const panels = name === 'bottom' ? ['timeline'] : region.panels.docked;
-      const labelKey = name === 'bottom' ? "dockHost.resizeTimeline" : panels.includes('structure') ? "dockHost.resizeFigureStructure"
-        : panels.includes('properties') ? "dockHost.resizePropertiesPanel" : 'dockHost.resizePanels';
-      const labelParams=labelKey==='dockHost.resizePanels'?{panels:{format:'list',value:panels.map(id=>descriptor(id)?.titleKey?{messageKey:descriptor(id).titleKey}:title(id))}}:{};
-      localizedAttribute(el,'aria-label',labelKey,labelParams);
-      el.setAttribute('aria-controls', name === 'bottom' ? bottom.id : hosts[name].id || '');
-      if (!hosts[name]?.id && name !== 'bottom') el.removeAttribute('aria-controls');
-    }
-  }
-
-  // ---------------------------------------------------------------------
-  // Commands (the workspace API and shell-commands.mjs)
-
-  /** Replaces the current workspace's arrangement with `change(arrangement, mode)`. */
-  function arrange(change) {
-    const m = mode();
-    store.update(layout => {
-      const entry = layout.modes[m];
-      const next = change({rail: entry.rail, bottomSpan: entry.bottomSpan, panels: entry.panels, weights: entry.weights}, m);
-      return next === entry ? layout : {...layout, modes: {...layout.modes, [m]: {...entry, ...next}}};
+  /** Replaces the workspace's arrangement with `change(layout)` and commits. */
+  function edit(change, {m = mode()} = {}) {
+    let changed = false;
+    store.update(state => {
+      const current = state.workspaces[m].layout;
+      const next = change(current);
+      if (!next || next === current) return state;
+      changed = true;
+      return setLayout(state, m, next);
     });
     commit();
+    return changed;
   }
+  const options = () => ({mode: mode(), catalog: catalog(), fallback: fallback()});
   const presentation = id => solution?.panels[id]?.presentation ?? 'unavailable';
-  const sideOf = id => solution?.panels[id]?.side;
-  const place = (id, target, options = {}) => arrange((arrangement, m) => movePanel(arrangement, id, target, {mode: m, ...options}));
 
-  /** Shows a panel: its tab in a docked island, its floating island, or a sheet; `focus` moves focus to it. */
+  /** Shows a panel: activates its tab, opens its flyout, the sheet or the timeline's body, or reopens it; `focus` moves focus to it. */
   function showPanel(id, {focus = true, invoker} = {}) {
     if (!registry.has(id) || presentation(id) === 'unavailable') return false;
     onBeforeChange?.();
     const current = presentation(id);
-    if (id === 'timeline') {
-      if (current === 'hidden') place(id, 'docked');
-      else if (current === 'strip') openBody({invoker});
-      if (focus) focusPanel(id);
-      return true;
+    if (current === 'hidden') {
+      edit(layout => reopenPanel(layout, id, options()));
+      return showPanel(id, {focus, invoker});
     }
-    if (current === 'docked') arrange((arrangement, m) => activatePanel(arrangement, id, {mode: m}));
-    else if (current === 'hidden') place(id, 'docked');
-    else if (current === 'strip' || current === 'sheet') {
-      openSheet(sideOf(id), id, {invoker, focus});
-      return true;
+    if (current === 'sheet') { openSheet(id, {invoker, focus}); return true; }
+    if (current === 'strip') {
+      const group = solution.groups.find(item => item.tabs.includes(id));
+      if (group?.timeline && group.state === 'header') { openBody({invoker, focus}); return true; }
+      const float = solution.floats.find(item => item.tabs.includes(id));
+      if (float) { edit(layout => setCollapsed(activatePanel(layout, id), float.group, false)); if (focus) focusPanel(id); return true; }
+      if (group) { openFlyout(group.id, id, {invoker, focus}); return true; }
     }
+    if (current === 'float') {
+      const float = solution.floats.find(item => item.tabs.includes(id));
+      edit(layout => (float?.collapsed ? setCollapsed(activatePanel(layout, id), float.group, false) : activatePanel(layout, id)));
+    } else edit(layout => activatePanel(layout, id));
     if (focus) focusPanel(id);
     return true;
   }
 
-  /** Focuses a panel: its tab, else its main collection (a tree, the timeline's grid or frame list), else its first control. */
+  /** Focuses a panel: its tab, else its main collection, else its first control. */
   function focusPanel(id) {
-    const tab = tabOf(id);
-    if (id !== 'timeline' && tab.isConnected && !tab.hidden && !tab.parentElement?.hidden) { tab.focus({preventScroll: true}); return; }
-    const panel = id === 'timeline' ? bottom : rootOf(id);
-    const usable = element => element.getClientRects().length && !element.disabled && element.tabIndex >= 0;
+    const tab = tabElements.get(id);
+    const usable = element => element?.isConnected && element.getClientRects().length && !element.closest('[hidden], .shell-parking') && !element.disabled && element.tabIndex >= 0;
+    if (id !== 'timeline' && usable(tab)) { tab.focus({preventScroll: true}); return; }
+    const panel = rootOf(id);
     const target = [...(panel?.querySelectorAll(COLLECTIONS) ?? [])].find(usable)
       ?? [...(panel?.querySelectorAll('[tabindex="0"], button, input, select, textarea') ?? [])].find(usable);
     target?.focus({preventScroll: true});
@@ -878,44 +995,33 @@ export function createDockHost({document: doc = globalThis.document, window: win
   const focusedIn = id => {
     const active = doc.activeElement;
     if (!active || active === doc.body) return false;
-    return Boolean(rootOf(id)?.contains(active) || (tabOf(id).isConnected && tabOf(id) === active));
+    return Boolean(rootOf(id)?.contains(active) || tabElements.get(id) === active);
   };
 
   /**
-   * The panel toggles (Ctrl+1–4, the band's Properties button): shows and
-   * focuses the panel, and folds it when it is already shown and focused.
-   * With `state` ('docked', 'strip' or 'hidden') it puts the panel there.
-   * The timeline toggles Full ↔ Strip (Build: shown ↔ hidden); where the
-   * window folds it, its body opens as a sheet.
+   * The panel toggles (Ctrl+1–5, the band's Properties button): shows and
+   * focuses the panel, and collapses its group when it is already shown and
+   * focused. The timeline toggles docked and collapsed (Build: closed).
    */
   function togglePanel(id, state) {
     if (!registry.has(id) || presentation(id) === 'unavailable') return false;
     if (state) {
       onBeforeChange?.();
-      if (!canPlacePanel(id, state === 'docked' ? 'docked' : state, {mode: mode(), catalog: registry.constraints()})) return false;
-      place(id, state);
-      return true;
+      if (state === 'hidden') return workspaceApi.hide(id);
+      if (state === 'strip') return workspaceApi.fold(id);
+      return showPanel(id);
     }
     const current = presentation(id);
     if (id === 'timeline') {
-      const stored = store.layout.modes[mode()].panels.find(record => record.id === 'timeline');
-      if (current === 'strip' && stored?.dock === 'bottom') return bodyOpen ? (closeBody(), true) : openBody();
+      const group = solution.groups.find(item => item.tabs.includes('timeline'));
+      if (group?.timeline && group.state === 'header' && !group.collapsed) return bodyOpen ? (closeBody(), true) : openBody();
       onBeforeChange?.();
-      place(id, current === 'docked' ? (mode() === 'rig' ? 'hidden' : 'strip') : 'docked');
-      return true;
+      if (current === 'docked') return mode() === 'rig' ? workspaceApi.hide(id) : workspaceApi.fold(id);
+      return showPanel(id);
     }
-    if (current === 'strip' || current === 'sheet') {
-      const side = sideOf(id);
-      if (sheets[side].open && sheets[side].active === id) { closeSheet(side); return true; }
-      openSheet(side, id);
-      return true;
-    }
-    const shown = registry.isVisible(id);
-    if (shown && focusedIn(id)) {
-      onBeforeChange?.();
-      place(id, 'strip');
-      return true;
-    }
+    if (current === 'sheet') { if (sheet.open && sheet.active === id) closeSheet(); else openSheet(id); return true; }
+    if (current === 'strip' && flyout?.panel === id) { closeFlyout(); return true; }
+    if (registry.isVisible(id) && focusedIn(id) && current === 'docked') { onBeforeChange?.(); return workspaceApi.fold(id); }
     return showPanel(id);
   }
 
@@ -924,146 +1030,226 @@ export function createDockHost({document: doc = globalThis.document, window: win
     return openBody();
   }
 
+  const timelineGroup = () => groupsOf(layoutNow()).find(group => group.tabs.includes('timeline')) ?? null;
   const tallSize = () => Math.floor(TALL_TIMELINE * (app.clientHeight || win.innerHeight));
-  // The stored timeline height before Expand (null: the default), which a second press restores.
   let beforeTall = null;
   function isTall() {
-    const stored = store.layout.shared.sizes.bottom;
-    return stored != null && stored >= Math.min(tallSize(), solution?.aria.bottom?.max ?? Infinity) - 1;
+    const group = timelineGroup();
+    return Boolean(group?.size) && group.size >= tallSize() - 1;
   }
-  /** Tall timeline ↔ the height it had before (the user's or the default): a size only, so playback and edits carry on. */
+  /** Tall timeline ↔ the height it had before: a size only, so playback and edits carry on. */
   function toggleTall() {
+    const group = timelineGroup();
+    if (!group) return false;
     const tall = isTall();
-    if (!tall) beforeTall = store.layout.shared.sizes.bottom ?? null;
+    if (!tall) beforeTall = group.size ?? null;
     const next = tall ? beforeTall : tallSize();
     if (tall) beforeTall = null;
-    store.update(layout => setSharedSize(layout, 'bottom', next));
-    commit();
+    setGroupSize(group.id, next);
     return !tall;
   }
-
-  /** `float('right')` (1.1's name) floats the right dock's shown panel if it can float, else its first floatable one. */
-  function floatTarget(id) {
-    if (id !== 'right' && id !== 'left') return id;
-    const region = solution?.regions[id];
-    const catalog = registry.constraints();
-    const floatable = ids => ids.filter(panel => catalog.find(item => item.id === panel)?.floatable);
-    const active = region?.groups.map(group => group.active) ?? [];
-    return floatable(active)[0] ?? floatable(region?.panels.docked ?? [])[0] ?? floatable([...(region?.panels.strip ?? []), ...(region?.panels.sheet ?? [])])[0] ?? null;
+  /** Sets a group's stored size along its split (null: the default). */
+  function setGroupSize(groupId, size) {
+    return edit(layout => {
+      const path = [];
+      let found = null;
+      const search = (node, at) => {
+        if (found) return;
+        if (node.type === 'group' && node.id === groupId) { found = at; return; }
+        if (node.type === 'split') node.children.forEach((child, index) => search(child, [...at, index]));
+      };
+      search(layout.root, path);
+      if (!found?.length) return layout;
+      return resizeChildren(layout, found.slice(0, -1), {[found.at(-1)]: size == null ? null : {size}});
+    });
   }
+
+  /** The zone a side name stands for: a split beside the stage (left, right, top, bottom). */
+  const sideZone = side => ({kind: 'split', target: STAGE, side: side === 'bottom' || side === 'top' ? side : side === 'left' ? 'left' : 'right'});
 
   const workspaceApi = {
     get sizes() {
       const s = solution ?? commit();
-      return {left: s.regions.left.size, right: s.regions.right.size, timeline: s.regions.bottom.size};
+      const width = id => s.groups.find(group => group.tabs.includes(id) && group.state === 'docked')?.rect.width ?? 0;
+      const tl = s.groups.find(group => group.tabs.includes('timeline'));
+      return {left: width('structure'), right: width('properties'), timeline: tl?.rect.height ?? 0};
     },
-    /** What the store last read or wrote (the preferences file or localStorage). */
     get preferences() { return store.stored ?? {}; },
-    get layout() { return store.layout; },
+    /** The workspace's arrangement (dock-model.mjs). */
+    get layout() { return layoutNow(); },
+    get state() { return store.state; },
     get solution() { return solution; },
     get tier() { return solution?.tier; },
     get height() { return solution?.height; },
     get stageInsets() { return {...(solution?.stageInsets ?? {top: 0, right: 0, bottom: 0, left: 0})}; },
-    get floating() { return (solution?.floating ?? []).map(item => ({...item})); },
-    get layouts() { return store.layout.saved.map(item => ({id: item.id, name: item.name, mode: item.mode})); },
+    get floating() { return (solution?.floats ?? []).map(item => ({id: item.id, panels: [...item.tabs], panel: item.active, x: item.rect.x, y: item.rect.y - origin.y, w: item.rect.width, h: item.rect.height})); },
+    get layouts() { return store.state.saved.map(item => ({id: item.id, name: item.name, mode: item.mode})); },
     get readOnly() { return store.readOnly; },
-    /** Every workspace at its default and the shared sizes cleared (Settings › Reset workspace). */
+    get preset() { return store.state.workspaces[mode()].preset; },
+    get modified() { return isModified(store.state, mode(), {catalog: catalog()}); },
+    get focusMode() { return focusActive(store.state, mode()); },
+    /** Every workspace at its default; saved layouts stay (Settings › Reset workspace). */
     reset() {
       onBeforeChange?.();
-      for (const side of SIDES) closeSheet(side, {restoreFocus: false, recommit: false});
-      closeBody({restoreFocus: false, recommit: false});
-      store.update(layout => resetLayout(layout));
+      closeAll();
+      store.update(state => resetAll(state, {catalog: catalog()}));
       commit();
     },
     resize: () => commit(),
     flushPreferences: () => store.flush(),
     setPreset(id) {
       onBeforeChange?.();
+      closeAll();
       const m = mode();
-      store.update(layout => applyPreset(layout, m, id, {workspaceHeight: workspace.clientHeight}));
+      store.update(state => applyPreset(state, m, id, {catalog: catalog(), workspaceHeight: workspace.clientHeight}));
       commit();
     },
     togglePanel,
     show: showPanel,
     activate: id => showPanel(id, {focus: false}),
-    fold: id => togglePanel(id, 'strip'),
-    hide: id => togglePanel(id, 'hidden'),
-    /** Docks as a tab of `tabInto`, at `index`, or in a separate island with `split: before|after`. */
-    dock(id, region, {tabInto, index, split} = {}) {
+    /** Collapses the panel's group (a float rolls up to its header). */
+    fold(id) {
+      const place = findPanel(layoutNow(), id);
+      if (!place?.group) return false;
       onBeforeChange?.();
-      const group = tabInto ? store.layout.modes[mode()].panels.find(record => record.id === tabInto)?.group ?? 0 : undefined;
-      place(id, region, {group, index, split});
+      if (flyout?.panel === id) closeFlyout({restoreFocus: false, recommit: false});
+      return edit(layout => setCollapsed(layout, place.group.id, true));
     },
+    /** Closes a panel; View › Panels and Reset layout bring it back. */
+    hide(id) {
+      if (!findPanel(layoutNow(), id) || findPanel(layoutNow(), id).where === 'closed') return false;
+      onBeforeChange?.();
+      if (flyout?.panel === id) closeFlyout({restoreFocus: false, recommit: false});
+      return edit(layout => closePanel(layout, id, options()));
+    },
+    close: id => workspaceApi.hide(id),
+    reopen: id => showPanel(id, {focus: false}),
+    /** Collapses (`on`, or the opposite of now) or expands a group. */
+    collapse(groupId, on) {
+      const group = findGroup(layoutNow(), groupId);
+      if (!group) return false;
+      onBeforeChange?.();
+      if (flyout?.group === groupId) closeFlyout({restoreFocus: false, recommit: false});
+      return edit(layout => setCollapsed(layout, groupId, on ?? !group.collapsed));
+    },
+    /**
+     * Docks a panel beside the stage on `side` (left, right, top, bottom), as
+     * a tab of the panel `tabInto`'s group, or expands it where it already is.
+     */
+    dock(id, side, {tabInto, index, split} = {}) {
+      onBeforeChange?.();
+      const layout = layoutNow();
+      if (tabInto) {
+        const target = findPanel(layout, tabInto)?.group;
+        if (!target) return false;
+        if (split) return edit(next => movePanel(next, id, {kind: 'split', target: target.id, side: split === 'before' ? 'top' : 'bottom'}, options()));
+        return edit(next => movePanel(next, id, {kind: 'tab', group: target.id, index}, options()));
+      }
+      const place = findPanel(layout, id);
+      const group = place?.group ? solution?.groups.find(item => item.id === place.group.id) : null;
+      if (group && (group.side === side || (side === 'bottom' && group.side === 'top'))) {
+        return edit(next => setCollapsed(activatePanel(next, id), group.id, false));
+      }
+      return edit(next => movePanel(next, id, sideZone(side), options()));
+    },
+    /** Moves a panel to a drop zone (dock-model.mjs ZONE_KINDS). */
+    move(id, zone) {
+      onBeforeChange?.();
+      closeFlyout({restoreFocus: false, recommit: false});
+      return edit(layout => movePanel(layout, id, zone, options()));
+    },
+    moveGroup(groupId, zone) {
+      onBeforeChange?.();
+      closeFlyout({restoreFocus: false, recommit: false});
+      return edit(layout => moveGroup(layout, groupId, zone, options()));
+    },
+    /** Floats a panel at `rect` (relative to the workspace), by default over the stage near its right edge. */
     float(id, rect) {
-      const panel = floatTarget(id);
+      const panel = registry.has(id) ? id : null;
       if (!panel) return false;
       onBeforeChange?.();
-      place(panel, 'float', {rect});
-      return true;
+      const s = solution ?? commit();
+      const width = Math.min(320, s.stage.width - 32), height = Math.min(520, s.stage.height - 32);
+      const at = rect ?? {x: Math.round(s.stage.x + s.stage.width - width - 24), y: Math.round(s.stage.y - origin.y + 56), w: width, h: height};
+      return edit(layout => movePanel(layout, id, {kind: 'float', rect: at}, options()));
+    },
+    placeFloat(floatId, rect) { return edit(layout => placeFloat(layout, floatId, rect)); },
+    /** Docks a float back where it came from (its panels' home when that place is gone). */
+    dockFloat(floatId) {
+      onBeforeChange?.();
+      return edit(layout => dockFloat(layout, floatId, options()));
     },
     focus(on) {
       onBeforeChange?.();
+      closeAll();
       const m = mode();
-      store.update(layout => toggleFocus(layout, m, {on}));
+      store.update(state => toggleFocus(state, m, {on}));
       commit();
     },
+    /** Re-applies the workspace's layout (built-in or saved): always works. */
     resetWorkspace() {
       onBeforeChange?.();
+      closeAll();
       const m = mode();
-      store.update(layout => resetMode(layout, m));
+      store.update(state => resetWorkspace(state, m, {catalog: catalog()}));
       commit();
     },
     saveLayout(name) {
       const m = mode();
       let result;
-      store.update(layout => {
-        result = savePreset(layout, {name, mode: m});
-        return result.layout;
-      });
+      store.update(state => (result = saveLayout(state, {name, mode: m})).state);
       commit();
-      if (result?.error) throw messageError(new Error(''), result.error === 'limit' ? "dockHost.message8PresetsSavedDeleteOneFirst"
-        : result.error === 'budget' ? "dockHost.presetStorageIsFullDeleteOneFirst" : "dockHost.nameThePresetFirst");
+      if (result?.error) throw messageError(new Error(''), result.error === 'limit' ? 'dockHost.layoutLimitReached' : 'dockHost.nameThePresetFirst', {count: MAX_SAVED_LAYOUTS});
       return result.id;
     },
-    deleteLayout(id) {
-      store.update(layout => deletePreset(layout, id));
-      commit();
-    },
+    deleteLayout(id) { store.update(state => deleteLayout(state, id)); commit(); },
     renameLayout(id, name) {
       let result;
-      store.update(layout => {
-        result = renamePreset(layout, id, name);
-        return result.layout;
-      });
+      store.update(state => (result = renameLayout(state, id, name)).state);
       commit();
-      if (result?.error) throw messageError(new Error(''), result.error === 'name' ? "dockHost.nameThePresetFirst" : "dockHost.thisPresetNoLongerExists");
+      if (result?.error) throw messageError(new Error(''), result.error === 'name' ? 'dockHost.nameThePresetFirst' : 'dockHost.thisPresetNoLongerExists');
     },
-    /** Replaces a saved preset with its workspace's current arrangement. */
-    updateLayout(id) {
-      store.update(layout => updatePreset(layout, id).layout);
+    updateLayout(id) { store.update(state => updateLayout(state, id).state); commit(); },
+    canSaveLayout: () => (store.state.saved.length >= MAX_SAVED_LAYOUTS ? {ok: false, reason: 'limit'} : {ok: true}),
+    /** The workspace's arrangement as a layout file's JSON value. */
+    exportLayout: () => exportLayout(store.state, mode()),
+    /** Saves a layout file's value as a named layout of this workspace and applies it. */
+    importLayout(value, {name} = {}) {
+      const m = mode();
+      let result;
+      store.update(state => (result = importLayout(state, value, {mode: m, name, catalog: catalog()})).state);
       commit();
+      if (result?.error) throw messageError(new Error(''), result.error === 'newer' ? 'dockHost.layoutFromNewerVersion' : result.error === 'limit' ? 'dockHost.layoutLimitReached' : 'dockHost.layoutFileUnreadable', {count: MAX_SAVED_LAYOUTS});
+      return result.id;
     },
-    /** Whether the workspace can be saved as a new preset: {ok} or {ok: false, reason: 'limit' | 'budget'}. */
-    canSaveLayout: () => canSavePreset(store.layout, mode()),
-    /** The tools' rail on the stage's `left` or `right`. */
+    presetLayout: id => presetLayout(id, mode(), {catalog: catalog(), state: store.state}),
     setRail(side) {
       if (side !== 'left' && side !== 'right') return false;
       onBeforeChange?.();
-      arrange(arrangement => ({...arrangement, rail: side}));
-      return true;
+      return edit(layout => setTools(layout, side));
     },
-    /** The timeline under the whole workspace (`full`, the default) or under the stage only (`stage`). */
+    /** The timeline across the window (`full`) or under the stage only (`stage`). */
     setTimelineSpan(span) {
       if (span !== 'full' && span !== 'stage') return false;
       onBeforeChange?.();
-      arrange(arrangement => ({...arrangement, bottomSpan: span}));
-      return true;
+      return edit(layout => movePanel(layout, 'timeline', span === 'full' ? {kind: 'edge', side: 'bottom'} : sideZone('bottom'), options()));
+    },
+    /** Timeline ⋯ › Default height: the stored height goes, so the window's default applies again. */
+    defaultTimelineHeight() {
+      const group = timelineGroup();
+      return group ? setGroupSize(group.id, null) : false;
     },
     toggleTall,
     get tall() { return isTall(); },
     timelineSheet: toggleTimelineSheet,
     destroy: () => destroy(),
   };
+
+  function closeAll() {
+    closeSheet({restoreFocus: false, recommit: false});
+    closeFlyout({restoreFocus: false, recommit: false});
+    closeBody({restoreFocus: false, recommit: false});
+  }
 
   // ---------------------------------------------------------------------
   // Lifecycle
@@ -1072,35 +1258,25 @@ export function createDockHost({document: doc = globalThis.document, window: win
     const next = mode();
     if (next === currentMode) return;
     currentMode = next;
-    for (const side of SIDES) closeSheet(side, {restoreFocus: false, recommit: false});
-    closeBody({restoreFocus: false, recommit: false});
+    closeAll();
     // Entering Draw or Build shows Properties; Animate keeps its own last tab.
-    const record = store.layout.modes[next]?.panels.find(item => item.id === 'properties');
-    if (next !== 'animate' && record && record.dock === record.side && !record.active)
-      arrange((arrangement, m) => activatePanel(arrangement, 'properties', {mode: m}));
+    const place = findPanel(layoutNow(), 'properties');
+    if (next !== 'animate' && place?.group && place.group.active !== 'properties' && !place.group.collapsed) edit(layout => activatePanel(layout, 'properties'));
     else commit();
   }
 
   const resizeObserver = new win.ResizeObserver(() => commit());
   resizeObserver.observe(app);
-  // The touch layouts size the workspace around their own chrome (the tab bar, the wing), without resizing the window.
   resizeObserver.observe(workspace);
   const stopTouch = touch?.on?.(() => {
-    for (const side of SIDES) closeSheet(side, {restoreFocus: false, recommit: false});
-    closeBody({restoreFocus: false, recommit: false});
-    // The band's controls changed size with the interface: measure its folds again.
+    closeAll();
     bandWatch?.refresh();
     commit();
   });
-  // The band is shorter at the low height tier: its new height solves again.
   if (band) resizeObserver.observe(band);
-  // The floating tool bar folds into two columns where its tools in one column would be taller than the room the
-  // solver gives it (Draw's tools in a short window); the solver then widens it and the artboard keeps clear. Its
-  // "more below" fade stays for a bar that still does not fit.
   const rail = workspace.querySelector('.shell-rail');
   const railFit = () => {
     const dock = rail.querySelector(':scope > .tool-dock');
-    // A horizontal bar (an upright phone) is one row that scrolls sideways; columns are for a bar down the side.
     if (solution?.rail?.orientation === 'horizontal') {
       if (railColumns !== 1) { railColumns = 1; rail.toggleAttribute('data-columns', false); schedule(); }
     } else if (dock && solution?.rail?.rect) {
@@ -1133,13 +1309,12 @@ export function createDockHost({document: doc = globalThis.document, window: win
     rail.addEventListener('scroll', railFit, {passive: true, signal});
     listeners.solve.add(() => railFit());
   }
-  // The band's widths change with its content (a name, a language, a session), never with the window.
   const bandWatch = band ? watchBand(band, {window: win, document: doc, storage: browserStorage(win), start: ready, onChange: () => schedule()}) : null;
   const modeObserver = new win.MutationObserver(modeChanged);
   modeObserver.observe(workspace, {attributes: true, attributeFilter: ['data-mode']});
   registry.on('define', () => schedule(), {signal});
-  store.on('change', ({origin}) => { if (origin === 'merge') schedule(); });
-  win.addEventListener('blur', () => { for (const splitter of Object.values(splitters)) splitter.cancel(); }, {signal});
+  store.on('change', ({origin: from}) => { if (from === 'merge') schedule(); });
+  win.addEventListener('blur', () => { if (dragging) dividerEls.get(dragging.key)?.dispatchEvent(new win.Event('pointercancel')); }, {signal});
   win.addEventListener('pagehide', () => { void store.flush(); }, {signal});
 
   function destroy() {
@@ -1152,8 +1327,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
     modeObserver.disconnect();
     bandWatch?.stop();
     if (frame) win.cancelAnimationFrame(frame);
-    for (const splitter of Object.values(splitters)) splitter.el.remove();
-    floatHost?.remove();
+    for (const el of dividerEls.values()) el.remove();
     return store.destroy();
   }
 
@@ -1164,31 +1338,47 @@ export function createDockHost({document: doc = globalThis.document, window: win
     store,
     workspace: workspaceApi,
     get solution() { return solution; },
-    /** #viewport's insets at fit for the current solution (fittedView). */
     stageInsets: () => ({...(solution?.stageInsets ?? {top: 24, right: 28, bottom: 24, left: 28})}),
     define: descriptorInput => registry.define(descriptorInput),
     showPanel,
     togglePanel,
     toggleTimelineSheet,
     toggleTall,
-    /** Closes every open sheet (the side panels' and the timeline body's), as Escape or a press outside does. */
     closeSheets({restoreFocus = false} = {}) {
-      for (const side of SIDES) closeSheet(side, {restoreFocus, recommit: false});
+      closeSheet({restoreFocus, recommit: false});
+      closeFlyout({restoreFocus, recommit: false});
       closeBody({restoreFocus, recommit: false});
       commit();
     },
-    canPlace: (id, target) => canPlacePanel(id, target, {mode: mode(), catalog: registry.constraints()}),
+    /** True when the panel exists in this workspace (every panel may go anywhere). */
+    canPlace: id => panelsOf(mode(), catalog()).includes(id),
     presentation,
-    /** The current workspace (animate, draw or rig). */
     get mode() { return mode(); },
-    place,
     commit,
-    /** Calls `listener(solution)` after every commit; returns the unsubscribe function. */
+    solveOnly,
+    /** The offset of solution rectangles from the workspace's box (the band above it). */
+    get origin() { return {...origin}; },
     onSolve(listener) {
       listeners.solve.add(listener);
       return () => listeners.solve.delete(listener);
     },
-    regions: () => ({hosts, bottom, stage, viewport, band, rail: workspace.querySelector('.shell-rail'), floats: [...floats.values()]}),
+    /** The elements of the regions, in reading order, for F6 (dock-keyboard.mjs). */
+    regions() {
+      const s = solution;
+      const list = [];
+      const head = stage?.querySelector(':scope > .stage-head');
+      walk(s?.layout?.root, node => {
+        if (node.type === STAGE) list.push(head, viewport);
+        else if (node.type === 'group') {
+          const group = s.groups.find(item => item.id === node.id);
+          if (!group) return;
+          list.push(group.timeline && group.state !== 'strip' ? timeline : group.state === 'strip' ? strips.get(group.id) : islands.get(group.id));
+        }
+      });
+      const floats = s?.floats.map(float => islands.get(float.group)).filter(Boolean) ?? [];
+      return {band, rail, stage, viewport, timeline, ordered: [band, rail, ...list, ...floats].filter(Boolean), floats, islands, strips, flyout: flyoutElement, sheet: sheet.element};
+    },
+    get flyout() { return flyout ? {...flyout} : null; },
     destroy,
   };
 }

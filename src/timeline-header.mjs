@@ -47,7 +47,6 @@ import {icon} from './icons.mjs';
 import {openMenu, menuFor} from './ui/ui-menu.mjs';
 import {createPopover} from './ui/ui-popover.mjs';
 import {setAttr, setHidden, setProp, setText, setVar} from './ui/dom-write.mjs';
-import {setSharedSize} from './shell/layout-schema.mjs';
 import {bandBottom} from './shell/topbar.mjs';
 import {normalizePlaybackRange, playbackRangeFromFrames} from './playback-window.mjs';
 
@@ -334,9 +333,7 @@ export function createTimelineHeader(ctx, host) {
   let shell = null;
   /** Timeline ⋯ › Default height: the stored height is cleared, so the default applies again (the splitter's double-click). */
   function defaultHeight() {
-    if (!shell?.store) return;
-    shell.store.update(layout => setSharedSize(layout, 'bottom', null));
-    shell.commit?.();
+    shell?.workspace?.defaultTimelineHeight?.();
   }
 
   // ---- Go to frame (the readout's popover) ----
