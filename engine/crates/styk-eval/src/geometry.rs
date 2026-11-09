@@ -1343,7 +1343,7 @@ pub fn build_remembering_plain_over(doc: &Document, frame: &Frame, memory: &mut 
 }
 
 /// Worker build carrying cancellation into nested clips.
-pub(crate) fn build_cancellable(doc: &Document, frame: &Frame, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
+pub fn build_cancellable(doc: &Document, frame: &Frame, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
     build_core_checked(doc, frame, None, Measure::Off, true, None, None, cancelled)
 }
 
@@ -1427,6 +1427,21 @@ pub fn build_shapes_cancellable(doc: &Document, frame: &Frame, slots: Option<&[u
         needed
     });
     build_core_checked(doc, frame, needed.as_deref(), Measure::Shapes, true, None, None, cancelled)
+}
+
+/// Query geometry with checkpoints in every parallel object and join level.
+pub fn build_only_measured_cancellable(doc: &Document, frame: &Frame, slots: &[usize], cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
+    if cancelled() { return None; }
+    let mut needed = vec![false; frame.objects.len()];
+    for &slot in slots {
+        let mut at = Some(slot);
+        while let Some(i) = at.filter(|&i| i < needed.len() && !needed[i]) {
+            if cancelled() { return None; }
+            needed[i] = true;
+            at = frame.objects[i].join.map(|j| j.slot as usize);
+        }
+    }
+    build_core_checked(doc, frame, Some(&needed), Measure::Bounds, true, None, None, cancelled)
 }
 
 fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {

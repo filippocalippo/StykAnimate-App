@@ -26,11 +26,16 @@ thread_local! {
 /// A core with `bytes` (a project file named `name`) open in one tab, its facts lane started through `spawner` (it
 /// must run the lane on a thread of its own) and its first revision published.
 pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn styk_services::Spawner>) -> Result<Core, String> {
+    core_with_files(bytes, name, spawner, Arc::new(styk_services::files::fake::MemoryFiles::default()))
+}
+
+/// [`core_with_document`] whose saves land in `files`.
+pub fn core_with_files(bytes: &[u8], name: &str, spawner: Arc<dyn styk_services::Spawner>, files: Arc<styk_services::files::fake::MemoryFiles>) -> Result<Core, String> {
     let (notify, ready) = std::sync::mpsc::channel();
-    let (core, publication) = crate::screens::core_with_document(bytes, name, spawner, Arc::new(move || {
+    let (core, publication) = crate::screens::core_with_files(bytes, name, spawner, Arc::new(move || {
         // A test that ended has dropped its receiver: nothing to tell.
         let _ = notify.send(());
-    }))?;
+    }), files)?;
     let id = core.documents.active().ok_or("no document is open")?.id().get();
     FIXTURES.with(|fixtures| fixtures.borrow_mut().entry(id).or_default().push(Fixture { publication, ready: Rc::new(ready) }));
     let mut core = core;
@@ -75,17 +80,27 @@ pub fn wait_facts(core: &mut Core) -> Result<(), String> {
     Ok(())
 }
 
+pub fn settle_session(core: &mut Core) -> Result<(), String> {
+    for _ in 0..30_000 {
+        if core.documents.active().is_none_or(|document| document.view().is_ok()) && !core.inspector().painting() { return Ok(()); }
+        core.poll_document();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    Err("the session did not settle in 30 s".into())
+}
+
 /// Lets the facts lane answer what the panels asked for: publish, then wait until the panel is not pending and the lane
 /// has nothing in flight (an answer for an earlier request may come first).
 pub fn settle_facts(core: &mut Core) -> Result<(), String> {
+    settle_session(core)?;
     publish(core)?;
-    for _ in 0..8 {
-        wait_facts(core)?;
-        if !core.inspector().pending() && !core.facts().is_some_and(Facts::in_flight) {
-            return Ok(());
-        }
+    loop {
+        core.refresh();
+        if !core.inspector().pending() && !core.facts().is_some_and(Facts::in_flight) { return Ok(()); }
+        // Wakes also acknowledge reclamation. Wait for quiescence, not an assumed
+        // number of evaluation replies (a blocked panel can be awaiting retirement).
+        with_fixture(core, |fixture| fixture.ready.recv_timeout(std::time::Duration::from_secs(30)).map_err(|_| "the facts and reclamation lanes stopped answering for 30 s".to_string()))?;
     }
-    Err("the panel was still pending after eight answers of the facts lane".to_string())
 }
 
 /// Runs a session command on the active document with JSON arguments (`"[1,-1]"`), then publishes the new state and
@@ -100,6 +115,12 @@ pub fn call_unsettled(core: &mut Core, method: &str, args: &str) -> Result<(), S
     let id = core.documents.active().ok_or("no document is open")?.id();
     let args = styk_doc::json::parse(args.as_bytes()).map_err(|error| error.to_string())?;
     let args: Vec<styk_doc::Value> = args.elements().map(|items| items.iter().collect()).unwrap_or_default();
+    if matches!(method, "updateBuilderSegmentStyle" | "replaceFigureColor") {
+        core.documents.dispatch(crate::documents::Request::Call { document: id, method: method.into(), args, view: styk_doc::Value::Null }).map_err(|(error, _)| error.to_string())?;
+        settle_session(core)?;
+        core.refresh();
+        return Ok(());
+    }
     let answer = core.documents.call(id, method, &args, &styk_doc::Value::Null).map_err(|error| error.to_string())?;
     answer.result.map_err(|error| error.to_string())?;
     core.refresh();
@@ -159,6 +180,57 @@ pub fn poll_until(core: &mut Core, done: impl Fn(&Core) -> bool) -> Result<Vec<c
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     Err(format!("the documents host did not answer in 15 s (recovery: {:?})", core.documents.recovery_view()))
+}
+
+/// A hook the documents host calls at every cancellation checkpoint of a worker-session command (the layer planner's
+/// steps), so a test can hold the command after its work has begun. Process-wide: a test that sets it runs alone in
+/// its own test binary.
+static CHECKPOINT: std::sync::Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = std::sync::Mutex::new(None);
+
+/// Sets (or clears) the checkpoint hook.
+pub fn set_checkpoint(hook: Option<Arc<dyn Fn() + Send + Sync>>) {
+    *CHECKPOINT.lock().unwrap_or_else(|error| error.into_inner()) = hook;
+}
+
+pub(crate) fn checkpoint() {
+    let hook = CHECKPOINT.lock().unwrap_or_else(|error| error.into_inner()).clone();
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+/// Deterministically holds the next facts request at worker admission. Dropping the guard releases it.
+pub struct FactsGate {
+    state: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    entered: Receiver<std::thread::ThreadId>,
+}
+impl FactsGate {
+    pub fn entered(&self) -> std::thread::ThreadId { self.entered.recv_timeout(std::time::Duration::from_secs(30)).expect("facts entered its worker") }
+    pub fn release(&self) { *self.state.0.lock().unwrap() = true; self.state.1.notify_all(); }
+}
+impl Drop for FactsGate { fn drop(&mut self) { self.release(); } }
+
+pub fn hold_facts(core: &mut Core) -> Result<FactsGate, String> {
+    struct Held {
+        source: Arc<FixturePublication>,
+        state: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+        entered: std::sync::mpsc::Sender<std::thread::ThreadId>,
+    }
+    impl crate::frames::FrameDocument for Held {
+        fn snapshot(&self, revision: u64, epoch: u64) -> Option<Arc<styk_engine::Generation>> {
+            let _ = self.entered.send(std::thread::current().id());
+            let mut open = self.state.0.lock().unwrap();
+            while !*open { open = self.state.1.wait(open).unwrap(); }
+            crate::frames::FrameDocument::snapshot(self.source.as_ref(), revision, epoch)
+        }
+        fn publication_receipt(&self) -> Option<u64> { crate::frames::FrameDocument::publication_receipt(self.source.as_ref()) }
+    }
+    let source = with_fixture(core, |fixture| Ok(fixture.publication.clone()))?;
+    let state = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let (entered, receiver) = std::sync::mpsc::channel();
+    let id = core.documents.active().ok_or("no document")?.id();
+    core.set_source(id, Arc::new(Held { source, state: state.clone(), entered }));
+    Ok(FactsGate { state, entered: receiver })
 }
 
 /// How many whole-frame object scans this thread has made (a counter, never a clock): a read on the interface thread that

@@ -270,6 +270,64 @@ masks = [
   [0, 457, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
 ]
 
+# B1: the colour and paint rows. A segment painted with a linear gradient (the colour field shows its swatch and "Linear gradient"), and a
+# figure with a four-colour palette and three fills (the Colours section opened as a person opens it). Both are taller than the other
+# screens, as the rows sit below their first screenful; today's references are captured at the window height that gives the panel
+# that height (screens.mjs).
+["inspector-joint-gradient"]
+# mostly text: the labels, values and names, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
+reference = "docs/native/screens/inspector/inspector-joint-gradient.png"
+max_difference = 0.017
+width = 320
+height = 640
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [16, 276, 278, 76, "the IK chunk: the IK section (its title and Use IK)"],
+  [0, 566, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 595, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
+
+["inspector-joint-gradient-dark"]
+# mostly text: the labels, values and names, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
+reference = "docs/native/screens/inspector/inspector-joint-gradient-dark.png"
+max_difference = 0.016
+width = 320
+height = 640
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [16, 276, 278, 76, "the IK chunk: the IK section (its title and Use IK)"],
+  [0, 566, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 595, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
+
+["inspector-colours"]
+# mostly text: the labels, values and names, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
+reference = "docs/native/screens/inspector/inspector-colours.png"
+max_difference = 0.019
+width = 320
+height = 960
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 886, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 915, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
+
+["inspector-colours-dark"]
+# mostly text: the labels, values and names, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
+reference = "docs/native/screens/inspector/inspector-colours-dark.png"
+max_difference = 0.018
+width = 320
+height = 960
+masks = [
+  [282, 16, 28, 28, "K-widgets and K-cmd: the target's menu button (the menu and its commands)"],
+  [16, 60, 288, 52, "K-cmd: the quick actions (the command registry fills the row)"],
+  [0, 886, 320, 28, "K-widgets: the scroll area fades its last 28 px while more is below"],
+  [0, 915, 320, 45, "the Library panel's chunk: Add to library (and under it the dock's rounded corners, K-dock)"],
+]
+
 # The stage (N2): today's stage region (`#viewport` with its artboard backing and scene canvas, alone on the page, 900 x 560,
 # fitted as the app fits it with the clearances of a window that has the Animate rail on the left) showing the Properties
 # screens' startup document at tick 0, captured as the others are (bundled Chromium through Playwright, device scale 1) by

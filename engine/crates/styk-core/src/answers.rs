@@ -40,6 +40,14 @@ impl Session {
 /// Runs a session command of document `id` with native arguments; refusals of the host (no such tab, not active) are
 /// messages too.
 pub fn call(documents: &mut Documents, id: DocumentId, method: &str, args: &[Value], session: &mut Session) -> Result<Value, Msg> {
+    if matches!(method, "updateBuilderSegmentStyle" | "replaceFigureColor") {
+        use crate::documents::{Request, Effect};
+        return match documents.dispatch(Request::Call { document: id, method: method.into(), args: args.to_vec(), view: Value::Null }) {
+            Ok(Effect::Started(_)) => Ok(Value::Null),
+            Err((error, _)) => Err(crate::inspector::host_refusal(&error)),
+            Ok(_) => Err(Msg::new("errors.editorSessions.finishTheCurrentOperationFirst")),
+        };
+    }
     match documents.call(id, method, args, &Value::Null) {
         Ok(answer) => session.take(answer),
         Err(error) => Err(Msg::owned(error.message_key().to_owned())),

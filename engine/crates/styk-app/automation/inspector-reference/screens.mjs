@@ -19,8 +19,9 @@ await mkdir(out, {recursive: true});
 const browser = await chromium.launch({args: ['--allow-file-access-from-files']});
 const fixture = async name => JSON.parse(await readFile(path.join(root, 'engine/tests/edit', `${name}.document.json`), 'utf8'));
 
-async function open(theme) {
-  const context = await browser.newContext({viewport: {width: 1440, height: 900}, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: theme});
+async function open(theme, height) {
+  // A taller panel needs a taller window: the panel is 398 px shorter than the window.
+  const context = await browser.newContext({viewport: {width: 1440, height: Math.max(900, height + 398)}, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: theme});
   await context.addInitScript(settings => {
     localStorage.setItem('stykanimate.editor.settings.v1', JSON.stringify(settings));
     localStorage.setItem('stykanimate.theme.v1', settings.theme);
@@ -33,7 +34,7 @@ async function open(theme) {
 
 const only = process.argv.slice(3);
 for (const screen of SCREENS.filter(screen => !only.length || only.includes(screen.id))) {
-  const {context, page} = await open(screen.theme);
+  const {context, page} = await open(screen.theme, screen.height);
   await page.evaluate(async ({report, screen}) => {
     const editor = window.styk.editor;
     editor.load(report, 'Reference');
@@ -47,6 +48,11 @@ for (const screen of SCREENS.filter(screen => !only.length || only.includes(scre
     await page.evaluate(enter, screen.enter);
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   }
+  if (screen.open) {
+    await page.locator(`[data-section-toggle="${screen.open}"]`).click();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  }
+  await page.mouse.move(0, 0);
   await page.waitForTimeout(500);
   const panel = page.locator('.shell-panel:has([data-slot=inspector-target])').first();
   const box = await panel.boundingBox();

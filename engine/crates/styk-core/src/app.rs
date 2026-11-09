@@ -145,7 +145,7 @@ impl Core {
     fn input_fenced(&self) -> bool { self.documents.edits_locked() || self.session_end_expired() }
     pub fn next_deadline(&self) -> Option<u64> {
         if self.input_fenced() { return self.overlay_deadline().into_iter().chain(self.settings_store.as_ref().and_then(|s| s.deadline())).min(); }
-        [self.overlay_deadline(), self.timeline.deadline(), self.settings_store.as_ref().and_then(|s| s.deadline()),
+        [self.overlay_deadline(), self.timeline.deadline(), self.inspector.deadline(), self.settings_store.as_ref().and_then(|s| s.deadline()),
             ((!self.command_queue.is_empty() || self.settings_mode_pending) && !self.activity().operation).then_some(self.now)].into_iter().flatten().min()
     }
     /// Shared barrier used by the document host before save, scope changes, close, quit and session end.
@@ -164,7 +164,24 @@ impl Core {
         use crate::documents::Effect as DocumentEffect;
         let effect = self.documents.poll()?;
         match effect {
-            DocumentEffect::Called { document: _, answer } => {
+            DocumentEffect::Called { job, answer, .. } if self.inspector.owns(job) => {
+                let result = self.session.take(answer);
+                let effects = self.inspector.layer_moved(&mut self.documents, &mut self.view, &mut self.session, job, crate::inspector::MoveOutcome::Called(result));
+                self.show_notices(&effects);
+                Some(DocumentEffect::None)
+            }
+            DocumentEffect::Failed { job, error } if self.inspector.owns(job) => {
+                let effects = self.inspector.layer_moved(&mut self.documents, &mut self.view, &mut self.session, job, crate::inspector::MoveOutcome::Failed(crate::inspector::host_refusal(&error)));
+                self.show_notices(&effects);
+                Some(DocumentEffect::None)
+            }
+            DocumentEffect::Cancelled(job) | DocumentEffect::Stale(job) if self.inspector.owns(job) => {
+                let outcome = if matches!(effect, DocumentEffect::Cancelled(_)) { crate::inspector::MoveOutcome::Cancelled } else { crate::inspector::MoveOutcome::Stale };
+                let effects = self.inspector.layer_moved(&mut self.documents, &mut self.view, &mut self.session, job, outcome);
+                self.show_notices(&effects);
+                Some(DocumentEffect::None)
+            }
+            DocumentEffect::Called { answer, .. } => {
                 let result = self.session.take(answer);
                 let stage = self.stage();
                 self.timeline.completed(&self.documents, stage.as_deref(), result.is_ok());
@@ -179,11 +196,14 @@ impl Core {
         }
     }
     pub fn new(documents: Documents) -> Core {
-        Core { documents, ..Core::default() }
+        let mut core = Core::default();
+        core.documents = documents;
+        core
     }
 
     /// The derived-facts worker. Without one, a fact that needs geometry stays pending.
     pub fn set_facts(&mut self, facts: Facts) {
+        if let Some(old) = &mut self.facts { self.inspector.retire_final(old); }
         self.facts = Some(facts);
     }
 
@@ -360,8 +380,9 @@ impl Core {
         let _ = self.documents.set_auto_key(self.settings.animation().timeline_mode == crate::settings::TimelineMode::Advanced && self.settings.view().auto_key);
         let source = self.documents.active().and_then(|document| self.sources.get(&document.id())).cloned();
         self.inspector.refresh(&mut self.documents, &self.view, self.facts.as_mut(), source, &mut self.session);
+        let mut effects = self.inspector.sync_dialog(&mut self.documents, &mut self.overlays, &mut self.focus);
         let mut document_effects = Vec::new();
-        let mut effects = self.recovery.refresh(&mut self.documents, &mut self.overlays, &mut self.focus, &self.presentation, &mut document_effects);
+        effects.extend(self.recovery.refresh(&mut self.documents, &mut self.overlays, &mut self.focus, &self.presentation, &mut document_effects));
         for effect in document_effects { effects.extend(self.document_effect(&effect)); }
         effects
     }
@@ -476,11 +497,26 @@ impl Core {
             Command::Timeline(event) => self.timeline_event(event),
             Command::Settings(event) => self.settings_event(event),
             Command::Overlay { event, now } => self.overlay_event(event, now),
+            // The layer move's Cancel is a terminal action: it reaches the move while the session is out on the worker
+            // (an ordinary edit waits for it instead).
+            Command::Inspector(event @ crate::inspector::Event::CancelLayerMove) => {
+                self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event)
+            }
+            // Releases of the already-open picker join its ordered queue while its session
+            // is on the worker. The quit fence above still rejects all edits.
+            Command::Inspector(event @ crate::inspector::Event::Paint(_)) if self.inspector.painting() => {
+                self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event)
+            }
             Command::Inspector(event) => {
                 let stage = self.stage();
                 if self.timeline.finish(&mut self.documents, &mut self.session, stage.as_deref()).is_err() {
                     self.defer(Command::Inspector(event))
-                } else { self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event) }
+                } else {
+                    let effects = self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event);
+                    // A layer move that began now is timed from now (its dialog shows after 150 ms).
+                    self.inspector.stamp(self.now, &self.overlays);
+                    effects
+                }
             }
             Command::Run(id) => self.run(id),
             Command::Recovery(event) => self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus, &mut document_effects),
@@ -534,6 +570,7 @@ impl Core {
     fn active_identity(&self) -> Option<(DocumentId, u64)> { self.documents.active().map(|d| (d.id(), d.lineage())) }
     fn wake(&mut self, now: u64) -> Vec<Effect> {
         self.now = now;
+        self.inspector.tick(now);
         let mut effects = self.refresh();
         if let Some(answer) = self.audio_open.as_ref().and_then(|worker| worker.take()) { self.audio_open = None; self.set_audio(answer); }
         effects.extend(self.stage_event(crate::stage::Event::Progress));
@@ -902,6 +939,13 @@ impl Core {
             crate::shortcuts::Press::Consumed => Some(Vec::new()),
             _ => None,
         }
+    }
+}
+
+#[cfg(feature = "engine")]
+impl Drop for Core {
+    fn drop(&mut self) {
+        if let Some(facts) = &mut self.facts { self.inspector.retire_final(facts); }
     }
 }
 

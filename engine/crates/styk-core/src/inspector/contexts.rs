@@ -11,6 +11,7 @@ use styk_eval::doc::{Figure, PaintKind, Prim, Segment};
 use super::facts::{self, FigureKind, degrees, item_f64, num};
 use super::memory::SectionMemory;
 use super::model::*;
+use super::paint::{PaintSpec as Paint2, PaintType, Stop};
 use super::property::PropertyKey;
 use super::{CameraTab, ConnectorPart, PanelState};
 use crate::commands::CommandId;
@@ -29,8 +30,18 @@ pub(crate) struct Inputs<'a> {
     pub can_paste: bool,
 }
 
-fn instance_figure(document: &Document, object: &Value, inputs: &Inputs<'_>) -> Option<Arc<Figure>> {
-    facts::uid_of(object).and_then(|uid| inputs.shown.figures.get(&uid).cloned()).or_else(|| facts::figure_of(document, object))
+/// A selected figure as the facts lane's evaluation drew it for exactly this state, its style overlay resolved there
+/// (`resolveInstanceFigure`); the definition until those facts land (the panel's controls are pending meanwhile).
+fn instance_figure(document: &Document, object: &Value, shown: &super::Shown) -> Option<Arc<Figure>> {
+    let definition = facts::figure_of(document, object)?;
+    let resolved = facts::uid_of(object).and_then(|uid| shown.figures.get(&uid)).filter(|figure| {
+        let base = figure.base.as_ref().unwrap_or(figure);
+        Arc::ptr_eq(base, &definition) && (!shown.awaiting || shown.subject.as_ref().is_some_and(|subject| {
+            let handle = usize::try_from(facts::selection(document).joint).ok().and_then(|index| definition.segments.get(index)).map(|segment| segment.id);
+            facts::same_appearance(&subject.object, object, handle)
+        }))
+    });
+    resolved.cloned().or(Some(definition))
 }
 
 const STEP_DOWN: &str = "step-down";
@@ -201,10 +212,17 @@ fn resolve(view: &ViewState, has_object: bool) -> InspectorContext {
 /// The Inspector for `document` in this view state.
 /// `frame` is the frame on show, read ready ([`Document::frame_records_ready`]): the model is never built from an
 /// evaluation made on the interface thread.
-pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> Inspector {
+/// With it, the paint each colour row's picker opens with ([`pickers`]), from the same walk of the frame.
+pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> (Inspector, Vec<(ColorTarget, Picked)>) {
+    let object = facts::selected_object(document, frame);
+    let model = build_for(document, frame, inputs, object.clone());
+    let pickers = pickers(document, frame, &model, inputs.shown, object);
+    (model, pickers)
+}
+
+fn build_for(document: &Document, frame: &Value, inputs: &Inputs<'_>, object: Option<Value>) -> Inspector {
     let records = facts::records(document);
     let frame = frame.clone();
-    let object = facts::selected_object(document, &frame);
     let count = facts::selection(document).uids.len();
     if let Some(tool) = inputs.view.drawing() {
         return drawing(tool);
@@ -215,7 +233,7 @@ pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> 
         (InspectorContext::Layer, _) => layer(records),
         (InspectorContext::Frame, _) => frame_context(document, records),
         (InspectorContext::Scene, _) | (_, None) => scene(records, &frame),
-        (_, Some(object)) => match instance_figure(document, &object, inputs) {
+        (_, Some(object)) => match instance_figure(document, &object, inputs.shown) {
             None => scene(records, &frame),
             Some(figure) if count == 1 && figure.movieclip.is_some() => movieclip(&figure, records),
             Some(_) if count > 1 => figures(document, records, &frame, inputs, count),
@@ -479,11 +497,16 @@ fn layer_select(document: &Document, records: &Value, span: bool) -> Row {
     })
 }
 
+/// `usesSegmentColors`: the figure keeps its own segment colours under a pose's colour override.
+fn uses_segment_colors(version: f64, figure: &Figure, object: &Value) -> bool {
+    version >= 5.0 || figure.segment_colors || object.path(&["_styk", "colorMode"]).and_then(Value::as_str) == Some("segments")
+}
+
 /// `displayedColor`: the colour a figure shows for `rgb` under its pose's colour override.
 fn displayed_color(version: f64, figure: &Figure, object: &Value, rgb: [u8; 3]) -> [u8; 3] {
     let raw = num(object.get("color_override_raw")).unwrap_or(0.0);
     let raw_bits = raw as i64 as u32;
-    let segment_colors = version >= 5.0 || figure.segment_colors || object.path(&["_styk", "colorMode"]).and_then(Value::as_str) == Some("segments");
+    let segment_colors = uses_segment_colors(version, figure, object);
     let override_rgb = [raw_bits as u8, (raw_bits >> 8) as u8, (raw_bits >> 16) as u8];
     if !segment_colors {
         return if (raw as i64 as i32) < 0 { [0, 0, 0] } else { override_rgb };
@@ -512,8 +535,8 @@ fn palette(version: f64, figure: &Figure, object: &Value) -> Vec<([u8; 3], usize
     };
     for segment in &figure.segments {
         let mut seen: Vec<[u8; 3]> = Vec::new();
-        for stop in segment_stops(segment) {
-            let shown = displayed_color(version, figure, object, stop);
+        for stop in displayed_segment_paint(version, figure, object, segment).stops {
+            let shown = stop.rgb();
             if !seen.contains(&shown) {
                 seen.push(shown);
                 add(shown, true);
@@ -527,20 +550,49 @@ fn palette(version: f64, figure: &Figure, object: &Value) -> Vec<([u8; 3], usize
     entries
 }
 
-/// The colours of a segment's paint stops (`segmentPaint`): its colour, and the secondary end of a gradient.
-fn segment_stops(segment: &Segment) -> Vec<[u8; 3]> {
-    let mut stops = vec![segment.rgb];
-    match (&segment.paint, segment.secondary) {
-        (Some(paint), secondary) if paint.kind != PaintKind::Solid => {
-            stops.extend(paint.stops.iter().skip(1).map(|stop| stop.rgb));
-            if let (Some((rgb, _)), Some(last)) = (secondary, stops.last_mut()) {
-                *last = rgb;
-            }
+/// `segmentPaint(segment)`: the segment's own paint with its colour and opacity as the first stop and a two-tone's
+/// secondary as the last; without one, solid, or linear to the secondary.
+fn segment_paint(segment: &Segment) -> Paint2 {
+    let first = Stop::new(0.0, segment.rgb, segment.alpha);
+    let secondary = segment.secondary.map(|(rgb, a)| Stop::new(1.0, rgb, 1.0 - f64::from(a) / 255.0));
+    if let Some(paint) = &segment.paint {
+        let kind = match paint.kind {
+            PaintKind::Solid => PaintType::Solid,
+            PaintKind::Linear => PaintType::Linear,
+            PaintKind::Radial => PaintType::Radial,
+            PaintKind::Angular => PaintType::Angular,
+            PaintKind::Diamond => PaintType::Diamond,
+        };
+        let mut stops: Vec<Stop> = paint.stops.iter().map(|stop| Stop::new(stop.offset, stop.rgb, stop.opacity)).collect();
+        if let Some(stop) = stops.first_mut() {
+            stop.color = first.color;
+            stop.opacity = first.opacity;
         }
-        (None, Some((rgb, _))) => stops.push(rgb),
-        _ => {}
+        if let (Some(secondary), Some(last), false) = (secondary, stops.last_mut(), kind == PaintType::Solid) {
+            last.color = secondary.color;
+            last.opacity = secondary.opacity;
+        }
+        return Paint2 { kind, angle: paint.angle, stops };
     }
-    stops
+    match secondary {
+        Some(secondary) => Paint2 { kind: PaintType::Linear, angle: 0.0, stops: vec![first, secondary] },
+        None => Paint2 { kind: PaintType::Solid, angle: 0.0, stops: vec![first] },
+    }
+}
+
+/// `displayedSegmentPaint`: the segment's paint under its pose's colour override; a full override shows the first
+/// stop alone (the secondary end is suppressed, alpha included).
+pub(crate) fn displayed_segment_paint(version: f64, figure: &Figure, object: &Value, segment: &Segment) -> Paint2 {
+    let mut paint = segment_paint(segment);
+    let raw = num(object.get("color_override_raw")).unwrap_or(0.0);
+    if uses_segment_colors(version, figure, object) && (raw as i64 as u32) >> 24 == 255 {
+        paint.kind = PaintType::Solid;
+        paint.stops.truncate(1);
+    }
+    for stop in &mut paint.stops {
+        stop.color = displayed_color(version, figure, object, stop.rgb()).map(f64::from);
+    }
+    paint
 }
 
 /// One figure, text or image: Transform, Appearance and Arrange are open; Connection and Colours are titled.
@@ -628,7 +680,7 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
         );
     }
     if facts::selection(document).joint < 0 {
-        sections.push(colours(document, &palette, figure, object, version, inputs.panel));
+        sections.push(colours(document, &palette, figure, object, version, inputs.panel, inputs.shown));
     }
     Inspector {
         kind: kind_id,
@@ -666,7 +718,9 @@ fn page_text(start: usize, size: usize, total: usize) -> Arc<str> {
 }
 
 /// The figure's colours and fills (titled): the palette 32 per page, the fills 12 per page.
-fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Figure, object: &Value, version: f64, panel: &PanelState) -> Section {
+fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Figure, object: &Value, version: f64, panel: &PanelState, shown: &super::Shown) -> Section {
+    // A swatch's picker captures the facts lane's row of its colour: until that is ready the swatch is pending.
+    let ready: Vec<&str> = shown.subject.as_ref().map(|subject| subject.palette.iter().map(|(color, _)| color.as_str()).collect()).unwrap_or_default();
     let uid = num(object.get("unique_id")).map(|uid| uid as u32);
     let drawables = super::order::drawables(figure, object);
     let mut rows = Vec::new();
@@ -674,10 +728,11 @@ fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Fi
     if !palette.is_empty() {
         let items = palette[palette_start..(palette_start + PALETTE_PAGE).min(palette.len())]
             .iter()
-            .map(|(rgb, segments, fills)| {
+            .enumerate()
+            .map(|(offset, (rgb, segments, fills))| {
                 let color = facts::hex(*rgb).to_uppercase();
                 let key = if *fills > 0 { "inspectorView.replaceColorSegmentsAndFills" } else { "inspectorView.replaceColorSegments" };
-                (*rgb, Msg::new(key).with("color", color).with("segments", Msg::count("counts.segments", *segments as f64)).with("fills", Msg::count("counts.fills", *fills as f64)))
+                Swatch { target: ColorTarget::Palette((palette_start + offset) as u32), rgb: *rgb, description: Msg::new(key).with("color", color).with("segments", Msg::count("counts.segments", *segments as f64)).with("fills", Msg::count("counts.fills", *fills as f64)), disabled: !ready.contains(&facts::hex(*rgb).as_str()) }
             })
             .collect();
         rows.push(Row::Swatches { label: msg("inspectorView.figureColorPalette"), items });
@@ -705,19 +760,11 @@ fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Fi
         let position = super::order::position(&drawables, super::order::DrawKind::Polygon, index).unwrap_or(1) as f64;
         let mut delete = Button { action: Action::Panel(PanelAction::DeletePolygon(at)), ..button(CommandId::Undo, Some("trash"), "inspectorView.deletePolygon") };
         delete.label = Msg::new("inspectorView.deletePolygon").with("value", index + 1);
+        let chip = Swatch { target: ColorTarget::Polygon(at), rgb: displayed_color(version, figure, object, polygon.rgb), description: Msg::new("inspectorView.color").with("name", name.clone()), disabled: false };
         rows.push(Row::Group {
             label: name.clone(),
+            head: ListRow { glyph: "polygon", label: name, swatch: Some(chip), actions: vec![delete] },
             rows: vec![
-                Row::Color(ColorRow { paint_picker: false, disabled: false,
-                    target: ColorTarget::Polygon(at),
-                    label: Msg::new("inspectorView.color").with("name", name),
-                    description: None,
-                    paint: Paint::Solid(displayed_color(version, figure, object, polygon.rgb)),
-                    caption: None,
-                    mixed: false,
-                    span: true,
-                }),
-                Row::Actions(ActionsRow { label: None, items: vec![delete] }),
                 grid(vec![
                     Row::Number(number(PropertyKey::PolygonOpacity(at), msg("inspectorView.opacity"), opacity, "%").range(0.0, 100.0)),
                     Row::Number(number(PropertyKey::PolygonZOrder(at), msg("inspectorView.order"), position, "").range(1.0, drawables.len() as f64)),
@@ -747,7 +794,7 @@ fn figures(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<
     opacities.dedup();
     let mut colours: Vec<[u8; 3]> = objects
         .iter()
-        .filter_map(|item| instance_figure(document, item, inputs).map(|figure| palette(version, &figure, item)))
+        .filter_map(|item| instance_figure(document, item, inputs.shown).map(|figure| palette(version, &figure, item)))
         .flat_map(|entries| entries.into_iter().map(|entry| entry.0))
         .collect();
     colours.sort_unstable();
@@ -847,7 +894,6 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
     let secondary = two_tone && segment.secondary.is_some();
     let fixed = matches!(segment.prim, Prim::Image | Prim::Text);
     let lock = segment.rig.as_ref().is_some_and(|rig| rig.lock.is_some());
-    let solid = segment.paint.as_ref().is_none_or(|paint| paint.kind == PaintKind::Solid) && segment.secondary.is_none();
     let len_flag = num(object.get("len_flag")).unwrap_or(0.0) != 0.0;
     let bend_flag = num(object.get("bend_flag")).unwrap_or(0.0) != 0.0;
     let position = if len_flag { item_f64(object.get("lengths"), joint).unwrap_or(segment.length) } else { segment.length };
@@ -855,14 +901,10 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
     let bend = if bend_flag { item_f64(object.get("bends"), joint).unwrap_or(0.0) } else { segment.bend };
     let title = segment.name.as_deref().filter(|name| !name.is_empty()).map_or_else(|| Label::Msg(Msg::new("builderSurfaceUi.jointNumber").with("id", f64::from(segment.id))), Label::plain);
     let static_switch = SwitchRow { toggle: Toggle::StaticJoint, label: msg("inspectorView.static"), checked: segment.is_static, disabled: false, tip: Some(msg("inspectorView.doesNotTurnWithItsParent")), span: false };
-    let stops: Vec<[u8; 3]> = segment_stops(segment).into_iter().map(|rgb| displayed_color(version, figure, object, rgb)).collect();
-    let paint = if solid { Paint::Solid(stops[0]) } else { Paint::Gradient(stops.iter().enumerate().map(|(index, rgb)| (index as f64 / (stops.len().max(2) - 1) as f64, *rgb)).collect()) };
-    let gradient_kind = segment.paint.as_ref().map_or("linear", |paint| match paint.kind {
-        PaintKind::Solid | PaintKind::Linear => "linear",
-        PaintKind::Radial => "radial",
-        PaintKind::Angular => "angular",
-        PaintKind::Diamond => "diamond",
-    });
+    let shown = displayed_segment_paint(version, figure, object, segment);
+    let solid = shown.is_solid();
+    let gradient_kind = shown.kind.id();
+    let paint = if solid { Paint::Solid(shown.stops[0].rgb()) } else { Paint::Gradient(shown) };
     let colour = ColorRow { paint_picker: true, disabled: false,
         target: ColorTarget::Segment,
         label: msg("inspectorView.colour"),
@@ -876,7 +918,9 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
     let opacity_value = override_of("opacity").map_or(segment.alpha * 100.0, |opacity| opacity * 100.0);
     let alpha = number(PropertyKey::SegmentOpacity, msg(if secondary { "inspectorView.primaryOpacity" } else { "inspectorView.opacity" }), opacity_value, "%")
         .range(0.0, 100.0)
-        .described(msg("inspectorView.primaryColorOpacity"));
+        .described(msg("inspectorView.primaryColorOpacity"))
+        .pending(inputs.shown.awaiting && !inputs.shown.subject.as_ref().is_some_and(|subject| facts::same_appearance(&subject.object, object, Some(segment.id)))
+            && override_of("opacity").is_none() && style.as_ref().is_some_and(|style| style.get("paint").is_some()));
     let shapes = [
         ("line", "inspectorView.roundLine"),
         ("squareLine", "inspectorView.squareLine"),
@@ -1010,13 +1054,102 @@ fn drawing(tool: &'static str) -> Inspector {
     }
 }
 
+/// What a colour row's picker opens with (`installColorPickers`' resolver in `src/app.mjs`).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Picked {
+    pub paint: Paint2,
+    pub gradients: bool,
+    pub alpha: bool,
+    /// The palette colour a swatch replaces (`entry.color`); its row (`targets`) is the facts lane's.
+    pub from: Option<String>,
+}
+
+/// Every colour target the model shows, with the colour it shows.
+fn color_targets(model: &Inspector) -> Vec<(ColorTarget, [u8; 3])> {
+    fn walk(rows: &[Row], out: &mut Vec<(ColorTarget, [u8; 3])>) {
+        for row in rows {
+            match row {
+                Row::Color(color) => out.push((color.target, match &color.paint {
+                    Paint::Solid(rgb) => *rgb,
+                    Paint::Gradient(paint) => paint.stops.first().map_or([0; 3], Stop::rgb),
+                })),
+                Row::Swatches { items, .. } => out.extend(items.iter().map(|item| (item.target, item.rgb))),
+                Row::Group { head, rows, .. } => {
+                    out.extend(head.swatch.iter().map(|swatch| (swatch.target, swatch.rgb)));
+                    walk(rows, out);
+                }
+                Row::Grid { rows, .. } => walk(rows, out),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for section in &model.sections {
+        walk(&section.rows, &mut out);
+    }
+    out
+}
+
+/// The paint each colour row's picker starts from, made with the model (once per build, never when a row is pressed):
+/// the background's paint (its own colour override first), the figure's colour and opacity, the segment's displayed
+/// paint, a two-tone's secondary colour, a fill's colour and opacity, a palette colour. A row starts from the colour
+/// it shows, as today's picker starts from the field's value.
+fn pickers(document: &Document, frame: &Value, model: &Inspector, lane: &super::Shown, object: Option<Value>) -> Vec<(ColorTarget, Picked)> {
+    let mut targets = color_targets(model);
+    // The background's picker also opens from outside the scene's row (today's breadcrumb, `crumb-background`).
+    if !targets.iter().any(|(target, _)| *target == ColorTarget::Background) {
+        targets.push((ColorTarget::Background, [0; 3]));
+    }
+    let records = facts::records(document);
+    let version = num(records.get("version")).unwrap_or(0.0);
+    let solid = |rgb: [u8; 3], opacity: f64, alpha: bool| Picked { paint: Paint2::solid(rgb, opacity), gradients: false, alpha, from: None };
+    let selected = object.and_then(|object| Some((instance_figure(document, &object, lane)?, object)));
+    let joint = facts::selection(document).joint;
+    let mut out = Vec::new();
+    for (target, shown) in targets {
+        let picked = match (target, &selected) {
+            (ColorTarget::Background, _) => {
+                let background_id = num(frame.get("background_id"));
+                let background = records.get("backgrounds").and_then(Value::elements).and_then(|items| items.iter().find(|item| num(item.get("background_id")) == background_id));
+                let paint = match num(frame.get("_stykBackgroundColor")) {
+                    Some(color) => {
+                        let mut solid = styk_doc::Obj::new();
+                        solid.set("kind", Value::Num(2.0));
+                        solid.set("color", Value::Num(color));
+                        Paint2::of_background(Some(&Value::object(solid)))
+                    }
+                    None => Paint2::of_background(background.as_ref()),
+                };
+                paint.ok().map(|paint| Picked { paint, gradients: true, alpha: true, from: None })
+            }
+            (_, None) => None,
+            (ColorTarget::Figure, Some((_, object))) => Some(solid(shown, 1.0 - num(object.get("field28")).unwrap_or(0.0) / 255.0, true)),
+            (ColorTarget::Segment, Some((figure, object))) => usize::try_from(joint).ok().and_then(|joint| figure.segments.get(joint)).map(|segment| Picked { paint: displayed_segment_paint(version, figure, object, segment), gradients: true, alpha: true, from: None }),
+            // The secondary colour is a plain colour field: today's default picker, opaque, without gradients.
+            (ColorTarget::SegmentGradient, Some((figure, object))) => usize::try_from(joint).ok().and_then(|joint| figure.segments.get(joint)).and_then(|segment| segment.secondary).map(|(rgb, _)| solid(displayed_color(version, figure, object, rgb), 1.0, false)),
+            (ColorTarget::Polygon(index), Some((figure, object))) => figure.polyfills.get(index as usize).map(|polygon| solid(displayed_color(version, figure, object, polygon.rgb), polygon.alpha, true)),
+            (ColorTarget::Palette(_), Some(_)) => Some(Picked { from: Some(facts::hex(shown)), ..solid(shown, 1.0, false) }),
+        };
+        out.extend(picked.map(|picked| (target, picked)));
+    }
+    out
+}
+
 /// The model while the frame on show and the document's views are being made on a worker: the last model with every
 /// value read from the frame cleared and every control disabled, so nothing stale is shown as current or edited.
 pub(crate) fn pending(model: &Inspector) -> Inspector {
     fn disable(rows: &mut [Row]) {
         for row in rows {
             match row {
-                Row::Grid { rows: inner, .. } | Row::Group { rows: inner, .. } => disable(inner),
+                Row::Grid { rows: inner, .. } => disable(inner),
+                Row::Group { head, rows: inner, .. } => {
+                    if let Some(swatch) = head.swatch.as_mut() {
+                        swatch.disabled = true;
+                    }
+                    head.actions.iter_mut().for_each(|action| action.disabled = true);
+                    disable(inner);
+                }
+                Row::Swatches { items, .. } => items.iter_mut().for_each(|item| item.disabled = true),
                 Row::Number(number) => number.pending = true,
                 Row::Stepper(stepper) => {
                     stepper.field.pending = true;
@@ -1032,7 +1165,7 @@ pub(crate) fn pending(model: &Inspector) -> Inspector {
                     previous.disabled = true;
                     next.disabled = true;
                 }
-                Row::Segmented(_) | Row::Value { .. } | Row::Meta(_) | Row::Caption(_) | Row::Swatches { .. } | Row::Slot(_) => {}
+                Row::Segmented(_) | Row::Value { .. } | Row::Meta(_) | Row::Caption(_) | Row::Slot(_) => {}
             }
         }
     }
@@ -1044,5 +1177,27 @@ pub(crate) fn pending(model: &Inspector) -> Inspector {
         }
         disable(&mut section.rows);
     }
+    model
+}
+
+/// Only instance-derived appearance waits for resolution. Pose, layer and project values
+/// come directly from the authoritative record and keep their value and enabled state.
+pub(crate) fn pending_derived(model: &Inspector) -> Inspector {
+    fn rows(items: &mut [Row]) {
+        for row in items {
+            match row {
+                Row::Grid { rows: inner, .. } => rows(inner),
+                Row::Group { head, rows: inner, .. } => {
+                    if let Some(swatch) = &mut head.swatch { swatch.disabled = true; }
+                    rows(inner);
+                }
+                Row::Swatches { items, .. } => items.iter_mut().for_each(|item| item.disabled = true),
+                Row::Color(color) if color.target != ColorTarget::Background => color.disabled = true,
+                _ => {}
+            }
+        }
+    }
+    let mut model = model.clone();
+    for section in &mut model.sections { rows(&mut section.rows); }
     model
 }

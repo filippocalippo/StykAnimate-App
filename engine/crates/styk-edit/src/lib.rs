@@ -139,8 +139,9 @@ pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
 }
 
 pub use history::{Command, CommandKind, EntryCosts, HistoryLimits, HistoryMarks};
-pub use frame::{FrameSlice, editor_frame};
+pub use frame::{FrameSlice, editor_frame, editor_frame_cancellable};
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
+pub use recolor::{attached_palette_rows, attached_palette_rows_resolved};
 pub use layer_focus::FocusLock;
 pub use select::Selection;
 pub use shown::{Flavor, ShownScene};
@@ -912,6 +913,11 @@ impl Editor {
         }
         if let Some(result) = self.property_call_checked(method, args, check) {
             return result;
+        }
+        match method {
+            "updateBuilderSegmentStyle" => return self.update_builder_segment_style_checked(args.first(), args.get(1), check),
+            "replaceFigureColor" => return self.replace_figure_color_checked(args.first(), args.get(1), &arg(2), check),
+            _ => {}
         }
         if let Some(result) = self.range_call(method, args) {
             return result;

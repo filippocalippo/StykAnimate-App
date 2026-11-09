@@ -444,7 +444,11 @@ impl Editor {
 
     /// `applyFigureRange(operation, options)`.
     pub(crate) fn apply_figure_range(&mut self, request: Request, options: Options) -> Result<Value, EditError> {
-        self.apply_figure_range_with(request, options, false, None)
+        self.apply_figure_range_checked(request, options, &mut || Ok(()))
+    }
+
+    pub(crate) fn apply_figure_range_checked(&mut self, request: Request, options: Options, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
+        self.apply_figure_range_with(request, options, false, None, check)
     }
 
     /// The recorded library movieclip insertion still uses the same range
@@ -455,10 +459,12 @@ impl Editor {
             Options { at_playhead: true, label: Some("Add figure".into()), ..Options::default() },
             true,
             worker,
+            &mut || Ok(()),
         )
     }
 
-    fn apply_figure_range_with(&mut self, request: Request, options: Options, movieclip_insertion: bool, worker: Option<&mut crate::movieclip_planning::TimelineWorker<'_>>) -> Result<Value, EditError> {
+    fn apply_figure_range_with(&mut self, request: Request, options: Options, movieclip_insertion: bool, worker: Option<&mut crate::movieclip_planning::TimelineWorker<'_>>, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
+        check()?;
         let label = options.label.clone().unwrap_or_else(|| request.label().to_string());
         let mut uids: Vec<u32> = Vec::new();
         for id in options.uids.clone().unwrap_or_else(|| self.selection.uids.clone()) {
@@ -469,7 +475,7 @@ impl Editor {
         // Duplicated figures keep their timeline effects in the same undo step.
         let effects = if matches!(request, Request::Duplicate { .. }) { self.figure_effect_clips(&uids) } else { Vec::new() };
         if !effects.is_empty() && self.batch.is_none() {
-            return self.movieclip_batch(&label, |editor| editor.apply_figure_range_with(request, options, movieclip_insertion, worker));
+            return self.movieclip_batch(&label, |editor| editor.apply_figure_range_with(request, options, movieclip_insertion, worker, check));
         }
         let mut part = None;
         if matches!(request, Request::Mirror(_)) && self.selection.joint >= 0 && (self.selected_objects()?.len() == 1 || self.branch_selected()) {
@@ -484,7 +490,7 @@ impl Editor {
         if matches!(request, Request::Align { .. }) && self.property_edit.is_some() {
             self.commit_animation_edit()?;
         }
-        let (mut authored, mut targets) = self.range_targets(&options)?;
+        let (mut authored, mut targets) = self.range_targets_checked(&options, check)?;
         if movieclip_insertion && !self.sheet() && self.report.path(&["_styk", "animation", "channels"]).and_then(Value::array_len).unwrap_or(0) > 0 {
             authored = true;
             for target in &mut targets { target.frame = self.shown_frame()?; }
@@ -533,6 +539,8 @@ impl Editor {
         let mut plans: Vec<(Target, Planned)> = Vec::new();
         let origins = figures.iter().any(|figure| figure.path(&["_styk", "animationOrigin"]).is_some_and(Value::truthy));
         for target in targets {
+            check()?;
+            let _walk = crate::prof::scope("paint::range.plan_frame");
             if origins { self.origin_range_gate(&objects_of(&target.frame), &uids, if let Request::Join { target, .. } = &request { target.as_f64().map(|id| id as u32) } else { None })?; }
             let planned = match (&operation, &payload) {
                 (None, Some(payload)) => {
@@ -595,6 +603,9 @@ impl Editor {
         } else {
             label
         };
+        // The planner already produced the authoritative edited pose. Publish that read
+        // with the commit; showing Properties must not evaluate the range a second time.
+        let shown = matches!(request, Request::Recolor(_) | Request::Pose(_)).then(|| plans.iter().find(|(target, _)| target.tick.to_bits() == self.tick.to_bits()).map(|(_, planned)| planned.frame.clone())).flatten();
         let selection = self.selection_state();
         let ticks: Vec<f64> = plans.iter().map(|(t, _)| t.tick).collect();
         let inserted: Vec<u32> = payload.as_ref().map(|p| p.order.clone()).unwrap_or_default();
@@ -663,6 +674,7 @@ impl Editor {
         if !effects.is_empty() {
             self.paste_figure_vfx_clips(&effects, &map.unwrap_or_default(), &[], 0.0)?;
         }
+        if shown.is_some() { self.publish_property_preview(shown); }
         Ok(outcome(&ticks, &inserted))
     }
 
@@ -737,6 +749,11 @@ impl Editor {
 
     /// `targets(editor, options)`: whether the range is authored (a layer sheet), and its frames.
     fn range_targets(&self, options: &Options) -> Result<(bool, Vec<Target>), EditError> {
+        self.range_targets_checked(options, &mut || Ok(()))
+    }
+
+    fn range_targets_checked(&self, options: &Options, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<(bool, Vec<Target>), EditError> {
+        check()?;
         if options.at_playhead {
             let frame = if self.sheet() { self.shown_frame()? } else { self.report.get("keyframes").and_then(|k| k.item(self.frame_index)).unwrap_or(Value::Null) };
             return Ok((self.sheet(), vec![Target { index: self.frame_index, tick: self.tick, frame }]));
@@ -755,6 +772,7 @@ impl Editor {
             unique.sort_by(f64::total_cmp);
             let mut frames = Vec::new();
             for tick in unique {
+                check()?;
                 frames.push(self.sample(tick)?);
             }
             return Ok((true, frames));
@@ -771,6 +789,7 @@ impl Editor {
             }
             let mut frames = Vec::new();
             for tick in ticks {
+                check()?;
                 frames.push(self.sample(tick)?);
             }
             return Ok((true, frames));

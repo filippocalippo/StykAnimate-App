@@ -21,7 +21,10 @@ use styk_core::number::{StepKeys, format};
 use styk_design::typography::TextStyle;
 use styk_design::widgets::badge::{Tint as DesignTint, badge};
 use styk_design::widgets::button::{Button, IconButton, IconSize, Variant};
-use styk_design::widgets::color::{ColorField, SwatchSize, swatch};
+use styk_core::inspector::paint::{PaintSpec, PaintType};
+use styk_core::roving::{NavKey, Orientation, next_index};
+use styk_design::widgets::color::{ColorField, GradientKind, SwatchButton, SwatchPaint, SwatchSize, SwatchStop};
+use styk_design::widgets::tooltip::Content;
 use styk_design::widgets::field::EditField;
 use styk_design::widgets::frame::{self, FieldFrame};
 use styk_design::widgets::focus::{Focusable, Keys, Ring};
@@ -174,6 +177,11 @@ impl Kit<'_> {
     /// glyph before them), ghost or outline (white with a `--line-2` ring). Both are the design system's buttons
     /// (`styk_design::widgets::button`); a text button in a field grid fills its cell.
     fn button(&self, item: &m::Button, size: ButtonSize) -> Element<'static, Message> {
+        self.button_inked(item, size, false)
+    }
+
+    /// [`Kit::button`], quiet (`--text-3` at rest) when it is one of a list row's actions.
+    fn button_inked(&self, item: &m::Button, size: ButtonSize, quiet: bool) -> Element<'static, Message> {
         let message = match item.action {
             Action::Command(command) => Message::Command(Command::Run(command)),
             Action::Panel(action) => send(Event::Act(action)),
@@ -191,7 +199,7 @@ impl Kit<'_> {
             return button.into_element();
         }
         let size = if size == ButtonSize::Small { IconSize::Sm } else { IconSize::Md };
-        IconButton::new(self.id(), FocusArea::Panels, self.palette, item.icon.unwrap_or("file"), message).size(size).toggled(pressed).disabled(item.disabled).into_element()
+        IconButton::new(self.id(), FocusArea::Panels, self.palette, item.icon.unwrap_or("file"), message).size(size).quiet(quiet).toggled(pressed).disabled(item.disabled).into_element()
     }
 
     /// A section title's action: an icon button, or words (Join…, Rotate 15°) in `--type-small-strong` on a 28 px pill
@@ -311,9 +319,9 @@ impl Kit<'_> {
     }
 
     fn color(&self, row: &m::ColorRow) -> Element<'static, Message> {
-        let first = match &row.paint {
-            Paint::Solid(rgb) => *rgb,
-            Paint::Gradient(stops) => stops.first().map_or([0; 3], |stop| stop.1),
+        let (first, gradient) = match &row.paint {
+            Paint::Solid(rgb) => (*rgb, None),
+            Paint::Gradient(paint) => (paint.stops.first().map_or([0; 3], styk_core::inspector::paint::Stop::rgb), swatch_paint(paint)),
         };
         let caption = match (&row.caption, row.mixed) {
             (_, true) => self.say(&Msg::new("inspector.mixed")),
@@ -323,10 +331,75 @@ impl Kit<'_> {
         // The label is the swatch's accessible name; the field shows the swatch and its caption. The paint picker is a
         // button, which centres what it holds unless it spans the row.
         ColorField::new(color_id(row.target), FocusArea::Panels, self.palette, first, caption, send(Event::Color(row.target)))
+            .paint(gradient)
             .centered(row.paint_picker && !row.span)
             .in_grid(self.in_grid.get())
             .disabled(row.disabled)
             .into_element()
+    }
+
+    /// A swatch button for a model swatch: its description is the tooltip (today's hex text), it is neither pressable nor
+    /// focusable while the model says it is disabled, and a press asks for the picker on its target.
+    fn swatch_button(&self, id: FocusId, item: &m::Swatch, size: SwatchSize) -> SwatchButton<'static, Message> {
+        let content = Content { label: self.say(&item.description), shortcut: String::new() };
+        SwatchButton::new(id, FocusArea::Panels, self.palette, item.rgb, size, send(Event::Color(item.target))).disabled(item.disabled).tooltip(content, Message::Tooltip)
+    }
+
+    /// `.ui-swatch-grid`: 24 px swatch buttons, 6 px apart, wrapping across the row. The group is one Tab stop and the
+    /// arrow keys, Home and End move inside it (`[data-count-one]`); which swatch is the stop is the focus owner's
+    /// (`Focusable::collection`: the one that last held focus). A press opens the picker on that palette colour.
+    fn swatches(&self, items: &[m::Swatch]) -> Element<'static, Message> {
+        let ids: Arc<[FocusId]> = items.iter().map(|_| self.id()).collect();
+        let disabled: Arc<[bool]> = items.iter().map(|item| item.disabled).collect();
+        let collection = ids.first().map(|id| id.0);
+        let buttons: Vec<Element<'static, Message>> = items
+            .iter()
+            .enumerate()
+            .map(|(at, item)| {
+                let (moves, skip, enter) = (ids.clone(), disabled.clone(), send(Event::Color(item.target)));
+                let keys = Keys::Custom(Box::new(move |event| {
+                    let iced::keyboard::Event::KeyPressed { key, modifiers, .. } = event else { return None };
+                    if modifiers.alt() || modifiers.control() || modifiers.logo() {
+                        return None;
+                    }
+                    use iced::keyboard::{Key, key::Named};
+                    let nav = match key.as_ref() {
+                        Key::Named(Named::Enter | Named::Space) => return Some(enter.clone()),
+                        Key::Named(Named::Home) => NavKey::Home,
+                        Key::Named(Named::End) => NavKey::End,
+                        Key::Named(Named::ArrowLeft) => NavKey::ArrowLeft,
+                        Key::Named(Named::ArrowRight) => NavKey::ArrowRight,
+                        Key::Named(Named::ArrowUp) => NavKey::ArrowUp,
+                        Key::Named(Named::ArrowDown) => NavKey::ArrowDown,
+                        _ => return None,
+                    };
+                    let next = next_index(nav, Some(at), moves.len(), Orientation::Both, true, |index| skip[index])?;
+                    (next != at).then(|| Message::Focusing(Box::new(Message::Idle), moves[next]))
+                }));
+                let mut button = self.swatch_button(ids[at], item, SwatchSize::Grid).keys(keys);
+                if let Some(collection) = collection {
+                    button = button.collection(collection);
+                }
+                button.into_element()
+            })
+            .collect();
+        Row::with_children(buttons).spacing(tokens::scale::SPACE_1_5).wrap().boxed()
+    }
+
+    /// A fill of the figure (`.inspector-group`, 8 px between its parts): its list row (`.ui-list-row`: 32 px, the
+    /// glyph, the name, then the colour chip and the actions the core supplies), then its other rows.
+    fn group(&self, head: &m::ListRow, rows: &[m::Row]) -> Element<'static, Message> {
+        let mut actions: Vec<Element<'static, Message>> = Vec::new();
+        if let Some(chip) = &head.swatch {
+            // `margin-inline: var(--space-1)`.
+            actions.push(container(self.swatch_button(self.id(), chip, SwatchSize::Chip).into_element()).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_1 }).boxed());
+        }
+        actions.extend(head.actions.iter().map(|item| self.button_inked(item, ButtonSize::Small, true)));
+        let name = self.text(self.say(&head.label), &tokens::scale::TYPE_UI, self.palette.text_1);
+        let line = row![self.icon(head.glyph, tokens::scale::ICON_SM, self.palette.text_3), name, Space::new().width(Length::Fill), Row::with_children(actions).align_y(Alignment::Center)].spacing(tokens::scale::SPACE_2).align_y(Alignment::Center);
+        let mut parts: Vec<Element<'static, Message>> = vec![container(line).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_2_5 }).center_y(Length::Fixed(tokens::scale::CONTROL_MD)).width(Length::Fill).boxed()];
+        parts.extend(rows.iter().filter_map(|row| self.row(row)));
+        Column::with_children(parts).spacing(tokens::scale::SPACE_2).boxed()
     }
 
     fn segmented(&self, row: &m::SegmentedRow) -> Element<'static, Message> {
@@ -389,7 +462,11 @@ impl Kit<'_> {
                 if self.in_grid.get() { container(buttons).center_y(Length::Fixed(tokens::scale::CONTROL_LG)).width(Length::Fill).boxed() } else { buttons.boxed() }
             }
             m::Row::Segmented(segmented) => self.segmented(segmented),
-            m::Row::Value { label, text } => row![self.small(self.say(label)), Space::new().width(Length::Fill), self.text(self.label(text), &tokens::scale::TYPE_VALUE, self.palette.text_1)].align_y(Alignment::Center).boxed(),
+            // `.ui-row`: at least 36 px, the label (`--type-small`, `--text-2`) and the value 12 px apart.
+            m::Row::Value { label, text } => {
+                let line = row![self.text(self.say(label), &tokens::scale::TYPE_SMALL, self.palette.text_2), Space::new().width(Length::Fill), self.text(self.label(text), &tokens::scale::TYPE_VALUE, self.palette.text_1)].spacing(tokens::scale::SPACE_3).align_y(Alignment::Center);
+                container(line).center_y(Length::Fixed(tokens::scale::CONTROL_LG)).width(Length::Fill).boxed()
+            }
             // `.inspector-meta`: small, tabular, the quiet ink.
             m::Row::Meta(meta) => self.styled(self.say(meta), style(&tokens::scale::TYPE_SMALL).tabular(), self.palette.text_3),
             // `.inspector-preview-caption`: its parts spread across the row ("960 × 540" at the start, "100% zoom" at the end).
@@ -403,16 +480,9 @@ impl Kit<'_> {
                 }
                 Row::with_children(line).align_y(Alignment::Center).boxed()
             }
-            m::Row::Swatches { items, .. } => {
-                let swatches: Vec<Element<'static, Message>> = items.iter().map(|(rgb, _)| swatch(self.palette, *rgb, SwatchSize::Md, 1.0)).collect();
-                Row::with_children(swatches).spacing(tokens::scale::SPACE_1).wrap().boxed()
-            }
+            m::Row::Swatches { items, .. } => self.swatches(items),
             m::Row::Pager { text: page, previous, next, .. } => row![self.button(previous, ButtonSize::Small), Space::new().width(Length::Fill), self.small(page.to_string()), Space::new().width(Length::Fill), self.button(next, ButtonSize::Small)].align_y(Alignment::Center).boxed(),
-            m::Row::Group { label, rows } => {
-                let mut children = vec![self.small(self.say(label))];
-                children.extend(rows.iter().filter_map(|row| self.row(row)));
-                Column::with_children(children).spacing(tokens::scale::SPACE_1_5).boxed()
-            }
+            m::Row::Group { head, rows, .. } => self.group(head, rows),
             // Another chunk's part of the panel: its place is kept, it draws nothing until that chunk lands.
             m::Row::Slot(slot) => Space::new().width(Length::Fill).height(slot_height(*slot)?).boxed(),
         })
@@ -430,7 +500,9 @@ impl Kit<'_> {
         badge(self.palette, icon, tint)
     }
 
-    fn section(&self, section: &m::Section, first: bool) -> Option<Element<'static, Message>> {
+    /// `under_quick`: the quick actions' row sits above the first section, so its hairline shows (`.ui-section +
+    /// .ui-section`).
+    fn section(&self, section: &m::Section, first: bool, under_quick: bool) -> Option<Element<'static, Message>> {
         let palette = self.palette;
         let titled = section.place == Place::Titled;
         let mut head: Vec<Element<'static, Message>> = Vec::new();
@@ -483,7 +555,7 @@ impl Kit<'_> {
         let bottom = if titled && !section.open { tokens::scale::SPACE_1_5 } else { tokens::scale::SPACE_4 };
         let element = container(Column::with_children(parts)).padding(Padding { top, bottom, left: 0.0, right: 0.0 }).width(Length::Fill).boxed();
         // `.ui-section + .ui-section { box-shadow: inset 0 1px 0 var(--line-1) }`: the hairline takes no room.
-        Some(if first { element } else { hairline(palette, element) })
+        Some(if first && !under_quick { element } else { hairline(palette, element) })
     }
 
     fn header(&self, model: &Inspector, rename: Option<RenameView>) -> Element<'static, Message> {
@@ -560,6 +632,18 @@ impl Kit<'_> {
     }
 }
 
+/// The gradient a colour row's swatch shows (`paintCSS`): none for a solid paint, a diamond drawn as a radial one.
+fn swatch_paint(paint: &PaintSpec) -> Option<SwatchPaint> {
+    let kind = match paint.kind {
+        PaintType::Solid => return None,
+        PaintType::Linear => GradientKind::Linear,
+        PaintType::Radial | PaintType::Diamond => GradientKind::Radial,
+        PaintType::Angular => GradientKind::Angular,
+    };
+    let stops = paint.stops.iter().map(|stop| SwatchStop { offset: stop.offset as f32, rgb: stop.rgb(), opacity: stop.opacity as f32 }).collect();
+    Some(SwatchPaint { kind, angle: paint.angle as f32, stops })
+}
+
 /// A double click on the name renames in place.
 fn mouse_double_click(content: Element<'static, Message>, message: Message) -> Element<'static, Message> {
     iced::widget::mouse_area(content).on_double_click(message).boxed()
@@ -591,7 +675,7 @@ pub fn view(view: View<'_>) -> Element<'static, Message> {
     let kit = Kit { palette, presentation: view.presentation, field: view.field, probe: view.button_probe, text: view.text, composing: view.composing, next: Cell::new(0), in_grid: Cell::new(false) };
     let mut sections: Vec<Element<'static, Message>> = Vec::new();
     for section in &view.model.sections {
-        if let Some(element) = kit.section(section, sections.is_empty()) {
+        if let Some(element) = kit.section(section, sections.is_empty(), view.model.quick.is_some()) {
             sections.push(element);
         }
     }
@@ -640,3 +724,31 @@ enum ButtonSize {
 
 /// The Library footer's height (`.properties-library-save`).
 const FOOTER_HEIGHT: f32 = 46.0;
+
+/// The figures' move to another layer, while its dialog is open (today's `changeFigureLayer`: the title, "Preserving
+/// animation…" over an indeterminate bar, and Cancel): a modal in the focus scope of the overlay the core opened for it,
+/// entering at the phase the host gives; the bar sweeps at the host's loop phase. Cancel and the close button cancel.
+#[cfg(feature = "engine")]
+pub fn owned<'a>(core: &styk_core::app::Core, palette: &'static styk_design::Palette, window: iced::Size) -> Vec<styk_design::widgets::layer::Placed<'a, Message>> {
+    use styk_core::inspector::ids;
+    use styk_design::widgets::dialog::{Dialog, DialogSize, modal};
+    use styk_design::widgets::progress::Bar;
+    let Some((overlay, view)) = core.inspector().layer_dialog() else { return Vec::new() };
+    let presentation = core.presentation();
+    let say = |message: &Msg| presentation.label(&styk_core::i18n::Label::Msg(message.clone()));
+    let cancel = send(Event::CancelLayerMove);
+    let status = styk_design::widgets::control::words(say(&view.status), TextStyle::from_role(&tokens::scale::TYPE_BODY), palette.text_2);
+    let bar = Bar::new(palette, None).width(Length::Fill).phase(core.overlays().phase(ids::PROGRESS));
+    let body = Column::with_children(vec![status, bar.boxed()]).spacing(tokens::scale::SPACE_2);
+    let spec = Dialog {
+        size: DialogSize::Sm,
+        title: say(&view.title),
+        description: None,
+        body: body.boxed(),
+        actions: vec![Button::new(ids::CANCEL, FocusArea::Panels, palette, say(&Msg::new("common.cancel")), cancel.clone()).into_element()],
+        meta: None,
+        error: None,
+        close: Some((ids::CLOSE, cancel)),
+    };
+    vec![modal(palette, overlay, spec, window, core.overlays().phase(overlay))]
+}

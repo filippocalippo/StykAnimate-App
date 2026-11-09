@@ -105,9 +105,11 @@ Plain Rust, no toolkit. The interface reports; the core decides.
   returns the stale one so the interface takes focus from it), and the `Scope` widget consumes every pointer event the dialog
   did not take, so a click on a field behind the dialog reaches nothing.
 - **Targets** are registered by the interface each view pass in tree order: `FocusTarget { id, area, kind, input_role,
-  history_owner, enabled, tab_stop }`. Input role is independent of focus kind: a select is a `Control` and still
+  history_owner, enabled, tab_stop, collection }`. Input role is independent of focus kind: a select is a `Control` and still
   suppresses editor shortcuts. Checkboxes/radios permit only the reference's builder-scoped `builder-*` exceptions.
-  A roving group is one target for Tab (its active child). Widgets describe these roles; the core decides routing.
+  A roving group is one target for Tab (its active child). A collection that wraps (a palette of swatches) marks its members
+  with a `collection` key instead: `FocusState` makes the member that last held focus (by arrow, press or Tab) the one stop,
+  the first enabled member before any has, and ignores the members' own `tab_stop`. Widgets describe these roles; the core decides routing.
 - **Reconciliation always reports `Option<Id>`.** After any event that can change focus (Tab, click, Escape, a removed or
   disabled field, a panel replaced, programmatic focus) the toolkit side reports what it holds focused:
   `FocusState::reconcile(Option<Id>)`. `None` clears the core's `text_entry` and `composing`. The core never trusts a

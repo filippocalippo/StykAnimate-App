@@ -850,10 +850,12 @@ impl Editor {
                 written
             }).collect();
             self.sheet_property_entries(&entries, "Edit layer pose")?;
+            self.publish_property_preview(edit.preview);
             return Ok(true);
         }
         let entry = entry(&edit.target, &edit.property, Some(edit.tick), Some(edit.value.clone()), edit.exact);
         self.sheet_property_entries(&[entry], &format!("Edit {}", edit.property))?;
+        self.publish_property_preview(edit.preview);
         Ok(true)
     }
 

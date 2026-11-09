@@ -88,7 +88,8 @@ pub enum Effect {
     NotAvailable(CommandId),
     /// The document changed: the stage needs a frame for its new revision.
     RequestFrame,
-    /// Open the colour picker for a colour row (the picker is a later chunk).
+    /// Open the colour picker on this colour row: its request is `inspector::Panel::picker` (the picker's view is
+    /// the colour picker chunk's).
     PickColor(inspector::model::ColorTarget),
     /// Show the one-time scrub hint in the message slot.
     ScrubHint(Msg),

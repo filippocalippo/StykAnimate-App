@@ -55,7 +55,9 @@ impl Session {
     /// the synchronous native seam; native hosts dispatch the complete bake on its sole worker owner.
     pub fn requires_worker(&self, method: &str, args: &[Value]) -> bool {
         match method {
-            "@timeline" => true,
+            "@timeline" | "@inspectorPaint" | "updateBuilderSegmentStyle" | "replaceFigureColor" => true,
+            // Today's `assignFiguresToLayerAsync`: the sheet planner samples the whole animation, with a Cancel.
+            "assignFiguresToLayer" => true,
             "bakeMovieclip" | "bakeMovieclipBegin" | "bakeMovieclipSample" | "bakeMovieclipPublish" | "bakeMovieclipCancel"
             | "restartMovieclip" | "removeMovieclipRestart" | "breakApartMovieclip"
             | "addMovieclipToNextKeyframes" | "placeMovieclip" | "splitMovieclip" => true,
@@ -156,6 +158,8 @@ impl Session {
         self.editor.views().map(|prepared| read(&prepared.doc))
     }
 
+    pub fn figure_ready(&self, id: u32) -> Option<std::sync::Arc<styk_eval::doc::Figure>> { self.editor.figure_ready(id) }
+
     /// `animationValue(target, property)` at the playhead when it needs no evaluation: `None` when not ready.
     pub fn animation_value_ready(&self, target: &Value, property: &str) -> Option<Result<Option<Value>, EditError>> {
         self.editor.animation_value_ready(target, property)
@@ -219,6 +223,13 @@ impl super::WorkerSession {
                     return Ok(result);
                 }
                 snapshot_view_boundary(editor, &mut snapshot_active, method);
+                if method == "assignFiguresToLayer" {
+                    let arg = |at: usize| args.get(at).cloned().unwrap_or(Value::Null);
+                    return editor.assign_figures_to_layer_checked(&arg(0), &arg(1), &mut checked).map(Value::Bool);
+                }
+                if matches!(method, "@inspectorPaint" | "updateBuilderSegmentStyle" | "replaceFigureColor") {
+                    return paint_call(editor, method, args, &mut checked);
+                }
                 if editor.sheet() || method == "bakeMovieclip" {
                     let source = editor.clock.clone();
                     let clock = &|| source.as_ref().map_or(0.0, |clock| clock());
@@ -241,4 +252,87 @@ fn snapshot_view_boundary(editor: &Editor, active: &mut Option<Value>, method: &
     if matches!(method, "seek" | "selectSheetLayer" | "keepSelectionOnSeek" | "setActiveLayer") {
         if active.is_none() { *active = editor.report.path(&["_styk", "layers", "activeId"]).cloned(); }
     } else { *active = None; }
+}
+
+fn paint_call(editor: &mut Editor, method: &str, args: &[Value], check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
+    check()?;
+    let guarded = method == "@inspectorPaint";
+    let values;
+    let (method, args, guard) = if guarded {
+        let method = args.first().and_then(Value::as_str).unwrap_or("");
+        values = args.get(1).and_then(Value::elements).map(|v| v.iter().collect::<Vec<_>>()).unwrap_or_default();
+        (method, values.as_slice(), args.get(2).filter(|guard| !guard.is_null()))
+    } else { (method, args, None) };
+    if !matches!(method, "updateBuilderSegmentStyle" | "replaceFigureColor") { return Err(EditError::Invalid("errors.editorSessions.chooseACompleteBackgroundCommand".into())); }
+    if let Some(guard) = guard {
+        let refused = || EditError::Invalid("errors.app.selectionChangedReopenTheColorPicker".into());
+        let selected = editor.builder_selection()?.ok_or_else(refused)?;
+        let handle = selected.figure.get("segments").and_then(|segments| segments.item(selected.joint)).and_then(|segment| segment.get("segment_id").cloned());
+        if !guard.get("definition").is_some_and(|definition| definition.same_node(&selected.figure))
+            || guard.get("handle") != handle.as_ref()
+            || guard.get("uid") != selected.object.get("unique_id")
+            || guard.get("joint").and_then(Value::as_f64) != Some(selected.joint as f64)
+            || guard.get("tick").and_then(Value::as_f64).map(f64::to_bits) != Some(editor.tick.to_bits()) {
+            return Err(refused());
+        }
+    }
+    let result = editor.call_checked_impl(method, args, true, check)?;
+    check()?;
+    if !guarded { return Ok(result); }
+    let mut answer = styk_doc::Obj::new();
+    answer.set("value", result);
+    if let Some(guard) = guard {
+        let mut next = guard.as_obj().cloned().unwrap_or_default();
+        let selected = editor.builder_selection()?.ok_or_else(|| EditError::Invalid("errors.app.selectionChangedReopenTheColorPicker".into()))?;
+        next.set("definition", selected.figure);
+        answer.set("guard", Value::object(next));
+    }
+    Ok(Value::object(answer))
+}
+
+#[cfg(test)]
+mod paint_worker_tests {
+    use super::*;
+    #[test]
+    fn paint_range_walks_run_on_the_worker_and_cancellation_keeps_history_atomic() {
+        let mut report = styk_doc::json::parse(include_bytes!("../../../../tests/edit/selection-metadata-plain-native.document.json")).unwrap();
+        let frame = report.get("keyframes").unwrap().item(0).unwrap();
+        report.make_obj().unwrap().set("keyframes", Value::array(vec![frame; 64]));
+        report.make_obj().unwrap().set("keyframe_count", Value::Num(64.0));
+        let session = Session::start(report, r#"{"selectedUid":1,"selectedUids":[1],"selectedJoint":-1}"#).unwrap();
+        assert!(session.requires_worker("replaceFigureColor", &[]));
+        assert!(session.requires_worker("updateBuilderSegmentStyle", &[]));
+        let interface = std::thread::current().id();
+        std::thread::spawn(move || {
+            let mut worker = session.into_worker();
+            let before = styk_doc::json::to_string(worker.report());
+            let mut options = styk_doc::Obj::new();
+            options.set("indices", Value::array((0..64).map(|index| Value::Num(f64::from(index))).collect()));
+            let args = [Value::str("#2b2b2b"), Value::nums(&[17.0, 31.0, 49.0]), Value::object(options)];
+            crate::prof::enable_for_test();
+            let mut checks = 0;
+            let answer = worker.call_native_long("replaceFigureColor", &args, &Value::Null, &mut || {
+                assert_ne!(std::thread::current().id(), interface); checks += 1; Ok(())
+            }, || Ok(())).unwrap();
+            answer.result.unwrap();
+            let walks = crate::prof::take().into_iter().find(|(name, _, _)| *name == "paint::range.plan_frame").unwrap().1;
+            assert_eq!(walks, 64, "one plan walk per selected frame, all on the worker");
+            assert!(worker.session.can_undo());
+            let after = styk_doc::json::to_string(worker.report());
+            assert_ne!(after, before);
+            worker.session.call_native("undo", &[], &Value::Null).result.unwrap();
+            assert_eq!(styk_doc::json::to_string(worker.report()), before);
+            worker.session.call_native("redo", &[], &Value::Null).result.unwrap();
+            assert_eq!(styk_doc::json::to_string(worker.report()), after);
+            worker.session.call_native("undo", &[], &Value::Null).result.unwrap();
+            let history = worker.session.editor.history_value();
+            let mut visits = 0;
+            assert!(worker.call_native_long("replaceFigureColor", &args, &Value::Null, &mut || {
+                visits += 1;
+                if visits >= checks / 2 { Err(EditError::Invalid("cancelled".into())) } else { Ok(()) }
+            }, || Ok(())).is_err());
+            assert_eq!(styk_doc::json::to_string(worker.report()), before);
+            assert_eq!(worker.session.editor.history_value(), history);
+        }).join().unwrap();
+    }
 }

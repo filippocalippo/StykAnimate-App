@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use super::order::DrawKind;
+use super::paint::PaintSpec;
 use super::property::PropertyKey;
 use crate::commands::CommandId;
 use crate::i18n::{Label, Msg};
@@ -287,7 +288,8 @@ pub struct SwitchRow {
     pub span: bool,
 }
 
-/// Which colour a colour row edits; pressing it asks for the colour picker (a later chunk).
+/// Which colour a colour row edits. Pressing the row ([`super::Event::Color`]) opens the colour picker on it
+/// ([`super::Panel::picker`]); a palette swatch names its colour's index in the whole palette.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ColorTarget {
     Background,
@@ -302,8 +304,30 @@ pub enum ColorTarget {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Paint {
     Solid([u8; 3]),
-    /// A gradient's CSS-equivalent stops, in order (offset, colour).
-    Gradient(Vec<(f64, [u8; 3])>),
+    /// A gradient as today's swatch draws it (`paintCSS`): its kind, angle and normalised stops with their opacity.
+    Gradient(PaintSpec),
+}
+
+/// One swatch of the figure's palette: pressing it opens a picker that replaces that colour (`Event::Color(target)`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Swatch {
+    /// [`ColorTarget::Palette`] with the colour's index in the whole palette (not the page).
+    pub target: ColorTarget,
+    pub rgb: [u8; 3],
+    /// The accessible name ("Replace #FF0000 · 3 segments").
+    pub description: Msg,
+    /// Not pressable or focusable (the panel is pending: the colour may be stale).
+    pub disabled: bool,
+}
+
+/// A list row (`.ui-list-row`: 32 px, a glyph, the name, then its actions), the head of a fill's group: the fill's
+/// colour as a chip swatch (pressing it opens the picker on [`Swatch::target`]) and its delete button.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListRow {
+    pub glyph: &'static str,
+    pub label: Msg,
+    pub swatch: Option<Swatch>,
+    pub actions: Vec<Button>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -375,10 +399,10 @@ pub enum Row {
     /// A caption under a preview ("960 × 540 · 100% zoom").
     Caption(Vec<Label>),
     /// The palette swatches, one page at a time.
-    Swatches { label: Msg, items: Vec<([u8; 3], Msg)> },
+    Swatches { label: Msg, items: Vec<Swatch> },
     Pager { label: Msg, text: Arc<str>, previous: Button, next: Button },
-    /// A fill of the figure: its row (swatch, delete) and fields.
-    Group { label: Msg, rows: Vec<Row> },
+    /// A fill of the figure: its list row (glyph, name, colour chip, delete), then its other rows.
+    Group { label: Msg, head: ListRow, rows: Vec<Row> },
     Slot(Slot),
 }
 
@@ -410,6 +434,18 @@ impl Inspector {
     /// The number row of `key`, when the panel shows one.
     pub fn number(&self, key: PropertyKey) -> Option<&NumberRow> {
         self.numbers().into_iter().find(|row| row.key == key)
+    }
+
+    /// The colour row of `target`, when the panel shows one.
+    pub fn color(&self, target: ColorTarget) -> Option<&ColorRow> {
+        fn find(rows: &[Row], target: ColorTarget) -> Option<&ColorRow> {
+            rows.iter().find_map(|row| match row {
+                Row::Color(color) if color.target == target => Some(color),
+                Row::Grid { rows, .. } | Row::Group { rows, .. } => find(rows, target),
+                _ => None,
+            })
+        }
+        self.sections.iter().find_map(|section| find(&section.rows, target))
     }
 
     /// The text row of `key`, when the panel shows one.

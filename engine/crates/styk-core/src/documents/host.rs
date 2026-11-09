@@ -85,7 +85,8 @@ pub enum Effect {
     None, OpenDialog, Started(JobId), Cancelled(JobId),
     Opened(DocumentId), Closed(DocumentId), ClosedSaved(Vec<DocumentId>), Renamed(DocumentId), SavedAll, QuitReady,
     Published { document: DocumentId, revision: u64, generation: u64 },
-    Called { document: DocumentId, answer: CallAnswer },
+    /// A worker-session command answered; `job` is its `Started` identity.
+    Called { document: DocumentId, job: JobId, answer: CallAnswer },
     Saved { document: DocumentId, current: bool, repairs: usize, warning: Option<String> },
     SaveDialog { prompt: PromptId, document: DocumentId, name: String },
     ConfirmClose { prompt: PromptId, document: DocumentId, name: String, recovery_error: Option<String> },
@@ -196,7 +197,12 @@ fn execute(options: &HostOptions, work: Work) -> Reply {
         let mut owner = (*session).into_worker();
         let cancelled = || EditError::Invalid("errors.editorSessions.backgroundOperationCancelled".into());
         let answer = owner.call_native_long(&method, &args, &view,
-            &mut || if work.cancel.is_cancelled() { Err(cancelled()) } else { Ok(()) },
+            &mut || {
+                // A test can hold the worker at a real checkpoint of its command (compiled out of the app).
+                #[cfg(feature = "testing")]
+                crate::testing::checkpoint();
+                if work.cancel.is_cancelled() { Err(cancelled()) } else { Ok(()) }
+            },
             || if work.cancel.begin_commit() { Ok(()) } else { Err(cancelled()) });
         let changed = owner.revision() != revision || !owner.report().same_node(&before);
         let session = Box::new(owner.into_session());
@@ -558,7 +564,7 @@ impl Documents {
                         if pending.cancel.is_cancelled() {
                             if let Some(host) = self.host.as_mut() { host.retire(answer); }
                             Effect::Cancelled(id)
-                        } else { match answer { Ok(answer) => Effect::Called { document: stamp.id, answer }, Err(error) => Effect::Failed { job: id, error: error.into() } } }
+                        } else { match answer { Ok(answer) => Effect::Called { document: stamp.id, job: id, answer }, Err(error) => Effect::Failed { job: id, error: error.into() } } }
                     } else { if let Some(host) = self.host.as_mut() { host.retire((session, answer)); } Effect::Stale(id) }
                 }
                 Err(error) => Effect::Failed { job: id, error },

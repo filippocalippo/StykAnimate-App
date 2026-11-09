@@ -8,11 +8,8 @@ use styk_doc::Value;
 use super::registry::ParamValue;
 use crate::doc::{Paint, PaintKind, PaintStop};
 
-/// JavaScript's `Math.round`: halves round up, towards positive infinity.
-pub fn js_round(x: f64) -> f64 {
-    let floor = x.floor();
-    if x - floor >= 0.5 { floor + 1.0 } else { floor }
-}
+/// JavaScript's `Math.round` (one definition, in `styk_doc::paint`).
+pub use styk_doc::paint::js_round;
 
 fn kind(name: &str) -> Option<PaintKind> {
     Some(match name {

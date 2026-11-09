@@ -1040,19 +1040,30 @@ pub fn app_bounds(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes) -
 /// [`app_bounds`] of the objects in `slots` only (the others are `None`): what a read of some of a scene's objects needs, measured
 /// without the others.
 pub fn app_bounds_of(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, slots: &[usize]) -> Vec<Option<[f64; 4]>> {
+    app_bounds_of_cancellable(scene, images, slots, &|| false).expect("uncancelled bounds")
+}
+
+pub fn app_bounds_of_cancellable(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, slots: &[usize], cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Vec<Option<[f64; 4]>>> {
     let mut wanted = vec![false; scene.objects.len()];
     for &slot in slots {
+        if cancelled() { return None; }
         if let Some(flag) = wanted.get_mut(slot) {
             *flag = true;
         }
     }
-    bounds_of(scene, images, Some(&wanted))
+    bounds_of_checked(scene, images, Some(&wanted), cancelled)
 }
 
 fn bounds_of(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, wanted: Option<&[bool]>) -> Vec<Option<[f64; 4]>> {
+    bounds_of_checked(scene, images, wanted, &|| false).expect("uncancelled bounds")
+}
+
+fn bounds_of_checked(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, wanted: Option<&[bool]>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Vec<Option<[f64; 4]>>> {
+    if cancelled() { return None; }
     let mut acc = vec![EMPTY; scene.objects.len()];
     let fx = has_effects(scene);
     for it in &scene.measured {
+        if cancelled() { return None; }
         if wanted.is_some_and(|wanted| !wanted.get(it.slot as usize).copied().unwrap_or(false)) {
             continue;
         }
@@ -1061,12 +1072,13 @@ fn bounds_of(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, wanted
             extent.include(acc, if fx { item_padding(scene, it) } else { 0.0 });
         }
     }
-    scene.objects.iter().enumerate().zip(acc).map(|((slot, object), acc)| {
+    let bounds = scene.objects.iter().enumerate().zip(acc).map(|((slot, object), acc)| {
         (object.resolved && wanted.is_none_or(|wanted| wanted[slot])).then(|| {
             let [x, y, width, height] = rounded(acc);
             [x, y, x + width, y + height]
         })
-    }).collect()
+    }).collect();
+    (!cancelled()).then_some(bounds)
 }
 
 /// A node's own stack (`segmentVfx`): segments have node stacks, polygons do not.

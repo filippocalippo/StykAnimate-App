@@ -537,21 +537,27 @@ fn key(target: &Target, property: &Property, v: &Value, notes: &mut Vec<String>)
 }
 
 pub(crate) fn channel(v: &Value, notes: &mut Vec<String>) -> Result<Channel, String> {
-    read_channel(v, notes, true)
+    read_channel(v, notes, true, &|| false)
 }
 
 /// Live editor draft: only finalized key ordering is deferred.
 pub(crate) fn draft_channel(v: &Value, notes: &mut Vec<String>) -> Result<Channel, String> {
-    read_channel(v, notes, false)
+    read_channel(v, notes, false, &|| false)
 }
 
-fn read_channel(v: &Value, notes: &mut Vec<String>, ordered: bool) -> Result<Channel, String> {
+pub(crate) fn channel_cancellable(v: &Value, notes: &mut Vec<String>, cancelled: &dyn Fn() -> bool) -> Result<Channel, String> {
+    read_channel(v, notes, true, cancelled)
+}
+
+fn read_channel(v: &Value, notes: &mut Vec<String>, ordered: bool, cancelled: &dyn Fn() -> bool) -> Result<Channel, String> {
+    if cancelled() { return Err("evaluation cancelled".into()); }
     let target = target(v.get("target").unwrap_or(&Value::Null))?;
     let name = v.get("property").and_then(Value::as_str).unwrap_or("");
     let property = Property::parse(name).filter(|p| p.supported_on(&target)).ok_or_else(|| format!("a channel of {name:?}, which cannot animate on its target"))?;
     let items = v.get("keys").and_then(Value::as_arr).ok_or("a channel without keys")?;
     let mut keys = Vec::with_capacity(items.len());
     for item in items {
+        if cancelled() { return Err("evaluation cancelled".into()); }
         let key = key(&target, &property, item, notes)?;
         if ordered && keys.last().is_some_and(|last: &Key| key.tick < last.tick) {
             return Err("a channel whose keys are not in order".into());
