@@ -77,6 +77,7 @@ mouse and numeric-key entry also require the unattended hidden-window strategy.
   capture readiness and independent app clocks. Tests use default parallel execution.
 - `cargo xtask check-shipping-features`: the default shipping feature graph.
 - Build the real app separately with `cargo build -p styk-app --features devtools`.
+  Create the repository's `artifacts/native-v0-review/` directory first.
   From `engine/`, run `stykanimate tests/edit/startup.document.json --automation
   crates/styk-app/automation/visible-loop.styk-auto --size 1560x1000` with
   `STYK_BACKGROUND_WINDOW=1`. The script drives window-addressed input, edits a number,
