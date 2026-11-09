@@ -35,6 +35,25 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 60000 });
   // A service another area has not ported yet answers null here, and its check fails; the rest still run.
+  // Calls must take Tauri's IPC protocol (a fetch to ipc.localhost), not its postMessage fallback, where bytes
+  // travel as arrays of numbers: the page's policy and isolation must both let that fetch through.
+  const transport = await page.evaluate(async () => {
+    const seen = { fetch: 0, failed: 0, postMessage: 0 };
+    const realFetch = window.fetch;
+    window.fetch = async (input, init) => {
+      const ipc = String(input?.url ?? input).startsWith('http://ipc.localhost');
+      if (ipc) seen.fetch++;
+      try { return await realFetch(input, init); } catch (error) { if (ipc) seen.failed++; throw error; }
+    };
+    const webview = window.chrome?.webview, post = webview?.postMessage?.bind(webview);
+    if (webview) webview.postMessage = (...args) => { seen.postMessage++; return post(...args); };
+    await window.stykDesktop.getWindowState();
+    await window.stykDesktop.getUpdateState();
+    window.fetch = realFetch;
+    if (webview) webview.postMessage = post;
+    return seen;
+  });
+  expect('Calls take the IPC protocol, not the postMessage fallback', transport.fetch >= 2 && transport.failed === 0 && transport.postMessage === 0, JSON.stringify(transport));
   const facts = await page.evaluate(async () => ({
     isolated: globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function',
     threaded: window.styk.state.renderer?.engineSide?.engine?.threaded === true,

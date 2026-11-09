@@ -28,7 +28,8 @@ const RELEASES = 'https://github.com/filippocalippo/styk-animate-releases/releas
 
 function run(command, commandArgs, options = {}) {
   console.log(`> ${command} ${commandArgs.join(' ')}`);
-  const result = spawnSync(command, commandArgs, { stdio: 'inherit', shell: process.platform === 'win32', ...options });
+  // Only npx needs a shell on Windows (it is a .cmd); a shell would split a path with spaces such as node's.
+  const result = spawnSync(command, commandArgs, { stdio: 'inherit', shell: process.platform === 'win32' && command === 'npx', ...options });
   if (result.status !== 0) throw new Error(`${command} failed (${result.status ?? result.signal})`);
 }
 
@@ -45,7 +46,15 @@ const tauriArgs = ['--yes', '@tauri-apps/cli@2.12.4', 'build', '--ci'];
 if (developer) tauriArgs.push('--features', 'devtools');
 if (exeOnly) tauriArgs.push('--no-bundle');
 else tauriArgs.push('--bundles', 'nsis');
-if (!signed) tauriArgs.push('--config', JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
+// The installer carries the encoder and the codec helpers (area 3); only packaging needs them staged.
+if (!exeOnly) tauriArgs.push('--config', path.join(crate, 'tauri.bundle.json'));
+if (!signed) {
+  // A file, not inline JSON: npx runs through cmd.exe, which strips the quotes of an inline value.
+  const config = path.join(root, 'build', 'tauri-unsigned.json');
+  mkdirSync(path.dirname(config), { recursive: true });
+  writeFileSync(config, JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
+  tauriArgs.push('--config', config);
+}
 run('npx', tauriArgs, { cwd: crate, env });
 
 const target = path.join(root, 'engine', 'target', 'release');

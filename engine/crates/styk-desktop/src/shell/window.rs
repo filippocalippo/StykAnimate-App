@@ -239,6 +239,7 @@ pub fn create(app: &AppHandle) -> Result<WebviewWindow, Box<dyn std::error::Erro
     let tracker = Arc::new(Mutex::new(Tracker::default()));
     let last = Arc::new(Mutex::new(WindowState::default()));
     let prompting = Arc::new(AtomicBool::new(false));
+    let telemetry_closed = Arc::new(AtomicBool::new(false));
     let events = window.clone();
     window.on_window_event(move |event| {
         let window = events.as_ref().window();
@@ -283,6 +284,16 @@ pub fn create(app: &AppHandle) -> Result<WebviewWindow, Box<dyn std::error::Erro
                         }
                     });
                 }
+            } else if !telemetry_closed.swap(true, Ordering::SeqCst) {
+                // The page counts and writes its telemetry session first (a second at most), then the window closes.
+                api.prevent_close();
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::services::close_telemetry(&app).await;
+                    if let Some(main) = app.get_webview_window(MAIN) {
+                        let _ = main.close();
+                    }
+                });
             } else {
                 save_placement(&window, &tracker);
             }

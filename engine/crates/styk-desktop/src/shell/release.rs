@@ -86,7 +86,7 @@ pub fn parse_releases(text: &str) -> Result<Vec<Release>, Failure> {
             Some(Release { version: version.to_owned(), markdown: String::from_utf16_lossy(&units) })
         })
         .collect();
-    releases.sort_by(|a, b| version_parts(&b.version).cmp(&version_parts(&a.version)));
+    releases.sort_by_key(|release| std::cmp::Reverse(version_parts(&release.version)));
     if releases.is_empty() {
         return Err(Failure::key("desktop.releaseHistory.errors.noReleaseHistoryAvailable"));
     }

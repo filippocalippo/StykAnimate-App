@@ -5,3 +5,6 @@
 use crate::Desktop;
 
 pub fn register(_desktop: &mut Desktop) {}
+
+/// Ends the page's telemetry session before the window closes (shell::window's close flow). Area 3 fills it in.
+pub async fn close_telemetry(_app: &tauri::AppHandle) {}

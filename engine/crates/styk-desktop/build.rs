@@ -14,6 +14,15 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=../../../src/desktop-bridge.mjs");
     println!("cargo:rerun-if-changed=../../../desktop/release-info.json");
+    // Area 3: what scripts/build-telemetry-info.cjs wrote while packaging (the build id and its traffic class), on one
+    // line so it fits an environment variable.
+    println!("cargo:rerun-if-changed=../../../desktop/telemetry-build.json");
+    if let Some(info) = std::fs::read_to_string("../../../desktop/telemetry-build.json")
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+    {
+        println!("cargo:rustc-env=STYK_TELEMETRY_BUILD={info}");
+    }
     // Names this build's embedded web assets in their entity tags.
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     println!("cargo:rustc-env=STYK_BUILD_STAMP={stamp:x}");
