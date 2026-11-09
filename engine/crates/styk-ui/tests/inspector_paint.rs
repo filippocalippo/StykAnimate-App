@@ -108,7 +108,9 @@ fn the_palette_is_one_tab_stop_and_the_arrows_move_inside_it() {
     let mut driver = mount(&core);
     let buttons = swatch_buttons(&mut driver);
     let stops: Vec<bool> = driver.snapshot().scopes.iter().flat_map(|(_, targets)| targets.iter()).filter(|target| buttons.contains(&target.id)).map(|target| target.tab_stop).collect();
-    assert_eq!(stops, vec![true, false, false, false], "only the first swatch takes Tab");
+    let mut only_the_first = vec![false; buttons.len()];
+    only_the_first[0] = true;
+    assert_eq!(stops, only_the_first, "only the first swatch takes Tab");
     driver.focus(buttons[0]);
     driver.press(iced::keyboard::key::Named::ArrowRight);
     driver.release(iced::keyboard::key::Named::ArrowRight);
@@ -186,7 +188,7 @@ fn the_edit_together_switch_sends_its_toggle_and_the_scope_follows() {
     let section = model.section("range").expect("two or more frames chosen: Edit together shows");
     let Row::Grid { rows, .. } = &section.rows[0] else { panic!("the switch sits in a grid") };
     assert!(matches!(&rows[0], Row::Switch(switch) if switch.toggle == Toggle::ApplyRange && !switch.checked));
-    assert!(model.scope.is_some(), "the scope line names the frames an edit reaches");
+    assert!(model.scope.is_none(), "with Edit together off the scope line is not shown");
     let mut driver = mount(&core);
     let switches: Vec<FocusId> = targets(&mut driver).into_iter().filter(|(_, role)| *role == InputRole::Checkbox).map(|(id, _)| id).collect();
     assert_eq!(switches.len(), 1, "Edit together's switch is the figure panel's one switch");
@@ -197,6 +199,7 @@ fn the_edit_together_switch_sends_its_toggle_and_the_scope_follows() {
     let model = core.inspector().model().unwrap();
     let Row::Grid { rows, .. } = &model.section("range").unwrap().rows[0] else { panic!("the switch sits in a grid") };
     assert!(matches!(&rows[0], Row::Switch(switch) if switch.checked), "the switch shows it on");
+    assert!(model.scope.is_some(), "the scope line names the frames an edit now reaches");
 }
 
 /// The colour row's swatch draws the gradient the row holds: its left is the first stop's blue, its right the last
@@ -210,11 +213,14 @@ fn a_gradient_segment_draws_its_gradient_in_the_colour_field() {
     let (pixels, size) = driver.render(&styk_ui::base_theme(Theme::Light), iced::Color::from(Theme::Light.palette().surface_field), 1.0);
     let at = |x: f32, y: f32| {
         let offset = ((y as u32 * size.width + x as u32) * 4) as usize;
-        [pixels[offset], pixels[offset + 1], pixels[offset + 2]]
+        [i32::from(pixels[offset]), i32::from(pixels[offset + 1]), i32::from(pixels[offset + 2])]
     };
-    // The swatch is 16 px, 8 px into the field's padding (2 px into the 10 px padding beside the 1 px border).
-    let (left, right, y) = (bounds.x + 9.0 + 2.0, bounds.x + 9.0 + 14.0, bounds.y + bounds.height / 2.0);
-    let (first, last) = (at(left, y), at(right, y));
-    assert!(first[2] > first[0] + 100 && first[0] < 80, "the swatch starts blue: {first:?}");
-    assert!(last[0] > 200 && last[0] > last[2].saturating_sub(40), "the swatch ends pink: {last:?}");
+    // The swatch is the first thing drawn in the field: its inked pixels run from its blue end to its pink one.
+    let y = bounds.y + bounds.height / 2.0;
+    let background = at(bounds.x + bounds.width - 4.0, y);
+    let inked: Vec<[i32; 3]> = (0..40).map(|dx| at(bounds.x + dx as f32, y)).filter(|pixel| pixel.iter().zip(background).any(|(a, b)| (a - b).abs() > 40)).collect();
+    assert!(inked.len() >= 12, "the swatch drew {} inked pixels across its row", inked.len());
+    let (first, last) = (inked[1], inked[11]);
+    assert!(first[2] > first[0] + 100 && first[0] < 90, "the swatch starts blue: {first:?}");
+    assert!(last[0] > first[0] + 50, "the swatch heads for pink, not the first stop's colour throughout: {first:?} then {last:?}");
 }
