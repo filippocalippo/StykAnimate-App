@@ -128,6 +128,8 @@ K-stage's steps and R-slice's panel test move onto it. Then the skeleton gate (f
 the quiet-machine latency checks, `#[ignore]`d with their commands: the export's flush cancel 250 ms, the audio-pass cancel
 1 s, the decoder timeout 3 s, the counting allocator's measured cost).
 
+**Open items found in step 3** (each gets a fixer or lands in its chunk): the slice's Inspector rebuild still scans the frame on its key change (interface-thread work, found by M1); a documents test (`long_open_returns_while_pending`, `documents_jobs.rs:99`) and two recovery view tests failed once under load; `styk-app`'s process-global engine clock (`ENGINE_NOW_BITS`) races parallel tests (V0's fix round makes it per instance); the machine ran out of commit once (test threads now 4 per queued job in `perf/env.sh`).
+
 **Polish lists** (cosmetic findings merged with an entry; one fixer clears each list before its workspace's gate, which never passes with it non-empty):
 
 - Skeleton: empty.
