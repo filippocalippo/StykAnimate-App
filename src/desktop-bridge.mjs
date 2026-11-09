@@ -69,6 +69,30 @@
     } }).catch(() => {});
   }, 1500), { once: true });
 
+  // Dawn compiles shaders with FXC in this app (engine/crates/styk-desktop/src/shell/gpu.rs), which needs seconds for the
+  // effects shader the first time on a machine, and the engine makes that pipeline synchronously on the first frame
+  // with an effect. So it is compiled here once, in the background after start, with the engine's own descriptor
+  // (styk-render effects/executor.rs): the browser's shader cache then holds it for that frame and for later launches.
+  function warmEffects(code) {
+    (async () => {
+      const adapter = await navigator.gpu?.requestAdapter();
+      if (!adapter) return;
+      const device = await adapter.requestDevice({ requiredLimits: { maxTextureDimension2D: adapter.limits.maxTextureDimension2D } });
+      try {
+        const texture = binding => ({ binding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d', multisampled: false } });
+        const group = device.createBindGroupLayout({ entries: [texture(0), texture(1), texture(2),
+          { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+          { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 736 } }] });
+        const module = device.createShaderModule({ code });
+        await device.createRenderPipelineAsync({ layout: device.createPipelineLayout({ bindGroupLayouts: [group] }),
+          vertex: { module, entryPoint: 'vertex' }, primitive: { topology: 'triangle-list' },
+          fragment: { module, entryPoint: 'fragment', targets: [{ format: 'rgba8unorm', writeMask: GPUColorWrite.ALL }] } });
+        performance.mark('styk-effects-warm');
+      } finally { device.destroy(); }
+    })().catch(() => {});
+  }
+  if (typeof boot.effectsShader === 'string') addEventListener('load', () => setTimeout(() => warmEffects(boot.effectsShader), 3000), { once: true });
+
   const shell = {
     isDesktop: true,
     platform: boot.platform,

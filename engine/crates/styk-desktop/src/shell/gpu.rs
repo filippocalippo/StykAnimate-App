@@ -25,10 +25,20 @@ pub struct Switches {
     pub disable_features: Vec<String>,
 }
 
+/// Whether Dawn compiles shaders with FXC in this run (Windows, unless `STYK_GPU_DXC=1`).
+pub fn fxc() -> bool {
+    cfg!(windows) && std::env::var("STYK_GPU_DXC").as_deref() != Ok("1")
+}
+
+/// The engine's effects shader (styk-render), which FXC takes seconds to compile the first time on a machine. The
+/// bridge compiles it in the background soon after start (`warmEffects`), with the engine's own pipeline descriptor,
+/// so the browser's shader cache already holds it when the first frame with an effect needs it. Measured 2026-11-09:
+/// about 8 s cold under FXC (0.6 s under Electron's DXC), 20-30 ms from the cache in later launches.
+pub const EFFECTS_SHADER: &str = include_str!("../../../styk-render/src/effects/passes.wgsl");
+
 pub fn switches(gpu_unsafe: Option<&str>, background: bool, remote_debugging_port: Option<u16>) -> Switches {
-    let dxc = std::env::var("STYK_GPU_DXC").as_deref() == Ok("1");
     let mut out = Switches {
-        switches: if cfg!(windows) && !dxc { vec!["--disable-dawn-features=use_dxc".into()] } else { Vec::new() },
+        switches: if fxc() { vec!["--disable-dawn-features=use_dxc".into()] } else { Vec::new() },
         disable_features: vec!["msWebOOUI".into(), "msPdfOOUI".into(), "msSmartScreenProtection".into()],
     };
     if gpu_unsafe == Some("1") {
@@ -71,5 +81,19 @@ mod tests {
         assert!(driven.contains("CalculateNativeWinOcclusion"));
         assert!(driven.contains("--remote-debugging-port=9333"));
         assert!(!switches(Some("0"), false, None).arguments().contains("webgpu"));
+    }
+
+    /// The bridge's warm-up mirrors the engine's effects pipeline (styk-render effects/executor.rs); a change there
+    /// must reach the bridge, or the warm-up compiles something the engine never asks for.
+    #[test]
+    fn the_effects_warm_up_matches_the_engines_pipeline() {
+        let executor = include_str!("../../../styk-render/src/effects/executor.rs");
+        let bridge = include_str!("../../../../../src/desktop-bridge.mjs");
+        assert!(executor.contains("const UNIFORM_SIZE: u64 = 736;"));
+        assert!(bridge.contains("minBindingSize: 736"));
+        assert!(executor.contains("const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;"));
+        assert!(executor.contains(r#"entry_point: Some("vertex")"#) && executor.contains(r#"entry_point: Some("fragment")"#));
+        assert!(executor.contains("blend: None") && executor.contains("has_dynamic_offset: true"));
+        assert!(EFFECTS_SHADER.contains("@group(0) @binding(4) var<uniform> params: Params;"));
     }
 }

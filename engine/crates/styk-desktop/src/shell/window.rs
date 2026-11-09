@@ -155,6 +155,7 @@ fn boot_script(shell: &Shell) -> String {
         "memoryBytes": total_memory(),
         "startupView": shell.startup_view,
         "packaged": shell.packaged,
+        "effectsShader": if gpu::fxc() { Some(gpu::EFFECTS_SHADER) } else { None },
     });
     format!("Object.defineProperty(window, '__STYK_BOOT__', {{value: Object.freeze({boot}), configurable: false}});\n{BRIDGE}")
 }

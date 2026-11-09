@@ -87,10 +87,41 @@ areas are the window's caption: WebView2's non-client region support (on in wry)
 - `stykanimate://open`, `privacy`, `library` and `library/<public id>` are accepted, as today. A packaged first
   process registers itself as the handler for the current user (as `setAsDefaultProtocolClient` did).
 - File associations are the Electron app's: the same extensions, names (ProgIDs) and roles, in `tauri.conf.json`.
-- GPU switches: WebView2 enables WebGPU through D3D12 with no opt-in (`STYK_GPU_UNSAFE=1` adds it). Its sandboxed GPU
-  process cannot load the runtime's `dxcompiler.dll` (the runtime ships no `dxil.dll`; error 87, no WebGPU device), so
-  the app passes `--disable-dawn-features=use_dxc` and Dawn compiles shaders with FXC, sandbox kept on (`shell/gpu.rs`;
-  `STYK_GPU_DXC=1` keeps DXC). Development builds also take `STYK_EXTRA_BROWSER_ARGS` for diagnosis.
+- GPU switches: WebView2 enables WebGPU through D3D12 with no opt-in (`STYK_GPU_UNSAFE=1` adds it). Development builds
+  also take `STYK_EXTRA_BROWSER_ARGS` for diagnosis.
+
+## WebGPU on WebView2: Dawn compiles with FXC
+
+**The fault.** With WebView2 runtime 157.0.4341.42, `requestDevice()` fails: "DynamicLib.Open: dxcompiler.dll Windows
+Error: 87" (Dawn's `EnsureDXCLibraries`). No device means the engine never starts and `styk.ready` stays false. It is
+not our folder or search path: nothing beside the exe or on `PATH` is a DX compiler, the load happens in WebView2's GPU
+process, and it fails the same with Electron's `dxil.dll` laid beside a copy of the runtime. Measured (2026-11-09, dev
+app, scratch profiles): no switch fails; `--enable-unsafe-webgpu` and WebGPU feature flags fail;
+`--disable-gpu-sandbox` works (so the GPU sandbox blocks the late load); `--disable-dawn-features=use_dxc` works.
+
+**The switch.** The app passes `--disable-dawn-features=use_dxc` on Windows (`shell/gpu.rs`): Dawn compiles HLSL with
+FXC (`d3dcompiler_47.dll`, which the runtime ships) and the GPU sandbox stays on. Turning the sandbox off would bring
+DXC back at the cost of the GPU process's isolation; that is a security decision, not taken here. The engine's shaders
+use nothing DXC-only (no `f16`, no subgroups). `STYK_GPU_DXC=1` keeps DXC, to check whether a newer runtime fixes it.
+
+**What it costs** (scratch profiles, same pages and engine build, Tauri against Electron from the same tree, 3 runs
+each, machine shared with other builds, so directional):
+
+| Measure | Tauri, FXC | Electron, DXC |
+|---|---|---|
+| Page start to `styk.ready` (median) | 1.66 s | 2.04 s |
+| Launch with tdd2 to its first frame (median) | 4.56 s | 4.82 s |
+| Effects shader (`passes.wgsl`) pipeline, cold | 6.6–9.1 s idle, 20–30 s under load | 0.6 s |
+| The same, from the shader cache (later launches) | 20–30 ms | - |
+
+Start-up and the first frame of a dense document are as fast or faster. The effects shader is the regression: the
+engine creates that pipeline synchronously on the first frame with an effect, so on a cold shader cache (after
+install, a WebView2 update or a driver update) that frame would wait the whole compile. The bridge therefore compiles
+it in the background 3 s after load with the engine's own descriptor (`warmEffects`, held to styk-render's
+`effects/executor.rs` by a unit test); a later identical pipeline is then a cache hit (14 ms measured, sync or async,
+any limits or labels). On a cold cache the warm-up itself took about 30 s on the loaded machine and frames stalled up
+to 0.5–3 s while it ran; in one of three runs the engine-like pipeline afterwards still missed the cache. With a warm
+cache (every later launch) none of this happens.
 
 ## Updates
 
