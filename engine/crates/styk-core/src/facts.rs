@@ -49,7 +49,8 @@ pub struct Ready {
 }
 
 /// What the lane answers: facts, or that the revision's generation is not published yet (K-doc publishes after the
-/// edit): not a result, so the panel keeps what it shows and asks again at its next refresh.
+/// edit): not a result. The next publication permits a retry; refreshing an unchanged
+/// unpublished state must not create a worker-wake loop.
 pub enum Answer {
     Ready(Ready),
     Unpublished(FactsKey),
@@ -93,7 +94,7 @@ pub struct Facts {
     /// The newest request, waiting while the lane works on an older one.
     waiting: Option<Request>,
     /// What was last asked for, so the same key is not asked again.
-    asked: Option<FactsKey>,
+    asked: Option<(FactsKey, Option<u64>)>,
     /// The lane holds a request whose result has not been taken.
     submitted: bool,
     latest: Option<Ready>,
@@ -114,11 +115,13 @@ impl Facts {
 
     /// Facts for `key`, made from `source` and the document's records at the key's revision. A newer request replaces
     /// an older one still waiting.
-    pub fn request(&mut self, key: FactsKey, source: Arc<dyn FrameDocument>, report: crate::engine::Value) {
-        if self.asked.as_ref() == Some(&key) {
+    /// `publication` is the document host's current generation receipt. It changes
+    /// when a previously unavailable source becomes ready, including a late reply.
+    pub fn request(&mut self, key: FactsKey, source: Arc<dyn FrameDocument>, report: crate::engine::Value, publication: Option<u64>) {
+        if self.asked.as_ref().is_some_and(|(asked, receipt)| asked == &key && *receipt == publication) {
             return;
         }
-        self.asked = Some(key.clone());
+        self.asked = Some((key.clone(), publication));
         self.waiting = Some(Request { key, source, report });
         self.flush();
     }
@@ -139,12 +142,8 @@ impl Facts {
             self.submitted = false;
             match answer {
                 Answer::Ready(ready) => self.latest = Some(ready),
-                // Not published yet: forget it was asked, so the next refresh asks again.
-                Answer::Unpublished(key) => {
-                    if self.asked.as_ref() == Some(&key) {
-                        self.asked = None;
-                    }
-                }
+                // The host's publication receipt, not this answer's wake, permits a retry.
+                Answer::Unpublished(_) => {}
             }
             // The lane is free again: the request that waited behind it goes now.
             self.flush();
@@ -155,5 +154,55 @@ impl Facts {
     /// Whether a request is waiting or being worked on.
     pub fn in_flight(&self) -> bool {
         self.waiting.is_some() || self.submitted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, mpsc};
+    struct Threads;
+    impl Spawner for Threads {
+        fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), SpawnError> {
+            std::thread::Builder::new().name(name.into()).spawn(job).map(|_| ()).map_err(|error| SpawnError(error.to_string()))
+        }
+    }
+    struct Source { ready: AtomicBool, reads: AtomicUsize, generation: Arc<styk_engine::Generation> }
+    impl FrameDocument for Source {
+        fn snapshot(&self, _: u64, _: u64) -> Option<Arc<styk_engine::Generation>> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.ready.load(Ordering::SeqCst).then(|| self.generation.clone())
+        }
+    }
+
+    #[test]
+    fn unpublished_facts_wait_for_publication_and_a_late_reply_cannot_lose_the_retry() {
+        for publication_before_reply in [false, true] {
+            let bytes = include_bytes!("../../../tests/edit/startup.document.json");
+            let engine = styk_engine::Engine::new(|| 0., styk_engine::Budgets::for_device(None));
+            engine.open(bytes, "json", "test").unwrap();
+            let generation = engine.generation().unwrap();
+            let key = FactsKey::new(1, generation.lineage, generation.revision, 0., &[1]);
+            let report = styk_doc::json::parse(bytes).unwrap();
+            let source = Arc::new(Source { ready: AtomicBool::new(false), reads: AtomicUsize::new(0), generation });
+            let (send, receive) = mpsc::channel();
+            let mut facts = Facts::start(&Threads, Arc::new(move || { let _ = send.send(()); })).unwrap();
+            let receipt = || receive.recv_timeout(std::time::Duration::from_secs(300)).expect("the facts worker must answer");
+            facts.request(key.clone(), source.clone(), report.clone(), None);
+            receipt();
+            if !publication_before_reply {
+                assert!(facts.latest().is_none());
+                for _ in 0..4 {
+                    facts.request(key.clone(), source.clone(), report.clone(), None);
+                    assert!(!facts.in_flight(), "a refresh must not retry an unchanged unpublished key");
+                }
+            }
+            source.ready.store(true, Ordering::SeqCst);
+            facts.request(key.clone(), source.clone(), report.clone(), Some(7));
+            facts.latest(); // A late unpublished reply must admit the newer receipt's waiting request.
+            receipt();
+            assert_eq!(facts.latest().unwrap().key, key);
+            assert_eq!(source.reads.load(Ordering::SeqCst), 2);
+        }
     }
 }

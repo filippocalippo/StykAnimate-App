@@ -84,4 +84,9 @@ mouse and numeric-key entry also require the unattended hidden-window strategy.
   `artifacts/native-v0-review/`. Complete glyph frames gate capture; no desktop input
   is injected. The unattended cursor hook removes itself when the window is destroyed.
 
+An unpublished facts reply keeps its request identity until the document host supplies a new
+publication receipt. Refreshing pending Properties cannot requeue that same miss and spin
+while recovery is holding publication. A receipt delivered before the old reply is consumed
+also admits exactly one retry.
+
 Every build, test and app run goes through the machine queue.

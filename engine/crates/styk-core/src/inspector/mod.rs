@@ -351,7 +351,7 @@ impl Panel {
         };
         let selection = facts::selection(document);
         let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), &selection.uids);
-        // Take what landed first (an "unpublished" answer frees the key to be asked again).
+        // Take what landed first. An unpublished key waits for its publication receipt.
         if let Some(landed) = facts.latest()
             && landed.key.document == key.document && landed.key.lineage == key.lineage
             && let Some((views, frame)) = &landed.evaluation
@@ -360,7 +360,8 @@ impl Panel {
         }
         let ready = document.frame_records_ready().is_some() && document.with_document_ready(|_| ()).is_some();
         if (!ready || !selection.uids.is_empty()) && let Some(source) = source {
-            facts.request(key.clone(), source, facts::records(document).clone());
+            let publication = documents.published().map(|(_, _, generation)| generation);
+            facts.request(key.clone(), source, facts::records(document).clone(), publication);
         }
         facts.flush();
         // A fact is shown only for exactly this state; otherwise nothing is, and its rows are pending.

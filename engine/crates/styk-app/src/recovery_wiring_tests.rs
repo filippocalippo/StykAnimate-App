@@ -196,8 +196,13 @@ impl Runtime {
     }
     #[track_caller]
     fn drain(&mut self) {
-        for _ in 0..128 { if !self.next() { return; } }
-        panic!("the idle app kept scheduling work: clock={:?}, deadline={:?}, expired={}, queued={:?}", self.clock.now(), self.app.band.core.wake_deadline(self.app.band.layouts_idle()), self.app.band.core.session_end_expired(), self.messages);
+        let mut recent = VecDeque::new();
+        for _ in 0..128 {
+            if recent.len() == 8 { recent.pop_front(); }
+            recent.push_back(self.messages.front().cloned());
+            if !self.next() { return; }
+        }
+        panic!("the idle app kept scheduling work: clock={:?}, deadline={:?}, expired={}, recent={:?}, queued={:?}", self.clock.now(), self.app.band.core.wake_deadline(self.app.band.layouts_idle()), self.app.band.core.session_end_expired(), recent, self.messages);
     }
     fn advance_deadline(&mut self) {
         let due = self.app.band.core.documents.recovery_deadline().expect("a real recovery deadline");
