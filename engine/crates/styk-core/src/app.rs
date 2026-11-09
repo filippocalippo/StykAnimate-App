@@ -471,7 +471,7 @@ impl Core {
                 } else {
                     let effects = self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event);
                     // A layer move that began now is timed from now (its dialog shows after 150 ms).
-                    self.inspector.stamp(self.now);
+                    self.inspector.stamp(self.now, &self.overlays);
                     effects
                 }
             }

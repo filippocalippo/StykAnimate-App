@@ -164,8 +164,12 @@ struct LayerMove {
     /// When it started (the core's injected clock), stamped right after the dispatch that began it.
     started: Option<u64>,
     dialog: bool,
-    /// The person closed the dialog (Escape, its close button): the move is cancelled and the dialog stays closed.
+    /// The person closed the dialog (Escape, its close button), or another dialog took over: the move is cancelled and
+    /// its dialog never shows.
     dismissed: bool,
+    /// The dialogs open on the overlay host when the move started (today's `changeFigureLayer` notes the dialog's
+    /// content and the open dialogs): a dialog opened meanwhile takes over and the move stops.
+    dialogs: Option<Vec<u64>>,
 }
 
 /// The focus targets of the layer move's dialog.
@@ -178,6 +182,12 @@ pub mod ids {
     pub const CLOSE: FocusId = FocusId(BASE + 1);
     /// The overlay host's animation key of the dialog's indeterminate progress bar (`Host::phase`).
     pub const PROGRESS: u64 = BASE + 0xff;
+}
+
+/// The dialogs open on the overlay host, by identity.
+#[cfg(feature = "engine")]
+fn open_dialogs(host: &crate::overlay::host::Host) -> Vec<u64> {
+    host.stack().entries().iter().filter(|entry| entry.kind == crate::overlay::Kind::Dialog).map(|entry| entry.id).collect()
 }
 
 /// Today's `changeFigureLayer` shows its dialog when the move takes this long.
@@ -250,10 +260,11 @@ pub struct PanelState {
 pub struct Shown {
     /// The selection's bounds; `None` while none are ready for exactly this state.
     pub bounds: Option<[f64; 4]>,
-    /// The one selected figure as its pose's style overlay resolves it, made on the facts lane for exactly this state.
-    pub instance: Option<Arc<styk_eval::doc::Figure>>,
-    /// The one selected pose restyles its figure: its rows wait for [`Shown::instance`].
-    pub restyled: bool,
+    /// What the facts lane made of the one selected figure (its style overlay, its resolution, its palette rows) for
+    /// exactly this state.
+    pub subject: Option<Arc<crate::facts::Subject>>,
+    /// One figure is selected and the lane's facts for this state have not landed: its rows wait.
+    pub awaiting: bool,
     key: Option<FactsKey>,
 }
 
@@ -291,6 +302,7 @@ struct Picker {
     figure: Option<u32>,
     /// The palette colour a swatch replaces, and its row as it was when the picker opened (today's captured `entry`).
     from: Option<String>,
+    /// The palette row a swatch replaces, as the facts lane made it when the picker opened (today's captured `entry`).
     targets: Option<Value>,
     /// The figure colour and opacity last applied (`previous`, `previousOpacity`): an opacity-only change keeps the
     /// colours.
@@ -359,6 +371,8 @@ pub struct Panel {
     field: Option<Field>,
     name: Option<NameDraft>,
     picker: Option<Picker>,
+    /// The paint each colour row's picker opens with, made with the model.
+    pickers: Vec<(ColorTarget, contexts::Picked)>,
     layer_move: Option<LayerMove>,
     /// The overlay the layer move's dialog is, while it is open on the host.
     layer_dialog: Option<u64>,
@@ -456,6 +470,12 @@ impl Panel {
         }
     }
 
+    /// What the facts lane made of the one selected figure, when it is for the state now.
+    fn subject(&self, document: &crate::documents::Document) -> Option<&crate::facts::Subject> {
+        let key = FactsKey::new(document.id().get(), document.revision(), facts::tick(document), &facts::subjects(document));
+        (self.shown.key.as_ref() == Some(&key)).then_some(self.shown.subject.as_deref()).flatten()
+    }
+
     /// The open colour picker's request.
     pub fn layer_move(&self) -> Option<LayerMoveView> {
         self.layer_move.as_ref().map(|moving| LayerMoveView { dialog: moving.dialog, title: Msg::new("inspectorView.moveFiguresToLayer"), status: Msg::new("app.preservingAnimation") })
@@ -482,6 +502,17 @@ impl Panel {
             }
         }
         let mut effects = Vec::new();
+        // A dialog opened since the move started takes over (`changeFigureLayer` aborts): the move is cancelled by its
+        // own job, nothing is edited, and its dialog never shows over the newer one.
+        if let Some(moving) = self.layer_move.as_mut()
+            && !moving.dismissed
+            && let Some(before) = &moving.dialogs
+            && open_dialogs(host).iter().any(|id| !before.contains(id) && Some(*id) != self.layer_dialog)
+        {
+            moving.dismissed = true;
+            // A refused cancel (the move already ended) leaves its completion to report.
+            let _ = documents.dispatch(crate::documents::Request::Cancel(moving.job));
+        }
         match (self.layer_move.as_mut(), self.layer_dialog) {
             (Some(moving), None) if moving.dialog && !moving.dismissed => {
                 let targets = vec![FocusTarget::new(ids::CANCEL.0, FocusArea::Panels, TargetKind::Control), FocusTarget::new(ids::CLOSE.0, FocusArea::Panels, TargetKind::Control)];
@@ -519,9 +550,10 @@ impl Panel {
     }
 
     /// Stamps a move that began in the last dispatch with the core's clock.
-    pub fn stamp(&mut self, now: u64) {
+    pub fn stamp(&mut self, now: u64, host: &crate::overlay::host::Host) {
         if let Some(moving) = self.layer_move.as_mut().filter(|moving| moving.started.is_none()) {
             moving.started = Some(now);
+            moving.dialogs = Some(open_dialogs(host));
         }
     }
 
@@ -571,7 +603,7 @@ impl Panel {
         let request = Request::Call { document: id, method: "assignFiguresToLayer".into(), args: vec![Value::array(uids), Value::str(&layer)], view: Value::Null };
         match documents.dispatch(request) {
             Ok(DocumentEffect::Started(job)) => {
-                self.layer_move = Some(LayerMove { job, document: id, layer, started: None, dialog: false, dismissed: false });
+                self.layer_move = Some(LayerMove { job, document: id, layer, started: None, dialog: false, dismissed: false, dialogs: None });
                 Ok(())
             }
             // Admission refused it (another job runs): the person is told, nothing is half done.
@@ -601,13 +633,10 @@ impl Panel {
         let Some(document) = documents.active() else { return };
         let selection = facts::selection(document);
         // The figures the facts are for: the selection, or the one figure a selected joint belongs to.
-        let subjects: Vec<u32> = if selection.uids.is_empty() { selection.uid.into_iter().collect() } else { selection.uids.clone() };
-        // A restyled instance is resolved on the lane, never here (the overlay walks the whole figure).
-        let restyled_now = |document: &crate::documents::Document| {
-            subjects.len() == 1 && document.frame_records_ready().and_then(|frame| facts::selected_object(document, &frame)).is_some_and(|object| crate::facts::restyled(&object))
-        };
+        let subjects = facts::subjects(document);
         let Some(facts) = facts else {
-            self.shown = Shown { restyled: restyled_now(document), ..Shown::default() };
+            // No lane: nothing waits for one (the definitions show).
+            self.shown = Shown::default();
             return;
         };
         let key = FactsKey::new(document.id().get(), document.revision(), facts::tick(document), &subjects);
@@ -619,17 +648,18 @@ impl Panel {
             document.adopt_evaluation(landed.key.revision, views.clone(), f64::from_bits(landed.key.tick), frame.clone());
         }
         let ready = document.frame_records_ready().is_some() && document.with_document_ready(|_| ()).is_some();
-        // Read once the landed frame is adopted: the frame on show says whether the pose restyles its figure.
-        let restyled = restyled_now(document);
         let measure = selection.uids.len() > 1;
-        if (!ready || measure || restyled) && let Some(source) = source {
+        // One figure: what the panel shows of it (its style overlay, its palette rows) is the lane's, made for this state.
+        let single = subjects.len() == 1;
+        let asked = (!ready || measure || single) && source.is_some();
+        if asked && let Some(source) = source {
             facts.request(key.clone(), source, facts::records(document).clone());
         }
         facts.flush();
         // A fact is shown only for exactly this state; otherwise nothing is, and its rows are pending.
         self.shown = match facts.latest() {
-            Some(landed) if (measure || restyled) && landed.key == key => Shown { bounds: landed.bounds, instance: landed.instance.clone(), restyled, key: Some(landed.key.clone()) },
-            _ => Shown { restyled, ..Shown::default() },
+            Some(landed) if (measure || single) && landed.key == key => Shown { bounds: landed.bounds, subject: landed.subject.clone(), awaiting: false, key: Some(landed.key.clone()) },
+            _ => Shown { awaiting: single && asked, ..Shown::default() },
         };
     }
 
@@ -672,7 +702,7 @@ impl Panel {
             self.pending = false;
             return;
         };
-        let waiting = self.shown.restyled && self.shown.instance.is_none();
+        let waiting = self.shown.awaiting;
         let Some(frame) = document.frame_records_ready().filter(|_| document.with_document_ready(|_| ()).is_some() && !waiting) else {
             // Not ready (or a restyled instance not resolved yet): the facts lane makes them; nothing is evaluated here.
             if !self.pending {
@@ -700,13 +730,14 @@ impl Panel {
         if same && self.model.is_some() {
             return;
         }
-        let built = contexts::build(document, &frame, &contexts::Inputs { view, memory: &self.memory, panel: &self.state, shown: &self.shown, can_paste: key.paste });
+        let (built, pickers) = contexts::build(document, &frame, &contexts::Inputs { view, memory: &self.memory, panel: &self.state, shown: &self.shown, can_paste: key.paste });
         for section in &built.sections {
             if section.place == model::Place::Titled && !section.auto {
                 self.memory.rule_released(built.kind.id(), section.id);
             }
         }
         self.builds += 1;
+        self.pickers = pickers;
         if self.model.as_deref() != Some(&built) {
             self.model = Some(Arc::new(built));
         }
@@ -953,15 +984,20 @@ impl Panel {
         }
         self.finish(documents, session, effects);
         let Some(document) = documents.get(id) else { return };
-        let Some(frame) = document.frame_records_ready() else { return };
-        let shown = self.model.as_ref().and_then(|model| model.color(target)).and_then(|row| match &row.paint {
-            model::Paint::Solid(rgb) => Some(*rgb),
-            model::Paint::Gradient(paint) => paint.stops.first().map(paint::Stop::rgb),
-        });
-        // A row whose target is gone opens nothing, as the resolver's `false` did.
-        let Some(picked) = contexts::picker(document, &frame, target, shown, &self.shown) else { return };
+        // What the row's picker opens with was made with the model; a row whose target is gone opens nothing, as the
+        // resolver's `false` did.
+        let Some(picked) = self.pickers.iter().find(|(row, _)| *row == target).map(|(_, picked)| picked.clone()) else { return };
+        let subject = self.subject(document);
+        // A palette swatch captures the lane's row of its colour (`targets: entry`); until it is ready, it opens nothing.
+        let targets = match &picked.from {
+            Some(from) => match subject.and_then(|subject| subject.palette.iter().find(|(color, _)| color == from)) {
+                Some((_, row)) => Some(row.clone()),
+                None => return,
+            },
+            None => None,
+        };
+        let figure = subject.map(|subject| subject.figure);
         let selection = facts::selection(document);
-        let figure = facts::figure_of_selection(document).map(|(figure, _)| figure.id);
         let first = picked.paint.stops.first().copied().unwrap_or(paint::Stop::new(0.0, [0, 0, 0], 1.0));
         self.requests += 1;
         self.picker = Some(Picker {
@@ -971,7 +1007,7 @@ impl Panel {
             tick: facts::tick(document).to_bits(),
             figure,
             from: picked.from,
-            targets: picked.targets,
+            targets,
             previous: (paint::hex(first.color), first.opacity),
         });
         effects.push(Effect::PickColor(target));
@@ -992,7 +1028,8 @@ impl Panel {
                 let Some(mut picker) = self.picker.take() else { return };
                 // An open number or name edit ends first, as the inspector's change does today.
                 self.finish(documents, session, effects);
-                match Self::apply_paint(documents, view, session, &mut picker, &paint) {
+                let figure = documents.get(picker.document).and_then(|document| self.subject(document)).map(|subject| subject.figure);
+                match Self::apply_paint(documents, view, session, &mut picker, &paint, figure) {
                     Ok(()) => {
                         picker.request.error = None;
                         effects.push(Effect::RequestFrame);
@@ -1005,19 +1042,20 @@ impl Panel {
     }
 
     /// One picked paint applied to the picker's row: one session command, one history entry.
-    fn apply_paint(documents: &mut Documents, view: &ViewState, session: &mut Session, picker: &mut Picker, paint: &paint::PaintSpec) -> Result<(), Msg> {
+    /// `figure` is the selected figure's type as the facts lane made it for the state now (`None` until it lands).
+    fn apply_paint(documents: &mut Documents, view: &ViewState, session: &mut Session, picker: &mut Picker, paint: &paint::PaintSpec, figure: Option<u32>) -> Result<(), Msg> {
         let paint = paint.normalize()?;
         let id = picker.document;
         let document = documents.get(id).ok_or_else(|| Msg::new("errors.editorSessions.thisProjectIsNoLongerOpen"))?;
         let selection = facts::selection(document);
         let now = (selection.uid, selection.uids.clone(), selection.joint);
         let tick = facts::tick(document).to_bits();
-        let figure = facts::figure_of_selection(document).map(|(figure, _)| figure.id);
-        // Each row checks what today's resolver checks before it applies.
+        // Each row checks what today's resolver checks before it applies (the figure, where both states' facts say).
+        let figure_changed = matches!((figure, picker.figure), (Some(now), Some(then)) if now != then);
         let changed = match picker.request.target {
-            ColorTarget::Palette(_) => now.0 != picker.selection.0 || figure != picker.figure || tick != picker.tick,
+            ColorTarget::Palette(_) => now.0 != picker.selection.0 || figure_changed || tick != picker.tick,
             ColorTarget::Figure => tick != picker.tick || now.1 != picker.selection.1,
-            ColorTarget::Segment => now.0 != picker.selection.0 || now.2 != picker.selection.2 || figure != picker.figure,
+            ColorTarget::Segment => now.0 != picker.selection.0 || now.2 != picker.selection.2 || figure_changed,
             ColorTarget::Background | ColorTarget::SegmentGradient | ColorTarget::Polygon(_) => false,
         };
         if changed {

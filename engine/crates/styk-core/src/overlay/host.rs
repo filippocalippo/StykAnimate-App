@@ -696,6 +696,7 @@ impl Host {
 /// What an owner's dialog does on the host, for the owners that keep one open (recovery's chooser and close prompt, the
 /// Inspector's layer move): open it, close it, ask whether it is still open, and carry the host's update out as the
 /// core's effects.
+#[cfg(feature = "engine")]
 pub(crate) mod dialogs {
     use super::{Event, Host, Update};
     use crate::commands::Effect;

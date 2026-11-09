@@ -165,3 +165,20 @@ pub fn poll_until(core: &mut Core, done: impl Fn(&Core) -> bool) -> Result<Vec<c
     }
     Err(format!("the documents host did not answer in 15 s (recovery: {:?})", core.documents.recovery_view()))
 }
+
+/// A hook the documents host calls at every cancellation checkpoint of a worker-session command (the layer planner's
+/// steps), so a test can hold the command after its work has begun. Process-wide: a test that sets it runs alone in
+/// its own test binary.
+static CHECKPOINT: std::sync::Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = std::sync::Mutex::new(None);
+
+/// Sets (or clears) the checkpoint hook.
+pub fn set_checkpoint(hook: Option<Arc<dyn Fn() + Send + Sync>>) {
+    *CHECKPOINT.lock().unwrap_or_else(|error| error.into_inner()) = hook;
+}
+
+pub(crate) fn checkpoint() {
+    let hook = CHECKPOINT.lock().unwrap_or_else(|error| error.into_inner()).clone();
+    if let Some(hook) = hook {
+        hook();
+    }
+}

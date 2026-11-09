@@ -195,7 +195,12 @@ fn execute(options: &HostOptions, work: Work) -> Reply {
         let mut owner = (*session).into_worker();
         let cancelled = || EditError::Invalid("errors.editorSessions.backgroundOperationCancelled".into());
         let answer = owner.call_native_long(&method, &args, &view,
-            &mut || if work.cancel.is_cancelled() { Err(cancelled()) } else { Ok(()) },
+            &mut || {
+                // A test can hold the worker at a real checkpoint of its command (compiled out of the app).
+                #[cfg(feature = "testing")]
+                crate::testing::checkpoint();
+                if work.cancel.is_cancelled() { Err(cancelled()) } else { Ok(()) }
+            },
             || if work.cancel.begin_commit() { Ok(()) } else { Err(cancelled()) });
         let changed = owner.revision() != revision || !owner.report().same_node(&before);
         let session = Box::new(owner.into_session());

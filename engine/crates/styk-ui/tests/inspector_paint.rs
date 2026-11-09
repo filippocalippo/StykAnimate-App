@@ -242,7 +242,9 @@ impl Window {
         let theme = Theme::Light;
         let panel = styk_ui::dock::docked(inspector::view(View::of(&self.core, theme).expect("the panel has a model")), theme);
         let host: &'static styk_core::overlay::host::Host = Box::leak(Box::new(self.core.overlays().clone()));
-        stack![panel, overlays::layer_of(host, self.core.focus().focus_visible(), theme.palette(), 0.0, None, Vec::new())].boxed()
+        // The window's owned overlays, as the band mounts them: the Inspector's layer-move dialog.
+        let owned = inspector::owned(&self.core, theme.palette(), SIZE);
+        stack![panel, overlays::layer_of(host, self.core.focus().focus_visible(), theme.palette(), 0.0, None, owned)].boxed()
     }
 
     fn rebuild(&mut self) {
@@ -542,4 +544,91 @@ fn choosing_a_layer_in_the_select_moves_the_figure_through_to_the_core() {
     let records = core.documents.active().unwrap().records().unwrap().clone();
     assert_eq!(records.path(&["_styk", "layers", "activeId"]).and_then(|id| id.as_str()), Some(chosen.as_str()), "the chosen layer is the document's active one");
     assert_eq!(styk_core::testing::undo_depth(core), history + 1, "one history entry");
+}
+
+/// A spawner whose documents worker waits at a gate before it takes its first job: the test decides when the move runs.
+struct Gated(Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
+
+impl styk_core::services::Spawner for Gated {
+    fn spawn(&self, name: &str, job: styk_core::services::Job) -> Result<(), styk_core::services::SpawnError> {
+        let gate = (name == "styk-documents").then(|| self.0.clone());
+        std::thread::Builder::new()
+            .name(name.to_owned())
+            .spawn(move || {
+                if let Some(gate) = gate {
+                    let mut open = gate.0.lock().unwrap();
+                    while !*open {
+                        open = gate.1.wait(open).unwrap();
+                    }
+                }
+                job()
+            })
+            .map(|_| ())
+            .map_err(|error| styk_core::services::SpawnError(error.to_string()))
+    }
+}
+
+/// How the person ends the layer move's dialog.
+#[derive(Clone, Copy, Debug)]
+enum Ending {
+    Cancel,
+    Close,
+    Escape,
+}
+
+/// The progress dialog mounted in the window: after 150 ms it shows with Cancel focused; Cancel, its close button and
+/// Escape (each through the real widgets and the window's adapter) stop the move with the document as it was, the
+/// dialog goes and the toolkit's focus is back on the layer select.
+#[test]
+fn the_layer_move_dialog_is_mounted_and_cancel_close_and_escape_end_it_through_the_widgets() {
+    use styk_core::inspector::ids;
+    for ending in [Ending::Cancel, Ending::Close, Ending::Escape] {
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let mut core = styk_core::testing::core_with_document(SHEET, "Test.styk", Arc::new(Gated(gate.clone()))).unwrap();
+        styk_core::testing::call(&mut core, "select", "[1,-1]").unwrap();
+        let before = core.documents.active().unwrap().records().unwrap().clone();
+        let mut window = Window::new(core);
+        let select = window.driver().snapshot().scopes.iter().flat_map(|(_, targets)| targets.iter()).find(|target| target.input_role == InputRole::Select).map(|target| target.id).expect("the layer select");
+        window.focus(select);
+        window.send(Message::Command(Command::Wake { now: 1_000 }));
+        window.send(Message::Command(Command::Inspector(Panel::Choose(Choice::FigureLayer, Arc::from("layer-2")))));
+        assert!(window.core.inspector().layer_move().is_some(), "{ending:?}: the move waits on the worker");
+        window.send(Message::Command(Command::Wake { now: 1_150 }));
+        window.walk();
+        assert!(window.core.inspector().layer_dialog().is_some(), "{ending:?}: the dialog shows after 150 ms");
+        assert_eq!(window.driver().snapshot().focused, Some(ids::CANCEL), "{ending:?}: Cancel holds the toolkit's focus");
+        window.agree();
+        match ending {
+            Ending::Cancel => {
+                let at = window.centre(ids::CANCEL);
+                window.click(at);
+            }
+            Ending::Close => {
+                let at = window.centre(ids::CLOSE);
+                window.click(at);
+            }
+            Ending::Escape => window.key(Named::Escape),
+        }
+        *gate.0.lock().unwrap() = true;
+        gate.1.notify_all();
+        // The documents host answers through the app's adapter (`poll_document`, then `document_effect`).
+        let mut ended = false;
+        for _ in 0..15_000 {
+            if let Some(effect) = window.core.poll_document() {
+                let task = message::run(window.core.document_effect(&effect));
+                window.finish(task);
+            }
+            if window.core.inspector().layer_move().is_none() && window.core.inspector().layer_dialog().is_none() {
+                ended = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(ended, "{ending:?}: the move and its dialog ended");
+        window.walk();
+        assert!(*window.core.documents.active().unwrap().records().unwrap() == before, "{ending:?}: the document is as it was");
+        assert_eq!(styk_core::testing::undo_depth(&window.core), 0, "{ending:?}: no history entry");
+        assert_eq!(window.driver().snapshot().focused, Some(select), "{ending:?}: the toolkit's focus is back on the layer select");
+        window.agree();
+    }
 }

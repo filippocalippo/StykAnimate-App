@@ -88,6 +88,7 @@ fn clamp01(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
 }
 
+#[cfg(feature = "engine")]
 fn invalid_value() -> Msg {
     Msg::new("errors.paint.invalidPaintValue")
 }

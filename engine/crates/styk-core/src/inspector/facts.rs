@@ -19,6 +19,12 @@ pub(crate) fn selection(document: &Document) -> &Selection {
     document.selection().unwrap_or(&NO_SELECTION)
 }
 
+/// The figures facts are made for: the selection, or the one figure a selected joint belongs to.
+pub(crate) fn subjects(document: &Document) -> Vec<u32> {
+    let selection = selection(document);
+    if selection.uids.is_empty() { selection.uid.into_iter().collect() } else { selection.uids.clone() }
+}
+
 pub(crate) fn records(document: &Document) -> &Value {
     document.records().unwrap_or(&NO_RECORDS)
 }
@@ -45,7 +51,18 @@ pub(crate) fn degrees(radians: f64) -> f64 {
 }
 
 /// The objects of the frame on show.
+/// How many times the panel walked a frame's objects on this thread (a regression count: an unchanged refresh walks
+/// nothing).
+pub fn walks() -> u64 {
+    WALKS.with(std::cell::Cell::get)
+}
+
+thread_local! {
+    static WALKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn frame_objects(frame: &Value) -> Vec<Value> {
+    WALKS.with(|walks| walks.set(walks.get() + 1));
     frame.get("objects").and_then(Value::elements).map(|items| items.iter().collect()).unwrap_or_default()
 }
 

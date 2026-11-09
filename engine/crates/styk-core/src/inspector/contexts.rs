@@ -198,10 +198,17 @@ fn resolve(view: &ViewState, has_object: bool) -> InspectorContext {
 /// The Inspector for `document` in this view state.
 /// `frame` is the frame on show, read ready ([`Document::frame_records_ready`]): the model is never built from an
 /// evaluation made on the interface thread.
-pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> Inspector {
+/// With it, the paint each colour row's picker opens with ([`pickers`]), from the same walk of the frame.
+pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> (Inspector, Vec<(ColorTarget, Picked)>) {
+    let object = facts::selected_object(document, frame);
+    let model = build_for(document, frame, inputs, object.clone());
+    let pickers = pickers(document, frame, &model, inputs.shown, object);
+    (model, pickers)
+}
+
+fn build_for(document: &Document, frame: &Value, inputs: &Inputs<'_>, object: Option<Value>) -> Inspector {
     let records = facts::records(document);
     let frame = frame.clone();
-    let object = facts::selected_object(document, &frame);
     let count = facts::selection(document).uids.len();
     if let Some(tool) = inputs.view.drawing() {
         return drawing(tool);
@@ -662,7 +669,7 @@ fn figure_context(document: &Document, records: &Value, frame: &Value, figure: &
         );
     }
     if facts::selection(document).joint < 0 {
-        sections.push(colours(document, &palette, figure, object, version, inputs.panel));
+        sections.push(colours(document, &palette, figure, object, version, inputs.panel, inputs.shown));
     }
     Inspector {
         kind: kind_id,
@@ -700,7 +707,9 @@ fn page_text(start: usize, size: usize, total: usize) -> Arc<str> {
 }
 
 /// The figure's colours and fills (titled): the palette 32 per page, the fills 12 per page.
-fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Figure, object: &Value, version: f64, panel: &PanelState) -> Section {
+fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Figure, object: &Value, version: f64, panel: &PanelState, shown: &super::Shown) -> Section {
+    // A swatch's picker captures the facts lane's row of its colour: until that is ready the swatch is pending.
+    let ready: Vec<&str> = shown.subject.as_ref().map(|subject| subject.palette.iter().map(|(color, _)| color.as_str()).collect()).unwrap_or_default();
     let uid = num(object.get("unique_id")).map(|uid| uid as u32);
     let drawables = super::order::drawables(figure, object);
     let mut rows = Vec::new();
@@ -712,7 +721,7 @@ fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Fi
             .map(|(offset, (rgb, segments, fills))| {
                 let color = facts::hex(*rgb).to_uppercase();
                 let key = if *fills > 0 { "inspectorView.replaceColorSegmentsAndFills" } else { "inspectorView.replaceColorSegments" };
-                Swatch { target: ColorTarget::Palette((palette_start + offset) as u32), rgb: *rgb, description: Msg::new(key).with("color", color).with("segments", Msg::count("counts.segments", *segments as f64)).with("fills", Msg::count("counts.fills", *fills as f64)), disabled: false }
+                Swatch { target: ColorTarget::Palette((palette_start + offset) as u32), rgb: *rgb, description: Msg::new(key).with("color", color).with("segments", Msg::count("counts.segments", *segments as f64)).with("fills", Msg::count("counts.fills", *fills as f64)), disabled: !ready.contains(&facts::hex(*rgb).as_str()) }
             })
             .collect();
         rows.push(Row::Swatches { label: msg("inspectorView.figureColorPalette"), items });
@@ -1032,13 +1041,16 @@ fn drawing(tool: &'static str) -> Inspector {
     }
 }
 
-/// The figure as its pose's style overlay resolves it: the definition when the pose restyles nothing, else the
-/// resolution the facts lane made for exactly this state (`None` until it lands).
+/// The figure as its pose's style overlay resolves it, from the facts lane's [`crate::facts::Subject`] made for exactly
+/// this state: the definition when the pose restyles nothing (or no lane runs), its resolution when it does; `None`
+/// while the lane's facts are for another state.
 fn instance(shown: &super::Shown, figure: Arc<Figure>, object: &Value) -> Option<Arc<Figure>> {
-    if !crate::facts::restyled(object) {
-        return Some(figure);
+    let uid = num(object.get("unique_id")).map(|uid| uid as u32);
+    match &shown.subject {
+        Some(subject) if Some(subject.uid) == uid && subject.figure == figure.id => if subject.restyled { subject.instance.clone() } else { Some(figure) },
+        None if !shown.awaiting => Some(figure),
+        _ => None,
     }
-    shown.instance.clone().filter(|instance| instance.id == figure.id)
 }
 
 /// What a colour row's picker opens with (`installColorPickers`' resolver in `src/app.mjs`).
@@ -1047,63 +1059,79 @@ pub(crate) struct Picked {
     pub paint: Paint2,
     pub gradients: bool,
     pub alpha: bool,
-    /// The palette colour a swatch replaces (`entry.color`).
+    /// The palette colour a swatch replaces (`entry.color`); its row (`targets`) is the facts lane's.
     pub from: Option<String>,
-    /// The palette row it replaces (`targets: entry`): the segments and stops, the fills and the instances the colour
-    /// had when the picker opened, which every commit of this opening reaches.
-    pub targets: Option<Value>,
 }
 
-/// The paint a colour row's picker starts from, read as the row was built: the background's paint (its own colour
-/// override first), the figure's colour and opacity, the segment's displayed paint, a two-tone's secondary colour, a
-/// fill's colour and opacity, a palette colour. `shown` is the colour the row shows (the figure's, or several
-/// figures' shared one), as today's picker starts from the field's value. `None` when the row's target is gone.
-pub(crate) fn picker(document: &Document, frame: &Value, target: ColorTarget, shown: Option<[u8; 3]>, lane: &super::Shown) -> Option<Picked> {
+/// Every colour target the model shows, with the colour it shows.
+fn color_targets(model: &Inspector) -> Vec<(ColorTarget, [u8; 3])> {
+    fn walk(rows: &[Row], out: &mut Vec<(ColorTarget, [u8; 3])>) {
+        for row in rows {
+            match row {
+                Row::Color(color) => out.push((color.target, match &color.paint {
+                    Paint::Solid(rgb) => *rgb,
+                    Paint::Gradient(paint) => paint.stops.first().map_or([0; 3], Stop::rgb),
+                })),
+                Row::Swatches { items, .. } => out.extend(items.iter().map(|item| (item.target, item.rgb))),
+                Row::Group { head, rows, .. } => {
+                    out.extend(head.swatch.iter().map(|swatch| (swatch.target, swatch.rgb)));
+                    walk(rows, out);
+                }
+                Row::Grid { rows, .. } => walk(rows, out),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for section in &model.sections {
+        walk(&section.rows, &mut out);
+    }
+    out
+}
+
+/// The paint each colour row's picker starts from, made with the model (once per build, never when a row is pressed):
+/// the background's paint (its own colour override first), the figure's colour and opacity, the segment's displayed
+/// paint, a two-tone's secondary colour, a fill's colour and opacity, a palette colour. A row starts from the colour
+/// it shows, as today's picker starts from the field's value.
+fn pickers(document: &Document, frame: &Value, model: &Inspector, lane: &super::Shown, object: Option<Value>) -> Vec<(ColorTarget, Picked)> {
+    let mut targets = color_targets(model);
+    // The background's picker also opens from outside the scene's row (today's breadcrumb, `crumb-background`).
+    if !targets.iter().any(|(target, _)| *target == ColorTarget::Background) {
+        targets.push((ColorTarget::Background, [0; 3]));
+    }
     let records = facts::records(document);
     let version = num(records.get("version")).unwrap_or(0.0);
-    let solid = |rgb: [u8; 3], opacity: f64, alpha: bool| Picked { paint: Paint2::solid(rgb, opacity), gradients: false, alpha, from: None, targets: None };
-    if target == ColorTarget::Background {
-        let background_id = num(frame.get("background_id"));
-        let background = records.get("backgrounds").and_then(Value::elements).and_then(|items| items.iter().find(|item| num(item.get("background_id")) == background_id));
-        let paint = match num(frame.get("_stykBackgroundColor")) {
-            Some(color) => {
-                let mut solid = styk_doc::Obj::new();
-                solid.set("kind", Value::Num(2.0));
-                solid.set("color", Value::Num(color));
-                Paint2::of_background(Some(&Value::object(solid)))
+    let solid = |rgb: [u8; 3], opacity: f64, alpha: bool| Picked { paint: Paint2::solid(rgb, opacity), gradients: false, alpha, from: None };
+    let selected = object.and_then(|object| Some((instance(lane, facts::figure_of(document, &object)?, &object)?, object)));
+    let joint = facts::selection(document).joint;
+    let mut out = Vec::new();
+    for (target, shown) in targets {
+        let picked = match (target, &selected) {
+            (ColorTarget::Background, _) => {
+                let background_id = num(frame.get("background_id"));
+                let background = records.get("backgrounds").and_then(Value::elements).and_then(|items| items.iter().find(|item| num(item.get("background_id")) == background_id));
+                let paint = match num(frame.get("_stykBackgroundColor")) {
+                    Some(color) => {
+                        let mut solid = styk_doc::Obj::new();
+                        solid.set("kind", Value::Num(2.0));
+                        solid.set("color", Value::Num(color));
+                        Paint2::of_background(Some(&Value::object(solid)))
+                    }
+                    None => Paint2::of_background(background.as_ref()),
+                };
+                paint.ok().map(|paint| Picked { paint, gradients: true, alpha: true, from: None })
             }
-            None => Paint2::of_background(background.as_ref()),
-        };
-        return paint.ok().map(|paint| Picked { paint, gradients: true, alpha: true, from: None, targets: None });
-    }
-    let object = facts::selected_object(document, frame)?;
-    let figure = instance(lane, facts::figure_of(document, &object)?, &object)?;
-    match target {
-        ColorTarget::Background => None,
-        ColorTarget::Figure => Some(solid(shown?, 1.0 - num(object.get("field28")).unwrap_or(0.0) / 255.0, true)),
-        ColorTarget::Segment => {
-            let segment = usize::try_from(facts::selection(document).joint).ok().and_then(|joint| figure.segments.get(joint))?;
-            Some(Picked { paint: displayed_segment_paint(version, &figure, &object, segment), gradients: true, alpha: true, from: None, targets: None })
-        }
-        ColorTarget::SegmentGradient => {
-            let segment = usize::try_from(facts::selection(document).joint).ok().and_then(|joint| figure.segments.get(joint))?;
-            let (rgb, _) = segment.secondary?;
+            (_, None) => None,
+            (ColorTarget::Figure, Some((_, object))) => Some(solid(shown, 1.0 - num(object.get("field28")).unwrap_or(0.0) / 255.0, true)),
+            (ColorTarget::Segment, Some((figure, object))) => usize::try_from(joint).ok().and_then(|joint| figure.segments.get(joint)).map(|segment| Picked { paint: displayed_segment_paint(version, figure, object, segment), gradients: true, alpha: true, from: None }),
             // The secondary colour is a plain colour field: today's default picker, opaque, without gradients.
-            Some(solid(displayed_color(version, &figure, &object, rgb), 1.0, false))
-        }
-        ColorTarget::Polygon(index) => {
-            let polygon = figure.polyfills.get(index as usize)?;
-            Some(solid(displayed_color(version, &figure, &object, polygon.rgb), polygon.alpha, true))
-        }
-        ColorTarget::Palette(index) => {
-            let (rgb, ..) = *palette(version, &figure, &object).get(index as usize)?;
-            // `editor.figurePalette().find(entry => entry.color === swatch)`: the session's own row, captured now.
-            let uid = facts::selection(document).uid?;
-            let from = facts::hex(rgb);
-            let targets = styk_edit::attached_palette_row(records, &facts::frame_objects(frame), uid, &from).ok().flatten()?;
-            Some(Picked { from: Some(from), targets: Some(targets), ..solid(rgb, 1.0, false) })
-        }
+            (ColorTarget::SegmentGradient, Some((figure, object))) => usize::try_from(joint).ok().and_then(|joint| figure.segments.get(joint)).and_then(|segment| segment.secondary).map(|(rgb, _)| solid(displayed_color(version, figure, object, rgb), 1.0, false)),
+            (ColorTarget::Polygon(index), Some((figure, object))) => figure.polyfills.get(index as usize).map(|polygon| solid(displayed_color(version, figure, object, polygon.rgb), polygon.alpha, true)),
+            (ColorTarget::Palette(_), Some(_)) => Some(Picked { from: Some(facts::hex(shown)), ..solid(shown, 1.0, false) }),
+        };
+        out.extend(picked.map(|picked| (target, picked)));
     }
+    out
 }
 
 /// The model while the frame on show and the document's views are being made on a worker: the last model with every

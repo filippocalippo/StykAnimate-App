@@ -425,10 +425,11 @@ fn a_restyled_instance_waits_for_its_resolution_from_the_facts_lane() {
     core.dispatch(Command::Inspector(Event::Paint(PaintEvent::Commit { request: id, paint: gradient() })));
     testing::publish(&mut core).unwrap();
     core.refresh();
-    assert!(core.inspector().pending() || core.inspector().shown().instance.is_some(), "never built from an unresolved restyled figure");
+    assert!(core.inspector().pending() || core.inspector().shown().subject.is_some(), "never built before the lane's facts for this state");
     testing::settle_facts(&mut core).unwrap();
     let shown = core.inspector().shown();
-    assert!(shown.restyled && shown.instance.is_some(), "restyled {}, resolved {}, selection {:?}", shown.restyled, shown.instance.is_some(), core.documents.active().unwrap().selection().map(|selection| (selection.uid, selection.uids.clone())));
+    let subject = shown.subject.as_ref().expect("the lane made the selected figure's facts");
+    assert!(subject.restyled && subject.instance.is_some(), "restyled {}, resolved {}", subject.restyled, subject.instance.is_some());
     let model = core.inspector().model().unwrap().clone();
     assert!(matches!(model.color(ColorTarget::Segment).map(|row| &row.paint), Some(Paint::Gradient(_))), "the lane's resolution shows");
 }
@@ -674,4 +675,122 @@ fn a_layer_move_shorter_than_150_ms_never_shows_the_dialog() {
     core.dispatch(Command::Wake { now: 2_000 });
     assert!(core.inspector().layer_dialog().is_none() && core.overlays().stack().entries().is_empty(), "no dialog after it ended");
     assert_eq!(core.inspector().deadline(), None);
+}
+
+#[test]
+fn a_dialog_opened_during_a_layer_move_takes_over_and_cancels_it() {
+    // Review finding 1: a held move starts at 1000 ms; another dialog opens at 1100; at 1150 the progress dialog must
+    // not show over it, and the move ends with no edit (today's `changeFigureLayer` aborts).
+    use styk_core::focus::{FocusArea, FocusId, FocusTarget, TargetKind};
+    let (mut core, gate, before) = held_move();
+    let newer = FocusId(77);
+    core.dispatch(Command::Overlay { event: styk_core::overlay::host::Event::OpenOverlay { kind: styk_core::overlay::Kind::Dialog, guarded: false, targets: vec![FocusTarget::new(newer.0, FocusArea::Panels, TargetKind::Control)], initial: Some(newer) }, now: 1_100 });
+    let newer_overlay = core.overlays().stack().entries().last().map(|entry| entry.id).expect("the newer dialog opened");
+    core.dispatch(Command::Wake { now: 1_150 });
+    assert!(core.inspector().layer_dialog().is_none(), "the progress dialog never shows over the newer dialog");
+    assert_eq!(core.overlays().stack().entries().last().map(|entry| entry.id), Some(newer_overlay), "the newer dialog is still on top");
+    assert_eq!(core.focus().focused(), Some(newer), "and keeps focus");
+    release(&gate);
+    finish_move(&mut core);
+    same(&records(&core), &before, "the move was cancelled by its job: nothing changed");
+    assert_eq!(testing::undo_depth(&core), 0, "no history entry");
+    assert!(core.overlays().stack().entries().iter().any(|entry| entry.id == newer_overlay), "the newer dialog stays");
+}
+
+#[test]
+fn unchanged_refreshes_walk_nothing() {
+    // Review finding 3: whether the pose restyles its figure is the lane's fact; a refresh with nothing changed reads it.
+    let mut core = core_with(NATIVE);
+    testing::call(&mut core, "select", "[1,-1]").unwrap();
+    let (walks, builds) = (styk_core::inspector::facts::walks(), core.inspector().builds);
+    for _ in 0..8 {
+        core.refresh();
+    }
+    assert_eq!(styk_core::inspector::facts::walks(), walks, "no frame walk on an unchanged refresh");
+    assert_eq!(core.inspector().builds, builds, "and no rebuild");
+}
+
+#[test]
+fn a_palette_picker_opens_on_the_lanes_row_without_walking_the_document() {
+    // Review finding 2: the swatch's row (its targets) is made on the facts lane; opening captures the ready row.
+    let mut core = core_with(NATIVE);
+    testing::call(&mut core, "select", "[1,-1]").unwrap();
+    let subject = core.inspector().shown().subject.clone().expect("the lane made the figure's facts");
+    assert!(subject.palette.iter().any(|(color, _)| color == "#2b2b2b"), "its palette rows");
+    let target = swatch_of(&core, "#2b2b2b");
+    let walks = styk_core::inspector::facts::walks();
+    let effects = core.dispatch(Command::Inspector(Event::Color(target)));
+    assert!(effects.contains(&Effect::PickColor(target)));
+    assert_eq!(styk_core::inspector::facts::walks(), walks, "opening walks nothing");
+    // Before the lane's facts for a new state land, the swatches are pending and open nothing.
+    testing::call_unsettled(&mut core, "seek", "[6]").unwrap();
+    let model = core.inspector().model().unwrap().clone();
+    let swatches: Vec<bool> = model.sections.iter().flat_map(|section| section.rows.iter()).filter_map(|row| match row {
+        Row::Swatches { items, .. } => Some(items.iter().map(|item| item.disabled).collect::<Vec<_>>()),
+        _ => None,
+    }).flatten().collect();
+    assert!(!swatches.is_empty() && swatches.iter().all(|disabled| *disabled), "pending swatches: {swatches:?}");
+}
+
+/// A frame source that holds the facts lane inside its first step until released, and says when it got there.
+struct Held {
+    publication: Arc<styk_core::screens::FixturePublication>,
+    gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    entered: std::sync::Mutex<std::sync::mpsc::Sender<()>>,
+}
+
+impl styk_core::frames::FrameDocument for Held {
+    fn snapshot(&self, revision: u64, epoch: u64) -> Option<Arc<styk_engine::Generation>> {
+        let _ = self.entered.lock().unwrap().send(());
+        let mut open = self.gate.0.lock().unwrap();
+        while !*open {
+            open = self.gate.1.wait(open).unwrap();
+        }
+        drop(open);
+        self.publication.snapshot(revision, epoch)
+    }
+}
+
+#[test]
+fn a_replaced_facts_request_stops_and_its_results_are_retired_on_the_lane() {
+    // Review finding 4: selecting B while A's facts are being made stops A (by its own cancellation) before it
+    // evaluates or resolves anything; replaced facts are handed to the lane to be dropped there.
+    use styk_core::frames::FrameDocument as _;
+    let mut core = core_with(NATIVE);
+    testing::call(&mut core, "select", "[2,-1]").unwrap();
+    let id = core.documents.active().unwrap().id();
+    let publication = Arc::new(styk_core::screens::FixturePublication::open(NATIVE, "Test.styk").unwrap());
+    let publish = |core: &Core| {
+        let document = core.documents.active().unwrap();
+        publication.publish(document.records().unwrap().clone(), document.revision()).unwrap();
+    };
+    publish(&core);
+    let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let (entered, reached) = std::sync::mpsc::channel();
+    core.set_source(id, Arc::new(Held { publication: publication.clone(), gate: gate.clone(), entered: std::sync::Mutex::new(entered) }));
+    assert!(publication.snapshot(core.documents.active().unwrap().revision(), 0).is_some(), "the held source is published");
+    let cancelled = core.facts().unwrap().cancelled;
+    // A: figure 1. The lane takes its request and is held in its first step.
+    let documents_id = id;
+    core.documents.call(documents_id, "select", &[Value::Num(1.0), Value::Num(-1.0)], &Value::Null).unwrap();
+    publish(&core);
+    core.refresh();
+    reached.recv_timeout(Duration::from_secs(30)).expect("the lane is making A's facts");
+    // B: figure 3, while A is being made: A is superseded.
+    core.documents.call(documents_id, "select", &[Value::Num(3.0), Value::Num(-1.0)], &Value::Null).unwrap();
+    publish(&core);
+    core.refresh();
+    release(&gate);
+    for _ in 0..15_000 {
+        core.refresh();
+        if !core.facts().unwrap().in_flight() && core.inspector().shown().subject.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(core.facts().unwrap().cancelled, cancelled + 1, "A stopped at its next step");
+    assert_eq!(core.inspector().shown().subject.as_ref().map(|subject| subject.uid), Some(3), "B's facts are shown");
+    core.refresh();
+    assert_eq!(core.facts().unwrap().retiring(), 0, "replaced facts went to the lane to be dropped");
+    drop(core);
 }

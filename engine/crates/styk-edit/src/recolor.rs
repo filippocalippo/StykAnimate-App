@@ -907,13 +907,14 @@ impl Editor {
     }
 }
 
-/// `editor.figurePalette()`'s row of `color` while the figure `uid` is selected without a joint
-/// (`attachedFigurePalette` over `objects`, the frame on show): what a palette swatch's picker captures when it
-/// opens and hands to every `replaceFigureColor` of that opening as its `targets`. `None` when no row has that colour.
-pub fn attached_palette_row(report: &Value, objects: &[Value], uid: u32, color: &str) -> Result<Option<Value>, EditError> {
+/// `editor.figurePalette()` while the figure `uid` is selected without a joint (`attachedFigurePalette` over `objects`,
+/// the frame on show): each colour (`#rrggbb`) with its row as `replaceFigureColor` takes it for `targets`. It walks
+/// the figure, the figures joined to it and their styles: a worker prepares it, and a palette swatch's picker
+/// captures the ready row when it opens.
+pub fn attached_palette_rows(report: &Value, objects: &[Value], uid: u32) -> Result<Vec<(String, Value)>, EditError> {
     let figures: Vec<Value> = report.get("figure_types").and_then(Value::elements).map(|e| e.iter().collect()).unwrap_or_default();
     let version = num(report, "version").unwrap_or(f64::NAN);
-    Ok(attached_palette(version, &figures, objects, uid)?.into_iter().find(|row| row.color == color).map(|row| row_value(&row)))
+    Ok(attached_palette(version, &figures, objects, uid)?.into_iter().map(|row| (row.color.clone(), row_value(&row))).collect())
 }
 
 /// A palette row as `attachedFigurePalette` returns it (`{color, segments, polygons, meshColors?, instances}`).
