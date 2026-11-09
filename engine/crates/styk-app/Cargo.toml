@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [features]
 # The developer build: the instrumentation layer records, and the tools are linked in. Same optimisation as release.
-devtools = ["dep:styk-text-check", "dep:styk-devtools", "dep:iced_winit", "iced_winit/devtools", "styk-trace/enabled", "styk-core/devtools", "styk-ui/devtools"]
+devtools = ["dep:styk-text-check", "dep:styk-devtools", "dep:iced_winit", "iced_winit/devtools", "styk-trace/enabled", "styk-core/devtools", "styk-ui/devtools", "styk-platform/devtools"]
 
 [dependencies]
 styk-text-check = { path = "../styk-text-check", optional = true }

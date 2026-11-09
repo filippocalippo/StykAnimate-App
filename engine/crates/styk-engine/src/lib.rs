@@ -157,7 +157,7 @@ struct Inner {
     state: Shared<State>,
     /// The document in front (store.rs).
     store: std::sync::Mutex<store::Store>,
-    clock: Clock,
+    clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     next_generation: AtomicU64,
     stopping: AtomicBool,
     /// [`Budgets::picture_bytes`].
@@ -191,15 +191,20 @@ impl Engine {
     /// A headless document whose only picture consumer is an export. The export
     /// owns its decode requests; no stage will consume a second decoded copy.
     pub fn for_export(clock: Clock, budgets: Budgets) -> Engine {
-        Engine::create(clock, budgets, None, false)
+        Engine::create(Arc::new(clock), budgets, None, false)
     }
 
     /// An engine that calls `notifier` whenever background work finishes.
     pub fn with_notifier(clock: Clock, budgets: Budgets, notifier: Option<Notifier>) -> Engine {
-        Engine::create(clock, budgets, notifier, true)
+        Engine::create(Arc::new(clock), budgets, notifier, true)
     }
 
-    fn create(clock: Clock, budgets: Budgets, notifier: Option<Notifier>, preload_stage: bool) -> Engine {
+    /// An instance-owned clock for native applications and parallel hosts.
+    pub fn with_clock(clock: Arc<dyn Fn() -> f64 + Send + Sync>, budgets: Budgets) -> Engine {
+        Engine::create(clock, budgets, None, true)
+    }
+
+    fn create(clock: Arc<dyn Fn() -> f64 + Send + Sync>, budgets: Budgets, notifier: Option<Notifier>, preload_stage: bool) -> Engine {
         Engine {
             inner: Arc::new(Inner {
                 state: Shared::new(State {
@@ -226,6 +231,8 @@ impl Engine {
             }),
         }
     }
+
+    pub fn clock_source(&self) -> Arc<dyn Fn() -> f64 + Send + Sync> { self.inner.clock.clone() }
 
     pub fn now(&self) -> f64 {
         (self.inner.clock)()

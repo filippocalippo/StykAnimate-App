@@ -160,11 +160,12 @@ pub struct PanelState {
 /// The facts the model shows, as of the last refresh: only facts made for the state on show (document, revision,
 /// playhead, selection); anything else is not shown, and the rows built from it are pending.
 #[cfg(feature = "engine")]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct Shown {
     /// The selection's bounds; `None` while none are ready for exactly this state.
     pub bounds: Option<[f64; 4]>,
     key: Option<FactsKey>,
+    pub(crate) figures: Arc<std::collections::HashMap<u32, Arc<crate::engine::doc::Figure>>>,
 }
 
 /// The number field being edited: its model (typed text, the open gesture's value) and its session gesture.
@@ -349,23 +350,23 @@ impl Panel {
             return;
         };
         let selection = facts::selection(document);
-        let key = FactsKey::new(document.id().get(), document.revision(), facts::tick(document), &selection.uids);
-        // Take what landed first (an "unpublished" answer frees the key to be asked again).
+        let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), &selection.uids);
+        // Take what landed first. An unpublished key waits for its publication receipt.
         if let Some(landed) = facts.latest()
-            && landed.key.document == key.document
+            && landed.key.document == key.document && landed.key.lineage == key.lineage
             && let Some((views, frame)) = &landed.evaluation
         {
             document.adopt_evaluation(landed.key.revision, views.clone(), f64::from_bits(landed.key.tick), frame.clone());
         }
         let ready = document.frame_records_ready().is_some() && document.with_document_ready(|_| ()).is_some();
-        let measure = selection.uids.len() > 1;
-        if (!ready || measure) && let Some(source) = source {
-            facts.request(key.clone(), source, facts::records(document).clone());
+        if (!ready || !selection.uids.is_empty()) && let Some(source) = source {
+            let publication = source.publication_receipt().or_else(|| documents.published().map(|(_, _, generation)| generation));
+            facts.request(key.clone(), source, facts::records(document).clone(), publication);
         }
         facts.flush();
         // A fact is shown only for exactly this state; otherwise nothing is, and its rows are pending.
         self.shown = match facts.latest() {
-            Some(landed) if measure && landed.key == key => Shown { bounds: landed.bounds, key: Some(landed.key.clone()) },
+            Some(landed) if landed.key == key => Shown { bounds: landed.bounds, figures: landed.figures.clone(), key: Some(landed.key.clone()) },
             _ => Shown::default(),
         };
     }
@@ -398,6 +399,7 @@ impl Panel {
         if self.model.is_some() && documents.active().is_some_and(|document| document.view().is_err()) {
             return;
         }
+        let resolving = facts.is_some() && source.is_some();
         self.facts(documents, facts, source);
         let Some(document) = documents.active() else {
             self.model = None;
@@ -405,6 +407,9 @@ impl Panel {
             self.pending = false;
             return;
         };
+        let selection = facts::selection(document);
+        let needed = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), &selection.uids);
+        let instances_ready = !resolving || selection.uids.is_empty() || self.shown.key.as_ref() == Some(&needed);
         let Some(frame) = document.frame_records_ready().filter(|_| document.with_document_ready(|_| ()).is_some()) else {
             // Not ready: the facts lane makes them; nothing is evaluated here.
             if !self.pending {
@@ -414,7 +419,9 @@ impl Panel {
             self.key = None;
             return;
         };
-        self.pending = false;
+        // Selection context is available before instance facts. Show its current layout immediately,
+        // with pending controls, instead of leaving the previous figure's layout on show.
+        self.pending = !instances_ready;
         let selection = facts::selection(document);
         let key = Key {
             document: document.id(),
@@ -433,6 +440,7 @@ impl Panel {
             return;
         }
         let built = contexts::build(document, &frame, &contexts::Inputs { view, memory: &self.memory, panel: &self.state, shown: &self.shown, can_paste: key.paste });
+        let built = if self.pending { contexts::pending(&built) } else { built };
         for section in &built.sections {
             if section.place == model::Place::Titled && !section.auto {
                 self.memory.rule_released(built.kind.id(), section.id);

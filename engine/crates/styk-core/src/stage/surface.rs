@@ -310,7 +310,7 @@ impl Inner {
         let before = self.host.view();
         let result = match event {
             Event::Pointer(pointer) => match self.host.pointer(pointer, self.navigation) {
-                Ok(InputResult::Route(routed)) => {
+                Ok(routed @ (InputResult::Route(_) | InputResult::Cancel(_))) => {
                     outcome.routed.push(routed);
                     Ok(())
                 }
@@ -377,7 +377,7 @@ impl Inner {
         let mut result = Ok(());
         for event in events {
             match self.host.pen_navigation(event, self.navigation) {
-                Ok(InputResult::Route(routed)) => outcome.routed.push(routed),
+                Ok(routed @ (InputResult::Route(_) | InputResult::Cancel(_))) => outcome.routed.push(routed),
                 Ok(_) => {}
                 Err(error) => result = Err(error),
             }

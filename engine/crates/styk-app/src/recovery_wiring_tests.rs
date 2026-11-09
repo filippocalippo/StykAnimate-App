@@ -14,6 +14,9 @@ use styk_services::{Clock, FixedClock, Cancel};
 use styk_services::recovery::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "visible_loop_tests.rs"]
+mod visible_loop;
+
 #[path = "timeline_quit_tests.rs"]
 mod timeline;
 
@@ -191,9 +194,15 @@ impl Runtime {
         for message in sent { self.message(message); }
         true
     }
+    #[track_caller]
     fn drain(&mut self) {
-        for _ in 0..128 { if !self.next() { return; } }
-        panic!("the idle app kept scheduling work");
+        let mut recent = VecDeque::new();
+        for _ in 0..128 {
+            if recent.len() == 8 { recent.pop_front(); }
+            recent.push_back(self.messages.front().cloned());
+            if !self.next() { return; }
+        }
+        panic!("the idle app kept scheduling work: clock={:?}, deadline={:?}, expired={}, recent={:?}, queued={:?}", self.clock.now(), self.app.band.core.wake_deadline(self.app.band.layouts_idle()), self.app.band.core.session_end_expired(), recent, self.messages);
     }
     fn advance_deadline(&mut self) {
         let due = self.app.band.core.documents.recovery_deadline().expect("a real recovery deadline");
@@ -252,15 +261,15 @@ impl Runtime {
         self.app.band.core.documents.call(id, "setFPS", &[styk_core::engine::Value::Num(30.0)], &styk_core::engine::Value::Null).unwrap().result.unwrap();
     }
     fn prompt(&mut self) { self.until(|app| app.band.core.recovery().closing().is_some()); }
-    fn inspector_input(&mut self, scrub: bool) {
-        use styk_core::inspector::property::PropertyKey::Fps;
+    fn inspector_input(&mut self, scrub: bool) { self.inspector_field(styk_core::inspector::property::PropertyKey::Fps, scrub, "42"); }
+    fn inspector_field(&mut self, key: styk_core::inspector::property::PropertyKey, scrub: bool, text: &str) {
         use styk_ui::inspector::{self, View};
         let element = |app: &App| styk_ui::dock::docked(inspector::view(View::of(&app.band.core, Theme::Light).expect("the live inspector")), Theme::Light)
             .map(|message| Message::Band(top_band::Message::Editor(message))).boxed();
         let mut driver = Driver::new(element(&self.app), Size::new(320.0, 900.0), &styk_design::fonts::ALL);
         driver.redraw();
         if scrub {
-            let bounds = driver.snapshot().bounds_of(inspector::label_id(Fps)).expect("the live FPS scrub label");
+            let bounds = driver.snapshot().bounds_of(inspector::label_id(key)).expect("the live FPS scrub label");
             let start = bounds.center(); driver.point_at(start);
             driver.events(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left))]);
             for delta in [8.0, 24.0] {
@@ -269,16 +278,16 @@ impl Runtime {
             }
             driver.events(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left))]);
         } else {
-            driver.focus(inspector::input_id(Fps)); driver.events(&[]);
+            driver.focus(inspector::input_id(key)); driver.events(&[]);
         }
         let sent = driver.messages(); assert!(!scrub || !sent.is_empty(), "the mounted scrub must publish");
         for message in sent { self.message(message); }
         if scrub { return; }
-        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(Fps));
+        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(key));
         for _ in 0..12 { driver.press(iced::keyboard::key::Named::Backspace); }
-        driver.typewrite("42");
+        driver.typewrite(text);
         let sent = driver.messages(); assert!(!sent.is_empty()); for message in sent { self.message(message); }
-        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(Fps)); driver.press(iced::keyboard::key::Named::Enter);
+        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(key)); driver.press(iced::keyboard::key::Named::Enter);
         let sent = driver.messages(); assert!(!sent.is_empty()); for message in sent { self.message(message); }
     }
 }
@@ -337,10 +346,13 @@ fn dirty_cancel_and_discard_run_from_mounted_buttons_with_autosave_off() {
 #[test]
 fn untitled_save_keeps_an_actionable_close_prompt() {
     let mut rt = Runtime::new(); rt.settled(); rt.dirty(false); rt.close(); rt.prompt();
-    assert_eq!(rt.click(ids::SAVE), 0, "the unavailable Save control sends no answer");
-    rt.drain();
-    assert!(rt.app.band.core.recovery().closing().is_some(), "no file-dialog consumer: keep Discard and Cancel actionable");
-    assert!(!rt.app.band.core.recovery().closing().unwrap().1.save_available);
+    let prompt = rt.app.band.core.recovery().closing().unwrap().0;
+    assert!(rt.app.band.core.recovery().closing().unwrap().1.save_available);
+    assert_eq!(rt.click(ids::SAVE), 1, "the mounted Save control requests the shared picker");
+    rt.drain(); // This harness has no native window: the app refuses the picker through DialogAnswer.
+    assert_eq!(rt.app.band.core.recovery().closing().unwrap().0, prompt, "a refused picker restores the same actionable prompt");
+    assert!(rt.app.band.core.recovery().closing().unwrap().1.save_available);
+    assert!(!rt.app.band.core.file_pending() && !rt.app.band.core.documents.edits_locked());
     rt.settle_prompt_animation();
     {
         // Render the existing prompt into this runtime's private directory; parallel processes share no output.
@@ -420,6 +432,13 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
             .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "styk"))
             .map(|entry| (entry.path(), std::fs::read(entry.path()).unwrap())).collect();
         assert!(!committed.is_empty());
+        // Shutdown also retires a live UI timer; an otherwise idle overlay cannot prove that route.
+        rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Notice(styk_core::commands::Notice {
+            message: styk_core::i18n::Msg::new("privacyUi.operationFailedPleaseTryAgain"),
+            severity: styk_core::commands::Severity::Warning,
+        }))));
+        rt.drain();
+        assert!(rt.app.band.core.overlay_deadline().is_some());
         rt.message(Message::SessionEnd); rt.drain();
         assert!(!rt.app.closing && !rt.checkpoint_finished);
         assert!(rt.app.band.core.recovery().closing().is_none());
@@ -433,6 +452,11 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
         for message in sent { rt.message(message); } rt.drain();
         assert!(rt.checkpoint_finished, "release the shutdown block reason");
         assert!(rt.app.closing, "QuitReady must follow without waiting for the gate");
+        let mut idle = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+        idle.redraw();
+        assert!(idle.messages().is_empty(), "expired session end must not publish another window wake");
+        assert!(matches!(idle.redraw_request, iced::window::RedrawRequest::Wait));
+        drop(idle);
         assert!(matches!(rt._outcome.try_recv(), Ok(Outcome::Done)), "exit must not wait for another disk save");
         for (path, bytes) in &committed { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
         rt.gate.release();
@@ -615,6 +639,8 @@ fn legacy_restore_from_mounted_offer_adopts_only_an_orphan() {
         let restore = offer.actions.iter().position(|action| action.command == styk_core::overlay::messages::Do::Recovery(styk_core::recovery::model::Event::Restore)).unwrap();
         let button = styk_core::overlay::host::message_button_id(offer.id, restore);
         rt.click(button); rt.until(|app| app.band.core.documents.active().is_some()); rt.drain();
+        rt.until(|app| app.band.core.stage().is_some() && !app.band.core.inspector().pending());
+        assert_eq!(rt.app.band.core.inspector().model().unwrap().number(styk_core::inspector::property::PropertyKey::RootX).unwrap().value, 480., "the restored front document reaches Properties through the real runtime");
         assert!(rt.app.band.core.documents.active().unwrap().dirty());
         rt.close(); rt.prompt();
         assert!(!rt.app.band.core.recovery().closing().unwrap().1.retry(), "a restored read-only source checkpoints into a new writable slot");

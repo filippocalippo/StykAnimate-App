@@ -195,7 +195,7 @@ fn js_color(value: f64) -> u32 {
 }
 
 /// `composeAnimationChannels`.
-pub(crate) fn compose(doc: &Document, animation: &Animation, mut frame: Frame, tick: f64) -> Frame {
+pub(crate) fn compose(doc: &Document, animation: &Animation, mut frame: Frame, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
     let mut active: Vec<(&Channel, KeyValue)> =
         animation.channels.iter().filter(|c| c.property != Property::Pose).filter_map(|c| Some((c, c.sample(tick)?))).collect();
     if active.is_empty() {
@@ -213,6 +213,7 @@ pub(crate) fn compose(doc: &Document, animation: &Animation, mut frame: Frame, t
     let mut scoped: HashSet<(u8, u32, u32, String)> = HashSet::new();
     let mut restyled: HashSet<usize> = HashSet::new();
     for (channel, value) in &active {
+        if cancelled() { return Frame::default(); }
         let target = &channel.target;
         let property = &channel.property;
         if property.is_vfx() {

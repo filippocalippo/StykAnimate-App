@@ -76,7 +76,7 @@ struct Rig { docs: Documents, store: Store, files: Arc<MemoryFiles>, clock: Fixe
 impl Rig {
     fn new(store: Store) -> Self {
         let mut docs = Documents::new(); let files = Arc::new(MemoryFiles::default()); let clock = FixedClock::new();
-        docs.attach_host(HostOptions { engine: Engine::new(|| 0.0, Budgets::for_device(None)), spawner: Arc::new(Threads), files: files.clone(), startup: styk_doc::json::parse(STARTUP).unwrap(), clock: || 0.0, notify: Arc::new(|| {}) }).unwrap();
+        docs.attach_host(HostOptions { engine: Engine::new(|| 0.0, Budgets::for_device(None)), spawner: Arc::new(Threads), files: files.clone(), startup: styk_doc::json::parse(STARTUP).unwrap(), clock: Arc::new(|| 0.0), notify: Arc::new(|| {}) }).unwrap();
         let mut rig = Self { docs, store, files, clock }; rig.open("Front.styk");
         rig.drain(); rig.docs.attach_recovery(Arc::new(rig.store.clone()), Arc::new(rig.clock.clone())).unwrap();
         rig.wait(|effect| matches!(effect, Effect::Recovery(Event::Listed))); rig

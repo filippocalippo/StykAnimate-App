@@ -454,7 +454,6 @@ Interface: stays in JS.
 | Module | Rust owner | Status | Notes |
 | --- | --- | --- | --- |
 | `src/app-dialogs.mjs` |  | stays |  |
-| `src/app.mjs` |  | stays |  |
 | `src/application-menu.mjs` |  | stays |  |
 | `src/asset-library.mjs` |  | stays |  |
 | `src/audio-timeline.mjs` |  | stays |  |
@@ -507,7 +506,6 @@ Interface: stays in JS.
 | `src/inspector-header.mjs` |  | stays |  |
 | `src/inspector-kit.mjs` |  | stays |  |
 | `src/inspector-legacy.mjs` |  | stays |  |
-| `src/inspector-view.mjs` |  | stays |  |
 | `src/keyframe-easing-popover.mjs` |  | stays |  |
 | `src/keyframe-easing-view.mjs` |  | stays |  |
 | `src/layer-timeline.mjs` |  | stays |  |
@@ -625,6 +623,8 @@ Interface: stays in JS.
 | `src/vfx-preset-preview.mjs` |  | stays |  |
 | `src/vfx-preset-ui.mjs` |  | stays |  |
 | `src/web-support.js` |  | stays |  |
+| `src/inspector-view.mjs` | `styk-core::inspector` | stays | Native V0 reads resolved instance styles from the facts worker; B1 owns colour commits and B3 owns the picker |
+| `src/app.mjs` | `styk-core::tools; styk-core::file_actions` | stays | Native V0 routes Select clicks and file actions; the browser remains the reference for later tools |
 
 ## Application services
 

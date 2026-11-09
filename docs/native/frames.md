@@ -5,7 +5,10 @@
 `Arc<Generation>` for exactly that document state, or a refusal. No document tree,
 session, generation or dense frame is read or dropped on the interface path. K-doc's
 panel seam is available; its worker publication/snapshot API is still pending, so
-this trait is the integration boundary rather than a second document store.
+this trait is the integration boundary rather than a second document store. Sources outside
+the document host, such as catalogue fixtures, expose an optional atomic
+`publication_receipt()` so pending facts can retry after publication. This stamp is the
+only source read allowed on the interface; snapshot and picture access remain worker-only.
 
 The host constructs a pool through `styk_services::Spawner` (the desktop supplies
 `styk_platform::spawn::ThreadSpawner`), injects `Clock` and a coalescing event-loop wake,

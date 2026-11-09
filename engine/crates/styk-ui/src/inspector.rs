@@ -33,6 +33,12 @@ use styk_design::{Palette, Theme, tokens};
 
 use crate::message::{Message, SelectRequest};
 
+/// Stable focus identity of a colour control, also used by the mounted automation driver.
+pub fn color_id(target: m::ColorTarget) -> FocusId {
+    let index = match target { m::ColorTarget::Background => 0, m::ColorTarget::Figure => 1, m::ColorTarget::Segment => 2, m::ColorTarget::SegmentGradient => 3, m::ColorTarget::Polygon(n) => 0x100 + u64::from(n), m::ColorTarget::Palette(n) => 0x1_0000_0000 + u64::from(n) };
+    FocusId(0x10_0000_0000 + index)
+}
+
 const BASE_ID: u64 = 0x1_0000;
 
 /// The focus ID of a number field's input, stable by its property.
@@ -316,7 +322,7 @@ impl Kit<'_> {
         };
         // The label is the swatch's accessible name; the field shows the swatch and its caption. The paint picker is a
         // button, which centres what it holds unless it spans the row.
-        ColorField::new(self.id(), FocusArea::Panels, self.palette, first, caption, send(Event::Color(row.target)))
+        ColorField::new(color_id(row.target), FocusArea::Panels, self.palette, first, caption, send(Event::Color(row.target)))
             .centered(row.paint_picker && !row.span)
             .in_grid(self.in_grid.get())
             .disabled(row.disabled)

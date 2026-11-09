@@ -29,6 +29,10 @@ pub(crate) struct Inputs<'a> {
     pub can_paste: bool,
 }
 
+fn instance_figure(document: &Document, object: &Value, inputs: &Inputs<'_>) -> Option<Arc<Figure>> {
+    facts::uid_of(object).and_then(|uid| inputs.shown.figures.get(&uid).cloned()).or_else(|| facts::figure_of(document, object))
+}
+
 const STEP_DOWN: &str = "step-down";
 const STEP_UP: &str = "step-up";
 
@@ -211,7 +215,7 @@ pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> 
         (InspectorContext::Layer, _) => layer(records),
         (InspectorContext::Frame, _) => frame_context(document, records),
         (InspectorContext::Scene, _) | (_, None) => scene(records, &frame),
-        (_, Some(object)) => match facts::figure_of(document, &object) {
+        (_, Some(object)) => match instance_figure(document, &object, inputs) {
             None => scene(records, &frame),
             Some(figure) if count == 1 && figure.movieclip.is_some() => movieclip(&figure, records),
             Some(_) if count > 1 => figures(document, records, &frame, inputs, count),
@@ -743,7 +747,7 @@ fn figures(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<
     opacities.dedup();
     let mut colours: Vec<[u8; 3]> = objects
         .iter()
-        .filter_map(|item| facts::figure_of(document, item).map(|figure| palette(version, &figure, item)))
+        .filter_map(|item| instance_figure(document, item, inputs).map(|figure| palette(version, &figure, item)))
         .flat_map(|entries| entries.into_iter().map(|entry| entry.0))
         .collect();
     colours.sort_unstable();

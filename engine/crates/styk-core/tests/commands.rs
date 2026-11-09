@@ -73,17 +73,19 @@ fn menu_and_message_actions_reach_dispatch_with_their_registry_identity() {
     use styk_core::overlay::{menu, messages};
 
     let mut core = Core::default();
-    let mut menu = menu::Menu::new(vec![menu::Entry::Item(menu::Item::new(CommandId::Save, "Save"))]);
+    // Keep an unported command as the registry sentinel; V0's Save now has a document owner,
+    // exercised with real save/reopen in visible_loop rather than this document-free fixture.
+    let mut menu = menu::Menu::new(vec![menu::Entry::Item(menu::Item::new(CommandId::Export, "Export"))]);
     menu.focus(0);
     let menu::Action::Activate { action: menu::RowAction::Command(command), close: true, .. } = menu.activate() else { panic!("menu activation"); };
-    assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Save)]);
+    assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Export)]);
 
     let mut slot = messages::Messages::default();
-    slot.push(messages::Message::new(1, "save-again", messages::Tone::Warning, false, vec![messages::Action {
-        command: CommandId::Save.into(), label: "Retry".into(), dismiss: true, outline: false,
+    slot.push(messages::Message::new(1, "export-again", messages::Tone::Warning, false, vec![messages::Action {
+        command: CommandId::Export.into(), label: "Retry".into(), dismiss: true, outline: false,
     }]), 0);
     let messages::Do::Command(command) = slot.current().unwrap().actions[0].command.clone() else { panic!("a registry action") };
-    assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Save)]);
+    assert_eq!(core.dispatch(AppCommand::Run(command)), [Effect::NotAvailable(CommandId::Export)]);
 }
 
 #[test]

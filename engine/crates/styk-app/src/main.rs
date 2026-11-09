@@ -324,9 +324,22 @@ impl App {
         let mut tasks = vec![task.map(Message::Band)];
         for request in requests {
             match request {
+                top_band::Request::Dialog { id: request_id, request } => {
+                    if let Some(window_id) = self.window { tasks.push(native_dialog(window_id, request_id, request)); }
+                    else { tasks.push(Task::done(Message::Band(top_band::Message::Editor(styk_core::commands::Command::DialogAnswer { id: request_id, result: Err("the picker owner closed".into()) }.into())))); }
+                }
+                #[cfg(feature = "devtools")]
+                top_band::Request::InputClick(point) => {
+                    if let Some(window_id) = self.window { tasks.push(iced_window::run(window_id, move |window| styk_platform::automation_input::click(window, point)).map(|answer| Message::Band(top_band::Message::InputResult(answer.map_err(|e| e.to_string()))))); }
+                }
+                #[cfg(feature = "devtools")]
+                top_band::Request::InputNumber(text) => {
+                    if let Some(window_id) = self.window { tasks.push(iced_window::run(window_id, move |window| styk_platform::automation_input::number(window, &text)).map(|answer| Message::Band(top_band::Message::InputResult(answer.map_err(|e| e.to_string()))))); }
+                }
                 top_band::Request::Minimize => tasks.extend(self.window.map(|id| iced_window::minimize(id, true))),
                 top_band::Request::Close => tasks.push(self.close()),
                 top_band::Request::QuitReady => {
+                    if let Some(window) = self.window { tasks.push(iced_window::run(window, |window| styk_platform::dialogs::NativeDialogs::cancel(window)).discard()); }
                     self.quit_cleared = true;
                     tasks.push(self.close());
                 }
@@ -447,7 +460,8 @@ impl App {
         // The documents host decides first: unsaved projects are asked about (the close prompt) and the recovery lane finishes
         // its copies; an unattended run has no one to ask.
         if self.strategy.is_none() && !self.quit_cleared {
-            return self.band.ask_to_quit().map(Message::Band);
+            let cancel = self.window.map(|id| iced_window::run(id, |window| styk_platform::dialogs::NativeDialogs::cancel(window)).discard()).unwrap_or_else(Task::none);
+            return Task::batch([cancel, self.band.ask_to_quit().map(Message::Band)]);
         }
         if self.band.core.session_end_requested() { return self.finish_session_quit(); }
         // Documents granted QuitReady. Start both maintenance lanes (the layout queue and Settings), even if one is busy;
@@ -963,4 +977,18 @@ mod capture_tests {
         drop(app.frame());
         assert!(app.capturing, "the existing two-frame wait should now be complete");
     }
+}
+
+/// Only service wiring: the core retains the dialog's identity and validates its answer.
+fn native_dialog(window: iced_window::Id, id: u64, request: styk_services::dialogs::Request) -> Task<Message> {
+    use styk_services::dialogs::Dialogs;
+    iced_window::run(window, move |window| {
+        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+        let result = styk_platform::dialogs::NativeDialogs::new(window).and_then(|dialogs| dialogs.choose(request, Box::new(move |result| {
+            if sender.send(result).is_err() { eprintln!("picker owner closed before its answer"); }
+        })));
+        (result, receiver)
+    }).then(move |(started, receiver)| Task::perform(async move {
+        match started { Err(error) => Err(error), Ok(()) => receiver.await.unwrap_or_else(|error| Err(error.to_string())) }
+    }, move |result| Message::Band(top_band::Message::Editor(styk_core::commands::Command::DialogAnswer { id, result }.into()))))
 }

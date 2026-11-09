@@ -361,8 +361,13 @@ fn untitled_save_must_not_hide_the_only_actionable_prompt() {
     let mut core = core_with(&Store::default());
     let effect = confirm_close(&mut core);
     core.document_effect(&effect);
-    send(&mut core, Event::Respond(Choice::Save));
-    assert!(core.recovery().closing().is_some(), "SaveDialog has no consumer: keep the prompt until saving is available");
+    let original = core.recovery().closing().unwrap().0;
+    assert!(core.recovery().closing().unwrap().1.save_available);
+    let effects = core.dispatch(Command::Recovery(Event::Respond(Choice::Save)));
+    let picker = effects.iter().find_map(|effect| match effect { styk_core::commands::Effect::Dialog { id, .. } => Some(*id), _ => None }).expect("Save uses the shared picker consumer");
+    assert_eq!(core.recovery().closing().unwrap().0, original);
+    core.dispatch(Command::DialogAnswer { id: picker, result: Ok(styk_services::dialogs::Choice::File(None)) });
+    assert_eq!(core.recovery().closing().unwrap().0, original, "picker cancellation preserves the prompt");
     send(&mut core, Event::Respond(Choice::Cancel));
     assert!(core.recovery().closing().is_none());
 }

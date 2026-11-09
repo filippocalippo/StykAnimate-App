@@ -68,7 +68,7 @@ fn long_open_returns_while_pending_cancel_wakes_it_and_drop_reclaims_off_the_int
     docs.attach_host(HostOptions {
         engine: Engine::new(|| 0.0, Budgets::for_device(None)), spawner: Arc::new(Threads),
         files: Arc::new(SlowFiles { gate: gate.clone(), entered, dropped }),
-        startup: styk_doc::json::parse(STARTUP).unwrap(), clock: || 0.0, notify: Arc::new(|| {}),
+        startup: styk_doc::json::parse(STARTUP).unwrap(), clock: Arc::new(|| 0.0), notify: Arc::new(|| {}),
     }).unwrap();
     // The gate is only released after dispatch returned. On a blocking implementation the watchdog
     // releases it so this test fails its assertion instead of stranding a process.
@@ -107,7 +107,7 @@ fn dropping_an_owner_cancels_a_file_future_and_does_not_join_it() {
     docs.attach_host(HostOptions {
         engine: Engine::new(|| 0.0, Budgets::for_device(None)), spawner: Arc::new(Threads),
         files: Arc::new(SlowFiles { gate: Arc::new(Gate::default()), entered, dropped }),
-        startup: styk_doc::json::parse(STARTUP).unwrap(), clock: || 0.0, notify: Arc::new(|| {}),
+        startup: styk_doc::json::parse(STARTUP).unwrap(), clock: Arc::new(|| 0.0), notify: Arc::new(|| {}),
     }).unwrap();
     assert!(matches!(docs.dispatch(Request::OpenFile(FileTarget::new("Slow.styk"))), Ok(Effect::Started(_))));
     entry.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -143,7 +143,7 @@ fn bake_handoff_refuses_borrowed_reads_cancels_atomically_and_returns_the_same_h
     // attach_host installs the clock for every already-open owner.
     let (notice, notified) = mpsc::channel();
     docs.attach_host(HostOptions { engine, spawner: Arc::new(Threads), files: Arc::new(styk_services::files::fake::MemoryFiles::default()),
-        startup: styk_doc::json::parse(STARTUP).unwrap(), clock: bake_clock, notify: Arc::new(move || { let _ = notice.send(()); }) }).unwrap();
+        startup: styk_doc::json::parse(STARTUP).unwrap(), clock: Arc::new(bake_clock), notify: Arc::new(move || { let _ = notice.send(()); }) }).unwrap();
     let request = || Request::Call { document: id, method: "bakeMovieclip".into(), args: vec![], view: Value::Null };
     let (entered, entry) = mpsc::sync_channel(1); let (release, gate) = mpsc::sync_channel(1);
     *BAKE_GATE.lock().unwrap() = Some((entered, gate));
