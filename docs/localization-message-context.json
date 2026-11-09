@@ -4456,20 +4456,20 @@
   },
   "chrome.addATitleOrCaption": {
     "locations": [
-      "index.html:363"
+      "index.html:355"
     ],
     "context": "<button data-action=\"add-text\" data-icon=\"text\"><strong data-i18n=\"chrome.text\">Text</strong><small data-i18n=\"chrome.addATitleOrCaption\">Add a title or caption"
   },
   "chrome.addToYourScene": {
     "locations": [
-      "index.html:360"
+      "index.html:352"
     ],
     "context": "<div class=\"dialog-head\"><div><span class=\"eyebrow\" data-i18n=\"chrome.create\">CREATE</span><h2 id=\"insert-title\" data-i18n=\"chrome.addToYourScene\">Add to your s"
   },
   "chrome.advanced": {
     "locations": [
-      "index.html:243",
-      "src/timeline-header.mjs:283"
+      "index.html:221",
+      "src/timeline-header.mjs:282"
     ],
     "context": "<div id=\"timeline-workflow\" class=\"segmented timeline-mode-switch\" role=\"group\" aria-label=\"Timeline mode\" data-i18n-aria-label=\"chrome.timelineMode\"><button ty"
   },
@@ -4488,7 +4488,7 @@
   },
   "chrome.animationCanvasVToSelectHToPanDragAFigureOrJointToPoseIt": {
     "locations": [
-      "index.html:209"
+      "index.html:203"
     ],
     "context": "data-i18n-aria-label=\"chrome.animationCanvasVToSelectHToPanDragAFigureOrJointToPoseIt\">"
   },
@@ -4500,7 +4500,7 @@
   },
   "chrome.aReusableAnimatedGroupThatPlaysInsideYourScene": {
     "locations": [
-      "index.html:367"
+      "index.html:359"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
@@ -4512,13 +4512,13 @@
   },
   "chrome.audio": {
     "locations": [
-      "index.html:297"
+      "index.html:275"
     ],
     "context": "<button id=\"timeline-audio\" class=\"icon-button timeline-audio-toggle\" title=\"Show audio\" aria-label=\"Audio\" aria-description=\"Show or hide audio editing. Audio "
   },
   "chrome.backgroundColour": {
     "locations": [
-      "index.html:162"
+      "index.html:156"
     ],
     "context": "<button type=\"button\" class=\"ui-crumb-swatch\" id=\"crumb-background\" data-paint-picker aria-label=\"Background colour\" data-tooltip=\"Background colour\" data-i18n-"
   },
@@ -4554,32 +4554,32 @@
   },
   "chrome.cancelChain": {
     "locations": [
-      "index.html:164"
+      "index.html:158"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
   "chrome.cancelEscape": {
     "locations": [
-      "index.html:164"
+      "index.html:158"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
   "chrome.cancelPolygon": {
     "locations": [
-      "index.html:182"
+      "index.html:176"
     ],
     "context": "data-i18n-aria-label=\"chrome.cancelPolygon\"></button>"
   },
   "chrome.canvasZoom": {
     "locations": [
-      "index.html:198",
+      "index.html:192",
       "src/localization-bindings.mjs:196"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-zoom\" id=\"zoom-label\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"zoom-menu\" aria-haspopup=\"menu\" aria-label=\""
   },
   "chrome.chain": {
     "locations": [
-      "index.html:164"
+      "index.html:158"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
@@ -4604,25 +4604,25 @@
   },
   "chrome.closeAddDialog": {
     "locations": [
-      "index.html:360"
+      "index.html:352"
     ],
     "context": "<div class=\"dialog-head\"><div><span class=\"eyebrow\" data-i18n=\"chrome.create\">CREATE</span><h2 id=\"insert-title\" data-i18n=\"chrome.addToYourScene\">Add to your s"
   },
   "chrome.constructionBackground": {
     "locations": [
-      "index.html:194"
+      "index.html:188"
     ],
     "context": "<button type=\"button\" class=\"ui-icon-button\" data-action=\"builder-canvas-color\" data-quiet data-workspaces=\"rig\" aria-label=\"Construction background\" data-toolt"
   },
   "chrome.create": {
     "locations": [
-      "index.html:360"
+      "index.html:352"
     ],
     "context": "<div class=\"dialog-head\"><div><span class=\"eyebrow\" data-i18n=\"chrome.create\">CREATE</span><h2 id=\"insert-title\" data-i18n=\"chrome.addToYourScene\">Add to your s"
   },
   "chrome.currentFrame": {
     "locations": [
-      "index.html:203"
+      "index.html:197"
     ],
     "context": "<div class=\"context-strip\"><strong id=\"tool-context\" data-i18n=\"chrome.select\">Select</strong><span id=\"edit-scope\" data-i18n=\"chrome.currentFrame\">Current fram"
   },
@@ -4655,7 +4655,7 @@
   },
   "chrome.dropAStykAnimatePivotOrStickNodesFileHere": {
     "locations": [
-      "index.html:217"
+      "index.html:211"
     ],
     "context": "<div id=\"canvas-empty\" hidden data-i18n=\"chrome.dropAStykAnimatePivotOrStickNodesFileHere\">Drop a StykAnimate, Pivot or Stick Nodes file here</div>"
   },
@@ -4697,25 +4697,25 @@
   },
   "chrome.editSelectedFrames": {
     "locations": [
-      "index.html:295"
+      "index.html:273"
     ],
     "context": "<button type=\"button\" id=\"range-edit\" class=\"button subtle small\" data-action=\"toggle-range-edit\" aria-label=\"Edit selected frames\" aria-pressed=\"false\" title=\""
   },
   "chrome.effects": {
     "locations": [
-      "index.html:191"
+      "index.html:185"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"vfx-preview\" data-workspaces=\"animate draw\" aria-pressed=\"true\" ari"
   },
   "chrome.effectsPreview": {
     "locations": [
-      "index.html:191"
+      "index.html:185"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"vfx-preview\" data-workspaces=\"animate draw\" aria-pressed=\"true\" ari"
   },
   "chrome.emptyMovieclip": {
     "locations": [
-      "index.html:367"
+      "index.html:359"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
@@ -4727,13 +4727,13 @@
   },
   "chrome.exampleAnimations": {
     "locations": [
-      "index.html:369"
+      "index.html:361"
     ],
     "context": "<details class=\"insert-examples\"><summary data-i18n=\"chrome.exampleAnimations\">Example animations</summary><div id=\"sample-list\"></div></details>"
   },
   "chrome.expandTimeline": {
     "locations": [
-      "index.html:300"
+      "index.html:278"
     ],
     "context": "<button id=\"expand-timeline\" class=\"icon-button\" title=\"Expand timeline\" aria-label=\"Expand timeline\" aria-pressed=\"false\" data-icon=\"maximize\" data-i18n-title="
   },
@@ -4746,13 +4746,13 @@
   },
   "chrome.figure": {
     "locations": [
-      "index.html:230"
+      "index.html:305"
     ],
     "context": "<div class=\"inspector-header\" data-slot=\"inspector-target\"><div><span class=\"panel-tab-title\" data-i18n=\"chrome.properties\">Properties</span><span id=\"inspector"
   },
   "chrome.figureSelectionAndJointHandles": {
     "locations": [
-      "index.html:215"
+      "index.html:209"
     ],
     "context": "data-i18n-aria-label=\"chrome.figureSelectionAndJointHandles\"></canvas>"
   },
@@ -4776,8 +4776,8 @@
   },
   "chrome.finish": {
     "locations": [
-      "index.html:164",
-      "index.html:174"
+      "index.html:158",
+      "index.html:168"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
@@ -4789,7 +4789,7 @@
   },
   "chrome.finishChainEnter": {
     "locations": [
-      "index.html:164"
+      "index.html:158"
     ],
     "context": "<div id=\"chain-controls\" class=\"polygon-controls stage-mode-controls\" role=\"group\" aria-label=\"Chain\" hidden data-i18n-aria-label=\"chrome.chain\"><span id=\"chain"
   },
@@ -4807,13 +4807,13 @@
   },
   "chrome.firstFrameHome": {
     "locations": [
-      "index.html:252"
+      "index.html:230"
     ],
     "context": "data-i18n-title=\"chrome.firstFrameHome\"></button"
   },
   "chrome.fitCanvas": {
     "locations": [
-      "index.html:199"
+      "index.html:193"
     ],
     "context": "<button type=\"button\" class=\"ui-icon-button\" data-action=\"zoom-reset\" aria-label=\"Fit canvas\" data-tooltip=\"Fit canvas\" data-icon=\"fit\" data-i18n-aria-label=\"ch"
   },
@@ -4831,49 +4831,49 @@
   },
   "chrome.fps": {
     "locations": [
-      "index.html:216"
+      "index.html:210"
     ],
     "context": "<output id=\"playback-fps\" aria-label=\"Playback frames per second\" hidden data-i18n-aria-label=\"chrome.playbackFramesPerSecond\" data-i18n=\"chrome.fps\">— fps</out"
   },
   "chrome.framesPerSecond": {
     "locations": [
-      "index.html:290"
+      "index.html:268"
     ],
     "context": "data-i18n-aria-label=\"chrome.framesPerSecond\" />fps</label"
   },
   "chrome.fromFrameRange": {
     "locations": [
-      "index.html:367"
+      "index.html:359"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
   "chrome.fromSelection": {
     "locations": [
-      "index.html:367"
+      "index.html:359"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
   "chrome.grid": {
     "locations": [
-      "index.html:190"
+      "index.html:184"
     ],
     "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
   },
   "chrome.gridAndGuides": {
     "locations": [
-      "index.html:190"
+      "index.html:184"
     ],
     "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
   },
   "chrome.gridAndGuidesSettings": {
     "locations": [
-      "index.html:190"
+      "index.html:184"
     ],
     "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
   },
   "chrome.handles": {
     "locations": [
-      "index.html:192"
+      "index.html:186"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"builder-static-handles\" data-workspaces=\"rig\" aria-pressed"
   },
@@ -4885,25 +4885,25 @@
   },
   "chrome.highlight": {
     "locations": [
-      "index.html:193"
+      "index.html:187"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"builder-highlight\" data-workspaces=\"rig\" aria-pressed=\"fal"
   },
   "chrome.highlightPart": {
     "locations": [
-      "index.html:193"
+      "index.html:187"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"builder-highlight\" data-workspaces=\"rig\" aria-pressed=\"fal"
   },
   "chrome.image": {
     "locations": [
-      "index.html:364"
+      "index.html:356"
     ],
     "context": "<button data-action=\"import-sprite\" data-icon=\"image\"><strong data-i18n=\"chrome.image\">Image</strong><small data-i18n=\"chrome.placeAnImage\">Place an image</smal"
   },
   "chrome.importFigure": {
     "locations": [
-      "index.html:365"
+      "index.html:357"
     ],
     "context": "<button data-action=\"import\" data-icon=\"import\"><strong data-i18n=\"chrome.importFigure\">Import figure</strong><small data-i18n=\"chrome.openAFigureOrMovieClip\">O"
   },
@@ -4915,16 +4915,9 @@
   },
   "chrome.initializingWebGPU": {
     "locations": [
-      "index.html:332"
+      "index.html:324"
     ],
     "context": "><span id=\"renderer-label\" data-i18n=\"chrome.initializingWebGPU\">Initializing WebGPU</span"
-  },
-  "chrome.inspector": {
-    "locations": [
-      "index.html:222",
-      "index.html:224"
-    ],
-    "context": "<aside class=\"right-panel shell-right shell-dock\" id=\"right-dock\" data-region=\"right\" aria-label=\"Inspector\" data-i18n-aria-label=\"chrome.inspector\">"
   },
   "chrome.joint": {
     "locations": [
@@ -4934,19 +4927,19 @@
   },
   "chrome.jointCount": {
     "locations": [
-      "index.html:166"
+      "index.html:160"
     ],
     "context": "<span id=\"polygon-count\" data-i18n=\"chrome.jointCount\">0 joints</span"
   },
   "chrome.joints": {
     "locations": [
-      "index.html:188"
+      "index.html:182"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"handles-button\" data-action=\"toggle-handles\" data-workspaces=\"anima"
   },
   "chrome.library": {
     "locations": [
-      "index.html:227"
+      "index.html:302"
     ],
     "context": "<button type=\"button\" role=\"tab\" class=\"ui-tab\" id=\"library-tab\" data-panel=\"library\" aria-controls=\"user-library\" aria-selected=\"false\" tabindex=\"-1\" data-i18n"
   },
@@ -4958,13 +4951,13 @@
   },
   "chrome.location": {
     "locations": [
-      "index.html:160"
+      "index.html:154"
     ],
     "context": "<nav class=\"ui-crumb\" aria-label=\"Location\" data-i18n-aria-label=\"chrome.location\">"
   },
   "chrome.loopPlayback": {
     "locations": [
-      "index.html:279"
+      "index.html:257"
     ],
     "context": "data-i18n-title=\"chrome.loopPlayback\"></button"
   },
@@ -4991,7 +4984,7 @@
   },
   "chrome.motionPaths": {
     "locations": [
-      "index.html:189"
+      "index.html:183"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"paths-button\" data-action=\"toggle-motion-paths\" data-workspaces=\"an"
   },
@@ -5003,25 +4996,25 @@
   },
   "chrome.nextFrame": {
     "locations": [
-      "index.html:272"
+      "index.html:250"
     ],
     "context": "data-i18n-title=\"chrome.nextFrame\"></button"
   },
   "chrome.onionSkin": {
     "locations": [
-      "index.html:296"
+      "index.html:274"
     ],
     "context": "<div class=\"timeline-onion-controls\"><button class=\"icon-button\" id=\"onion-button\" data-action=\"toggle-onion\" data-icon=\"onion\" title=\"Onion skin · O\" aria-labe"
   },
   "chrome.onionSkinO": {
     "locations": [
-      "index.html:296"
+      "index.html:274"
     ],
     "context": "<div class=\"timeline-onion-controls\"><button class=\"icon-button\" id=\"onion-button\" data-action=\"toggle-onion\" data-icon=\"onion\" title=\"Onion skin · O\" aria-labe"
   },
   "chrome.onionSkinSettings": {
     "locations": [
-      "index.html:296"
+      "index.html:274"
     ],
     "context": "<div class=\"timeline-onion-controls\"><button class=\"icon-button\" id=\"onion-button\" data-action=\"toggle-onion\" data-icon=\"onion\" title=\"Onion skin · O\" aria-labe"
   },
@@ -5033,7 +5026,7 @@
   },
   "chrome.openAFigureOrMovieClip": {
     "locations": [
-      "index.html:365"
+      "index.html:357"
     ],
     "context": "<button data-action=\"import\" data-icon=\"import\"><strong data-i18n=\"chrome.importFigure\">Import figure</strong><small data-i18n=\"chrome.openAFigureOrMovieClip\">O"
   },
@@ -5057,82 +5050,82 @@
   },
   "chrome.paths": {
     "locations": [
-      "index.html:189"
+      "index.html:183"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" id=\"paths-button\" data-action=\"toggle-motion-paths\" data-workspaces=\"an"
   },
   "chrome.performanceDetails": {
     "locations": [
-      "index.html:340"
+      "index.html:332"
     ],
     "context": "data-i18n-title=\"chrome.performanceDetails\"></button>"
   },
   "chrome.placeAnImage": {
     "locations": [
-      "index.html:364"
+      "index.html:356"
     ],
     "context": "<button data-action=\"import-sprite\" data-icon=\"image\"><strong data-i18n=\"chrome.image\">Image</strong><small data-i18n=\"chrome.placeAnImage\">Place an image</smal"
   },
   "chrome.play": {
     "locations": [
-      "index.html:266"
+      "index.html:244"
     ],
     "context": "data-i18n-title=\"chrome.playPauseSpace\" data-i18n-aria-label=\"chrome.play\"></button"
   },
   "chrome.playbackFramesPerSecond": {
     "locations": [
-      "index.html:216"
+      "index.html:210"
     ],
     "context": "<output id=\"playback-fps\" aria-label=\"Playback frames per second\" hidden data-i18n-aria-label=\"chrome.playbackFramesPerSecond\" data-i18n=\"chrome.fps\">— fps</out"
   },
   "chrome.playing": {
     "locations": [
-      "index.html:331"
+      "index.html:323"
     ],
     "context": "><span id=\"preview-badge\" hidden data-i18n=\"chrome.playing\">PLAYING</span></span"
   },
   "chrome.playPauseSpace": {
     "locations": [
-      "index.html:266"
+      "index.html:244"
     ],
     "context": "data-i18n-title=\"chrome.playPauseSpace\" data-i18n-aria-label=\"chrome.play\"></button"
   },
   "chrome.polygon": {
     "locations": [
       "index.html:132",
-      "index.html:165"
+      "index.html:159"
     ],
     "context": "<button type=\"button\" class=\"tool ui-tool-button\" data-tool=\"polygon\" data-icon=\"polygon\" aria-label=\"Polygon\" data-i18n-aria-label=\"chrome.polygon\"></button>"
   },
   "chrome.previewDetailFollowsYourPlaybackQualitySettingOrAvailableMemoryOriginalArtworkAndExportQualityArePreserved": {
     "locations": [
-      "index.html:196"
+      "index.html:190"
     ],
     "context": "<output id=\"preview-quality\" class=\"stage-head-note\" data-tooltip=\"Preview detail follows your playback quality setting or available memory. Original artwork an"
   },
   "chrome.previousFrame": {
     "locations": [
-      "index.html:258"
+      "index.html:236"
     ],
     "context": "data-i18n-title=\"chrome.previousFrame\"></button"
   },
   "chrome.projectLibrary": {
     "locations": [
-      "index.html:368"
+      "index.html:360"
     ],
     "context": "<div class=\"insert-library\"><h3 data-i18n=\"chrome.projectLibrary\">Project library</h3><div id=\"asset-list\"></div></div>"
   },
   "chrome.properties": {
     "locations": [
       "index.html:86",
-      "index.html:225",
-      "index.html:230"
+      "index.html:300",
+      "index.html:305"
     ],
     "context": "data-i18n-aria-label=\"chrome.properties\"></button>"
   },
   "chrome.ready": {
     "locations": [
-      "index.html:327"
+      "index.html:319"
     ],
     "context": "><span id=\"status\" data-i18n=\"chrome.ready\">Ready</span>"
   },
@@ -5150,13 +5143,13 @@
   },
   "chrome.reducedPreview": {
     "locations": [
-      "index.html:196"
+      "index.html:190"
     ],
     "context": "<output id=\"preview-quality\" class=\"stage-head-note\" data-tooltip=\"Preview detail follows your playback quality setting or available memory. Original artwork an"
   },
   "chrome.returnToAnimation": {
     "locations": [
-      "index.html:203"
+      "index.html:197"
     ],
     "context": "<div class=\"context-strip\"><strong id=\"tool-context\" data-i18n=\"chrome.select\">Select</strong><span id=\"edit-scope\" data-i18n=\"chrome.currentFrame\">Current fram"
   },
@@ -5180,13 +5173,13 @@
   },
   "chrome.scene": {
     "locations": [
-      "index.html:161"
+      "index.html:155"
     ],
     "context": "<button type=\"button\" class=\"ui-crumb-item\" data-action=\"scene-settings\" data-crumb=\"scene\" data-tooltip=\"Scene properties\" data-icon=\"scene\" data-i18n-tooltip="
   },
   "chrome.scene01": {
     "locations": [
-      "index.html:210"
+      "index.html:204"
     ],
     "context": "<div id=\"artboard\"><span class=\"artboard-name\" data-i18n=\"chrome.scene01\">Scene 01</span></div>"
   },
@@ -5198,7 +5191,7 @@
   },
   "chrome.sceneProperties": {
     "locations": [
-      "index.html:161"
+      "index.html:155"
     ],
     "context": "<button type=\"button\" class=\"ui-crumb-item\" data-action=\"scene-settings\" data-crumb=\"scene\" data-tooltip=\"Scene properties\" data-icon=\"scene\" data-i18n-tooltip="
   },
@@ -5210,7 +5203,7 @@
   },
   "chrome.select": {
     "locations": [
-      "index.html:203"
+      "index.html:197"
     ],
     "context": "<div class=\"context-strip\"><strong id=\"tool-context\" data-i18n=\"chrome.select\">Select</strong><span id=\"edit-scope\" data-i18n=\"chrome.currentFrame\">Current fram"
   },
@@ -5222,13 +5215,13 @@
   },
   "chrome.selectionActions": {
     "locations": [
-      "index.html:230"
+      "index.html:305"
     ],
     "context": "<div class=\"inspector-header\" data-slot=\"inspector-target\"><div><span class=\"panel-tab-title\" data-i18n=\"chrome.properties\">Properties</span><span id=\"inspector"
   },
   "chrome.selectMultipleFramesToEditThemTogether": {
     "locations": [
-      "index.html:295"
+      "index.html:273"
     ],
     "context": "<button type=\"button\" id=\"range-edit\" class=\"button subtle small\" data-action=\"toggle-range-edit\" aria-label=\"Edit selected frames\" aria-pressed=\"false\" title=\""
   },
@@ -5246,20 +5239,20 @@
   },
   "chrome.showAudio": {
     "locations": [
-      "index.html:297"
+      "index.html:275"
     ],
     "context": "<button id=\"timeline-audio\" class=\"icon-button timeline-audio-toggle\" title=\"Show audio\" aria-label=\"Audio\" aria-description=\"Show or hide audio editing. Audio "
   },
   "chrome.showOrHideAudioEditingAudioKeepsPlayingWhenHidden": {
     "locations": [
-      "index.html:297"
+      "index.html:275"
     ],
     "context": "<button id=\"timeline-audio\" class=\"icon-button timeline-audio-toggle\" title=\"Show audio\" aria-label=\"Audio\" aria-description=\"Show or hide audio editing. Audio "
   },
   "chrome.simple": {
     "locations": [
-      "index.html:243",
-      "src/timeline-header.mjs:283"
+      "index.html:221",
+      "src/timeline-header.mjs:282"
     ],
     "context": "<div id=\"timeline-workflow\" class=\"segmented timeline-mode-switch\" role=\"group\" aria-label=\"Timeline mode\" data-i18n-aria-label=\"chrome.timelineMode\"><button ty"
   },
@@ -5271,35 +5264,28 @@
   },
   "chrome.stage": {
     "locations": [
-      "index.html:157",
-      "index.html:158"
+      "index.html:151",
+      "index.html:152"
     ],
     "context": "<main class=\"center shell-stage\" aria-label=\"Stage\" data-i18n-aria-label=\"chrome.stage\">"
   },
   "chrome.startWithACharacter": {
     "locations": [
-      "index.html:362"
+      "index.html:354"
     ],
     "context": "<button data-action=\"add-figure\" data-icon=\"person\"><strong data-i18n=\"chrome.stickFigure\">Stick figure</strong><small data-i18n=\"chrome.startWithACharacter\">St"
   },
   "chrome.staticHandles": {
     "locations": [
-      "index.html:192"
+      "index.html:186"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-toggle\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"builder-static-handles\" data-workspaces=\"rig\" aria-pressed"
   },
   "chrome.stickFigure": {
     "locations": [
-      "index.html:362"
+      "index.html:354"
     ],
     "context": "<button data-action=\"add-figure\" data-icon=\"person\"><strong data-i18n=\"chrome.stickFigure\">Stick figure</strong><small data-i18n=\"chrome.startWithACharacter\">St"
-  },
-  "chrome.structure": {
-    "locations": [
-      "index.html:151",
-      "index.html:153"
-    ],
-    "context": "<aside class=\"shell-left shell-dock\" id=\"left-dock\" data-region=\"left\" aria-label=\"Structure\" hidden data-i18n-aria-label=\"chrome.structure\">"
   },
   "chrome.testRig": {
     "locations": [
@@ -5315,32 +5301,32 @@
   },
   "chrome.text": {
     "locations": [
-      "index.html:363"
+      "index.html:355"
     ],
     "context": "<button data-action=\"add-text\" data-icon=\"text\"><strong data-i18n=\"chrome.text\">Text</strong><small data-i18n=\"chrome.addATitleOrCaption\">Add a title or caption"
   },
   "chrome.timeline": {
     "locations": [
-      "index.html:238",
-      "index.html:240"
+      "index.html:216",
+      "index.html:218"
     ],
     "context": "<section class=\"timeline-panel shell-bottom ui-island\" id=\"animation-timeline\" aria-label=\"Timeline\" data-i18n-aria-label=\"chrome.timeline\">"
   },
   "chrome.timeline2": {
     "locations": [
-      "index.html:241"
+      "index.html:219"
     ],
     "context": "<button type=\"button\" class=\"icon-button shell-timeline-sheet\" data-action=\"timeline-sheet\" aria-label=\"Timeline…\" aria-haspopup=\"dialog\" aria-expanded=\"false\" "
   },
   "chrome.timelineMode": {
     "locations": [
-      "index.html:243"
+      "index.html:221"
     ],
     "context": "<div id=\"timeline-workflow\" class=\"segmented timeline-mode-switch\" role=\"group\" aria-label=\"Timeline mode\" data-i18n-aria-label=\"chrome.timelineMode\"><button ty"
   },
   "chrome.timelineZoom": {
     "locations": [
-      "index.html:310",
+      "index.html:288",
       "src/localization-bindings.mjs:195"
     ],
     "context": "data-i18n-aria-label=\"chrome.timelineZoom\" />"
@@ -5359,13 +5345,13 @@
   },
   "chrome.turnARangeOfFramesIntoAMovieclip": {
     "locations": [
-      "index.html:367"
+      "index.html:359"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
   "chrome.turnTheSelectedFiguresIntoAMovieclip": {
     "locations": [
-      "index.html:367"
+      "index.html:359"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
   },
@@ -5389,21 +5375,20 @@
   },
   "chrome.vfx": {
     "locations": [
-      "index.html:226",
-      "src/shell/layout-popover.mjs:290"
+      "index.html:301"
     ],
     "context": "<button type=\"button\" role=\"tab\" class=\"ui-tab\" id=\"vfx-tab\" data-vfx-tab=\"vfx\" data-panel=\"vfx\" aria-controls=\"vfx-panel\" aria-selected=\"false\" tabindex=\"-1\" d"
   },
   "chrome.view": {
     "locations": [
       "index.html:40",
-      "index.html:187"
+      "index.html:181"
     ],
     "context": "<button class=\"ui-menubar-item\" role=\"menuitem\" data-app-menu=\"view\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n=\"chrome.view\">View</button>"
   },
   "chrome.webgpuAnimationScene": {
     "locations": [
-      "index.html:211"
+      "index.html:205"
     ],
     "context": "<canvas id=\"scene\" aria-label=\"WebGPU animation scene\" data-i18n-aria-label=\"chrome.webgpuAnimationScene\"></canvas>"
   },
@@ -5415,13 +5400,13 @@
   },
   "chrome.zoom": {
     "locations": [
-      "index.html:197"
+      "index.html:191"
     ],
     "context": "<div class=\"stage-head-cluster\" data-zoom role=\"group\" aria-label=\"Zoom\" data-i18n-aria-label=\"chrome.zoom\">"
   },
   "chrome.zoomOptions": {
     "locations": [
-      "index.html:198",
+      "index.html:192",
       "src/localization-bindings.mjs:196"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-zoom\" id=\"zoom-label\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"zoom-menu\" aria-haspopup=\"menu\" aria-label=\""
@@ -7308,7 +7293,7 @@
       "src/camera-motion-ui.mjs:78",
       "src/color-picker.mjs:157",
       "src/localization-bindings.mjs:208",
-      "src/shell/layout-popover.mjs:212",
+      "src/shell/layout-popover.mjs:195",
       "src/studio-shell.mjs:126",
       "src/touch/timeline-scrubber.mjs:55",
       "src/ui/command-catalog.mjs:110",
@@ -7373,8 +7358,8 @@
     "locations": [
       "src/background-dialog.mjs:62",
       "src/inspector-view.mjs:301",
-      "src/shell/layout-popover.mjs:230",
-      "src/shell/layout-popover.mjs:239",
+      "src/shell/layout-popover.mjs:213",
+      "src/shell/layout-popover.mjs:222",
       "src/vfx-preset-ui.mjs:48",
       "src/vfx-preset-ui.mjs:69"
     ],
@@ -7434,7 +7419,7 @@
   "common.reset": {
     "locations": [
       "src/rig-test-ui.mjs:48",
-      "src/shell/layout-popover.mjs:110",
+      "src/shell/layout-popover.mjs:87",
       "src/ui/quick-actions.mjs:92",
       "src/vfx-inspector.mjs:177"
     ],
@@ -9638,277 +9623,316 @@
   },
   "dockHost.dragToMovePanelRightClickForLayout": {
     "locations": [
-      "src/shell/dock-host.mjs:458"
+      "src/shell/dock-host.mjs:305"
     ],
-    "context": "localizedAttribute(tab, \"title\", \"dockHost.dragToMovePanelRightClickForLayout\", {});"
+    "context": "localizedAttribute(tab, 'title', 'dockHost.dragToMovePanelRightClickForLayout', {});"
   },
   "dockHost.expandTimeline": {
     "locations": [
-      "src/shell/dock-host.mjs:536"
+      "src/shell/dock-host.mjs:613"
     ],
-    "context": "localizedAttribute(expandButton, 'aria-label', (tall ? \"dockHost.restoreTimelineHeight\" : \"dockHost.expandTimeline\"), (tall ? {} : {}));"
+    "context": "localizedAttribute(expandButton, 'aria-label', tall ? 'dockHost.restoreTimelineHeight' : 'dockHost.expandTimeline', {});"
   },
   "dockHost.folded": {
     "locations": [
-      "src/shell/dock-host.mjs:376"
+      "src/shell/dock-host.mjs:468"
     ],
-    "context": "localizedAttribute(strip, 'aria-label', \"dockHost.folded\", {value: SIDE_NAMES[side]});"
+    "context": "localizedAttribute(strip, 'aria-label', 'dockHost.folded', {value: group.tabs.map(title).join(', ')});"
   },
   "dockHost.inspector": {
     "locations": [
-      "src/shell/dock-host.mjs:55"
+      "src/shell/dock-host.mjs:418"
     ],
-    "context": "const SIDE_NAMES = Object.freeze({left: interfaceText(\"dockHost.leftPanels\"), right: interfaceText(\"dockHost.inspector\")});"
+    "context": "localizedAttribute(element, 'aria-label', 'dockHost.inspector', {});"
   },
-  "dockHost.leftPanels": {
+  "dockHost.layoutFileUnreadable": {
     "locations": [
-      "src/shell/dock-host.mjs:55"
+      "src/shell/dock-host.mjs:1241",
+      "src/shell/layout-popover.mjs:245",
+      "src/shell/layout-popover.mjs:247"
     ],
-    "context": "const SIDE_NAMES = Object.freeze({left: interfaceText(\"dockHost.leftPanels\"), right: interfaceText(\"dockHost.inspector\")});"
+    "context": "if (result?.error) throw messageError(new Error(''), result.error === 'newer' ? 'dockHost.layoutFromNewerVersion' : result.error === 'limit' ? 'dockHost.layoutL"
   },
-  "dockHost.message8PresetsSavedDeleteOneFirst": {
+  "dockHost.layoutFromNewerVersion": {
     "locations": [
-      "src/shell/dock-host.mjs:1024"
+      "src/shell/dock-host.mjs:1241"
     ],
-    "context": "if (result?.error) throw messageError(new Error(''), result.error === 'limit' ? \"dockHost.message8PresetsSavedDeleteOneFirst\""
+    "context": "if (result?.error) throw messageError(new Error(''), result.error === 'newer' ? 'dockHost.layoutFromNewerVersion' : result.error === 'limit' ? 'dockHost.layoutL"
+  },
+  "dockHost.layoutLimitReached": {
+    "locations": [
+      "src/shell/dock-host.mjs:1221",
+      "src/shell/dock-host.mjs:1241",
+      "src/shell/layout-popover.mjs:220",
+      "src/shell/layout-popover.mjs:283"
+    ],
+    "context": "if (result?.error) throw messageError(new Error(''), result.error === 'limit' ? 'dockHost.layoutLimitReached' : 'dockHost.nameThePresetFirst', {count: MAX_SAVED"
   },
   "dockHost.nameThePresetFirst": {
     "locations": [
-      "src/shell/dock-host.mjs:1025",
-      "src/shell/dock-host.mjs:1039"
+      "src/shell/dock-host.mjs:1221",
+      "src/shell/dock-host.mjs:1229"
     ],
-    "context": ": result.error === 'budget' ? \"dockHost.presetStorageIsFullDeleteOneFirst\" : \"dockHost.nameThePresetFirst\");"
-  },
-  "dockHost.presetStorageIsFullDeleteOneFirst": {
-    "locations": [
-      "src/shell/dock-host.mjs:1025"
-    ],
-    "context": ": result.error === 'budget' ? \"dockHost.presetStorageIsFullDeleteOneFirst\" : \"dockHost.nameThePresetFirst\");"
+    "context": "if (result?.error) throw messageError(new Error(''), result.error === 'limit' ? 'dockHost.layoutLimitReached' : 'dockHost.nameThePresetFirst', {count: MAX_SAVED"
   },
   "dockHost.resizeFigureStructure": {
     "locations": [
-      "src/shell/dock-host.mjs:820"
+      "src/shell/dock-host.mjs:663"
     ],
-    "context": "const labelKey = name === 'bottom' ? \"dockHost.resizeTimeline\" : panels.includes('structure') ? \"dockHost.resizeFigureStructure\""
+    "context": "const labelKey = resized.length === 1 && resized[0] === 'timeline' ? 'dockHost.resizeTimeline' : resized.includes('structure') ? 'dockHost.resizeFigureStructure"
   },
   "dockHost.resizePanels": {
     "locations": [
-      "src/shell/dock-host.mjs:821",
-      "src/shell/dock-host.mjs:822"
+      "src/shell/dock-host.mjs:664",
+      "src/shell/dock-host.mjs:666"
     ],
-    "context": ": panels.includes('properties') ? \"dockHost.resizePropertiesPanel\" : 'dockHost.resizePanels';"
+    "context": ": resized.includes('properties') ? 'dockHost.resizePropertiesPanel' : 'dockHost.resizePanels';"
   },
   "dockHost.resizePropertiesPanel": {
     "locations": [
-      "src/shell/dock-host.mjs:821"
+      "src/shell/dock-host.mjs:664"
     ],
-    "context": ": panels.includes('properties') ? \"dockHost.resizePropertiesPanel\" : 'dockHost.resizePanels';"
-  },
-  "dockHost.resizeStackedLeftPanels": {
-    "locations": [
-      "src/shell/dock-host.mjs:814"
-    ],
-    "context": "localizedAttribute(el, 'aria-label', side === 'left' ? 'dockHost.resizeStackedLeftPanels' : 'dockHost.resizeStackedRightPanels', {});"
-  },
-  "dockHost.resizeStackedRightPanels": {
-    "locations": [
-      "src/shell/dock-host.mjs:814"
-    ],
-    "context": "localizedAttribute(el, 'aria-label', side === 'left' ? 'dockHost.resizeStackedLeftPanels' : 'dockHost.resizeStackedRightPanels', {});"
+    "context": ": resized.includes('properties') ? 'dockHost.resizePropertiesPanel' : 'dockHost.resizePanels';"
   },
   "dockHost.resizeTimeline": {
     "locations": [
-      "src/shell/dock-host.mjs:820"
+      "src/shell/dock-host.mjs:663"
     ],
-    "context": "const labelKey = name === 'bottom' ? \"dockHost.resizeTimeline\" : panels.includes('structure') ? \"dockHost.resizeFigureStructure\""
+    "context": "const labelKey = resized.length === 1 && resized[0] === 'timeline' ? 'dockHost.resizeTimeline' : resized.includes('structure') ? 'dockHost.resizeFigureStructure"
   },
   "dockHost.restoreTimelineHeight": {
     "locations": [
-      "src/shell/dock-host.mjs:536"
+      "src/shell/dock-host.mjs:613"
     ],
-    "context": "localizedAttribute(expandButton, 'aria-label', (tall ? \"dockHost.restoreTimelineHeight\" : \"dockHost.expandTimeline\"), (tall ? {} : {}));"
+    "context": "localizedAttribute(expandButton, 'aria-label', tall ? 'dockHost.restoreTimelineHeight' : 'dockHost.expandTimeline', {});"
   },
   "dockHost.sizePixels": {
     "locations": [
-      "src/shell/dock-host.mjs:810"
+      "src/shell/dock-host.mjs:660"
     ],
-    "context": "localizedAttribute(el,'aria-valuetext','dockHost.sizePixels',{count:bounds.now});"
+    "context": "localizedAttribute(el, 'aria-valuetext', 'dockHost.sizePixels', {count: divider.now});"
+  },
+  "dockHost.stage": {
+    "locations": [
+      "src/shell/dock-host.mjs:666"
+    ],
+    "context": "localizedAttribute(el, 'aria-label', labelKey, labelKey === 'dockHost.resizePanels' ? {panels: {format: 'list', value: names.length ? names : [{messageKey: 'doc"
   },
   "dockHost.thisPresetNoLongerExists": {
     "locations": [
-      "src/shell/dock-host.mjs:1039"
+      "src/shell/dock-host.mjs:1229"
     ],
-    "context": "if (result?.error) throw messageError(new Error(''), result.error === 'name' ? \"dockHost.nameThePresetFirst\" : \"dockHost.thisPresetNoLongerExists\");"
-  },
-  "dockKeyboard.dockLeft": {
-    "locations": [
-      "src/shell/dock-keyboard.mjs:18"
-    ],
-    "context": "const PLACE_KEYS = Object.freeze({left:'dockKeyboard.dockLeft', right:'dockKeyboard.dockRight', float:'dockKeyboard.floatHere'});"
-  },
-  "dockKeyboard.dockRight": {
-    "locations": [
-      "src/shell/dock-keyboard.mjs:18"
-    ],
-    "context": "const PLACE_KEYS = Object.freeze({left:'dockKeyboard.dockLeft', right:'dockKeyboard.dockRight', float:'dockKeyboard.floatHere'});"
-  },
-  "dockKeyboard.floatHere": {
-    "locations": [
-      "src/shell/dock-keyboard.mjs:18"
-    ],
-    "context": "const PLACE_KEYS = Object.freeze({left:'dockKeyboard.dockLeft', right:'dockKeyboard.dockRight', float:'dockKeyboard.floatHere'});"
+    "context": "if (result?.error) throw messageError(new Error(''), result.error === 'name' ? 'dockHost.nameThePresetFirst' : 'dockHost.thisPresetNoLongerExists');"
   },
   "dockKeyboard.focusAPanelToMoveIt": {
     "locations": [
-      "src/shell/dock-keyboard.mjs:136"
+      "src/shell/dock-keyboard.mjs:137"
     ],
-    "context": "if (!id) { announce(interfaceText(\"dockKeyboard.focusAPanelToMoveIt\")); return false; }"
+    "context": "if (!id || host.presentation(id) === 'unavailable') { announce(interfaceText('dockKeyboard.focusAPanelToMoveIt')); return false; }"
   },
   "dockKeyboard.moveCancelled": {
     "locations": [
-      "src/shell/dock-keyboard.mjs:105"
+      "src/shell/dock-keyboard.mjs:106"
     ],
-    "context": "if (!commit) { announce(interfaceText(\"dockKeyboard.moveCancelled\")); restore?.focus?.({preventScroll: true}); return; }"
+    "context": "if (!commit) { announce(interfaceText('dockKeyboard.moveCancelled')); restore?.focus?.({preventScroll: true}); return; }"
   },
   "dockKeyboard.moveInstructions": {
     "locations": [
-      "src/shell/dock-keyboard.mjs:147"
+      "src/shell/dock-keyboard.mjs:144"
     ],
-    "context": "announce(interfaceText('dockKeyboard.moveInstructions', {title:panelName(id), place:{messageKey:PLACE_KEYS[move.targets[move.index]]}}));"
+    "context": "announce(interfaceText('dockKeyboard.moveInstructions', {title: panelName(id), place: {messageKey: zoneLabelKey(targets[0])}}));"
   },
   "dockKeyboard.panelLocation": {
     "locations": [
-      "src/shell/dock-keyboard.mjs:109",
-      "src/shell/dock-tabs.mjs:76"
+      "src/shell/dock-keyboard.mjs:110",
+      "src/shell/dock-tabs.mjs:166",
+      "src/shell/dock-tabs.mjs:403"
     ],
-    "context": "announce(interfaceText('dockKeyboard.panelLocation', {title:panelName(id), place:{messageKey:PLACE_KEYS[target]}}));"
+    "context": "announce(interfaceText('dockKeyboard.panelLocation', {title: panelName(id), place: {messageKey: zoneLabelKey(target)}}));"
   },
   "dockKeyboard.thisPanelStaysWhereItIs": {
     "locations": [
-      "src/shell/dock-keyboard.mjs:138"
+      "src/shell/dock-keyboard.mjs:139"
     ],
-    "context": "if (targets.length < 2) { announce(interfaceText(\"dockKeyboard.thisPanelStaysWhereItIs\")); return false; }"
+    "context": "if (!targets.length) { announce(interfaceText('dockKeyboard.thisPanelStaysWhereItIs')); return false; }"
   },
   "dockTabs.addAsATab": {
     "locations": [
-      "src/shell/dock-tabs.mjs:23"
+      "src/shell/dock-tabs.mjs:47"
     ],
-    "context": "const LABEL_KEYS = Object.freeze({left:'dockTabs.dockLeft', right:'dockTabs.dockRight', tab:'dockTabs.addAsATab', float:'dockTabs.floatHere',"
+    "context": "tab: 'dockTabs.addAsATab', float: 'dockTabs.floatHere',"
+  },
+  "dockTabs.close": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:160"
+    ],
+    "context": "items.push({label: interfaceText('dockTabs.close'), labelKey: 'dockTabs.close', icon: 'x', run: () => { workspace.hide(id); announce(interfaceText('dockTabs.hid"
+  },
+  "dockTabs.collapse": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:158"
+    ],
+    "context": ": {label: interfaceText('dockTabs.collapse'), labelKey: 'dockTabs.collapse', icon: 'minimize', run: () => { workspace.collapse(groupId, true); announce(interfac"
+  },
+  "dockTabs.dockAbove": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:49"
+    ],
+    "context": "'stage-left': 'dockTabs.dockLeft', 'stage-right': 'dockTabs.dockRight', 'stage-top': 'dockTabs.dockAbove', 'stage-bottom': 'dockTabs.dockBelow',"
+  },
+  "dockTabs.dockBack": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:151"
+    ],
+    "context": "else items.push({label: interfaceText('dockTabs.dockBack'), labelKey: 'dockTabs.dockBack', icon: 'panel-right', run: () => workspace.dockFloat(float.id)});"
+  },
+  "dockTabs.dockBelow": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:49",
+      "src/shell/dock-tabs.mjs:149"
+    ],
+    "context": "'stage-left': 'dockTabs.dockLeft', 'stage-right': 'dockTabs.dockRight', 'stage-top': 'dockTabs.dockAbove', 'stage-bottom': 'dockTabs.dockBelow',"
+  },
+  "dockTabs.dockBottomEdge": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:50"
+    ],
+    "context": "'edge-left': 'dockTabs.dockLeftEdge', 'edge-right': 'dockTabs.dockRightEdge', 'edge-top': 'dockTabs.dockTopEdge', 'edge-bottom': 'dockTabs.dockBottomEdge',"
   },
   "dockTabs.dockLeft": {
     "locations": [
-      "src/shell/dock-tabs.mjs:23"
+      "src/shell/dock-tabs.mjs:49",
+      "src/shell/dock-tabs.mjs:147"
     ],
-    "context": "const LABEL_KEYS = Object.freeze({left:'dockTabs.dockLeft', right:'dockTabs.dockRight', tab:'dockTabs.addAsATab', float:'dockTabs.floatHere',"
+    "context": "'stage-left': 'dockTabs.dockLeft', 'stage-right': 'dockTabs.dockRight', 'stage-top': 'dockTabs.dockAbove', 'stage-bottom': 'dockTabs.dockBelow',"
+  },
+  "dockTabs.dockLeftEdge": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:50"
+    ],
+    "context": "'edge-left': 'dockTabs.dockLeftEdge', 'edge-right': 'dockTabs.dockRightEdge', 'edge-top': 'dockTabs.dockTopEdge', 'edge-bottom': 'dockTabs.dockBottomEdge',"
   },
   "dockTabs.dockRight": {
     "locations": [
-      "src/shell/dock-tabs.mjs:23"
+      "src/shell/dock-tabs.mjs:49",
+      "src/shell/dock-tabs.mjs:148"
     ],
-    "context": "const LABEL_KEYS = Object.freeze({left:'dockTabs.dockLeft', right:'dockTabs.dockRight', tab:'dockTabs.addAsATab', float:'dockTabs.floatHere',"
+    "context": "'stage-left': 'dockTabs.dockLeft', 'stage-right': 'dockTabs.dockRight', 'stage-top': 'dockTabs.dockAbove', 'stage-bottom': 'dockTabs.dockBelow',"
+  },
+  "dockTabs.dockRightEdge": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:50"
+    ],
+    "context": "'edge-left': 'dockTabs.dockLeftEdge', 'edge-right': 'dockTabs.dockRightEdge', 'edge-top': 'dockTabs.dockTopEdge', 'edge-bottom': 'dockTabs.dockBottomEdge',"
+  },
+  "dockTabs.dockTopEdge": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:50"
+    ],
+    "context": "'edge-left': 'dockTabs.dockLeftEdge', 'edge-right': 'dockTabs.dockRightEdge', 'edge-top': 'dockTabs.dockTopEdge', 'edge-bottom': 'dockTabs.dockBottomEdge',"
   },
   "dockTabs.dragToEitherSideLeftAndRightArrows": {
     "locations": [
-      "src/shell/dock-tabs.mjs:43"
+      "src/shell/dock-tabs.mjs:130"
     ],
-    "context": "localizedAttribute(railHandle, \"title\", \"dockTabs.dragToEitherSideLeftAndRightArrows\", {});"
+    "context": "localizedAttribute(railHandle, 'title', 'dockTabs.dragToEitherSideLeftAndRightArrows', {});"
+  },
+  "dockTabs.expand": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:157"
+    ],
+    "context": "? {label: interfaceText('dockTabs.expand'), labelKey: 'dockTabs.expand', icon: 'maximize', run: () => { workspace.collapse(groupId, false); host.showPanel(id); "
   },
   "dockTabs.float": {
     "locations": [
-      "src/shell/dock-tabs.mjs:62"
+      "src/shell/dock-tabs.mjs:150"
     ],
-    "context": "if (host.canPlace(id, 'float') && presentation !== 'float') items.push({label: interfaceText(\"dockTabs.float\"), labelKey: \"dockTabs.float\", icon: 'layout', run:"
+    "context": "if (!float) items.push({label: interfaceText('dockTabs.float'), labelKey: 'dockTabs.float', icon: 'layout', run: () => { workspace.float(id); announce(interface"
   },
   "dockTabs.floatHere": {
     "locations": [
-      "src/shell/dock-tabs.mjs:23"
+      "src/shell/dock-tabs.mjs:47"
     ],
-    "context": "const LABEL_KEYS = Object.freeze({left:'dockTabs.dockLeft', right:'dockTabs.dockRight', tab:'dockTabs.addAsATab', float:'dockTabs.floatHere',"
+    "context": "tab: 'dockTabs.addAsATab', float: 'dockTabs.floatHere',"
   },
   "dockTabs.floatingPanel": {
     "locations": [
-      "src/shell/dock-tabs.mjs:75"
+      "src/shell/dock-tabs.mjs:150"
     ],
-    "context": "const statusKey = {strip:'dockTabs.foldedPanel',hidden:'dockTabs.hiddenPanel',float:'dockTabs.floatingPanel'}[target];"
+    "context": "if (!float) items.push({label: interfaceText('dockTabs.float'), labelKey: 'dockTabs.float', icon: 'layout', run: () => { workspace.float(id); announce(interface"
   },
   "dockTabs.foldedPanel": {
     "locations": [
-      "src/shell/dock-tabs.mjs:75"
+      "src/shell/dock-tabs.mjs:158"
     ],
-    "context": "const statusKey = {strip:'dockTabs.foldedPanel',hidden:'dockTabs.hiddenPanel',float:'dockTabs.floatingPanel'}[target];"
-  },
-  "dockTabs.foldToStrip": {
-    "locations": [
-      "src/shell/dock-tabs.mjs:64"
-    ],
-    "context": "else if (host.canPlace(id, 'strip')) items.push({label: interfaceText(\"dockTabs.foldToStrip\"), labelKey: \"dockTabs.foldToStrip\", icon: 'minimize', run: () => mo"
+    "context": ": {label: interfaceText('dockTabs.collapse'), labelKey: 'dockTabs.collapse', icon: 'minimize', run: () => { workspace.collapse(groupId, true); announce(interfac"
   },
   "dockTabs.hiddenPanel": {
     "locations": [
-      "src/shell/dock-tabs.mjs:75"
+      "src/shell/dock-tabs.mjs:160"
     ],
-    "context": "const statusKey = {strip:'dockTabs.foldedPanel',hidden:'dockTabs.hiddenPanel',float:'dockTabs.floatingPanel'}[target];"
-  },
-  "dockTabs.hide": {
-    "locations": [
-      "src/shell/dock-tabs.mjs:65"
-    ],
-    "context": "if (host.canPlace(id, 'hidden')) items.push(null, {label: interfaceText(\"dockTabs.hide\"), labelKey: \"dockTabs.hide\", icon: 'eye-off', run: () => move(id, 'hidde"
+    "context": "items.push({label: interfaceText('dockTabs.close'), labelKey: 'dockTabs.close', icon: 'x', run: () => { workspace.hide(id); announce(interfaceText('dockTabs.hid"
   },
   "dockTabs.moveCancelled": {
     "locations": [
-      "src/shell/dock-tabs.mjs:244"
+      "src/shell/dock-tabs.mjs:389"
     ],
-    "context": "if (!commit || !target) { if (!commit) announce(interfaceText(\"dockTabs.moveCancelled\")); return; }"
+    "context": "if (!commit || !target) { if (!commit) announce(interfaceText('dockTabs.moveCancelled')); return; }"
   },
   "dockTabs.moveTools": {
     "locations": [
-      "src/shell/dock-tabs.mjs:42"
+      "src/shell/dock-tabs.mjs:129"
     ],
-    "context": "localizedAttribute(railHandle, 'aria-label', \"dockTabs.moveTools\", {});"
+    "context": "localizedAttribute(railHandle, 'aria-label', 'dockTabs.moveTools', {});"
   },
   "dockTabs.moveToolsLeft": {
     "locations": [
-      "src/shell/dock-tabs.mjs:24"
+      "src/shell/dock-tabs.mjs:51"
     ],
-    "context": "before:'dockTabs.stackAbove', after:'dockTabs.stackBelow', 'rail-left':'dockTabs.moveToolsLeft', 'rail-right':'dockTabs.moveToolsRight'});"
+    "context": "'rail-left': 'dockTabs.moveToolsLeft', 'rail-right': 'dockTabs.moveToolsRight',"
   },
   "dockTabs.moveToolsRight": {
     "locations": [
-      "src/shell/dock-tabs.mjs:24"
+      "src/shell/dock-tabs.mjs:51"
     ],
-    "context": "before:'dockTabs.stackAbove', after:'dockTabs.stackBelow', 'rail-left':'dockTabs.moveToolsLeft', 'rail-right':'dockTabs.moveToolsRight'});"
+    "context": "'rail-left': 'dockTabs.moveToolsLeft', 'rail-right': 'dockTabs.moveToolsRight',"
   },
   "dockTabs.panel": {
     "locations": [
-      "src/shell/dock-tabs.mjs:91"
+      "src/shell/dock-tabs.mjs:176"
     ],
-    "context": "openMenu(menuItems(id), point, {label: interfaceText(\"dockTabs.panel\", {value:titleMessage(id)}), labelKey: \"dockTabs.panel\", labelParams: {value:titleMessage(i"
+    "context": "openMenu(menuItems(id), point, {label: interfaceText('dockTabs.panel', {value: titleMessage(id)}), labelKey: 'dockTabs.panel', labelParams: {value: titleMessage"
   },
-  "dockTabs.show": {
+  "dockTabs.splitAbove": {
     "locations": [
-      "src/shell/dock-tabs.mjs:63"
+      "src/shell/dock-tabs.mjs:48"
     ],
-    "context": "if (presentation === 'strip') items.push({label: interfaceText(\"dockTabs.show\"), labelKey: \"dockTabs.show\", icon: 'maximize', run: () => host.showPanel(id)});"
+    "context": "'split-left': 'dockTabs.splitLeft', 'split-right': 'dockTabs.splitRight', 'split-top': 'dockTabs.splitAbove', 'split-bottom': 'dockTabs.splitBelow',"
   },
-  "dockTabs.stackAbove": {
+  "dockTabs.splitBelow": {
     "locations": [
-      "src/shell/dock-tabs.mjs:24"
+      "src/shell/dock-tabs.mjs:48"
     ],
-    "context": "before:'dockTabs.stackAbove', after:'dockTabs.stackBelow', 'rail-left':'dockTabs.moveToolsLeft', 'rail-right':'dockTabs.moveToolsRight'});"
+    "context": "'split-left': 'dockTabs.splitLeft', 'split-right': 'dockTabs.splitRight', 'split-top': 'dockTabs.splitAbove', 'split-bottom': 'dockTabs.splitBelow',"
   },
-  "dockTabs.stackBelow": {
+  "dockTabs.splitLeft": {
     "locations": [
-      "src/shell/dock-tabs.mjs:24"
+      "src/shell/dock-tabs.mjs:48"
     ],
-    "context": "before:'dockTabs.stackAbove', after:'dockTabs.stackBelow', 'rail-left':'dockTabs.moveToolsLeft', 'rail-right':'dockTabs.moveToolsRight'});"
+    "context": "'split-left': 'dockTabs.splitLeft', 'split-right': 'dockTabs.splitRight', 'split-top': 'dockTabs.splitAbove', 'split-bottom': 'dockTabs.splitBelow',"
+  },
+  "dockTabs.splitRight": {
+    "locations": [
+      "src/shell/dock-tabs.mjs:48"
+    ],
+    "context": "'split-left': 'dockTabs.splitLeft', 'split-right': 'dockTabs.splitRight', 'split-top': 'dockTabs.splitAbove', 'split-bottom': 'dockTabs.splitBelow',"
   },
   "dockTabs.tools": {
     "locations": [
-      "src/shell/dock-tabs.mjs:38",
-      "src/shell/dock-tabs.mjs:39"
+      "src/shell/dock-tabs.mjs:125",
+      "src/shell/dock-tabs.mjs:126"
     ],
-    "context": "const title = id => id === 'tools' ? interfaceText(\"dockTabs.tools\") : (host.registry.get(id)?.titleKey ? interfaceText(host.registry.get(id).titleKey) : host.r"
+    "context": "const title = id => (id === 'tools' ? interfaceText('dockTabs.tools') : host.registry.get(id)?.titleKey ? interfaceText(host.registry.get(id).titleKey) : host.r"
   },
   "drawingController.alreadyDrawing": {
     "locations": [
@@ -15063,25 +15087,25 @@
   },
   "errors.layoutSchema.unknownWorkspace": {
     "locations": [
-      "src/shell/layout-schema.mjs:150"
+      "src/shell/layout-schema.mjs:151"
     ],
     "context": "if (mode !== 'build' && !MODES.includes(mode)) throw messageError(new TypeError(''), \"errors.layoutSchema.unknownWorkspace\", {value: String(mode)});"
   },
   "errors.layoutStore.aLayoutStoreNeedsReadAndWrite": {
     "locations": [
-      "src/shell/layout-store.mjs:162"
+      "src/shell/dock-store.mjs:172"
     ],
     "context": "if (typeof read !== 'function' || typeof write !== 'function') throw messageError(new TypeError(''), \"errors.layoutStore.aLayoutStoreNeedsReadAndWrite\", {});"
   },
   "errors.layoutStore.layoutStorageIsUnavailable": {
     "locations": [
-      "src/shell/layout-store.mjs:70"
+      "src/shell/dock-store.mjs:108"
     ],
     "context": "if (!storage) throw messageError(new Error(''), \"errors.layoutStore.layoutStorageIsUnavailable\", {});"
   },
   "errors.layoutStore.theWorkspaceLayoutDoesNotFitInThe": {
     "locations": [
-      "src/shell/layout-store.mjs:226"
+      "src/shell/dock-store.mjs:81"
     ],
     "context": "if (!fitted.ok) throw messageError(new Error(''), \"errors.layoutStore.theWorkspaceLayoutDoesNotFitInThe\", {});"
   },
@@ -20351,7 +20375,7 @@
   "home.home": {
     "locations": [
       "index.html:46",
-      "index.html:321"
+      "index.html:313"
     ],
     "context": "<button type=\"button\" class=\"ui-icon-button band-home\" data-action=\"home\" aria-pressed=\"false\" aria-label=\"Home\" data-tooltip=\"Home\" data-icon=\"home\" data-i18n-"
   },
@@ -23546,204 +23570,119 @@
   },
   "layoutPopover.closeLayout": {
     "locations": [
-      "src/shell/layout-popover.mjs:125"
+      "src/shell/layout-popover.mjs:112"
     ],
-    "context": "const popover = createPopover({anchor: target, title: interfaceText(\"layoutPopover.layout\"), titleKey: \"layoutPopover.layout\", closeLabel: interfaceText(\"layout"
+    "context": "const popover = createPopover({anchor: target, title: interfaceText('layoutPopover.layout'), titleKey: 'layoutPopover.layout', closeLabel: interfaceText('layout"
   },
   "layoutPopover.delete": {
     "locations": [
-      "src/shell/layout-popover.mjs:212"
+      "src/shell/layout-popover.mjs:195"
     ],
-    "context": "{label: interfaceText('layoutPopover.delete'), labelKey: \"common.delete\", icon: 'trash', danger: true, run: () => { guard(() => workspace.deleteLayout(item.id))"
+    "context": "{label: interfaceText('layoutPopover.delete'), labelKey: 'common.delete', icon: 'trash', danger: true, run: () => { guard(() => workspace.deleteLayout(item.id))"
+  },
+  "layoutPopover.exportLayout": {
+    "locations": [
+      "src/shell/layout-popover.mjs:100"
+    ],
+    "context": "{label: interfaceText('layoutPopover.exportLayout'), labelKey: 'layoutPopover.exportLayout', icon: 'export', run: () => exportFile()},"
   },
   "layoutPopover.fightSetup": {
     "locations": [
-      "src/shell/layout-popover.mjs:239"
+      "src/shell/layout-popover.mjs:222"
     ],
-    "context": "const name = await prompt({title: interfaceText(\"layoutPopover.saveLayoutAsPreset\"), titleKey: \"layoutPopover.saveLayoutAsPreset\", label: interfaceText(\"common."
+    "context": "const name = await prompt({title: interfaceText('layoutPopover.saveLayoutAsPreset'), titleKey: 'layoutPopover.saveLayoutAsPreset', label: interfaceText('common."
   },
-  "layoutPopover.floating": {
+  "layoutPopover.importLayout": {
     "locations": [
-      "src/shell/layout-popover.mjs:22"
+      "src/shell/layout-popover.mjs:99"
     ],
-    "context": "const POSITION_KEYS = Object.freeze({left: \"layoutPopover.left\", right: \"layoutPopover.right\", with: \"layoutPopover.withProperties\", float: \"layoutPopover.float"
-  },
-  "layoutPopover.fullWidth": {
-    "locations": [
-      "src/shell/layout-popover.mjs:312"
-    ],
-    "context": "setOptions(selects.timeline.select, [messageTuple(['full', interfaceText(\"layoutPopover.fullWidth\")], {1: {key: \"layoutPopover.fullWidth\", params: {}}}), messag"
-  },
-  "layoutPopover.hidden": {
-    "locations": [
-      "src/shell/layout-popover.mjs:22"
-    ],
-    "context": "const POSITION_KEYS = Object.freeze({left: \"layoutPopover.left\", right: \"layoutPopover.right\", with: \"layoutPopover.withProperties\", float: \"layoutPopover.float"
+    "context": "{label: interfaceText('layoutPopover.importLayout'), labelKey: 'layoutPopover.importLayout', icon: 'import', run: () => importFile()},"
   },
   "layoutPopover.layout": {
     "locations": [
-      "src/shell/layout-popover.mjs:125"
+      "src/shell/layout-popover.mjs:112",
+      "src/shell/layout-popover.mjs:234"
     ],
-    "context": "const popover = createPopover({anchor: target, title: interfaceText(\"layoutPopover.layout\"), titleKey: \"layoutPopover.layout\", closeLabel: interfaceText(\"layout"
+    "context": "const popover = createPopover({anchor: target, title: interfaceText('layoutPopover.layout'), titleKey: 'layoutPopover.layout', closeLabel: interfaceText('layout"
   },
   "layoutPopover.layoutPresets": {
     "locations": [
-      "src/shell/layout-popover.mjs:91"
+      "src/shell/layout-popover.mjs:66"
     ],
-    "context": "localizedAttribute(presets, 'aria-label', \"layoutPopover.layoutPresets\", {});"
+    "context": "localizedAttribute(presets, 'aria-label', 'layoutPopover.layoutPresets', {});"
   },
-  "layoutPopover.left": {
+  "layoutPopover.modified": {
     "locations": [
-      "src/shell/layout-popover.mjs:22",
-      "src/shell/layout-popover.mjs:313"
+      "src/shell/layout-popover.mjs:172"
     ],
-    "context": "const POSITION_KEYS = Object.freeze({left: \"layoutPopover.left\", right: \"layoutPopover.right\", with: \"layoutPopover.withProperties\", float: \"layoutPopover.float"
+    "context": "if (card.modified) localizedAttribute(choice, 'aria-description', 'layoutPopover.modified', {}); else choice.removeAttribute('aria-description');"
   },
-  "layoutPopover.library": {
+  "layoutPopover.moreLayoutActions": {
     "locations": [
-      "src/shell/layout-popover.mjs:291"
+      "src/shell/layout-popover.mjs:96"
     ],
-    "context": "selectRow('library', 'layoutPopover.library', 'layoutPopover.libraryPosition', value => place('library', value));"
-  },
-  "layoutPopover.libraryPosition": {
-    "locations": [
-      "src/shell/layout-popover.mjs:291"
-    ],
-    "context": "selectRow('library', 'layoutPopover.library', 'layoutPopover.libraryPosition', value => place('library', value));"
-  },
-  "layoutPopover.message3fr": {
-    "locations": [
-      "src/shell/layout-popover.mjs:56"
-    ],
-    "context": "columns.push(messageTuple(['stage', interfaceText(\"layoutPopover.message3fr\")], {1: {key: \"layoutPopover.message3fr\", params: {}}}));"
-  },
-  "layoutPopover.message8PresetsSavedDeleteOneFirst": {
-    "locations": [
-      "src/shell/layout-popover.mjs:23"
-    ],
-    "context": "const SAVE_REASON_KEYS = Object.freeze({limit: \"layoutPopover.message8PresetsSavedDeleteOneFirst\", budget: \"layoutPopover.presetStorageIsFullDeleteOneFirst\"});"
+    "context": "localizedAttribute(more, 'aria-label', 'layoutPopover.moreLayoutActions', {});"
   },
   "layoutPopover.nameThePresetFirst": {
     "locations": [
-      "src/shell/layout-popover.mjs:231",
-      "src/shell/layout-popover.mjs:240"
+      "src/shell/layout-popover.mjs:214",
+      "src/shell/layout-popover.mjs:223"
     ],
-    "context": "validate: value => (value.trim() ? null : interfaceText(\"layoutPopover.nameThePresetFirst\"))});"
+    "context": "validate: value => (value.trim() ? null : interfaceText('layoutPopover.nameThePresetFirst'))});"
   },
-  "layoutPopover.presetStorageIsFullDeleteOneFirst": {
+  "layoutPopover.panels": {
     "locations": [
-      "src/shell/layout-popover.mjs:23"
+      "src/shell/layout-popover.mjs:70"
     ],
-    "context": "const SAVE_REASON_KEYS = Object.freeze({limit: \"layoutPopover.message8PresetsSavedDeleteOneFirst\", budget: \"layoutPopover.presetStorageIsFullDeleteOneFirst\"});"
-  },
-  "layoutPopover.properties": {
-    "locations": [
-      "src/shell/layout-popover.mjs:289"
-    ],
-    "context": "selectRow('properties', 'layoutPopover.properties', 'layoutPopover.propertiesPosition', value => place('properties', value));"
-  },
-  "layoutPopover.propertiesPosition": {
-    "locations": [
-      "src/shell/layout-popover.mjs:289"
-    ],
-    "context": "selectRow('properties', 'layoutPopover.properties', 'layoutPopover.propertiesPosition', value => place('properties', value));"
+    "context": "localizedAttribute(rows, 'aria-label', 'layoutPopover.panels', {});"
   },
   "layoutPopover.rename": {
     "locations": [
-      "src/shell/layout-popover.mjs:209"
+      "src/shell/layout-popover.mjs:192"
     ],
-    "context": "{label: interfaceText(\"layoutPopover.rename\"), labelKey: \"layoutPopover.rename\", icon: 'file', run: () => renameSaved(item)},"
+    "context": "{label: interfaceText('layoutPopover.rename'), labelKey: 'layoutPopover.rename', icon: 'file', run: () => renameSaved(item)},"
   },
   "layoutPopover.rename2": {
     "locations": [
-      "src/shell/layout-popover.mjs:230"
+      "src/shell/layout-popover.mjs:213"
     ],
-    "context": "const name = await prompt({title: interfaceText(\"layoutPopover.renamePreset\"), titleKey: \"layoutPopover.renamePreset\", label: interfaceText(\"common.name\"), labe"
+    "context": "const name = await prompt({title: interfaceText('layoutPopover.renamePreset'), titleKey: 'layoutPopover.renamePreset', label: interfaceText('common.name'), labe"
   },
   "layoutPopover.renamePreset": {
     "locations": [
-      "src/shell/layout-popover.mjs:230"
+      "src/shell/layout-popover.mjs:213"
     ],
-    "context": "const name = await prompt({title: interfaceText(\"layoutPopover.renamePreset\"), titleKey: \"layoutPopover.renamePreset\", label: interfaceText(\"common.name\"), labe"
+    "context": "const name = await prompt({title: interfaceText('layoutPopover.renamePreset'), titleKey: 'layoutPopover.renamePreset', label: interfaceText('common.name'), labe"
   },
   "layoutPopover.resetLayout": {
     "locations": [
-      "src/shell/layout-popover.mjs:111"
+      "src/shell/layout-popover.mjs:88"
     ],
-    "context": "localizedAttribute(reset, 'aria-label', \"layoutPopover.resetLayout\", {});"
-  },
-  "layoutPopover.right": {
-    "locations": [
-      "src/shell/layout-popover.mjs:22",
-      "src/shell/layout-popover.mjs:313"
-    ],
-    "context": "const POSITION_KEYS = Object.freeze({left: \"layoutPopover.left\", right: \"layoutPopover.right\", with: \"layoutPopover.withProperties\", float: \"layoutPopover.float"
+    "context": "localizedAttribute(reset, 'aria-label', 'layoutPopover.resetLayout', {});"
   },
   "layoutPopover.saveAsPreset": {
     "locations": [
-      "src/shell/layout-popover.mjs:114"
+      "src/shell/layout-popover.mjs:102"
     ],
-    "context": "const save = translatedElement(button(interfaceText(\"layoutPopover.saveAsPreset\"), 'outline', () => saveAs()), \"layoutPopover.saveAsPreset\", {});"
+    "context": "const save = translatedElement(button(interfaceText('layoutPopover.saveAsPreset'), 'outline', () => saveAs()), 'layoutPopover.saveAsPreset', {});"
   },
   "layoutPopover.saveLayoutAsPreset": {
     "locations": [
-      "src/shell/layout-popover.mjs:239"
+      "src/shell/layout-popover.mjs:222"
     ],
-    "context": "const name = await prompt({title: interfaceText(\"layoutPopover.saveLayoutAsPreset\"), titleKey: \"layoutPopover.saveLayoutAsPreset\", label: interfaceText(\"common."
+    "context": "const name = await prompt({title: interfaceText('layoutPopover.saveLayoutAsPreset'), titleKey: 'layoutPopover.saveLayoutAsPreset', label: interfaceText('common."
   },
   "layoutPopover.savePreset": {
     "locations": [
-      "src/shell/layout-popover.mjs:239"
+      "src/shell/layout-popover.mjs:222"
     ],
-    "context": "const name = await prompt({title: interfaceText(\"layoutPopover.saveLayoutAsPreset\"), titleKey: \"layoutPopover.saveLayoutAsPreset\", label: interfaceText(\"common."
-  },
-  "layoutPopover.timeline": {
-    "locations": [
-      "src/shell/layout-popover.mjs:292"
-    ],
-    "context": "selectRow('timeline', 'layoutPopover.timeline', 'layoutPopover.timelineWidth', value => workspace.setTimelineSpan(value));"
-  },
-  "layoutPopover.timelineWidth": {
-    "locations": [
-      "src/shell/layout-popover.mjs:292"
-    ],
-    "context": "selectRow('timeline', 'layoutPopover.timeline', 'layoutPopover.timelineWidth', value => workspace.setTimelineSpan(value));"
-  },
-  "layoutPopover.tools": {
-    "locations": [
-      "src/shell/layout-popover.mjs:293"
-    ],
-    "context": "selectRow('rail', 'layoutPopover.tools', 'layoutPopover.toolsSide', value => workspace.setRail(value));"
-  },
-  "layoutPopover.toolsSide": {
-    "locations": [
-      "src/shell/layout-popover.mjs:293"
-    ],
-    "context": "selectRow('rail', 'layoutPopover.tools', 'layoutPopover.toolsSide', value => workspace.setRail(value));"
-  },
-  "layoutPopover.underStage": {
-    "locations": [
-      "src/shell/layout-popover.mjs:312"
-    ],
-    "context": "setOptions(selects.timeline.select, [messageTuple(['full', interfaceText(\"layoutPopover.fullWidth\")], {1: {key: \"layoutPopover.fullWidth\", params: {}}}), messag"
+    "context": "const name = await prompt({title: interfaceText('layoutPopover.saveLayoutAsPreset'), titleKey: 'layoutPopover.saveLayoutAsPreset', label: interfaceText('common."
   },
   "layoutPopover.update": {
     "locations": [
-      "src/shell/layout-popover.mjs:210"
+      "src/shell/layout-popover.mjs:193"
     ],
-    "context": "{label: interfaceText(\"layoutPopover.update\"), labelKey: \"layoutPopover.update\", icon: 'save', run: () => { guard(() => workspace.updateLayout(item.id)); refocu"
-  },
-  "layoutPopover.vfxPosition": {
-    "locations": [
-      "src/shell/layout-popover.mjs:290"
-    ],
-    "context": "selectRow('vfx', 'chrome.vfx', 'layoutPopover.vfxPosition', value => place('vfx', value));"
-  },
-  "layoutPopover.withProperties": {
-    "locations": [
-      "src/shell/layout-popover.mjs:22"
-    ],
-    "context": "const POSITION_KEYS = Object.freeze({left: \"layoutPopover.left\", right: \"layoutPopover.right\", with: \"layoutPopover.withProperties\", float: \"layoutPopover.float"
+    "context": "{label: interfaceText('layoutPopover.update'), labelKey: 'layoutPopover.update', icon: 'save', run: () => { guard(() => workspace.updateLayout(item.id)); refocu"
   },
   "libraryDrag.addToScene": {
     "locations": [
@@ -24499,7 +24438,7 @@
   },
   "movieclipUi.movieclip": {
     "locations": [
-      "index.html:367",
+      "index.html:359",
       "src/movieclip-ui.mjs:99"
     ],
     "context": "<section class=\"insert-movieclip\" aria-labelledby=\"insert-movieclip-title\"><h3 id=\"insert-movieclip-title\"><span data-i18n=\"movieclipUi.movieclip\">Movieclip</sp"
@@ -27472,45 +27411,52 @@
   },
   "shell.preset.animate": {
     "locations": [
-      "src/shell/layout-schema.mjs:195"
+      "src/shell/dock-workspaces.mjs:66",
+      "src/shell/layout-schema.mjs:196"
     ],
-    "context": "{id: 'animate', title: 'Animate', titleKey: 'shell.preset.animate', modes: ['animate'], arrangement: animateArrangement},"
+    "context": "{id: 'animate', titleKey: 'shell.preset.animate', modes: ['animate'],"
   },
   "shell.preset.build": {
     "locations": [
-      "src/shell/layout-schema.mjs:202"
+      "src/shell/dock-workspaces.mjs:76",
+      "src/shell/layout-schema.mjs:203"
     ],
-    "context": "{id: 'build', title: 'Build', titleKey: 'shell.preset.build', modes: ['rig'],"
+    "context": "{id: 'build', titleKey: 'shell.preset.build', modes: ['rig'],"
   },
   "shell.preset.buildTimeline": {
     "locations": [
-      "src/shell/layout-schema.mjs:204"
+      "src/shell/dock-workspaces.mjs:78",
+      "src/shell/layout-schema.mjs:205"
     ],
-    "context": "{id: 'build-timeline', title: 'Build + timeline', titleKey: 'shell.preset.buildTimeline', modes: ['rig'],"
+    "context": "{id: 'build-timeline', titleKey: 'shell.preset.buildTimeline', modes: ['rig'],"
   },
   "shell.preset.draw": {
     "locations": [
-      "src/shell/layout-schema.mjs:201"
+      "src/shell/dock-workspaces.mjs:74",
+      "src/shell/layout-schema.mjs:202"
     ],
-    "context": "{id: 'draw', title: 'Draw', titleKey: 'shell.preset.draw', modes: ['draw'], arrangement: animateArrangement},"
+    "context": "{id: 'draw', titleKey: 'shell.preset.draw', modes: ['draw'],"
   },
   "shell.preset.focus": {
     "locations": [
-      "src/shell/layout-schema.mjs:198"
+      "src/shell/dock-workspaces.mjs:71",
+      "src/shell/layout-schema.mjs:199"
     ],
-    "context": "{id: 'focus', title: 'Focus', titleKey: 'shell.preset.focus', modes: [...MODES], toggle: 'focus'},"
+    "context": "{id: 'focus', titleKey: 'shell.preset.focus', modes: [...MODES], toggle: true},"
   },
   "shell.preset.review": {
     "locations": [
-      "src/shell/layout-schema.mjs:199"
+      "src/shell/dock-workspaces.mjs:72",
+      "src/shell/layout-schema.mjs:200"
     ],
-    "context": "{id: 'review', title: 'Review', titleKey: 'shell.preset.review', modes: ['animate'],"
+    "context": "{id: 'review', titleKey: 'shell.preset.review', modes: ['animate'],"
   },
   "shell.preset.timing": {
     "locations": [
-      "src/shell/layout-schema.mjs:196"
+      "src/shell/dock-workspaces.mjs:68",
+      "src/shell/layout-schema.mjs:197"
     ],
-    "context": "{id: 'timing', title: 'Timing', titleKey: 'shell.preset.timing', modes: ['animate'], sizes: {bottom: 0.4},"
+    "context": "{id: 'timing', titleKey: 'shell.preset.timing', modes: ['animate'], shares: {g3: 0.4},"
   },
   "spatialControls.allowTheLimbToReachBeyondItsRest": {
     "locations": [
@@ -30746,17 +30692,17 @@
   "timeline.addFrame": {
     "locations": [
       "desktop/main.cjs:198",
-      "src/timeline-header.mjs:127",
-      "src/timeline-header.mjs:129",
-      "src/timeline-header.mjs:518",
+      "src/timeline-header.mjs:126",
+      "src/timeline-header.mjs:128",
+      "src/timeline-header.mjs:515",
       "src/ui/command-catalog.mjs:163"
     ],
     "context": "item(t('desktop.main.playPause'), 'play'), item(t('timeline.addFrame'), 'add-frame'),"
   },
   "timeline.addFrameName": {
     "locations": [
-      "src/timeline-header.mjs:128",
-      "src/timeline-header.mjs:520"
+      "src/timeline-header.mjs:127",
+      "src/timeline-header.mjs:517"
     ],
     "context": "localizedAttribute(addFrame, 'aria-label', \"timeline.addFrameName\", {});"
   },
@@ -30768,33 +30714,33 @@
   },
   "timeline.audio": {
     "locations": [
-      "src/timeline-header.mjs:306"
+      "src/timeline-header.mjs:305"
     ],
     "context": "{label: say(\"timeline.audio\"), labelKey: \"timeline.audio\", labelParams: {}, icon: 'music', checked: audio.getAttribute('aria-pressed') === 'true', run: action('"
   },
   "timeline.autoKey": {
     "locations": [
-      "src/timeline-header.mjs:219",
-      "src/timeline-header.mjs:289",
+      "src/timeline-header.mjs:218",
+      "src/timeline-header.mjs:288",
       "src/ui/command-catalog.mjs:173"
     ],
     "context": "localizedMarkup(autoKey, `<span class=\"tl-autokey-dot\" aria-hidden=\"true\"></span><span class=\"ui-label\" ${messageAttributes(\"timeline.autoKey\", {})}>${say(\"time"
   },
   "timeline.autoKeyTip": {
     "locations": [
-      "src/timeline-header.mjs:218"
+      "src/timeline-header.mjs:217"
     ],
     "context": "localizedAttribute(autoKey, 'data-tooltip', \"timeline.autoKeyTip\", {});"
   },
   "timeline.blankDrawingHere": {
     "locations": [
-      "src/timeline-header.mjs:329"
+      "src/timeline-header.mjs:328"
     ],
     "context": "{label: say(\"timeline.blankDrawingHere\"), labelKey: \"timeline.blankDrawingHere\", labelParams: {}, icon: 'frame', shortcut: shortcut('insert-blank-key'), run: ()"
   },
   "timeline.blankFrame": {
     "locations": [
-      "src/timeline-header.mjs:518"
+      "src/timeline-header.mjs:515"
     ],
     "context": "const key = blank ? 'timeline.blankFrame' : 'timeline.addFrame';"
   },
@@ -30807,28 +30753,28 @@
   },
   "timeline.copyDrawingHere": {
     "locations": [
-      "src/timeline-header.mjs:330"
+      "src/timeline-header.mjs:329"
     ],
     "context": "{label: say(\"timeline.copyDrawingHere\"), labelKey: \"timeline.copyDrawingHere\", labelParams: {}, icon: 'duplicate', shortcut: shortcut('insert-copied-key'), run:"
   },
   "timeline.defaultHeight": {
     "locations": [
-      "src/timeline-header.mjs:320"
+      "src/timeline-header.mjs:319"
     ],
     "context": "{label: say(\"timeline.defaultHeight\"), labelKey: \"timeline.defaultHeight\", labelParams: {}, icon: 'reset', disabled: !shell, run: () => run(defaultHeight)},"
   },
   "timeline.drawingFrames": {
     "locations": [
-      "src/timeline-header.mjs:135",
-      "src/timeline-header.mjs:150"
+      "src/timeline-header.mjs:134",
+      "src/timeline-header.mjs:149"
     ],
     "context": "localizedAttribute(cel, 'aria-label', \"timeline.drawingFrames\", {});"
   },
   "timeline.editTogether": {
     "locations": [
-      "src/timeline-header.mjs:158",
-      "src/timeline-header.mjs:161",
-      "src/timeline-header.mjs:307"
+      "src/timeline-header.mjs:157",
+      "src/timeline-header.mjs:160",
+      "src/timeline-header.mjs:306"
     ],
     "context": "localizedAttribute(range, 'aria-label', \"timeline.editTogether\", {});"
   },
@@ -30846,13 +30792,13 @@
   },
   "timeline.editTogetherReason": {
     "locations": [
-      "src/timeline-header.mjs:308"
+      "src/timeline-header.mjs:307"
     ],
     "context": "disabled: range.disabled, reason: say(\"timeline.editTogetherReason\"), reasonKey: \"timeline.editTogetherReason\", reasonParams: {}, hidden: mode !== 'animate' || "
   },
   "timeline.extend": {
     "locations": [
-      "src/timeline-header.mjs:331"
+      "src/timeline-header.mjs:330"
     ],
     "context": "{label: say(\"timeline.extend\"), labelKey: \"timeline.extend\", labelParams: {}, icon: 'stretch-horizontal', shortcut: shortcut('extend-keyframe'), run: () => run("
   },
@@ -30866,29 +30812,29 @@
   },
   "timeline.firstFrame": {
     "locations": [
-      "src/timeline-header.mjs:167",
-      "src/timeline-header.mjs:298",
-      "src/timeline-header.mjs:304"
+      "src/timeline-header.mjs:166",
+      "src/timeline-header.mjs:297",
+      "src/timeline-header.mjs:303"
     ],
     "context": "const names = {'first-frame': 'timeline.firstFrame', 'previous-frame': null, 'next-frame': null};"
   },
   "timeline.fit": {
     "locations": [
-      "src/timeline-header.mjs:250",
-      "src/timeline-header.mjs:510"
+      "src/timeline-header.mjs:249",
+      "src/timeline-header.mjs:507"
     ],
     "context": "const fit = translatedElement(iconButton(rulerTools, 'fit', say(\"timeline.fit\"), {size: 'sm'}), \"timeline.fit\", {}, 'aria-label');"
   },
   "timeline.fitFilmstrip": {
     "locations": [
-      "src/timeline-header.mjs:510",
-      "src/timeline-header.mjs:511"
+      "src/timeline-header.mjs:507",
+      "src/timeline-header.mjs:508"
     ],
     "context": "localizedAttribute(fit, 'aria-label', simple ? 'timeline.fitFilmstrip' : 'timeline.fit');"
   },
   "timeline.fitTip": {
     "locations": [
-      "src/timeline-header.mjs:511"
+      "src/timeline-header.mjs:508"
     ],
     "context": "localizedAttribute(fit, 'data-tooltip', (simple ? \"timeline.fitFilmstrip\" : \"timeline.fitTip\"), (simple ? {} : {}));"
   },
@@ -30900,33 +30846,33 @@
   },
   "timeline.goToFrame": {
     "locations": [
-      "src/timeline-header.mjs:196",
-      "src/timeline-header.mjs:357",
-      "src/timeline-header.mjs:369"
+      "src/timeline-header.mjs:195",
+      "src/timeline-header.mjs:354",
+      "src/timeline-header.mjs:366"
     ],
     "context": "localizedAttribute(readout, 'aria-description', 'timeline.goToFrame');"
   },
   "timeline.goToFrameField": {
     "locations": [
-      "src/timeline-header.mjs:354"
+      "src/timeline-header.mjs:351"
     ],
     "context": "translatedElement(element('span', field, 'ui-field-label', say(\"timeline.goToFrameField\")), \"timeline.goToFrameField\", {});"
   },
   "timeline.goToFrameGo": {
     "locations": [
-      "src/timeline-header.mjs:359"
+      "src/timeline-header.mjs:356"
     ],
     "context": "const submit = translatedElement(element('button', form, 'ui-button', say(\"timeline.goToFrameGo\")), \"timeline.goToFrameGo\", {});"
   },
   "timeline.goToFrameOf": {
     "locations": [
-      "src/timeline-header.mjs:374"
+      "src/timeline-header.mjs:371"
     ],
     "context": "localizedText(goMeta, 'timeline.goToFrameOf', {total, seconds: (ctx.editor.totalTicks / fps).toFixed(2)});"
   },
   "timeline.lastFrame": {
     "locations": [
-      "src/timeline-header.mjs:316"
+      "src/timeline-header.mjs:315"
     ],
     "context": "{label: say(\"timeline.lastFrame\"), labelKey: \"timeline.lastFrame\", labelParams: {}, icon: 'last', shortcut: shortcut('last-frame'), run: action('last-frame')},"
   },
@@ -30938,15 +30884,15 @@
   },
   "timeline.loop": {
     "locations": [
-      "src/timeline-header.mjs:179",
-      "src/timeline-header.mjs:305"
+      "src/timeline-header.mjs:178",
+      "src/timeline-header.mjs:304"
     ],
     "context": "if (!loop.hasAttribute('aria-label')) localizedAttribute(loop, 'aria-label', \"timeline.loop\", {});"
   },
   "timeline.menu": {
     "locations": [
-      "src/timeline-header.mjs:234",
-      "src/timeline-header.mjs:238"
+      "src/timeline-header.mjs:233",
+      "src/timeline-header.mjs:237"
     ],
     "context": "const menuButton = translatedElement(iconButton(end, 'more', say(\"timeline.menu\")), \"timeline.menu\", {}, 'aria-label');"
   },
@@ -31000,120 +30946,120 @@
   },
   "timeline.nextBlank": {
     "locations": [
-      "src/timeline-header.mjs:327"
+      "src/timeline-header.mjs:326"
     ],
     "context": "{label: say(\"timeline.nextBlank\"), labelKey: \"timeline.nextBlank\", labelParams: {}, icon: 'frame', run: () => run(() => timeline?.nextDrawing?.(true))},"
   },
   "timeline.nextCopy": {
     "locations": [
-      "src/timeline-header.mjs:140"
+      "src/timeline-header.mjs:139"
     ],
     "context": "localizedMarkup(celMain, `${icon('duplicate')}<span class=\"ui-label\" ${messageAttributes(\"timeline.nextCopy\", {})}>${say(\"timeline.nextCopy\")}</span>`);"
   },
   "timeline.nextCopyMore": {
     "locations": [
-      "src/timeline-header.mjs:147"
+      "src/timeline-header.mjs:146"
     ],
     "context": "localizedAttribute(celMore, 'aria-label', \"timeline.nextCopyMore\", {});"
   },
   "timeline.nextCopyName": {
     "locations": [
-      "src/timeline-header.mjs:141",
-      "src/timeline-header.mjs:295"
+      "src/timeline-header.mjs:140",
+      "src/timeline-header.mjs:294"
     ],
     "context": "localizedAttribute(celMain, 'aria-label', \"timeline.nextCopyName\", {});"
   },
   "timeline.nextCopyTip": {
     "locations": [
-      "src/timeline-header.mjs:142"
+      "src/timeline-header.mjs:141"
     ],
     "context": "localizedAttribute(celMain, 'data-tooltip', \"timeline.nextCopyTip\", {});"
   },
   "timeline.nextKey": {
     "locations": [
-      "src/timeline-header.mjs:318"
+      "src/timeline-header.mjs:317"
     ],
     "context": "{label: say(\"timeline.nextKey\"), labelKey: \"timeline.nextKey\", labelParams: {}, icon: 'chevron-right', shortcut: shortcut('next-keyframe'), run: action('next-ke"
   },
   "timeline.onion": {
     "locations": [
       "desktop/main.cjs:200",
-      "src/timeline-header.mjs:225"
+      "src/timeline-header.mjs:224"
     ],
     "context": "{ type: 'separator' }, item(t('timeline.onion'), 'toggle-onion'),"
   },
   "timeline.onionSettings": {
     "locations": [
-      "src/timeline-header.mjs:285"
+      "src/timeline-header.mjs:284"
     ],
     "context": "items.push(null, {label: say(\"timeline.onionSettings\"), labelKey: \"timeline.onionSettings\", labelParams: {}, icon: 'onion', run: () => $('onion-settings-button'"
   },
   "timeline.playbackRange": {
     "locations": [
-      "src/timeline-header.mjs:187",
-      "src/timeline-header.mjs:314",
-      "src/timeline-header.mjs:424",
-      "src/timeline-header.mjs:544"
+      "src/timeline-header.mjs:186",
+      "src/timeline-header.mjs:313",
+      "src/timeline-header.mjs:421",
+      "src/timeline-header.mjs:541"
     ],
     "context": "localizedAttribute(playbackLimits, 'aria-label', 'timeline.playbackRange');"
   },
   "timeline.playbackRangeActive": {
     "locations": [
-      "src/timeline-header.mjs:544"
+      "src/timeline-header.mjs:541"
     ],
     "context": "localizedAttribute(playbackLimits, 'data-tooltip', active ? 'timeline.playbackRangeActive' : 'timeline.playbackRange', {first: start + 1, last: end});"
   },
   "timeline.playbackRangeApply": {
     "locations": [
-      "src/timeline-header.mjs:415"
+      "src/timeline-header.mjs:412"
     ],
     "context": "const submit = translatedElement(element('button', actions, 'ui-button', say('timeline.playbackRangeApply')), 'timeline.playbackRangeApply');"
   },
   "timeline.playbackRangeEntire": {
     "locations": [
-      "src/timeline-header.mjs:411"
+      "src/timeline-header.mjs:408"
     ],
     "context": "const entire = translatedElement(element('button', actions, 'ui-button', say('timeline.playbackRangeEntire')), 'timeline.playbackRangeEntire');"
   },
   "timeline.playbackRangeFrom": {
     "locations": [
-      "src/timeline-header.mjs:396"
+      "src/timeline-header.mjs:393"
     ],
     "context": "rangeFirst = field('timeline.playbackRangeFrom');"
   },
   "timeline.playbackRangeSelection": {
     "locations": [
-      "src/timeline-header.mjs:401"
+      "src/timeline-header.mjs:398"
     ],
     "context": "rangeSelection = translatedElement(element('button', meta, 'ui-button', say('timeline.playbackRangeSelection')), 'timeline.playbackRangeSelection');"
   },
   "timeline.playbackRangeTo": {
     "locations": [
-      "src/timeline-header.mjs:397"
+      "src/timeline-header.mjs:394"
     ],
     "context": "rangeLast = field('timeline.playbackRangeTo');"
   },
   "timeline.playbackRangeTotal": {
     "locations": [
-      "src/timeline-header.mjs:431"
+      "src/timeline-header.mjs:428"
     ],
     "context": "localizedText(rangeTotal, 'timeline.playbackRangeTotal', {total: ctx.editor.totalTicks});"
   },
   "timeline.previousKey": {
     "locations": [
-      "src/timeline-header.mjs:317"
+      "src/timeline-header.mjs:316"
     ],
     "context": "{label: say(\"timeline.previousKey\"), labelKey: \"timeline.previousKey\", labelParams: {}, icon: 'chevron-left', shortcut: shortcut('previous-keyframe'), run: acti"
   },
   "timeline.readoutTip": {
     "locations": [
-      "src/timeline-header.mjs:204"
+      "src/timeline-header.mjs:203"
     ],
     "context": "localizedAttribute(readout, 'data-tooltip', \"timeline.readoutTip\", {frame, total});"
   },
   "timeline.sheet": {
     "locations": [
-      "src/timeline-header.mjs:293"
+      "src/timeline-header.mjs:292"
     ],
     "context": "items.push({label: say(\"timeline.sheet\"), labelKey: \"timeline.sheet\", labelParams: {}, icon: 'timeline', run: action('timeline-sheet')}, null);"
   },
@@ -31131,7 +31077,7 @@
   },
   "timeline.tall": {
     "locations": [
-      "src/timeline-header.mjs:257"
+      "src/timeline-header.mjs:256"
     ],
     "context": "localizedAttribute(tall, 'data-tooltip', \"timeline.tall\", {});"
   },
@@ -31144,7 +31090,7 @@
   },
   "timeline.zoomTools": {
     "locations": [
-      "src/timeline-header.mjs:111"
+      "src/timeline-header.mjs:110"
     ],
     "context": "localizedAttribute(rulerTools, 'aria-label', \"timeline.zoomTools\", {});"
   },
@@ -31997,13 +31943,13 @@
     "locations": [
       "src/tutorials/tutorial-catalog.mjs:56"
     ],
-    "context": "{id: 'panels', target: {selector: '#right-dock .shell-tabs'}, sayKey: 'tutorials.tour.panels.say', moreKey: 'tutorials.tour.panels.more'},"
+    "context": "{id: 'panels', target: {selector: '.shell-tabs:has(#properties-tab)'}, sayKey: 'tutorials.tour.panels.say', moreKey: 'tutorials.tour.panels.more'},"
   },
   "tutorials.tour.panels.say": {
     "locations": [
       "src/tutorials/tutorial-catalog.mjs:56"
     ],
-    "context": "{id: 'panels', target: {selector: '#right-dock .shell-tabs'}, sayKey: 'tutorials.tour.panels.say', moreKey: 'tutorials.tour.panels.more'},"
+    "context": "{id: 'panels', target: {selector: '.shell-tabs:has(#properties-tab)'}, sayKey: 'tutorials.tour.panels.say', moreKey: 'tutorials.tour.panels.more'},"
   },
   "tutorials.tour.select.done": {
     "locations": [

@@ -19,10 +19,10 @@ try {
   await page.evaluate(() => window.stykDesktop.setWorkspacePreferences({ left: 268, right: 310, timeline: 240 }));
   await page.reload();
   await page.waitForFunction(() => window.styk?.ready && window.styk.workspace, undefined, { timeout: 20000 });
-  // A 1.1 blob migrates to the v2 layout; `float('right')` floats the right dock's floatable panel (VFX).
-  // A saved layout and the timeline's width (under the stage) must survive the restart too.
-  const migrated = await page.evaluate(() => ({sizes: window.styk.workspace.layout.shared.sizes, right: window.styk.workspace.sizes.right}));
-  assert.deepEqual([migrated.sizes.right, migrated.sizes.bottom, migrated.right], [310, 240, 310]);
+  // A 1.1 blob migrates into the docking arrangement (dock-migrate.mjs): its widths become the groups' sizes.
+  // A floating panel, a saved layout and the timeline under the stage must survive the restart too.
+  const migrated = await page.evaluate(() => ({source: window.styk.shell.store.source, right: window.styk.workspace.sizes.right, timeline: window.styk.workspace.sizes.timeline}));
+  assert.deepEqual(migrated, {source: 'import-legacy', right: 310, timeline: 240});
   const saved = await page.evaluate(async () => {
     window.styk.workspace.saveLayout('Smoke layout');
     window.styk.workspace.float('vfx');
@@ -31,19 +31,20 @@ try {
     await window.styk.loadLocale('it'); window.styk.settingsUI.commit({locale:'it',theme:'dark'});
     await window.styk.settingsUI.flush();
     const snapshot = window.styk.workspace.preferences;
-    const disk = await window.stykDesktop.getWorkspacePreferences();
+    const disk = (await window.stykDesktop.getWorkspacePreferences()).dock;
     let invalidRejected = false, oversizedRejected = false;
     try { await window.stykDesktop.setWorkspacePreferences([]); } catch { invalidRejected = true; }
     try { await window.stykDesktop.setWorkspacePreferences({ padding: 'x'.repeat(17000) }); } catch { oversizedRejected = true; }
-    return { snapshot, disk, editorSettings: await window.stykDesktop.getEditorSettings(), afterRejected: await window.stykDesktop.getWorkspacePreferences(), invalidRejected, oversizedRejected };
+    const file = await window.stykDesktop.getWorkspacePreferences();
+    return { snapshot, disk, file, editorSettings: await window.stykDesktop.getEditorSettings(), afterRejected: (await window.stykDesktop.getWorkspacePreferences()).dock, invalidRejected, oversizedRejected };
   });
   assert.deepEqual(saved.snapshot, saved.disk);
   assert.deepEqual(saved.afterRejected, saved.disk);
-  assert.equal(saved.snapshot.layoutVersion, 2);
-  assert.equal(saved.snapshot.studioVersion, 1, 'the v1 mirror a 1.1 app reads');
-  assert.equal(saved.snapshot.right, 310);
-  assert.ok(saved.snapshot.modes.animate.panels.some(record => record.id === 'vfx' && record.dock === 'float'));
-  assert.equal(saved.snapshot.modes.animate.bottomSpan, 'stage');
+  assert.equal(saved.snapshot.version, 3, 'the docking state is the dock key of the preferences');
+  assert.deepEqual([saved.file.left, saved.file.right, saved.file.timeline], [268, 310, 240], 'what an older version reads stays as it was');
+  const animate = saved.snapshot.workspaces.animate.layout;
+  assert.ok(animate.floats.some(float => float.group.tabs.includes('vfx')), 'VFX floats');
+  assert.ok(animate.nodes.some(node => node.tabs?.includes('timeline')), 'the timeline is placed');
   assert.deepEqual(saved.snapshot.saved.map(item => item.name), ['Smoke layout']);
   assert.equal(saved.invalidRejected, true);
   assert.equal(saved.oversizedRejected, true);
@@ -67,7 +68,11 @@ try {
   const second = await launch(); applications.push(second);
   const restoredPage = await second.firstWindow();
   await restoredPage.waitForFunction(() => window.styk?.ready && window.styk.workspace, undefined, { timeout: 20000 });
-  const restored = await restoredPage.evaluate(async () => ({ snapshot: window.styk.workspace.preferences, disk: await window.stykDesktop.getWorkspacePreferences(), floating: window.styk.workspace.floating, layouts: window.styk.workspace.layouts.map(item => item.name), span: document.querySelector('.workspace').dataset.bottomSpan, locale:window.styk.settingsUI.value.locale, documentLocale:document.documentElement.lang, editorSettings:await window.stykDesktop.getEditorSettings() }));
+  const restored = await restoredPage.evaluate(async () => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect();
+    return { snapshot: window.styk.workspace.preferences, disk: (await window.stykDesktop.getWorkspacePreferences()).dock, floating: window.styk.workspace.floating, layouts: window.styk.workspace.layouts.map(item => item.name),
+      span: box('#animation-timeline').right <= box('.shell-stage').right + 1 ? 'stage' : 'full', locale:window.styk.settingsUI.value.locale, documentLocale:document.documentElement.lang, editorSettings:await window.stykDesktop.getEditorSettings() };
+  });
   assert.deepEqual(restored.snapshot, saved.snapshot);
   assert.deepEqual(restored.disk, saved.snapshot);
   assert.deepEqual(restored.floating.map(item => item.panel), ['vfx']);

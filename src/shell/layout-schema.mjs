@@ -1,8 +1,9 @@
 import {messageError} from '../localized-error.mjs';
 /**
- * Workspace layouts as versioned data (schema v2). Pure functions: no DOM and
- * no I/O; layout-store.mjs reads and writes, layout-solver.mjs fits a layout
- * into a window, and neither ever writes a fitted size back.
+ * Workspace layouts as versioned data (schema v2), as StykAnimate stored them
+ * before the docking model (dock-model.mjs). Pure functions: no DOM and no
+ * I/O. dock-migrate.mjs reads stored v2 layouts through migrateLayout once,
+ * to import them; the v2 keys stay in the file for older versions.
  *
  * Stored shape, inside the desktop's workspace-preferences.json (16 KiB file
  * cap) or the browser's localStorage:
