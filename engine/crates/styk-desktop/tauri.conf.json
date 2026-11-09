@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "StykAnimate",
+  "mainBinaryName": "StykAnimate",
+  "version": "../../../package.json",
+  "identifier": "app.stykanimate.desktop",
+  "build": {
+    "frontendDist": "../../../build/tauri-web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null,
+      "freezePrototype": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "StykAnimate",
+    "homepage": "https://stykanimate.com",
+    "category": "GraphicsAndDesign",
+    "shortDescription": "Stick figure animation",
+    "longDescription": "StykAnimate: stick figure animation.",
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      { "ext": ["nodes"], "mimeType": "application/x-sticknodes-figure", "name": "Stick Nodes figure", "description": "Stick Nodes figure", "role": "Viewer" },
+      { "ext": ["nodemc"], "mimeType": "application/x-sticknodes-movieclip", "name": "Stick Nodes movie clip", "description": "Stick Nodes movie clip", "role": "Viewer" },
+      { "ext": ["stknds"], "mimeType": "application/x-sticknodes-project", "name": "Stick Nodes project", "description": "Stick Nodes project", "role": "Viewer" },
+      { "ext": ["piv"], "mimeType": "application/x-pivot-animation", "name": "Pivot animation", "description": "Pivot animation", "role": "Editor" },
+      { "ext": ["stk"], "mimeType": "application/x-pivot-figure", "name": "Pivot stick figure", "description": "Pivot stick figure", "role": "Editor" },
+      { "ext": ["stykmov"], "mimeType": "application/vnd.stykanimate.movieclip", "name": "StykAnimate movieclip", "description": "StykAnimate movieclip", "role": "Editor" },
+      { "ext": ["stkz"], "mimeType": "application/vnd.stykanimate.figure", "name": "StykAnimate figure", "description": "StykAnimate figure", "role": "Editor" },
+      { "ext": ["styk"], "mimeType": "application/vnd.stykanimate.project", "name": "StykAnimate project", "description": "StykAnimate project", "role": "Editor" }
+    ],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "installerHooks": "windows/installer-hooks.nsh",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFGQzg0RUExMzk5NzU5NDYKUldSR1daYzVvVTdJSDhpNEdnUDdTWDlPazBUQUR5MG9EOUZRT0pXekI2OUZrUTB3RVA4ZElOQjAK",
+      "endpoints": ["https://github.com/filippocalippo/styk-animate-releases/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

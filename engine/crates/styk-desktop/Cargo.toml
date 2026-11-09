@@ -1,0 +1,48 @@
+[package]
+name = "styk-desktop"
+description = "The desktop app: a Tauri 2 window around today's web interface and engine, and the native services it calls."
+edition.workspace = true
+version = "1.2.5"
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "styk_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "StykAnimate"
+path = "src/main.rs"
+
+[features]
+# `tauri build` turns this on: the web assets are embedded and the app counts as packaged.
+custom-protocol = ["tauri/custom-protocol"]
+# The developer build: the WebView2 inspector is on. The shipping build leaves it out (docs/tauri/shell.md).
+devtools = ["tauri/devtools"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+serde_json = "1"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["net", "io-util", "time", "sync", "macros", "fs", "process", "rt-multi-thread"] }
+reqwest = { version = "0.13", default-features = false, features = ["stream", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+futures-util = "0.3"
+semver = "1"
+url = "2"
+percent-encoding = "2"
+log = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_System_SystemInformation", "Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+winreg = "0.55"
+
+[dev-dependencies]
+tempfile = "3"
