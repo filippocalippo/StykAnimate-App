@@ -23,7 +23,8 @@ use styk_design::widgets::badge::{Tint as DesignTint, badge};
 use styk_design::widgets::button::{Button, IconButton, IconSize, Variant};
 use styk_core::inspector::paint::{PaintSpec, PaintType};
 use styk_core::roving::{NavKey, Orientation, next_index};
-use styk_design::widgets::color::{ColorField, GradientKind, SwatchButton, SwatchPaint, SwatchSize, SwatchStop, swatch};
+use styk_design::widgets::color::{ColorField, GradientKind, SwatchButton, SwatchPaint, SwatchSize, SwatchStop};
+use styk_design::widgets::tooltip::Content;
 use styk_design::widgets::field::EditField;
 use styk_design::widgets::frame::{self, FieldFrame};
 use styk_design::widgets::focus::{Focusable, Keys, Ring};
@@ -326,21 +327,25 @@ impl Kit<'_> {
             .into_element()
     }
 
-    /// `.ui-swatch-grid`: 24 px swatch buttons, 6 px apart, wrapping across the row. The group is one Tab stop (its first
-    /// swatch) and the arrow keys, Home and End move inside it (`[data-count-one]`); a press opens the picker on that
-    /// palette colour.
+    /// A swatch button for a model swatch: its description is the tooltip (today's hex text), it is neither pressable nor
+    /// focusable while the model says it is disabled, and a press asks for the picker on its target.
+    fn swatch_button(&self, id: FocusId, item: &m::Swatch, size: SwatchSize) -> SwatchButton<'static, Message> {
+        let content = Content { label: self.say(&item.description), shortcut: String::new() };
+        SwatchButton::new(id, FocusArea::Panels, self.palette, item.rgb, size, send(Event::Color(item.target))).disabled(item.disabled).tooltip(content, Message::Tooltip)
+    }
+
+    /// `.ui-swatch-grid`: 24 px swatch buttons, 6 px apart, wrapping across the row. The group is one Tab stop and the
+    /// arrow keys, Home and End move inside it (`[data-count-one]`); which swatch is the stop is the focus owner's
+    /// (`Focusable::collection`: the one that last held focus). A press opens the picker on that palette colour.
     fn swatches(&self, items: &[m::Swatch]) -> Element<'static, Message> {
         let ids: Arc<[FocusId]> = items.iter().map(|_| self.id()).collect();
+        let disabled: Arc<[bool]> = items.iter().map(|item| item.disabled).collect();
+        let collection = ids.first().map(|id| id.0);
         let buttons: Vec<Element<'static, Message>> = items
             .iter()
             .enumerate()
             .map(|(at, item)| {
-                // A pending panel's swatch is not pressable or focusable.
-                if item.disabled {
-                    return swatch(self.palette, item.rgb, SwatchSize::Grid, 0.5);
-                }
-                let press = send(Event::Color(item.target));
-                let (moves, enter) = (ids.clone(), press.clone());
+                let (moves, skip, enter) = (ids.clone(), disabled.clone(), send(Event::Color(item.target)));
                 let keys = Keys::Custom(Box::new(move |event| {
                     let iced::keyboard::Event::KeyPressed { key, modifiers, .. } = event else { return None };
                     if modifiers.alt() || modifiers.control() || modifiers.logo() {
@@ -357,10 +362,14 @@ impl Kit<'_> {
                         Key::Named(Named::ArrowDown) => NavKey::ArrowDown,
                         _ => return None,
                     };
-                    let next = next_index(nav, Some(at), moves.len(), Orientation::Both, true, |_| false)?;
+                    let next = next_index(nav, Some(at), moves.len(), Orientation::Both, true, |index| skip[index])?;
                     (next != at).then(|| Message::Focusing(Box::new(Message::Idle), moves[next]))
                 }));
-                SwatchButton::new(ids[at], FocusArea::Panels, self.palette, item.rgb, SwatchSize::Grid, press).tab_stop(at == 0).keys(keys).into_element()
+                let mut button = self.swatch_button(ids[at], item, SwatchSize::Grid).keys(keys);
+                if let Some(collection) = collection {
+                    button = button.collection(collection);
+                }
+                button.into_element()
             })
             .collect();
         Row::with_children(buttons).spacing(tokens::scale::SPACE_1_5).wrap().boxed()
@@ -371,13 +380,8 @@ impl Kit<'_> {
     fn group(&self, head: &m::ListRow, rows: &[m::Row]) -> Element<'static, Message> {
         let mut actions: Vec<Element<'static, Message>> = Vec::new();
         if let Some(chip) = &head.swatch {
-            let chip = if chip.disabled {
-                swatch(self.palette, chip.rgb, SwatchSize::Chip, 0.5)
-            } else {
-                SwatchButton::new(self.id(), FocusArea::Panels, self.palette, chip.rgb, SwatchSize::Chip, send(Event::Color(chip.target))).into_element()
-            };
             // `margin-inline: var(--space-1)`.
-            actions.push(container(chip).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_1 }).boxed());
+            actions.push(container(self.swatch_button(self.id(), chip, SwatchSize::Chip).into_element()).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_1 }).boxed());
         }
         actions.extend(head.actions.iter().map(|item| self.button(item, ButtonSize::Small)));
         let name = self.text(self.say(&head.label), &tokens::scale::TYPE_UI, self.palette.text_1);

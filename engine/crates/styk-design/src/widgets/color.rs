@@ -7,7 +7,7 @@ use iced::Widget as _;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Tree};
 use iced::advanced::{Renderer as _, renderer};
-use super::control::{FIELD_DISABLED, Preview, paint_ring, paint_shadows, words};
+use super::control::{DISABLED, FIELD_DISABLED, Preview, paint_ring, paint_shadows, words};
 use super::focus::{Focusable, Keys, Ring};
 use super::frame::{self, FieldFrame};
 use super::surface::{Look, Surface};
@@ -242,7 +242,9 @@ pub fn swatch_paint<'a, Message: 'a>(palette: &'static Palette, paint: SwatchPai
     face(palette, Fill::Gradient(paint), size, opacity, false)
 }
 
-/// A swatch that is a button (a palette colour): a press publishes `on_press`; hovered, it gains its outer rings.
+/// A swatch that is a button (a palette colour): a press publishes `on_press`; hovered, it gains its outer rings. A
+/// disabled one is neither pressable nor focusable and draws at the design system's disabled opacity
+/// (`.ui-swatch:disabled { opacity: 0.42 }`).
 pub struct SwatchButton<'a, Message> {
     id: FocusId,
     area: FocusArea,
@@ -250,18 +252,30 @@ pub struct SwatchButton<'a, Message> {
     rgb: [u8; 3],
     size: SwatchSize,
     on_press: Message,
-    tab_stop: bool,
+    collection: Option<u64>,
+    disabled: bool,
     keys: Keys<'a, Message>,
+    tooltip: Option<Tip<'a, Message>>,
 }
+
+/// A tooltip a swatch names, and how its events reach the owner.
+type Tip<'a, Message> = (super::tooltip::Content, Box<dyn Fn(super::tooltip::TipEvent) -> Message + 'a>);
 
 impl<'a, Message: Clone + 'a> SwatchButton<'a, Message> {
     pub fn new(id: FocusId, area: FocusArea, palette: &'static Palette, rgb: [u8; 3], size: SwatchSize, on_press: Message) -> Self {
-        SwatchButton { id, area, palette, rgb, size, on_press, tab_stop: true, keys: Keys::Button }
+        SwatchButton { id, area, palette, rgb, size, on_press, collection: None, disabled: false, keys: Keys::Button, tooltip: None }
     }
 
-    /// Whether Tab stops here (a collection is one tab stop).
-    pub fn tab_stop(mut self, tab_stop: bool) -> Self {
-        self.tab_stop = tab_stop;
+    /// The swatch is a member of collection `collection` (`Focusable::collection`): the group is one Tab stop, the member
+    /// that last held focus.
+    pub fn collection(mut self, collection: u64) -> Self {
+        self.collection = Some(collection);
+        self
+    }
+
+    /// Not pressable or focusable (the colour it shows may be stale).
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -271,13 +285,27 @@ impl<'a, Message: Clone + 'a> SwatchButton<'a, Message> {
         self
     }
 
+    /// The swatch has a tooltip (`Focusable::tooltip`).
+    pub fn tooltip(mut self, content: super::tooltip::Content, on_event: impl Fn(super::tooltip::TipEvent) -> Message + 'a) -> Self {
+        self.tooltip = Some((content, Box::new(on_event)));
+        self
+    }
+
     pub fn into_element(self) -> Element<'a, Message> {
-        let SwatchButton { id, area, palette, rgb, size, on_press, tab_stop, keys } = self;
-        let rest = face(palette, Fill::Solid(rgb), size, 1.0, false);
+        let SwatchButton { id, area, palette, rgb, size, on_press, collection, disabled, keys, tooltip } = self;
+        let opacity = if disabled { DISABLED } else { 1.0 };
+        let rest = face(palette, Fill::Solid(rgb), size, opacity, false);
         let hovered = face(palette, Fill::Solid(rgb), size, 1.0, true);
-        let press = Surface::new(rest, move |_| Look::plain(size.radius())).hover_face(hovered).on_press_maybe(Some(on_press.clone()));
+        let press = Surface::new(rest, move |_| Look::plain(size.radius())).hover_face(hovered).on_press_maybe((!disabled).then(|| on_press.clone()));
         // `.ui-swatch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px }`.
-        Focusable::new(id, area, press.boxed(), Ring::of(palette, size.radius())).keys(keys).tab_stop(tab_stop).on_activate(on_press).boxed()
+        let mut target = Focusable::new(id, area, press.boxed(), Ring::of(palette, size.radius())).keys(keys).on_activate(on_press).enabled(!disabled);
+        if let Some(collection) = collection {
+            target = target.collection(collection);
+        }
+        if let Some((content, on_event)) = tooltip {
+            target = target.tooltip(content, on_event);
+        }
+        target.boxed()
     }
 }
 

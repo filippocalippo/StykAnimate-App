@@ -79,13 +79,17 @@ pub struct FocusTarget {
     pub enabled: bool,
     /// Whether Tab stops here. A roving group's inactive children are focusable by arrows and by `focus` but not stops.
     pub tab_stop: bool,
+    /// The collection this target belongs to (a palette's swatches: one Tab stop, arrows inside). The focus state picks
+    /// the member that is the stop ([`FocusState::register`]): the one that last held focus while it is enabled, else
+    /// the first enabled; a member's own `tab_stop` is ignored.
+    pub collection: Option<u64>,
 }
 
 impl FocusTarget {
     /// An enabled Tab stop.
     pub fn new(id: u64, area: FocusArea, kind: TargetKind) -> FocusTarget {
         FocusTarget { id: FocusId(id), area, kind, input_role: if kind == TargetKind::TextEntry { InputRole::Text } else { InputRole::None },
-            history_owner: HistoryOwner::Field, enabled: true, tab_stop: true }
+            history_owner: HistoryOwner::Field, enabled: true, tab_stop: true, collection: None }
     }
 
     fn focusable(&self) -> bool {
@@ -124,6 +128,8 @@ pub struct FocusState {
     /// Targets that were registered and then were not (gone or disabled), until [`FocusState::take_removed`].
     removed: Vec<FocusId>,
     regions: Vec<FocusRegion>,
+    /// Each collection's Tab stop: the member that last held focus.
+    stops: Vec<(u64, FocusId)>,
 }
 
 impl Default for FocusState {
@@ -142,7 +148,38 @@ impl FocusState {
             keyboard_modality: false,
             removed: Vec::new(),
             regions: Vec::new(),
+            stops: Vec::new(),
         }
+    }
+
+    /// Makes each collection one Tab stop: the member that last held focus while it is still enabled, else the first
+    /// enabled member. A collection that is gone forgets its stop.
+    fn settle_stops(&mut self) {
+        let focused = self.focused.and_then(|id| self.find(id)).and_then(|(_, target)| target.collection.map(|collection| (collection, target.id)));
+        if let Some((collection, id)) = focused {
+            match self.stops.iter_mut().find(|(known, _)| *known == collection) {
+                Some(stop) => stop.1 = id,
+                None => self.stops.push((collection, id)),
+            }
+        }
+        let stops = &mut self.stops;
+        let mut present: Vec<u64> = Vec::new();
+        for scope in &mut self.scopes {
+            let collections: Vec<u64> = scope.targets.iter().filter_map(|target| target.collection).collect();
+            for collection in collections {
+                if present.contains(&collection) {
+                    continue;
+                }
+                present.push(collection);
+                let held = stops.iter().find(|(known, _)| *known == collection).map(|(_, id)| *id);
+                let member = |target: &&FocusTarget| target.collection == Some(collection) && target.enabled;
+                let stop = held.filter(|id| scope.targets.iter().filter(member).any(|target| target.id == *id)).or_else(|| scope.targets.iter().find(member).map(|target| target.id));
+                for target in scope.targets.iter_mut().filter(|target| target.collection == Some(collection)) {
+                    target.tab_stop = Some(target.id) == stop;
+                }
+            }
+        }
+        stops.retain(|(collection, _)| present.contains(collection));
     }
 
     fn top(&self) -> &Scope {
@@ -253,6 +290,7 @@ impl FocusState {
             self.focused = None;
             self.composing = false;
         }
+        self.settle_stops();
         self.focused
     }
 
@@ -266,6 +304,7 @@ impl FocusState {
             self.composing = false;
         }
         self.focused = known;
+        self.settle_stops();
         reported.filter(|id| known.is_none() && self.find(*id).is_some())
     }
 
@@ -339,6 +378,7 @@ impl FocusState {
         if target.is_some() && target != self.focused {
             self.composing = false;
             self.focused = target;
+            self.settle_stops();
         }
         target
     }
@@ -455,6 +495,55 @@ mod tests {
         // A roving child can hold focus (arrows put it there); Tab leaves from its position.
         f.reconcile(Some(FocusId(3)));
         assert_eq!(f.tab(true), Some(FocusId(4)));
+    }
+
+    fn member(id: u64, collection: u64) -> FocusTarget {
+        FocusTarget { collection: Some(collection), ..t(id, Panels, Control) }
+    }
+
+    /// A palette of three swatches between two buttons.
+    fn palette_page() -> Vec<FocusTarget> {
+        vec![t(1, Panels, Control), member(10, 10), member(11, 10), member(12, 10), t(2, Panels, Control)]
+    }
+
+    #[test]
+    fn a_collection_is_one_tab_stop_that_follows_the_member_that_held_focus() {
+        let mut f = FocusState::new();
+        f.register(ScopeId::ROOT, palette_page());
+        // Fresh: the first member is the stop, whatever the view said of the others.
+        assert_eq!((f.tab(true), f.tab(true), f.tab(true)), (Some(FocusId(1)), Some(FocusId(10)), Some(FocusId(2))));
+        // An arrow (or a click) puts focus on the second member; Tab away and Shift+Tab lands back on it.
+        f.reconcile(Some(FocusId(11)));
+        assert_eq!(f.tab(true), Some(FocusId(2)));
+        assert_eq!(f.tab(false), Some(FocusId(11)), "Shift+Tab returns to the member that last held focus");
+        assert_eq!(f.tab(false), Some(FocusId(1)));
+        // The next view pass registers the same targets again: the stop stays.
+        f.register(ScopeId::ROOT, palette_page());
+        assert_eq!(f.tab(true), Some(FocusId(11)));
+    }
+
+    #[test]
+    fn a_collections_stop_falls_to_the_first_enabled_member_when_its_own_is_gone() {
+        let mut f = FocusState::new();
+        f.register(ScopeId::ROOT, palette_page());
+        f.reconcile(Some(FocusId(12)));
+        let mut gone = palette_page();
+        gone.remove(3);
+        f.register(ScopeId::ROOT, gone);
+        f.reconcile(None);
+        assert_eq!((f.tab(true), f.tab(true)), (Some(FocusId(1)), Some(FocusId(10))), "the remembered member was removed: the first one is the stop");
+        // Disabled members are no stop either: the first enabled one is.
+        let mut pending = palette_page();
+        pending[1].enabled = false;
+        f.register(ScopeId::ROOT, pending);
+        f.reconcile(None);
+        assert_eq!((f.tab(true), f.tab(true)), (Some(FocusId(1)), Some(FocusId(11))));
+        // A collection that left the tree forgets its stop.
+        f.reconcile(Some(FocusId(12)));
+        f.register(ScopeId::ROOT, vec![t(1, Panels, Control)]);
+        f.register(ScopeId::ROOT, palette_page());
+        f.reconcile(None);
+        assert_eq!((f.tab(true), f.tab(true)), (Some(FocusId(1)), Some(FocusId(10))));
     }
 
     #[test]

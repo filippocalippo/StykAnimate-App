@@ -36,6 +36,7 @@ pub struct Meta {
     pub history_owner: HistoryOwner,
     pub enabled: bool,
     pub tab_stop: bool,
+    pub collection: Option<u64>,
 }
 
 /// Whether a [`Focusable`] shows its ring now (it holds focus that came from the keyboard), told to an operation as a
@@ -133,7 +134,7 @@ pub fn snapshot() -> impl Operation<Snapshot> {
             } else if let Some(meta) = state.downcast_ref::<Meta>() {
                 let scope = self.stack.last().copied().unwrap_or(ScopeId::ROOT);
                 let target = FocusTarget { id: meta.id, area: meta.area, kind: meta.kind, input_role: meta.input_role,
-                    history_owner: meta.history_owner, enabled: meta.enabled, tab_stop: meta.tab_stop };
+                    history_owner: meta.history_owner, enabled: meta.enabled, tab_stop: meta.tab_stop, collection: meta.collection };
                 match self.scopes.iter_mut().find(|(s, _)| *s == scope) {
                     Some((_, targets)) => targets.push(target),
                     None => self.scopes.push((scope, vec![target])),
@@ -243,6 +244,7 @@ pub struct Focusable<'a, Message> {
     content: Element<'a, Message>,
     enabled: bool,
     tab_stop: bool,
+    collection: Option<u64>,
     keys: Keys<'a, Message>,
     on_activate: Option<Message>,
     on_focus_change: Option<Box<dyn Fn(bool) -> Message + 'a>>,
@@ -263,6 +265,7 @@ impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
             content,
             enabled: true,
             tab_stop: true,
+            collection: None,
             keys: Keys::Button,
             on_activate: None,
             on_focus_change: None,
@@ -303,6 +306,13 @@ impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
         self
     }
 
+    /// The control is a member of collection `collection`: the group is one Tab stop and the focus state decides which
+    /// member it is (the one that last held focus), so the control's own [`Focusable::tab_stop`] does not apply.
+    pub fn collection(mut self, collection: u64) -> Self {
+        self.collection = Some(collection);
+        self
+    }
+
     /// Describe the underlying input; shortcut policy belongs to the core.
     pub fn input_role(mut self, role: InputRole) -> Self {
         self.input_role = role;
@@ -328,7 +338,7 @@ impl<'a, Message: Clone + 'a> Focusable<'a, Message> {
 
     fn meta(&self) -> Meta {
         Meta { id: self.id, area: self.area, kind: TargetKind::Control, input_role: self.input_role,
-            history_owner: self.history_owner, enabled: self.enabled, tab_stop: self.tab_stop }
+            history_owner: self.history_owner, enabled: self.enabled, tab_stop: self.tab_stop, collection: self.collection }
     }
 }
 
@@ -558,7 +568,7 @@ impl<'a, Message: 'a> Anchor<'a, Message> {
     pub fn new(id: FocusId, area: FocusArea, kind: TargetKind, enabled: bool, content: Element<'a, Message>) -> Self {
         let target = FocusTarget::new(id.0, area, kind);
         Anchor { meta: Meta { id, area, kind, input_role: target.input_role, history_owner: target.history_owner,
-            enabled, tab_stop: true }, content, on_key_release: None }
+            enabled, tab_stop: true, collection: None }, content, on_key_release: None }
     }
 
     pub fn history_owner(mut self, owner: HistoryOwner) -> Self {
