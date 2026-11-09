@@ -360,7 +360,7 @@ impl Panel {
         }
         let ready = document.frame_records_ready().is_some() && document.with_document_ready(|_| ()).is_some();
         if (!ready || !selection.uids.is_empty()) && let Some(source) = source {
-            let publication = documents.published().map(|(_, _, generation)| generation);
+            let publication = source.publication_receipt().or_else(|| documents.published().map(|(_, _, generation)| generation));
             facts.request(key.clone(), source, facts::records(document).clone(), publication);
         }
         facts.flush();

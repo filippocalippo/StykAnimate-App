@@ -21,12 +21,15 @@ pub const THUMBNAILS: usize = 8;
 const SLOTS: usize = 1 + LOOKAHEAD + ONIONS + PREVIEWS + THUMBNAILS;
 const MAX_HIDDEN: usize = 65_536;
 
-/// K-doc supplies this seam. Called ONLY on workers. Return the immutable
+/// K-doc supplies this seam. Snapshot and picture access run ONLY on workers. Return the immutable
 /// generation for exactly this revision/resource epoch, or None; do not hold a
 /// store lock while preparing it. A resource epoch changes when mutable image
 /// or cel bounds change without a document edit.
 pub trait FrameDocument: Send + Sync {
     fn snapshot(&self, revision: u64, resource_epoch: u64) -> Option<Arc<Generation>>;
+    /// Sources published outside the document host expose a cheap receipt for retry admission.
+    /// Read on the interface: an atomic stamp only, never a generation load or a blocking lock.
+    fn publication_receipt(&self) -> Option<u64> { None }
     /// The document's existing picture service, with its workers already running.
     /// Only the paint worker calls this; no decoder is constructed by the view.
     fn picture_engine(&self) -> Option<styk_engine::Engine> {

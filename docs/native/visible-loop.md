@@ -87,6 +87,8 @@ mouse and numeric-key entry also require the unattended hidden-window strategy.
 An unpublished facts reply keeps its request identity until the document host supplies a new
 publication receipt. Refreshing pending Properties cannot requeue that same miss and spin
 while recovery is holding publication. A receipt delivered before the old reply is consumed
-also admits exactly one retry.
+also admits exactly one retry. Catalogue/test publications expose the same signal through
+`FrameDocument::publication_receipt`, an atomic stamp read without loading a generation.
+The host remains the source of receipts for normal documents.
 
 Every build, test and app run goes through the machine queue.

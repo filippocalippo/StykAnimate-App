@@ -84,10 +84,14 @@ pub struct FixturePublication {
     engine: Engine,
     lineage: u64,
     generations: Mutex<HashMap<u64, Arc<styk_engine::Generation>>>,
+    receipt: std::sync::atomic::AtomicU64,
 }
 
 #[cfg(feature = "engine")]
 impl FrameDocument for FixturePublication {
+    fn publication_receipt(&self) -> Option<u64> {
+        Some(self.receipt.load(std::sync::atomic::Ordering::Acquire))
+    }
     fn picture_engine(&self) -> Option<Engine> {
         Some(self.engine.clone())
     }
@@ -105,7 +109,7 @@ impl FixturePublication {
             .open_document(styk_engine::document::OpenSource::File { bytes, name }, styk_engine::document::OpenOptions { layer_timeline: true }, &|| false)
             .map_err(|error| error.message)?;
         engine.activate(&opened.typed, &opened.tree, 0).map_err(|error| error.message)?;
-        Ok(FixturePublication { lineage: opened.lineage(), engine, generations: Mutex::new(HashMap::new()) })
+        Ok(FixturePublication { lineage: opened.lineage(), engine, generations: Mutex::new(HashMap::new()), receipt: std::sync::atomic::AtomicU64::new(0) })
     }
 
     /// Publishes `tree` as the generation of `revision`.
@@ -113,6 +117,7 @@ impl FixturePublication {
         self.engine.publish_tree(self.lineage, tree, revision).map_err(|error| error.message)?.ok_or("the publication holds another document")?;
         let generation = self.engine.generation().ok_or("nothing was published")?;
         self.generations.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(revision, generation);
+        self.receipt.fetch_add(1, std::sync::atomic::Ordering::Release);
         Ok(())
     }
 }
