@@ -164,6 +164,20 @@ struct LayerMove {
     /// When it started (the core's injected clock), stamped right after the dispatch that began it.
     started: Option<u64>,
     dialog: bool,
+    /// The person closed the dialog (Escape, its close button): the move is cancelled and the dialog stays closed.
+    dismissed: bool,
+}
+
+/// The focus targets of the layer move's dialog.
+pub mod ids {
+    use crate::focus::FocusId;
+    const BASE: u64 = (1 << 39) + 0x200;
+    /// The dialog's Cancel (focused as it opens).
+    pub const CANCEL: FocusId = FocusId(BASE);
+    /// The dialog's close button.
+    pub const CLOSE: FocusId = FocusId(BASE + 1);
+    /// The overlay host's animation key of the dialog's indeterminate progress bar (`Host::phase`).
+    pub const PROGRESS: u64 = BASE + 0xff;
 }
 
 /// Today's `changeFigureLayer` shows its dialog when the move takes this long.
@@ -346,6 +360,8 @@ pub struct Panel {
     name: Option<NameDraft>,
     picker: Option<Picker>,
     layer_move: Option<LayerMove>,
+    /// The overlay the layer move's dialog is, while it is open on the host.
+    layer_dialog: Option<u64>,
     /// The last picker request's id.
     requests: u64,
     hinted: bool,
@@ -445,6 +461,58 @@ impl Panel {
         self.layer_move.as_ref().map(|moving| LayerMoveView { dialog: moving.dialog, title: Msg::new("inspectorView.moveFiguresToLayer"), status: Msg::new("app.preservingAnimation") })
     }
 
+    /// The layer move's dialog while it is open: its overlay and what it shows.
+    pub fn layer_dialog(&self) -> Option<(u64, LayerMoveView)> {
+        Some((self.layer_dialog?, self.layer_move()?))
+    }
+
+    /// Keeps the layer move's dialog in line with the move, on the overlay host (as recovery's dialogs are): it opens
+    /// once the move has run 150 ms, with Cancel focused; it closes when the move ends, and focus returns where it
+    /// was; a dialog the host closed (Escape, its close button) cancels the move, as today's dialog's `close` did.
+    pub(crate) fn sync_dialog(&mut self, documents: &mut Documents, host: &mut crate::overlay::host::Host, focus: &mut crate::focus::FocusState) -> Vec<Effect> {
+        use crate::focus::{FocusArea, FocusTarget, TargetKind};
+        use crate::overlay::host::dialogs;
+        struct Animation;
+        impl Animation {
+            fn start(id: u64) -> crate::overlay::host::Event {
+                crate::overlay::host::Event::Animate { id, kind: Some(crate::overlay::host::Animation::Progress) }
+            }
+            fn stop(id: u64) -> crate::overlay::host::Event {
+                crate::overlay::host::Event::Animate { id, kind: None }
+            }
+        }
+        let mut effects = Vec::new();
+        match (self.layer_move.as_mut(), self.layer_dialog) {
+            (Some(moving), None) if moving.dialog && !moving.dismissed => {
+                let targets = vec![FocusTarget::new(ids::CANCEL.0, FocusArea::Panels, TargetKind::Control), FocusTarget::new(ids::CLOSE.0, FocusArea::Panels, TargetKind::Control)];
+                let (overlay, opened) = dialogs::open(host, focus, targets, ids::CANCEL);
+                self.layer_dialog = overlay;
+                effects.extend(opened);
+                // Today's indeterminate <progress> sweeps while the move runs: a loop the host times.
+                let now = host.now();
+                effects.extend(dialogs::carry(host.event(Animation::start(ids::PROGRESS), focus, now)));
+            }
+            (Some(moving), Some(overlay)) if !dialogs::is_open(host, overlay) => {
+                self.layer_dialog = None;
+                let now = host.now();
+                effects.extend(dialogs::carry(host.event(Animation::stop(ids::PROGRESS), focus, now)));
+                moving.dismissed = true;
+                // A refused cancel (the move already ended) leaves its completion to report.
+                let _ = documents.dispatch(crate::documents::Request::Cancel(moving.job));
+            }
+            (None, Some(overlay)) => {
+                self.layer_dialog = None;
+                let now = host.now();
+                effects.extend(dialogs::carry(host.event(Animation::stop(ids::PROGRESS), focus, now)));
+                if dialogs::is_open(host, overlay) {
+                    effects.extend(dialogs::close(host, focus, overlay));
+                }
+            }
+            _ => {}
+        }
+        effects
+    }
+
     /// Whether `job` is this panel's layer move.
     pub fn owns(&self, job: JobId) -> bool {
         self.layer_move.as_ref().is_some_and(|moving| moving.job == job)
@@ -503,7 +571,7 @@ impl Panel {
         let request = Request::Call { document: id, method: "assignFiguresToLayer".into(), args: vec![Value::array(uids), Value::str(&layer)], view: Value::Null };
         match documents.dispatch(request) {
             Ok(DocumentEffect::Started(job)) => {
-                self.layer_move = Some(LayerMove { job, document: id, layer, started: None, dialog: false });
+                self.layer_move = Some(LayerMove { job, document: id, layer, started: None, dialog: false, dismissed: false });
                 Ok(())
             }
             // Admission refused it (another job runs): the person is told, nothing is half done.

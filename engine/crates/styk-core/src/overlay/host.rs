@@ -692,3 +692,40 @@ impl Host {
         Some((tip, self.bound_of(FocusId(tip.target))?))
     }
 }
+
+/// What an owner's dialog does on the host, for the owners that keep one open (recovery's chooser and close prompt, the
+/// Inspector's layer move): open it, close it, ask whether it is still open, and carry the host's update out as the
+/// core's effects.
+pub(crate) mod dialogs {
+    use super::{Event, Host, Update};
+    use crate::commands::Effect;
+    use crate::focus::{FocusId, FocusState, FocusTarget};
+    use crate::overlay::Kind;
+
+    /// The host's update as the core's effects: the stack's effects and a dismissed message.
+    pub(crate) fn carry(update: Update) -> Vec<Effect> {
+        let mut effects: Vec<Effect> = update.effects.into_iter().map(Effect::Overlay).collect();
+        effects.extend(update.dismissed.map(Effect::MessageDismissed));
+        effects
+    }
+
+    /// Whether the overlay is still on the stack (Escape or a press outside may have closed it).
+    pub(crate) fn is_open(host: &Host, overlay: u64) -> bool {
+        host.stack().entries().iter().any(|entry| entry.id == overlay)
+    }
+
+    /// Opens a modal dialog whose content has these focus targets; the new overlay's identity and the stack's effects.
+    pub(crate) fn open(host: &mut Host, focus: &mut FocusState, targets: Vec<FocusTarget>, initial: FocusId) -> (Option<u64>, Vec<Effect>) {
+        let known: Vec<u64> = host.stack().entries().iter().map(|entry| entry.id).collect();
+        let now = host.now();
+        let update = host.event(Event::OpenOverlay { kind: Kind::Dialog, guarded: false, targets, initial: Some(initial) }, focus, now);
+        let overlay = host.stack().entries().iter().map(|entry| entry.id).find(|id| !known.contains(id));
+        (overlay, carry(update))
+    }
+
+    /// Closes the overlay; focus returns where it was when the dialog opened.
+    pub(crate) fn close(host: &mut Host, focus: &mut FocusState, overlay: u64) -> Vec<Effect> {
+        let now = host.now();
+        carry(host.event(Event::CloseOverlay(overlay), focus, now))
+    }
+}

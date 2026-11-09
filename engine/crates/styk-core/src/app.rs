@@ -357,7 +357,9 @@ impl Core {
         let _ = self.documents.set_auto_key(self.settings.animation().timeline_mode == crate::settings::TimelineMode::Advanced && self.settings.view().auto_key);
         let source = self.documents.active().and_then(|document| self.sources.get(&document.id())).cloned();
         self.inspector.refresh(&mut self.documents, &self.view, self.facts.as_mut(), source, &mut self.session);
-        self.recovery.refresh(&mut self.documents, &mut self.overlays, &mut self.focus, &self.presentation)
+        let mut effects = self.inspector.sync_dialog(&mut self.documents, &mut self.overlays, &mut self.focus);
+        effects.extend(self.recovery.refresh(&mut self.documents, &mut self.overlays, &mut self.focus, &self.presentation));
+        effects
     }
 
     /// Toolkit adapters bind command choices; arbitrary owners receive `OverlayChoice` effects.
@@ -457,6 +459,11 @@ impl Core {
             Command::Timeline(event) => self.timeline_event(event),
             Command::Settings(event) => self.settings_event(event),
             Command::Overlay { event, now } => self.overlay_event(event, now),
+            // The layer move's Cancel is a terminal action: it reaches the move while the session is out on the worker
+            // (an ordinary edit waits for it instead).
+            Command::Inspector(event @ crate::inspector::Event::CancelLayerMove) => {
+                self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event)
+            }
             Command::Inspector(event) => {
                 let stage = self.stage();
                 if self.timeline.finish(&mut self.documents, &mut self.session, stage.as_deref()).is_err() {

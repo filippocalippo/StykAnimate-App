@@ -568,3 +568,110 @@ impl SaveRig {
         panic!("the save did not answer")
     }
 }
+
+/// A spawner whose documents worker waits at a gate before it takes its first job, so a test decides when the layer
+/// move runs (every other lane starts at once).
+struct Gated(Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
+
+impl Gated {
+    fn new() -> (Arc<Gated>, Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>) {
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        (Arc::new(Gated(gate.clone())), gate)
+    }
+}
+
+fn release(gate: &(std::sync::Mutex<bool>, std::sync::Condvar)) {
+    *gate.0.lock().unwrap() = true;
+    gate.1.notify_all();
+}
+
+impl styk_services::Spawner for Gated {
+    fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+        let gate = (name == "styk-documents").then(|| self.0.clone());
+        std::thread::Builder::new()
+            .name(name.to_owned())
+            .spawn(move || {
+                if let Some(gate) = gate {
+                    let mut open = gate.0.lock().unwrap();
+                    while !*open {
+                        open = gate.1.wait(open).unwrap();
+                    }
+                }
+                job()
+            })
+            .map(|_| ())
+            .map_err(|error| styk_services::SpawnError(error.to_string()))
+    }
+}
+
+/// A sheet with figure 1 selected, focus on a control of the page, the clock at 1000, and the move to layer 2 started
+/// on a held worker.
+fn held_move() -> (Core, Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>, String) {
+    use styk_core::focus::{FocusArea, FocusId, FocusTarget, ScopeId, TargetKind};
+    let (spawner, gate) = Gated::new();
+    let mut core = testing::core_with_document(SHEET, "Test.styk", spawner).unwrap();
+    testing::call(&mut core, "select", "[1,-1]").unwrap();
+    let before = records(&core);
+    core.focus_mut().register(ScopeId::ROOT, vec![FocusTarget::new(7, FocusArea::Panels, TargetKind::Control)]);
+    core.focus_mut().focus(FocusId(7));
+    core.dispatch(Command::Wake { now: 1_000 });
+    core.dispatch(Command::Inspector(Event::Choose(Choice::FigureLayer, Arc::from("layer-2"))));
+    assert!(core.inspector().layer_move().is_some(), "the move waits on the worker");
+    (core, gate, before)
+}
+
+#[test]
+fn a_layer_move_longer_than_150_ms_opens_its_dialog_and_focus_returns_when_it_ends() {
+    use styk_core::focus::FocusId;
+    use styk_core::inspector::ids;
+    let (mut core, gate, _) = held_move();
+    core.dispatch(Command::Wake { now: 1_149 });
+    assert!(core.inspector().layer_dialog().is_none(), "not before 150 ms");
+    core.dispatch(Command::Wake { now: 1_150 });
+    let (overlay, view) = core.inspector().layer_dialog().expect("the dialog opens on the overlay host");
+    assert!(view.dialog);
+    assert!(core.overlays().stack().entries().iter().any(|entry| entry.id == overlay));
+    assert_eq!(core.focus().focused(), Some(ids::CANCEL), "Cancel takes focus");
+    assert!(core.overlays().phase(ids::PROGRESS) < 1.0, "the bar's loop runs");
+    release(&gate);
+    finish_move(&mut core);
+    assert!(core.inspector().layer_dialog().is_none() && core.overlays().stack().entries().is_empty(), "it closes when the move ends");
+    assert_eq!(core.focus().focused(), Some(FocusId(7)), "focus returns where it was");
+    assert_eq!(testing::undo_depth(&core), 1);
+    assert_eq!(core.view_state().layers(), &["layer-2"]);
+}
+
+#[test]
+fn cancel_through_the_dialog_leaves_the_document_as_it_was() {
+    use styk_core::focus::FocusId;
+    for escape in [false, true] {
+        let (mut core, gate, before) = held_move();
+        core.dispatch(Command::Wake { now: 1_150 });
+        assert!(core.inspector().layer_dialog().is_some());
+        if escape {
+            // Escape closes the dialog on the host: today's dialog's `close` cancels the move.
+            core.dispatch(Command::Overlay { event: styk_core::overlay::host::Event::Escape, now: 1_160 });
+            core.refresh();
+        } else {
+            core.dispatch(Command::Inspector(Event::CancelLayerMove));
+        }
+        release(&gate);
+        finish_move(&mut core);
+        same(&records(&core), &before, &format!("a cancelled move changes nothing (escape: {escape})"));
+        assert_eq!(testing::undo_depth(&core), 0);
+        assert!(core.inspector().layer_dialog().is_none() && core.overlays().stack().entries().is_empty());
+        assert_eq!(core.focus().focused(), Some(FocusId(7)));
+    }
+}
+
+#[test]
+fn a_layer_move_shorter_than_150_ms_never_shows_the_dialog() {
+    let (mut core, gate, _) = held_move();
+    release(&gate);
+    finish_move(&mut core);
+    assert_eq!(testing::undo_depth(&core), 1, "it landed");
+    core.dispatch(Command::Wake { now: 1_150 });
+    core.dispatch(Command::Wake { now: 2_000 });
+    assert!(core.inspector().layer_dialog().is_none() && core.overlays().stack().entries().is_empty(), "no dialog after it ended");
+    assert_eq!(core.inspector().deadline(), None);
+}

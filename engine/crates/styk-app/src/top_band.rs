@@ -425,11 +425,13 @@ impl TopBand {
     }
 
     /// The overlay layer over the band and dock: menus, lists, the stage's message,
-    /// tooltips and recovery dialogs, drawn from the core-owned host. Every message
+    /// tooltips, recovery dialogs and the layer move's progress dialog, drawn from the core-owned host. Every message
     /// reaches `Core::dispatch` through the same interface adapter.
     pub fn overlay_layer(&self, theme: Theme) -> iced::Element<'_, Message> {
         let window = self.shell.window();
-        let owned = styk_ui::recovery::owned(&self.core, theme.palette(), Size::new(window.width, window.height));
+        let mut owned = styk_ui::recovery::owned(&self.core, theme.palette(), Size::new(window.width, window.height));
+        // The Inspector's layer move, while its progress dialog is open.
+        owned.extend(styk_ui::inspector::owned(&self.core, theme.palette(), Size::new(window.width, window.height)));
         styk_ui::overlays::layer(&self.core, theme.palette(), self.height() + 6.0, None, owned).map(Message::Editor).boxed()
     }
 

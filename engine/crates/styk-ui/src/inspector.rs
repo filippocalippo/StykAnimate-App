@@ -718,3 +718,31 @@ enum ButtonSize {
 
 /// The Library footer's height (`.properties-library-save`).
 const FOOTER_HEIGHT: f32 = 46.0;
+
+/// The figures' move to another layer, while its dialog is open (today's `changeFigureLayer`: the title, "Preserving
+/// animation…" over an indeterminate bar, and Cancel): a modal in the focus scope of the overlay the core opened for it,
+/// entering at the phase the host gives; the bar sweeps at the host's loop phase. Cancel and the close button cancel.
+#[cfg(feature = "engine")]
+pub fn owned<'a>(core: &styk_core::app::Core, palette: &'static styk_design::Palette, window: iced::Size) -> Vec<styk_design::widgets::layer::Placed<'a, Message>> {
+    use styk_core::inspector::ids;
+    use styk_design::widgets::dialog::{Dialog, DialogSize, modal};
+    use styk_design::widgets::progress::Bar;
+    let Some((overlay, view)) = core.inspector().layer_dialog() else { return Vec::new() };
+    let presentation = core.presentation();
+    let say = |message: &Msg| presentation.label(&styk_core::i18n::Label::Msg(message.clone()));
+    let cancel = send(Event::CancelLayerMove);
+    let status = styk_design::widgets::control::words(say(&view.status), TextStyle::from_role(&tokens::scale::TYPE_BODY), palette.text_2);
+    let bar = Bar::new(palette, None).width(Length::Fill).phase(core.overlays().phase(ids::PROGRESS));
+    let body = Column::with_children(vec![status, bar.boxed()]).spacing(tokens::scale::SPACE_2);
+    let spec = Dialog {
+        size: DialogSize::Sm,
+        title: say(&view.title),
+        description: None,
+        body: body.boxed(),
+        actions: vec![Button::new(ids::CANCEL, FocusArea::Panels, palette, say(&Msg::new("common.cancel")), cancel.clone()).into_element()],
+        meta: None,
+        error: None,
+        close: Some((ids::CLOSE, cancel)),
+    };
+    vec![modal(palette, overlay, spec, window, core.overlays().phase(overlay))]
+}

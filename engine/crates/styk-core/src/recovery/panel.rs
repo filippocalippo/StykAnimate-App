@@ -6,9 +6,9 @@ use crate::documents::recovery::Command as Ask;
 use crate::documents::{CloseChoice, Documents, Effect as Doc, HostError, PromptId, Request};
 use crate::focus::{FocusArea, FocusId, FocusState, FocusTarget, TargetKind};
 use crate::i18n::{Label, Msg, Presentation};
-use crate::overlay::host::{Event as Overlay, Host, Update};
+use crate::overlay::host::dialogs::{carry, close, is_open, open};
+use crate::overlay::host::{Event as Overlay, Host};
 use crate::overlay::messages::Message;
-use crate::overlay::Kind;
 use styk_services::recovery::Slot;
 use std::time::Duration;
 
@@ -44,16 +44,6 @@ pub struct Panel {
     session_end: Option<SessionEnd>,
 }
 
-fn carry(update: Update) -> Vec<Effect> {
-    let mut effects: Vec<Effect> = update.effects.into_iter().map(Effect::Overlay).collect();
-    effects.extend(update.dismissed.map(Effect::MessageDismissed));
-    effects
-}
-
-fn is_open(host: &Host, overlay: u64) -> bool {
-    host.stack().entries().iter().any(|entry| entry.id == overlay)
-}
-
 /// A refusal of the documents host as the person reads it.
 fn refusal(error: &HostError) -> Label {
     match error {
@@ -64,20 +54,6 @@ fn refusal(error: &HostError) -> Label {
 
 fn target(id: FocusId) -> FocusTarget {
     FocusTarget::new(id.0, FocusArea::Panels, TargetKind::Control)
-}
-
-/// Opens a modal dialog whose content has these focus targets; the new overlay's identity and the stack's effects.
-fn open(host: &mut Host, focus: &mut FocusState, targets: Vec<FocusTarget>, initial: FocusId) -> (Option<u64>, Vec<Effect>) {
-    let known: Vec<u64> = host.stack().entries().iter().map(|entry| entry.id).collect();
-    let now = host.now();
-    let update = host.event(Overlay::OpenOverlay { kind: Kind::Dialog, guarded: false, targets, initial: Some(initial) }, focus, now);
-    let overlay = host.stack().entries().iter().map(|entry| entry.id).find(|id| !known.contains(id));
-    (overlay, carry(update))
-}
-
-fn close(host: &mut Host, focus: &mut FocusState, overlay: u64) -> Vec<Effect> {
-    let now = host.now();
-    carry(host.event(Overlay::CloseOverlay(overlay), focus, now))
 }
 
 impl Panel {
