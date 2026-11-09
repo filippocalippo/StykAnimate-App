@@ -20,7 +20,7 @@ fn opened_bytes(bytes: &[u8]) -> (Core, Arc<Progress>, Arc<styk_services::files:
     documents.attach_host(HostOptions {
         engine: Engine::new(|| 0., Budgets::for_device(None)), spawner: spawner.clone(),
         files: files.clone(),
-        startup: json::parse(STARTUP).unwrap(), clock: || 0., notify: progress.wake(),
+        startup: json::parse(STARTUP).unwrap(), clock: Arc::new(|| 0.), notify: progress.wake(),
     }).unwrap();
     let mut core = Core::new(documents);
     core.start_runtime(spawner, Arc::new(FixedClock::new()), progress.clone()).unwrap();
@@ -33,7 +33,7 @@ fn until(core: &mut Core, progress: &Progress, ready: impl Fn(&Core) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if progress.poll(std::task::Waker::noop()) {
-            while let Some(effect) = core.poll_document() { core.document_effect(&effect); }
+            while let Some(effect) = core.poll_document() { assert!(!matches!(effect, styk_core::documents::Effect::Failed { .. }), "document worker failed: {effect:?}"); core.document_effect(&effect); }
             send(core, Command::Wake { now: 0 });
         }
         if ready(core) { return; }
@@ -86,7 +86,7 @@ fn fitted_and_panned_stage_picks_project_the_query_and_handles_once() {
 fn send(core: &mut Core, command: Command) -> Vec<Effect> {
     let effects = core.dispatch(command);
     if effects.iter().any(|effect| matches!(effect, Effect::RequestFrame | Effect::PollDocuments)) {
-        while let Some(effect) = core.poll_document() { core.document_effect(&effect); }
+        while let Some(effect) = core.poll_document() { assert!(!matches!(effect, styk_core::documents::Effect::Failed { .. }), "document worker failed: {effect:?}"); core.document_effect(&effect); }
     }
     effects
 }
@@ -126,8 +126,8 @@ fn cancelled_or_failed_save_picker_releases_the_host_for_the_next_request() {
     assert_eq!(core.documents.active().unwrap().view().unwrap().history.undo, 0);
 }
 #[test]
-fn number_colour_history_save_reopen_and_front_document_stay_together() {
-    use styk_core::inspector::{Event as Inspector, FieldEvent, property::PropertyKey, model::{ColorTarget, Kind}};
+fn number_history_save_reopen_and_front_document_stay_together() {
+    use styk_core::inspector::{Event as Inspector, FieldEvent, property::PropertyKey, model::Kind};
     use styk_services::{dialogs::Choice, files::FileTarget};
     let (mut core, progress, files) = opened();
     click(&mut core, [480., 280.]); settle(&mut core, &progress);
@@ -141,14 +141,6 @@ fn number_colour_history_save_reopen_and_front_document_stay_together() {
     assert_eq!(core.documents.active().unwrap().view().unwrap().history.undo, 1);
     send(&mut core, Command::Run(CommandId::Undo)); settle(&mut core, &progress); assert_eq!(value(&core), 480.);
     send(&mut core, Command::Run(CommandId::Redo)); settle(&mut core, &progress); assert_eq!(value(&core), 520.);
-    let effects = send(&mut core, Command::Inspector(Inspector::Color(ColorTarget::Figure)));
-    // Losing window focus to the native modal does not invalidate its colour answer.
-    send(&mut core, Command::Blur);
-    let answer = send(&mut core, Command::DialogAnswer { id: dialog(&effects), result: Ok(Choice::Color(Some([220, 60, 60]))) });
-    assert!(!answer.iter().any(|effect| matches!(effect, Effect::Notice(_))), "colour answer: {answer:?}");
-    settle(&mut core, &progress);
-    assert_eq!(styk_core::inspector::color::initial(core.inspector(), ColorTarget::Figure), Some([220, 60, 60]));
-    assert_eq!(core.documents.active().unwrap().view().unwrap().history.undo, 2);
     let first = core.documents.active().unwrap().id(); let first_stage = core.stage().unwrap();
     let path = FileTarget::new("loop.styk");
     let effects = send(&mut core, Command::Run(CommandId::SaveAs));
@@ -162,7 +154,6 @@ fn number_colour_history_save_reopen_and_front_document_stay_together() {
     settle(&mut core, &progress);
     let second = core.documents.active().unwrap().id(); assert_ne!(first, second);
     click(&mut core, [520., 280.]); settle(&mut core, &progress); assert_eq!(value(&core), 520.);
-    assert_eq!(styk_core::inspector::color::initial(core.inspector(), ColorTarget::Figure), Some([220, 60, 60]));
     assert_eq!(core.documents.active().unwrap().view().unwrap().history.undo, 0);
     send(&mut core, Command::Activate(first)); settle(&mut core, &progress); assert!(Arc::ptr_eq(&first_stage, &core.stage().unwrap()));
     send(&mut core, Command::Activate(second)); settle(&mut core, &progress);
@@ -171,26 +162,7 @@ fn number_colour_history_save_reopen_and_front_document_stay_together() {
     assert_eq!(value(&core), 520.);
 }
 #[test]
-fn superseded_clicks_and_colour_answers_do_not_change_the_new_selection() {
-    use styk_core::inspector::{Event as Inspector, model::ColorTarget};
-    use styk_services::dialogs::Choice;
-    let (mut core, progress, _) = opened();
-    click(&mut core, [480., 280.]); click(&mut core, [20., 20.]); settle(&mut core, &progress);
-    assert_eq!(core.documents.active().unwrap().selection().unwrap().uid, None);
-    click(&mut core, [480., 280.]); settle(&mut core, &progress);
-    let effects = send(&mut core, Command::Inspector(Inspector::Color(ColorTarget::Figure)));
-    click(&mut core, [20., 20.]);
-    send(&mut core, Command::DialogAnswer { id: dialog(&effects), result: Ok(Choice::Color(Some([1, 2, 3]))) });
-    settle(&mut core, &progress);
-    assert_eq!(core.documents.active().unwrap().selection().unwrap().uid, None);
-    assert_eq!(core.documents.active().unwrap().view().unwrap().history.undo, 0);
-    click(&mut core, [480., 280.]); settle(&mut core, &progress);
-    assert_ne!(styk_core::inspector::color::initial(core.inspector(), ColorTarget::Figure), Some([1, 2, 3]));
-}
-
-#[test]
 fn closing_the_last_tab_replaces_its_lineage_and_never_reuses_its_facts() {
-    use styk_core::inspector::{color, model::ColorTarget};
     let mut tree = json::parse(STARTUP).unwrap();
     for figure in tree.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap() {
         for segment in figure.make_obj().unwrap().get_mut("segments").unwrap().make_arr().unwrap() {
@@ -199,27 +171,11 @@ fn closing_the_last_tab_replaces_its_lineage_and_never_reuses_its_facts() {
     }
     let (mut core, progress, _) = opened_bytes(json::to_string(&tree).as_bytes());
     let before = core.documents.active().unwrap(); let (id, lineage, revision) = (before.id(), before.lineage(), before.revision());
-    assert_eq!(color::initial(core.inspector(), ColorTarget::Figure), Some([220, 60, 60]));
+    assert_eq!(shown_colour(&core), Some([220, 60, 60]));
     send(&mut core, Command::Run(CommandId::CloseProject)); settle(&mut core, &progress);
     let after = core.documents.active().unwrap();
     assert_eq!(after.id(), id); assert_ne!(after.lineage(), lineage); assert_eq!(after.revision(), revision);
-    assert_eq!(color::initial(core.inspector(), ColorTarget::Figure), Some([13, 153, 255]));
-}
-
-#[test]
-fn the_selected_joints_colour_changes_its_instance_and_undo_restores_it() {
-    use styk_core::inspector::{Event as Inspector, color, model::ColorTarget};
-    use styk_services::dialogs::Choice;
-    let (mut core, progress, _) = opened();
-    click(&mut core, [480., 202.]); settle(&mut core, &progress);
-    let effects = send(&mut core, Command::Inspector(Inspector::Color(ColorTarget::Segment)));
-    let answer = send(&mut core, Command::DialogAnswer { id: dialog(&effects), result: Ok(Choice::Color(Some([19, 80, 90]))) });
-    assert!(!answer.iter().any(|effect| matches!(effect, Effect::Notice(_))), "{answer:?}");
-    settle(&mut core, &progress);
-    assert_eq!(color::initial(core.inspector(), ColorTarget::Segment), Some([19, 80, 90]));
-    assert_eq!(core.documents.active().unwrap().view().unwrap().history.undo, 1);
-    send(&mut core, Command::Run(CommandId::Undo)); settle(&mut core, &progress);
-    assert_eq!(color::initial(core.inspector(), ColorTarget::Segment), Some([13, 153, 255]));
+    assert_eq!(shown_colour(&core), Some([13, 153, 255]));
 }
 
 #[test]
@@ -230,4 +186,151 @@ fn a_cancelled_press_never_reaches_the_session() {
     send(&mut core, Command::Stage(Event::Pointer(Pointer { id: 0, phase: PointerPhase::Cancel, point: [0., 0.], button: Button::Left, modifiers: Modifiers::NONE })));
     settle(&mut core, &progress);
     assert_eq!(core.documents.active().unwrap().selection().unwrap().uid, None);
+}
+
+fn shown_colour(core: &Core) -> Option<[u8; 3]> {
+    use styk_core::inspector::model::{Row, Paint, ColorTarget};
+    fn find(rows: &[Row]) -> Option<[u8; 3]> {
+        rows.iter().find_map(|row| match row {
+            Row::Color(row) if row.target == ColorTarget::Figure => match row.paint { Paint::Solid(rgb) => Some(rgb), _ => None },
+            Row::Grid { rows, .. } | Row::Group { rows, .. } => find(rows),
+            _ => None,
+        })
+    }
+    core.inspector().model()?.sections.iter().find_map(|section| find(&section.rows))
+}
+
+#[test]
+fn queued_pen_interrupt_and_overflow_cancel_before_any_pick_is_adopted() {
+    use styk_services::input::{InputQueue, InputEvent, PenSample, Tool, Phase, PenButtons, InterruptReason};
+    for overflow in [false, true] {
+        let (mut core, progress, _) = opened();
+        click(&mut core, [20., 20.]); settle(&mut core, &progress);
+        let stage = core.stage().unwrap();
+        let queue = InputQueue::with_capacity(1); stage.set_input(queue.clone());
+        let local = stage.view().unwrap().document_to_stage([480., 280.], [960, 540], None);
+        let viewport = stage.viewport().unwrap();
+        let point = viewport.stage_to_window(local).map(|v| v * viewport.dpr);
+        let mut pen = PenSample::at(1, 44, Tool::Pen, point[0], point[1]);
+        pen.phase = Phase::Down; pen.buttons = PenButtons::TIP;
+        assert!(queue.push(InputEvent::Sample(pen)));
+        if overflow { pen.phase = Phase::Move; assert!(!queue.push(InputEvent::Sample(pen))); }
+        else { assert!(queue.push(InputEvent::Interrupted { pointer: 44, time_ns: 2, reason: InterruptReason::Canceled })); }
+        send(&mut core, Command::Wake { now: 0 }); settle(&mut core, &progress);
+        assert_eq!(core.documents.active().unwrap().selection().unwrap().uid, None);
+        assert_eq!(core.documents.active().unwrap().view().unwrap().history.undo, 0);
+    }
+}
+
+#[test]
+fn a_different_pointer_cannot_cancel_the_current_press_and_latest_click_wins() {
+    let (mut core, progress, _) = opened();
+    click(&mut core, [20., 20.]); click(&mut core, [480., 280.]);
+    send(&mut core, Command::Stage(Event::Pointer(Pointer { id: 99, phase: PointerPhase::Cancel, point: [0., 0.], button: Button::Left, modifiers: Modifiers::NONE })));
+    settle(&mut core, &progress);
+    assert_eq!(core.documents.active().unwrap().selection().unwrap().uid, Some(1));
+    click(&mut core, [480., 280.]); click(&mut core, [20., 20.]); settle(&mut core, &progress);
+    assert_eq!(core.documents.active().unwrap().selection().unwrap().uid, None);
+}
+
+fn edit_number(core: &mut Core, progress: &Progress) {
+    use styk_core::inspector::{Event as Inspector, FieldEvent, property::PropertyKey};
+    click(core, [480., 280.]); settle(core, progress);
+    for event in [FieldEvent::Focus, FieldEvent::Input("520".into()), FieldEvent::Enter] {
+        send(core, Command::Inspector(Inspector::Field(PropertyKey::RootX, event)));
+    }
+    settle(core, progress);
+}
+
+#[test]
+fn untitled_close_and_quit_save_route_through_the_shared_picker_consumer() {
+    use styk_core::recovery::model::{Event as Recovery, Choice};
+    use styk_services::{dialogs::Choice as Pick, files::FileTarget};
+    for quit in [false, true] {
+        let (mut core, progress, files) = opened(); edit_number(&mut core, &progress);
+        let lineage = core.documents.active().unwrap().lineage();
+        send(&mut core, if quit { Command::Quit } else { Command::Run(CommandId::CloseProject) });
+        until(&mut core, &progress, |c| c.recovery().closing().is_some());
+        assert!(core.recovery().closing().unwrap().1.save_available);
+        let effects = send(&mut core, Command::Recovery(Recovery::Respond(Choice::Save)));
+        let picker = dialog(&effects); assert!(core.documents.edits_locked());
+        let revision = core.documents.active().unwrap().revision();
+        send(&mut core, Command::Run(CommandId::Undo)); assert_eq!(core.documents.active().unwrap().revision(), revision);
+        let target = FileTarget::new(if quit { "quit.styk" } else { "closed.styk" });
+        send(&mut core, Command::DialogAnswer { id: picker, result: Ok(Pick::File(Some(target.clone()))) });
+        until(&mut core, &progress, |c| files.get(&target).is_some() && (if quit { c.documents.edits_locked() && c.documents.active().is_some_and(|d| !d.dirty()) } else { c.documents.active().is_some_and(|d| d.lineage() != lineage) }));
+        assert!(core.recovery().closing().is_none());
+        let saved = Engine::new(|| 0., Budgets::for_device(None));
+        saved.open(&files.get(&target).unwrap(), "styk", "saved").unwrap();
+        assert_eq!(saved.generation().unwrap().prepared.evaluate(0.).objects[0].root[0], 520.);
+    }
+}
+
+#[test]
+fn cancelling_untitled_save_preserves_close_prompt_identity_and_document() {
+    use styk_core::recovery::model::{Event as Recovery, Choice};
+    for quit in [false, true] {
+        let (mut core, progress, _) = opened(); edit_number(&mut core, &progress);
+        let before = core.documents.active().unwrap().records().unwrap().clone();
+        send(&mut core, if quit { Command::Quit } else { Command::Run(CommandId::CloseProject) });
+        until(&mut core, &progress, |c| c.recovery().closing().is_some());
+        let overlay = core.recovery().closing().unwrap().0;
+        let effects = send(&mut core, Command::Recovery(Recovery::Respond(Choice::Save)));
+        send(&mut core, Command::DialogAnswer { id: dialog(&effects), result: Ok(styk_services::dialogs::Choice::File(None)) });
+        assert_eq!(core.recovery().closing().unwrap().0, overlay);
+        assert!(core.documents.active().unwrap().records().unwrap().same_node(&before));
+        assert!(core.documents.active().unwrap().dirty()); assert!(!core.documents.edits_locked());
+        // The same host prompt is still answerable, not merely the same overlay.
+        let retry = send(&mut core, Command::Recovery(Recovery::Respond(Choice::Save)));
+        send(&mut core, Command::DialogAnswer { id: dialog(&retry), result: Ok(styk_services::dialogs::Choice::File(None)) });
+        assert_eq!(core.recovery().closing().unwrap().0, overlay);
+        let cancelled = send(&mut core, Command::Recovery(Recovery::Respond(Choice::Cancel)));
+        assert!(!cancelled.iter().any(|effect| matches!(effect, Effect::Notice(_))));
+        assert!(core.recovery().closing().is_none());
+    }
+}
+
+#[test]
+fn selection_uses_strict_saved_locks_and_the_document_focus_lock() {
+    for (saved, focus, expected) in [("true", None, None), ("false", Some("other"), None), ("false", Some("layer-1"), Some(1))] {
+        let mut tree = json::parse(STARTUP).unwrap();
+        tree.make_obj().unwrap().get_mut("_styk").unwrap().make_obj().unwrap()
+            .get_mut("layers").unwrap().make_obj().unwrap().get_mut("byId").unwrap().make_obj().unwrap()
+            .get_mut("layer-1").unwrap().make_obj().unwrap().set("locked", json::parse(saved.as_bytes()).unwrap());
+        let (mut core, progress, _) = opened_bytes(json::to_string(&tree).as_bytes());
+        click(&mut core, [20., 20.]); settle(&mut core, &progress);
+        let id = core.documents.active().unwrap().id();
+        let lineage = core.documents.active().unwrap().lineage();
+        if let Some(focus) = focus { core.view_state_mut().set_layer_focus_lock(id, lineage, Some(vec![focus.to_owned()].into())); }
+        click(&mut core, [480., 280.]); settle(&mut core, &progress);
+        assert_eq!(core.documents.active().unwrap().selection().unwrap().uid, expected, "saved={saved} focus={focus:?}");
+        assert_eq!(core.documents.active().unwrap().view().unwrap().history.undo, 0);
+    }
+}
+
+#[test]
+fn open_dialog_keeps_desktop_filters_and_localized_labels() {
+    use styk_services::dialogs::Request as Picker;
+    for locale in ["en", "it"] {
+        let (mut core, _, _) = opened(); assert!(core.set_locale(locale));
+        let effects = send(&mut core, Command::Run(CommandId::Open));
+        let filters = effects.iter().find_map(|effect| if let Effect::Dialog { request: Picker::Open { filters, .. }, .. } = effect { Some(filters) } else { None }).unwrap();
+        assert_eq!(filters.iter().map(|f| f.extensions.join(",")).collect::<Vec<_>>(), ["styk,stykmov,stkz,piv,stk,json,nodes,nodemc,stknds,zip", "stykmov", "stkz", "piv", "stk", "styk,json"]);
+        for (filter, key) in filters.iter().zip(["animationAndStickFigures", "stykanimateMovieclip", "stykanimateFigure", "pivotAnimation", "pivotStickFigure", "stykanimateProject"]) {
+            let key = format!("desktop.main.{key}");
+            assert_eq!(filter.label, core.presentation().text(&styk_core::i18n::Msg::owned(key.clone())));
+            assert_ne!(filter.label, key);
+        }
+    }
+}
+
+#[test]
+fn instance_style_facts_and_pending_context_survive_without_a_colour_commit_path() {
+    let (mut core, progress, _) = opened();
+    let id = core.documents.active().unwrap().id();
+    core.documents.call(id, "setFigureColor", &[json::parse(b"[210,40,70]").unwrap(), json::parse(b"{}").unwrap()], &styk_core::engine::Value::Null).unwrap().result.unwrap();
+    send(&mut core, Command::Wake { now: 0 }); settle(&mut core, &progress);
+    assert_eq!(shown_colour(&core), Some([210, 40, 70]));
+    send(&mut core, Command::Run(CommandId::Undo)); settle(&mut core, &progress);
+    assert_eq!(shown_colour(&core), Some([13, 153, 255]));
 }

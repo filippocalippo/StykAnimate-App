@@ -16,7 +16,6 @@ use iced::{Event, Size, Subscription, Task, Widget as _, event, mouse, window};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use styk_core::automation::{self, Expect, MAX_SCRIPT_BYTES, Script, Step, Target};
 use styk_core::documents::{DocumentId, Documents, Effect as Opened, HostError, HostOptions, Request as Ask};
 use styk_core::focus::FocusId;
@@ -59,7 +58,9 @@ fn developer_stream(watch:&DeveloperWatch)->impl iced::futures::Stream<Item=Mess
 #[derive(Clone, Debug)]
 pub enum Message {
     Progress,
+    #[cfg(feature = "devtools")]
     TypeNumber(String),
+    #[cfg(feature = "devtools")]
     InputResult(Result<(), String>),
     Editor(styk_ui::message::Message),
     /// A message of the band's views.
@@ -85,7 +86,9 @@ pub enum Message {
 pub enum Request {
     /// Minimize.
     Minimize,
+    #[cfg(feature = "devtools")]
     InputClick([f64; 2]),
+    #[cfg(feature = "devtools")]
     InputNumber(String),
     Dialog { id: u64, request: styk_services::dialogs::Request },
     /// Close the window.
@@ -198,14 +201,6 @@ impl Drop for TopBand {
 /// The startup document the host is given (see `TopBand::new`).
 const STARTUP: &[u8] = include_bytes!("../../../tests/edit/startup.document.json");
 
-/// The engine's clock for budgeted reads, in milliseconds: the application clock as the band last read it (`TopBand::now`),
-/// so the engine runs on the one clock too. It is only ever stored by the interface thread.
-static ENGINE_NOW_BITS: AtomicU64 = AtomicU64::new(0);
-
-fn engine_clock() -> f64 {
-    f64::from_bits(ENGINE_NOW_BITS.load(Ordering::Relaxed))
-}
-
 /// Reads a script through its size limit (`diagnostics::read_file` reads one byte past it at most) and decodes it.
 fn read_script(path: &Path) -> Result<String, String> {
     let bytes = styk_platform::diagnostics::read_file(path, Some(MAX_SCRIPT_BYTES))?;
@@ -266,6 +261,8 @@ impl TopBand {
     pub fn new(window_size: Size, clock: Arc<dyn Clock>, fixed: Option<FixedClock>, spawner: Arc<dyn Spawner>, wakes: styk_platform::shell::Wakes, recovery: Option<Arc<dyn styk_services::recovery::Recovery>>, layouts: Option<Arc<styk_core::layout::LayoutStore>>, storage: Option<Arc<dyn styk_services::storage::Storage>>) -> Result<TopBand, String> {
         let window = shell::Window { width: window_size.width, height: window_size.height, ui_scale: 1.0, controls: !cfg!(target_os = "macos") };
         let unmeasured = shell::band::Labels { animate: 0.0, draw: 0.0, build: 0.0, export: 0.0, cancel: 0.0, test_rig: 0.0, done: 0.0 };
+        let source = clock.clone();
+        let engine_clock: Arc<dyn Fn() -> f64 + Send + Sync> = Arc::new(move || source.now().as_secs_f64() * 1000.0);
         let mut documents = Documents::new();
         let progress = styk_core::stage::Progress::new();
         let notify = progress.wake();
@@ -279,7 +276,7 @@ impl TopBand {
         let startup = json::parse(STARTUP).map_err(|error| format!("the startup document: {error:?}"))?;
         documents
             .attach_host(HostOptions {
-                engine: Engine::new(engine_clock, Budgets::for_device(None)),
+                engine: Engine::with_clock(engine_clock.clone(), Budgets::for_device(None)),
                 spawner: spawner.clone(),
                 files: Arc::new(styk_platform::files::LocalFiles),
                 startup,
@@ -562,7 +559,6 @@ impl TopBand {
     fn now(&mut self) -> u64 {
         let millis = self.clock.now().as_millis() as u64;
         self.core.dock_mut().set_wall_time(self.wall.unix_millis());
-        ENGINE_NOW_BITS.store((millis as f64).to_bits(), Ordering::Relaxed);
         millis
     }
 
@@ -654,7 +650,9 @@ impl TopBand {
                     (Vec::new(), Task::done(Message::Editor(styk_core::commands::Command::DialogAnswer { id, result }.into())))
                 } else { (vec![Request::Dialog { id, request }], Task::none()) }
             }
+            #[cfg(feature = "devtools")]
             Message::TypeNumber(text) => (vec![Request::InputNumber(text)], Task::none()),
+            #[cfg(feature = "devtools")]
             Message::InputResult(result) => { if let Err(error) = result { self.fail(error); } (Vec::new(), Task::none()) },
             Message::Editor(styk_ui::message::Message::PollDocuments) => (Vec::new(), self.pump()),
             Message::Editor(styk_ui::message::Message::QuitReady) => (vec![Request::QuitReady], Task::none()),
@@ -927,7 +925,7 @@ impl TopBand {
                     (Vec::new(), Task::done(Message::Documents))
                 }
                 Step::ChooseFile(path) => { if let Some(run) = &mut self.run { run.choices.push_back(styk_services::dialogs::Choice::File(Some(FileTarget::new(resolved(path))))); } (Vec::new(), Task::none()) }
-                Step::ChooseColor(rgb) => { if let Some(run) = &mut self.run { run.choices.push_back(styk_services::dialogs::Choice::Color(Some(rgb))); } (Vec::new(), Task::none()) }
+                #[cfg(feature = "devtools")]
                 Step::ClickStage(point) => {
                     let stage = self.core.stage().ok_or("no stage")?;
                     let canvas = self.core.documents.active().and_then(|doc| doc.with_document_ready(|doc| doc.canvas)).ok_or("canvas pending")?;
@@ -935,13 +933,7 @@ impl TopBand {
                     let viewport = stage.viewport().ok_or("stage viewport pending")?;
                     (vec![Request::InputClick(viewport.stage_to_window(local).map(|v| v * viewport.dpr))], Task::none())
                 }
-                Step::ClickColor(name) => {
-                    use styk_core::inspector::model::ColorTarget;
-                    let target = match name.as_str() { "figure" => ColorTarget::Figure, "segment" => ColorTarget::Segment, _ => ColorTarget::Background };
-                    let rect = self.core.overlays().bound_of(styk_ui::inspector::color_id(target)).ok_or("colour field is not mounted")?;
-                    let dpr = self.core.stage().and_then(|s| s.viewport()).map_or(1., |v| v.dpr);
-                    (vec![Request::InputClick([(rect.x + rect.width / 2.) * dpr, (rect.y + rect.height / 2.) * dpr])], Task::none())
-                }
+                #[cfg(feature = "devtools")]
                 Step::Inspector(automation::InspectorStep::Type { key, text }) => {
                     let key = styk_core::inspector::property::PropertyKey::from_id(&key).ok_or("unknown property")?;
                     let id = styk_ui::inspector::input_id(key);
@@ -951,6 +943,10 @@ impl TopBand {
                         .chain(Task::done(Message::TypeNumber(text)));
                     (Vec::new(), task)
                 }
+                #[cfg(not(feature = "devtools"))]
+                Step::ClickStage(_) | Step::Inspector(automation::InspectorStep::Type { .. }) => return Err("window input requires devtools".into()),
+                #[cfg(not(feature = "devtools"))]
+                Step::Click(target) => (Vec::new(), self.click(target)?),
                 Step::Wait(frames) => {
                     if let Some(run) = &mut self.run {
                         run.settle = frames;
@@ -968,6 +964,7 @@ impl TopBand {
                     };
                     (Vec::new(), self.dispatch(E::Session(session)))
                 }
+                #[cfg(feature = "devtools")]
                 Step::Click(target) => {
                     let id = match &target {
                         Target::Command(command) => {
@@ -1321,6 +1318,21 @@ mod tests {
     }
 
     #[test]
+    fn app_clocks_are_independent_even_when_advanced_and_read_in_parallel() {
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            for stamp in [317, 901] {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    let (mut top, fixed) = band(); fixed.advance(Duration::from_millis(stamp));
+                    top.now(); barrier.wait();
+                    for _ in 0..100 { assert_eq!(top.core.documents.engine_now(), Some(stamp as f64)); }
+                });
+            }
+        });
+    }
+
+    #[test]
     fn every_deadline_runs_on_the_one_injected_clock_and_only_a_fixed_clock_can_be_advanced() {
         let (mut top, fixed) = band();
         open(&mut top, 2);
@@ -1335,7 +1347,7 @@ mod tests {
         let _ = top.execute(4, Step::Advance(1));
         assert_eq!(top.shell.tabs()[1].state, None, "2.2 s on the clock the script holds");
         assert_eq!(fixed.now(), Duration::from_millis(2200));
-        assert_eq!(engine_clock(), 2200.0, "the engine reads the same clock");
+        assert_eq!(top.core.documents.engine_now(), Some(2200.0), "the engine reads this instance clock");
         // With the real clock there is nothing to advance, and saying so is a failure, not a no-op.
         let mut real = match TopBand::with_storage(Size::new(1560.0, 900.0), Arc::new(styk_platform::clock::SystemClock::new()), None, Arc::new(styk_platform::spawn::ThreadSpawner), Arc::new(styk_services::storage::fake::MemoryStorage::default())) {
             Ok(top) => top,

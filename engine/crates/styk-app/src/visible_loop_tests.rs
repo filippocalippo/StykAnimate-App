@@ -20,32 +20,6 @@ fn queued_open_and_a_mounted_properties_edit_publish_without_an_unrelated_event(
 }
 
 #[test]
-fn the_mounted_colour_control_reaches_the_picker_and_commits_one_edit() {
-    use styk_core::{commands::{Command, CommandId}, inspector::model::ColorTarget};
-    let mut rt = Runtime::new(); rt.settled();
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/edit/startup.document.json");
-    rt.app.band.open_all(&[fixture]);
-    rt.until(|app| app.band.core.stage().is_some() && !app.band.core.inspector().pending()); rt.drain();
-    rt.message(Message::Band(top_band::Message::Editor(Command::Run(CommandId::SelectAll).into())));
-    rt.until(|app| !app.band.core.inspector().pending()); rt.drain();
-    let sent = {
-        let element = styk_ui::dock::docked(styk_ui::inspector::view(styk_ui::inspector::View::of(&rt.app.band.core, Theme::Light).unwrap()), Theme::Light)
-            .map(|message| Message::Band(top_band::Message::Editor(message))).boxed();
-        let mut driver = Driver::new(element, Size::new(320., 900.), &styk_design::fonts::ALL);
-        let bounds = driver.snapshot().bounds_of(styk_ui::inspector::color_id(ColorTarget::Figure)).expect("mounted colour control");
-        driver.point_at(bounds.center()); driver.click(bounds.center()); driver.messages()
-    };
-    for message in sent { rt.message(message); }
-    let dialog = rt.messages.iter().position(|m| matches!(m, Message::Band(top_band::Message::Editor(styk_ui::Message::Dialog { .. })))).expect("the widget and production effect adapter must request the service");
-    let Message::Band(top_band::Message::Editor(styk_ui::Message::Dialog { id, request })) = rt.messages.remove(dialog).unwrap() else { unreachable!() };
-    assert!(matches!(request, styk_services::dialogs::Request::Color { .. }));
-    rt.message(Message::Band(top_band::Message::Editor(Command::DialogAnswer { id, result: Ok(styk_services::dialogs::Choice::Color(Some([220, 60, 60]))) }.into())));
-    rt.until(|app| !app.band.core.inspector().pending() && !app.band.core.file_pending()); rt.drain();
-    assert_eq!(styk_core::inspector::color::initial(rt.app.band.core.inspector(), ColorTarget::Figure), Some([220, 60, 60]));
-    assert_eq!(rt.app.band.core.documents.active().unwrap().view().unwrap().history.undo, 1);
-}
-
-#[test]
 fn a_mounted_tab_click_keeps_the_release_from_the_presses_event_batch() {
     use iced::advanced::subscription::{Event as RuntimeEvent, into_recipes};
     let mut rt = Runtime::new(); rt.settled();

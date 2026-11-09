@@ -253,3 +253,17 @@ worker's start, release and fallbacks); `node --test tests/engine-previews.test.
 (the preview worker's queue, cancellation, failure and idle release);
 `engine/viewer/` (a bare page over the engine with `window.viewer` benchmarks);
 the app parity tool.
+
+## Native instance clocks and cancellable Select queries
+
+Native application hosts use `Engine::with_clock` and a captured `HostOptions::clock`;
+opened and restored sessions receive that source through `Session::set_clock_source`.
+The function-pointer constructors remain available to existing engine hosts. Save
+workers take an owned clock source, so parallel jobs do not borrow interface state or
+share an application timestamp. Parallel app instances and fixed-clock tests are independent.
+
+The Select lane owns one cancellation per press and one latest waiting intent. Its
+checked evaluation, geometry, image-decoding and raster APIs discard incomplete work.
+Cancellation never mutates an already published generation. Teardown cancels before
+handing retained payloads to `Worker::shutdown`, which disposes them on the worker;
+the interface neither frees those payloads nor joins the worker.

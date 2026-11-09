@@ -300,8 +300,8 @@ impl Core {
         let mut effects = self.recovery.effect(effect, &self.documents, &mut self.overlays, &mut self.focus);
         use crate::documents::Effect as Doc;
         let picker = match effect {
-            Doc::OpenDialog => self.pickers.open(self.presentation.text(&Msg::new("menu.openProject"))),
-            Doc::SaveDialog { prompt, name, .. } => self.pickers.save(*prompt, self.presentation.text(&Msg::new("common.saveAs")), name.clone()),
+            Doc::OpenDialog => self.pickers.open(&self.presentation),
+            Doc::SaveDialog { prompt, name, .. } => self.pickers.save(*prompt, &self.presentation, name.clone()),
             _ => None,
         };
         if let Some((id, request)) = picker { effects.push(Effect::Dialog { id, request }); }
@@ -334,7 +334,9 @@ impl Core {
 
     /// Called once on a host wake, after its bounded poll, never from refresh or view.
     pub fn documents_progress(&mut self) -> Vec<Effect> {
-        let mut effects = self.recovery.progress(&mut self.documents, &mut self.overlays, &mut self.focus);
+        let mut document_effects = Vec::new();
+        let mut effects = self.recovery.progress(&mut self.documents, &mut self.overlays, &mut self.focus, &mut document_effects);
+        for effect in document_effects { effects.extend(self.document_effect(&effect)); }
         if let Some(request) = self.file_waiting.take() { effects.extend(self.file_request(request)); }
         effects
     }
@@ -358,7 +360,10 @@ impl Core {
         let _ = self.documents.set_auto_key(self.settings.animation().timeline_mode == crate::settings::TimelineMode::Advanced && self.settings.view().auto_key);
         let source = self.documents.active().and_then(|document| self.sources.get(&document.id())).cloned();
         self.inspector.refresh(&mut self.documents, &self.view, self.facts.as_mut(), source, &mut self.session);
-        self.recovery.refresh(&mut self.documents, &mut self.overlays, &mut self.focus, &self.presentation)
+        let mut document_effects = Vec::new();
+        let mut effects = self.recovery.refresh(&mut self.documents, &mut self.overlays, &mut self.focus, &self.presentation, &mut document_effects);
+        for effect in document_effects { effects.extend(self.document_effect(&effect)); }
+        effects
     }
 
     /// Toolkit adapters bind command choices; arbitrary owners receive `OverlayChoice` effects.
@@ -434,9 +439,9 @@ impl Core {
         }
         if matches!(&command, Command::Activate(_) | Command::Run(_) | Command::Inspector(_) | Command::Timeline(_) | Command::Quit | Command::Blur | Command::Recovery(_)) {
             if let Some(tools) = &mut self.tools { tools.cancel(); }
-            if !matches!(&command, Command::Blur | Command::Inspector(crate::inspector::Event::Field(_, crate::inspector::FieldEvent::Focus | crate::inspector::FieldEvent::Blur))) { self.pickers.invalidate_color(); }
         }
         self.session = Session::default();
+        let mut document_effects = Vec::new();
         let mut effects = match command {
             Command::DialogAnswer { .. } => Vec::new(), // handled before the quit fence: saves may be completing quit
             #[cfg(feature = "devtools")]
@@ -446,7 +451,7 @@ impl Core {
                 let mut effects = Vec::new();
                 if self.finish_panels(&mut effects) {
                     self.quit_pending = false;
-                    effects.extend(self.recovery.quit(&mut self.documents, &mut self.overlays, &mut self.focus));
+                    effects.extend(self.recovery.quit(&mut self.documents, &mut self.overlays, &mut self.focus, &mut document_effects));
                 }
                 effects
             }
@@ -476,7 +481,7 @@ impl Core {
                 } else { self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event) }
             }
             Command::Run(id) => self.run(id),
-            Command::Recovery(event) => self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus),
+            Command::Recovery(event) => self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus, &mut document_effects),
             Command::Activate(id) => self.activate(id),
             Command::Stage(event) => self.stage_event(event),
             Command::Dock(event) => {
@@ -493,16 +498,8 @@ impl Core {
                 self.dock_effects(effects)
             }
         };
-        let mut routed = Vec::new();
-        for effect in effects {
-            if let Effect::PickColor(target) = effect {
-                match crate::inspector::color::initial(&self.inspector, target).and_then(|initial| self.pickers.color(&self.documents, target, initial)) {
-                    Some((id, request)) => routed.push(Effect::Dialog { id, request }),
-                    None => routed.push(warn(Msg::new("errors.engineOwner.notSupported"))),
-                }
-            } else { routed.push(effect); }
-        }
-        routed.extend(self.refresh()); routed
+        for effect in document_effects { effects.extend(self.document_effect(&effect)); }
+        effects.extend(self.refresh()); effects
     }
     pub fn file_pending(&self) -> bool { self.pickers.pending() || self.file_waiting.is_some() || self.documents.operations_pending() }
 
@@ -521,13 +518,8 @@ impl Core {
     fn dialog_answer(&mut self, id: u64, result: Result<styk_services::dialogs::Choice, String>) -> Vec<Effect> {
         let mut effects = Vec::new();
         let choice = match result { Ok(choice) => Some(choice), Err(_) => { effects.push(warn(Msg::new("privacyUi.operationFailedPleaseTryAgain"))); None } };
-        match self.pickers.answer(id, choice, &self.documents) {
+        match self.pickers.answer(id, choice) {
             Ok(crate::file_actions::Answer::Document(request)) => effects.extend(self.file_request(request)),
-            Ok(crate::file_actions::Answer::Color(target, rgb)) if !self.input_fenced() => {
-                match crate::inspector::color::commit(&mut self.documents, &self.view, &mut self.session, target, rgb) {
-                    Ok(()) => effects.push(Effect::RequestFrame), Err(message) => effects.push(warn(message)),
-                }
-            }
             Ok(_) => {}
             Err(message) => effects.push(warn(message)),
         }
@@ -558,7 +550,7 @@ impl Core {
         effects.extend(self.stage_event(crate::stage::Event::Progress));
         let stage = self.stage();
         if let Some(tools) = &mut self.tools {
-            match tools.progress(&mut self.documents, stage.as_deref(), &mut self.session) {
+            match tools.progress(&mut self.documents, stage.as_deref(), &mut self.session, &self.view) {
                 Ok(true) => { self.view.set_context(crate::view_state::InspectorContext::Auto); effects.push(Effect::RequestFrame); }
                 Ok(false) => {}
                 Err(message) => effects.push(warn(message)),
@@ -760,7 +752,7 @@ impl Core {
     fn stage_event(&mut self, event: crate::stage::Event) -> Vec<Effect> {
         use crate::stage::{Event as StageEvent, input::PointerPhase};
         let supersedes = match &event {
-            StageEvent::Pointer(pointer) => matches!(pointer.phase, PointerPhase::Down | PointerPhase::Cancel),
+            StageEvent::Pointer(pointer) => matches!(pointer.phase, PointerPhase::Down),
             StageEvent::Wheel(_) | StageEvent::Pan(_) | StageEvent::Zoom { .. } | StageEvent::FitCanvas | StageEvent::PanTool(_) => true,
             _ => false,
         };
@@ -779,13 +771,20 @@ impl Core {
         let progress = matches!(event, crate::stage::Event::Progress | crate::stage::Event::Tick);
         let mut effects = Vec::new();
         if let Some(stage) = self.stage() && let Ok(outcome) = stage.event(event) {
-            for pointer in outcome.routed {
-                if pointer.phase == crate::stage::input::PointerPhase::Down { self.pickers.invalidate_color(); }
+            for routed in outcome.routed {
+                let pointer = match routed {
+                    crate::stage::input::InputResult::Route(pointer) => pointer,
+                    crate::stage::input::InputResult::Cancel(pointer) => {
+                        if let Some(tools) = &mut self.tools { tools.cancel_pointer(pointer); }
+                        continue;
+                    }
+                    _ => continue,
+                };
                 if pointer.phase == crate::stage::input::PointerPhase::Down && !self.finish_panels(&mut effects) {
                     effects.push(warn(Msg::new("errors.editorSessions.finishTheCurrentOperationFirst")));
                     continue;
                 }
-                if let Some(tools) = &mut self.tools && let Err(message) = tools.pointer(pointer, &self.documents, &stage) { effects.push(warn(message)); }
+                if let Some(tools) = &mut self.tools && let Err(message) = tools.pointer(pointer, &self.documents, &stage, &self.view) { effects.push(warn(message)); }
             }
         }
         if progress { effects.extend(self.timeline_event(crate::timeline::Event::Wake { now: self.now })); }
@@ -796,7 +795,6 @@ impl Core {
     fn finish_panels(&mut self, effects: &mut Vec<Effect>) -> bool {
         // Shell tab switches use this same barrier, including an A-B-A switch before a worker answers.
         if let Some(tools) = &mut self.tools { tools.cancel(); }
-        self.pickers.invalidate_color();
         let stage = self.stage();
         if let Err(message) = self.timeline.finish(&mut self.documents, &mut self.session, stage.as_deref()) { effects.push(warn(message)); return false; }
         let panels: [&mut dyn Lifecycle; 1] = [&mut self.inspector];

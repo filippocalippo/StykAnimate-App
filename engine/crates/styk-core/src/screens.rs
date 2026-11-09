@@ -128,7 +128,7 @@ pub fn core_with_document(bytes: &[u8], name: &str, spawner: Arc<dyn Spawner>, w
     let id = documents.open(prepared).map_err(|(error, _)| error.to_string())?;
     let startup = styk_doc::json::parse(STARTUP).map_err(|error| error.to_string())?;
     documents
-        .attach_host(HostOptions { engine: opener, spawner: spawner.clone(), files: Arc::new(styk_services::files::fake::MemoryFiles::default()), startup, clock: || 0.0, notify: wake.clone() })
+        .attach_host(HostOptions { engine: opener, spawner: spawner.clone(), files: Arc::new(styk_services::files::fake::MemoryFiles::default()), startup, clock: Arc::new(|| 0.0), notify: wake.clone() })
         .map_err(|error| format!("{error:?}"))?;
     let mut core = Core::new(documents);
     core.set_facts(Facts::start(spawner.as_ref(), wake).map_err(|error| error.0)?);

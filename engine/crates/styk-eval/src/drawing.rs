@@ -270,9 +270,12 @@ pub(crate) fn bordered_into<S: std::hash::BuildHasher>(level: &HashMap<(i32, i32
 /// [`level_tiles`]: `(level, index within the level, slot pixels)`. Tiles that
 /// fail to decode are left out (they draw transparent, as an undecodable tile
 /// does in the editor).
-pub fn decode_cel(cel: &DrawingTiles) -> Vec<(u32, u32, Vec<u8>)> {
+pub fn decode_cel(cel: &DrawingTiles) -> Vec<(u32, u32, Vec<u8>)> { decode_cel_cancellable(cel, &|| false) }
+
+pub fn decode_cel_cancellable(cel: &DrawingTiles, cancelled: &dyn Fn() -> bool) -> Vec<(u32, u32, Vec<u8>)> {
     let mut level: HashMap<(i32, i32), Vec<u8>> = HashMap::with_capacity(cel.tiles.len());
     for (tx, ty, png) in &cel.tiles {
+        if cancelled() { return Vec::new(); }
         if let Some(rgba) = decode_png_tile(png) {
             level.insert((*tx, *ty), rgba);
         }
@@ -283,14 +286,16 @@ pub fn decode_cel(cel: &DrawingTiles) -> Vec<(u32, u32, Vec<u8>)> {
     resolve_bounds(cel, ink);
     let mut out = Vec::new();
     for (n, drawn) in cel.levels.iter().enumerate() {
+        if cancelled() { return Vec::new(); }
         if n > 0 {
             let reduced: HashMap<(i32, i32), Vec<u8>> = cel.levels[n]
                 .iter()
-                .filter_map(|&(tx, ty)| down_tile(&level, tx, ty).filter(|tile| tile.chunks_exact(4).any(|texel| texel[3] != 0)).map(|tile| ((tx, ty), tile)))
+                .filter_map(|&(tx, ty)| if cancelled() { None } else { down_tile(&level, tx, ty).filter(|tile| tile.chunks_exact(4).any(|texel| texel[3] != 0)).map(|tile| ((tx, ty), tile)) })
                 .collect();
             level = reduced;
         }
         for (index, &(tx, ty)) in drawn.iter().enumerate() {
+        if cancelled() { return Vec::new(); }
             out.push((n as u32, index as u32, bordered(&level, tx, ty)));
         }
     }
@@ -354,14 +359,17 @@ pub fn dirty_tiles(old: &DrawingTiles, new: &DrawingTiles) -> Vec<Vec<bool>> {
 /// [`decode_cel`]'s slots for the tiles marked in `dirty` (by level and index in `cel.levels`, as [`dirty_tiles`] says) and no others, with
 /// the same pixels: only the tiles those need are decoded and reduced. The cel's bounds are resolved from the ink the cel it replaced
 /// recorded for the tiles it shares ([`DrawingTiles::inherited_ink`]) and from the tiles decoded here; without it every tile is decoded.
-pub fn decode_cel_dirty(cel: &DrawingTiles, dirty: &[Vec<bool>]) -> Vec<(u32, u32, Vec<u8>)> {
-    let Some(inherited) = cel.inherited_ink.get() else { return decode_cel(cel).into_iter().filter(|(n, i, _)| dirty.get(*n as usize).is_some_and(|level| level.get(*i as usize).copied().unwrap_or(false))).collect() };
+pub fn decode_cel_dirty(cel: &DrawingTiles, dirty: &[Vec<bool>]) -> Vec<(u32, u32, Vec<u8>)> { decode_cel_dirty_cancellable(cel, dirty, &|| false) }
+
+pub fn decode_cel_dirty_cancellable(cel: &DrawingTiles, dirty: &[Vec<bool>], cancelled: &dyn Fn() -> bool) -> Vec<(u32, u32, Vec<u8>)> {
+    let Some(inherited) = cel.inherited_ink.get() else { return decode_cel_cancellable(cel, cancelled).into_iter().filter(|(n, i, _)| dirty.get(*n as usize).is_some_and(|level| level.get(*i as usize).copied().unwrap_or(false))).collect() };
     let levels = cel.levels.len();
     let drawn: Vec<HashSet<(i32, i32)>> = cel.levels.iter().map(|level| level.iter().copied().collect()).collect();
     // The tiles to write, and at each level the tiles whose pixels are needed to write them: those and their neighbours (the slot
     // borders), and below them the tiles they are reduced from.
     let mut need: Vec<HashSet<(i32, i32)>> = vec![HashSet::new(); levels];
     for (n, level) in cel.levels.iter().enumerate() {
+        if cancelled() { return Vec::new(); }
         for (i, &(x, y)) in level.iter().enumerate() {
             if dirty[n].get(i).copied().unwrap_or(false) {
                 for dy in -1..=1 {
@@ -386,6 +394,7 @@ pub fn decode_cel_dirty(cel: &DrawingTiles, dirty: &[Vec<bool>]) -> Vec<(u32, u3
     let mut level: HashMap<(i32, i32), Vec<u8>> = HashMap::new();
     let mut ink: HashMap<(i32, i32), [i64; 4]> = HashMap::new();
     for (tx, ty, png) in &cel.tiles {
+        if cancelled() { return Vec::new(); }
         let at = (*tx, *ty);
         if need[0].contains(&at) {
             if let Some(rgba) = decode_png_tile(png) {
@@ -401,11 +410,12 @@ pub fn decode_cel_dirty(cel: &DrawingTiles, dirty: &[Vec<bool>]) -> Vec<(u32, u3
     resolve_bounds(cel, ink);
     let mut out = Vec::new();
     for n in 0..levels {
+        if cancelled() { return Vec::new(); }
         if n > 0 {
             level = need[n]
                 .iter()
                 .filter(|at| drawn[n].contains(at))
-                .filter_map(|&(tx, ty)| down_tile(&level, tx, ty).filter(|tile| tile.chunks_exact(4).any(|texel| texel[3] != 0)).map(|tile| ((tx, ty), tile)))
+                .filter_map(|&(tx, ty)| if cancelled() { None } else { down_tile(&level, tx, ty).filter(|tile| tile.chunks_exact(4).any(|texel| texel[3] != 0)).map(|tile| ((tx, ty), tile)) })
                 .collect();
         }
         for (index, &(tx, ty)) in cel.levels[n].iter().enumerate() {

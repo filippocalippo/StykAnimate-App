@@ -18,7 +18,7 @@ pub struct HostOptions {
     pub files: Arc<dyn Files>,
     /// The application's startup document (the same input used for New and closing the last tab).
     pub startup: Value,
-    pub clock: fn() -> f64,
+    pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     /// Announces a ready job to the host's event loop; no assumption that a channel wakes the interface.
     pub notify: Arc<dyn Fn() + Send + Sync>,
 }
@@ -123,6 +123,7 @@ enum Action {
     Import(Stamp),
 }
 struct Pending { id: JobId, cancel: Cancel, action: Action }
+#[derive(Clone)]
 enum Prompt {
     Save { id: PromptId, stamp: Stamp }, Close { id: PromptId, stamp: Stamp }, Quit { id: PromptId, stamps: Vec<Stamp> },
 }
@@ -135,6 +136,7 @@ pub(super) struct Host {
     pending: Option<Pending>,
     prompt: Option<Prompt>,
     after_save: Option<AfterSave>,
+    save_return: Option<Prompt>,
     pub(super) quit_committed: bool,
     continue_save: Option<(Stamp, bool)>,
     retired: Vec<Box<dyn Send>>,
@@ -142,7 +144,7 @@ pub(super) struct Host {
     serial: u64,
     pub(super) publication_needed: bool,
     published: Option<(Stamp, u64)>,
-    clock: fn() -> f64,
+    clock: Arc<dyn Fn() -> f64 + Send + Sync>,
 }
 
 impl Host {
@@ -224,7 +226,7 @@ fn execute(options: &HostOptions, work: Work) -> Reply {
             Input::Save { snapshot, name, original_first, target } => {
                 let tree = snapshot();
                 // No helper is borrowed until an engine worker pool has explicitly supplied one.
-                let host = EngineHost { engine: Some(&options.engine), cancel, clock: options.clock, helpers: 0, aside: false };
+                let host = EngineHost { engine: Some(&options.engine), cancel, clock: || 0.0, helpers: 0, aside: false };
                 let written = save_project(&[tree], &[], ProjectRequest { reservation: None, name: Some(name), original_first }, &host).map_err(HostError::from)?;
                 run_future(options.files.replace(&target, &written.bytes, &work.cancel)).map_err(HostError::File)?;
                 Ok(Output::Saved { repairs: written.repairs, warning: written.warning })
@@ -240,7 +242,7 @@ fn execute(options: &HostOptions, work: Work) -> Reply {
             }
         }
     })();
-    let result = result.map(|mut output| { if let Output::Open(prepared) = &mut output { prepared.set_clock(options.clock); } output });
+    let result = result.map(|mut output| { if let Output::Open(prepared) = &mut output { prepared.set_clock_source(options.clock.clone()); } output });
     Reply { id: work.id, result }
 }
 
@@ -255,6 +257,8 @@ impl Documents {
         let lineage = self.get(id)?.lineage();
         Some(Arc::new(PublishedFrames { lifetime: host.lifetime.clone(), lineage }))
     }
+    pub fn engine_now(&self) -> Option<f64> { self.host.as_ref().map(|host| host.options.engine.now()) }
+
     /// Start the bounded document lane before accepting work; a refused spawn leaves this owner unchanged.
     pub fn attach_host(&mut self, options: HostOptions) -> Result<(), HostError> {
         if self.host.is_some() { return Err(DocumentsError::Busy.into()); }
@@ -262,7 +266,7 @@ impl Documents {
         let spawner = options.spawner.clone();
         let notify = options.notify.clone();
         let engine = options.engine.clone();
-        let clock = options.clock;
+        let clock = options.clock.clone();
         let options = Arc::new(options);
         let lifetime = Arc::new(EngineLifetime(engine.clone()));
         let job_lifetime = lifetime.clone();
@@ -283,17 +287,17 @@ impl Documents {
             }
         }
         for tab in &mut self.tabs {
-            tab.prepared.set_clock(clock);
-            for scope in &mut tab.scopes { scope.parent.set_clock(clock); }
+            tab.prepared.set_clock_source(clock.clone());
+            for scope in &mut tab.scopes { scope.parent.set_clock_source(clock.clone()); }
         }
-        self.host = Some(Host { options: saved_options, lifetime, worker: Some(worker), pending: None, prompt: None, after_save: None, quit_committed: false, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
+        self.host = Some(Host { options: saved_options, lifetime, worker: Some(worker), pending: None, prompt: None, after_save: None, save_return: None, quit_committed: false, continue_save: None, retired: Vec::new(), startup, serial: 0, publication_needed: self.active.is_some(), published: None, clock });
         Ok(())
     }
 
     /// Once a quit answer is accepted, only its save continuation may mutate sessions.
     /// Save failure/cancellation clears `after_save`; cleanup and final window teardown never reopen input.
     pub fn edits_locked(&self) -> bool {
-        self.host.as_ref().is_some_and(|host| host.quit_committed || matches!(host.after_save, Some(AfterSave::All { quit: true, .. })))
+        self.host.as_ref().is_some_and(|host| host.quit_committed || matches!(host.after_save, Some(AfterSave::Close(_) | AfterSave::All { quit: true, .. })) || host.pending.as_ref().is_some_and(|job| matches!(job.action, Action::LastClose(_))))
     }
 
     /// Work whose completion changes the visible document or finishes a file request.
@@ -442,6 +446,7 @@ impl Documents {
     }
 
     fn begin_save(&mut self, id: DocumentId, save_as: bool) -> Result<Effect, HostError> {
+        if let Some(host) = self.host.as_mut() && host.after_save.is_none() { host.save_return = None; }
         self.interrupt_recovery(id);
         if self.recovery_writing(id) { return Err(DocumentsError::Busy.into()); }
         if self.active != Some(id) { return Err(DocumentsError::NotActive.into()); }
@@ -479,7 +484,25 @@ impl Documents {
         let stamp = match self.host.as_ref().and_then(|host| host.prompt.as_ref()) { Some(Prompt::Save { id, stamp }) if *id == prompt => *stamp, _ => return Err(HostError::Stale) };
         self.host()?.prompt = None;
         if !self.matches(stamp) { self.host()?.after_save = None; return Err(HostError::Stale); }
-        let Some(target) = target else { self.host()?.after_save = None; return Ok(Effect::None); };
+        let Some(target) = target else {
+            self.host()?.after_save = None;
+            let restored = self.host()?.save_return.take();
+            return Ok(match restored {
+                Some(Prompt::Close { id, stamp }) => {
+                    let name = self.get(stamp.id).ok_or(HostError::Stale)?.project_name().to_owned();
+                    self.host()?.prompt = Some(Prompt::Close { id, stamp });
+                    Effect::ConfirmClose { prompt: id, document: stamp.id, name, recovery_error: None }
+                }
+                Some(Prompt::Quit { id, .. }) => {
+                    // Earlier documents in Save All may already have been saved.
+                    let stamps = self.tabs.iter().filter(|tab| tab.dirty()).map(Stamp::of).collect();
+                    let names = self.tabs.iter().filter(|tab| tab.dirty()).map(|tab| tab.project_name().to_owned()).collect();
+                    self.host()?.prompt = Some(Prompt::Quit { id, stamps });
+                    Effect::ConfirmQuit { prompt: id, names, recovery_error: None }
+                }
+                _ => Effect::None,
+            });
+        };
         let result = self.save_to(stamp.id, target);
         if let Err(error) = &result {
             if matches!(error, HostError::Documents(DocumentsError::Busy)) { self.host()?.prompt = Some(Prompt::Save { id: prompt, stamp }); }
@@ -497,7 +520,7 @@ impl Documents {
         if reply.is_none() {
             if host.pending.is_none() && let Some((stamp, save_as)) = host.continue_save.take() {
                 if !self.matches(stamp) {
-                    if let Some(host) = self.host.as_mut() { host.after_save = None; }
+                    if let Some(host) = self.host.as_mut() { host.after_save = None; host.save_return = None; }
                     return Some(Effect::Stale(JobId(self.host.as_ref().map_or(0, |host| host.serial))));
                 }
                 return Some(match self.begin_save(stamp.id, save_as) {
@@ -506,7 +529,7 @@ impl Documents {
                         if let Some(host) = self.host.as_mut() { host.continue_save = Some((stamp, save_as)); }
                         Effect::None
                     }
-                    Err(error) => { if let Some(host) = self.host.as_mut() { host.after_save = None; } Effect::Failed { job: JobId(self.host.as_ref().map_or(0, |host| host.serial)), error } }
+                    Err(error) => { if let Some(host) = self.host.as_mut() { host.after_save = None; host.save_return = None; } Effect::Failed { job: JobId(self.host.as_ref().map_or(0, |host| host.serial)), error } }
                 });
             }
             if host.pending.is_none() && host.prompt.is_none() && host.publication_needed {
@@ -541,12 +564,12 @@ impl Documents {
         }
         if pending.id != id || pending.cancel.is_cancelled() {
             if matches!(pending.action, Action::Publish(_)) { host.published = None; host.publication_needed = self.active.is_some(); }
-            host.retired.push(Box::new(reply)); host.after_save = None; host.continue_save = None;
+            host.retired.push(Box::new(reply)); host.after_save = None; host.save_return = None; host.continue_save = None;
             return Some(Effect::Cancelled(id));
         }
         let output = match reply.result {
             Ok(output) => output,
-            Err(error) => { host.after_save = None; host.continue_save = None; return Some(Effect::Failed { job: id, error }); }
+            Err(error) => { host.after_save = None; host.save_return = None; host.continue_save = None; return Some(Effect::Failed { job: id, error }); }
         };
         Some(self.complete(id, pending.action, output))
     }
@@ -554,7 +577,7 @@ impl Documents {
     fn complete(&mut self, id: JobId, action: Action, output: Output) -> Effect {
         let result = self.accept(action, output);
         match result { Ok(effect) => effect, Err((error, retired)) => {
-            if let Some(host) = self.host.as_mut() { host.retired.push(retired); host.after_save = None; host.continue_save = None; }
+            if let Some(host) = self.host.as_mut() { host.retired.push(retired); host.after_save = None; host.save_return = None; host.continue_save = None; }
             if matches!(error, HostError::Stale) { Effect::Stale(id) } else { Effect::Failed { job: id, error } }
         } }
     }
@@ -586,7 +609,7 @@ impl Documents {
                         Some(AfterSave::All { origin, quit }) => return self.save_next_for_all(origin, quit).map_err(|error| (error, Box::new(()) as Box<dyn Send>)),
                         None => {}
                     }
-                } else if let Some(host) = self.host.as_mut() { host.after_save = None; }
+                } else if let Some(host) = self.host.as_mut() { host.after_save = None; host.save_return = None; }
                 Ok(Effect::Saved { document: stamp.id, current, repairs, warning })
             }
             (Action::Publish(stamp), Output::Published(generation)) => {
@@ -681,7 +704,8 @@ impl Documents {
         };
         if !matched { return Err(HostError::Stale); }
         let question = self.host()?.prompt.take().ok_or(HostError::Stale)?;
-        if choice == CloseChoice::Cancel { self.host()?.after_save = None; return Ok(Effect::None); }
+        if choice == CloseChoice::Cancel { self.host()?.after_save = None; self.host()?.save_return = None; return Ok(Effect::None); }
+        self.host()?.save_return = (choice == CloseChoice::Save).then(|| question.clone());
         match question {
             Prompt::Close { stamp, .. } => {
                 if !self.matches(stamp) { return Err(HostError::Stale); }
@@ -692,7 +716,7 @@ impl Documents {
                     self.host()?.after_save = Some(AfterSave::Close(stamp.id)); self.begin_save(stamp.id, false)
                 };
                 if let Err(error) = &result {
-                    let host = self.host()?; host.after_save = None;
+                    let host = self.host()?; host.after_save = None; host.save_return = None;
                     if matches!(error, HostError::Documents(DocumentsError::Busy)) { host.prompt = Some(Prompt::Close { id: prompt, stamp }); }
                 }
                 result
@@ -788,7 +812,7 @@ mod close_wiring_regression {
         let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
         let prepared = PreparedDocument::open_bytes(&engine, Arc::from(startup.as_slice()), "Project.styk", &|| false).unwrap();
         let mut documents = Documents::new();
-        documents.attach_host(HostOptions { engine, spawner: Arc::new(ManualSpawner::default()), files: Arc::new(MemoryFiles::default()), startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify: Arc::new(|| {}) }).unwrap();
+        documents.attach_host(HostOptions { engine, spawner: Arc::new(ManualSpawner::default()), files: Arc::new(MemoryFiles::default()), startup: styk_doc::json::parse(startup).unwrap(), clock: Arc::new(|| 0.0), notify: Arc::new(|| {}) }).unwrap();
         let id = documents.open(prepared).map_err(|(e, _)| e).unwrap();
         documents.tabs[0].target = Some(FileTarget::new("Project.styk"));
         documents.call(id, "setFPS", &[Value::Num(30.0)], &Value::Null).unwrap().result.unwrap();
@@ -815,7 +839,7 @@ mod close_wiring_regression {
         let engine = Engine::new(|| 0.0, styk_engine::Budgets::for_device(None));
         let prepared = PreparedDocument::open_bytes(&engine, Arc::from(startup.as_slice()), "Project.styk", &|| false).unwrap();
         let mut documents = Documents::new();
-        documents.attach_host(HostOptions { engine, spawner: Arc::new(Threads), files, startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify }).unwrap();
+        documents.attach_host(HostOptions { engine, spawner: Arc::new(Threads), files, startup: styk_doc::json::parse(startup).unwrap(), clock: Arc::new(|| 0.0), notify }).unwrap();
         let id = documents.open(prepared).map_err(|(e, _)| e).unwrap();
         documents.tabs[0].target = Some(FileTarget::new("Project.styk"));
         documents.call(id, "setFPS", &[Value::Num(30.0)], &Value::Null).unwrap().result.unwrap();
@@ -869,7 +893,7 @@ mod close_wiring_regression {
         documents.attach_host(HostOptions {
             engine: Engine::new(|| 0.0, styk_engine::Budgets::for_device(None)),
             spawner: Arc::new(ManualSpawner::default()), files: Arc::new(MemoryFiles::default()),
-            startup: styk_doc::json::parse(startup).unwrap(), clock: || 0.0, notify: Arc::new(|| {}),
+            startup: styk_doc::json::parse(startup).unwrap(), clock: Arc::new(|| 0.0), notify: Arc::new(|| {}),
         }).unwrap();
         assert!(matches!(documents.dispatch(Request::New), Ok(Effect::Started(_))));
         let mut core = crate::app::Core::new(documents);

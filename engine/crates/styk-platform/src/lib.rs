@@ -74,5 +74,5 @@ macro_rules! shell_window_settings { ($settings:expr) => {}; }
 
 #[cfg(windows)]
 pub mod dialogs;
-#[cfg(windows)]
+#[cfg(all(windows, feature = "devtools"))]
 pub mod automation_input;

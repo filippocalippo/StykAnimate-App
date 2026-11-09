@@ -14,7 +14,7 @@ required-features = ["devtools"]
 name = "release_dev_catalogue"
 
 [features]
-devtools = []
+devtools = ["styk-services/devtools"]
 default = ["engine"]
 engine = ["dep:styk-alloc", "dep:styk-drawing", "dep:styk-edit", "dep:styk-engine", "dep:styk-eval", "dep:styk-export", "dep:styk-math", "dep:styk-trace", "dep:styk-render"]
 # `styk_core::testing`: what the interface's tests need to open a document without naming an engine crate.

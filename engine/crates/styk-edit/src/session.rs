@@ -524,8 +524,13 @@ impl Session {
 
     /// The clock reads that are given a time to take are held to (milliseconds).
     pub fn set_clock(&mut self, clock: fn() -> f64) {
+        self.set_clock_source(std::sync::Arc::new(clock));
+    }
+    /// Captured host time; no process-global function-pointer bridge.
+    pub fn set_clock_source(&mut self, clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>) {
         self.editor.clock = Some(clock);
     }
+
 
     /// The frame the stage draws, at `view` (its playhead): the gesture in progress, else the document at the playhead; with `motion`,
     /// the motion-path edit's display where one is shown. The frame is typed and its scene built (the geometry the interface reads

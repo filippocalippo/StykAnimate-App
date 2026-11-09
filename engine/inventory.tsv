@@ -311,7 +311,7 @@ src/inspector-dom.mjs	ui	-	stays
 src/inspector-header.mjs	ui	-	stays	
 src/inspector-kit.mjs	ui	-	stays	
 src/inspector-legacy.mjs	ui	-	stays	
-src/inspector-view.mjs	ui	styk-core::inspector	stays	Native V0 reads resolved instance styles from the facts worker and commits colour through the session
+src/inspector-view.mjs	ui	styk-core::inspector	stays	Native V0 reads resolved instance styles from the facts worker; B1 owns colour commits and B3 owns the picker
 src/keyframe-easing-popover.mjs	ui	-	stays	
 src/keyframe-easing-view.mjs	ui	-	stays	
 src/keyframe-easing.mjs	engine	styk-eval	partial	Rust: easing curves (linear, eased, bezier, constant, Auto); validation still JS

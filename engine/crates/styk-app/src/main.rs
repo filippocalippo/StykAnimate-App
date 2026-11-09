@@ -328,15 +328,18 @@ impl App {
                     if let Some(window_id) = self.window { tasks.push(native_dialog(window_id, request_id, request)); }
                     else { tasks.push(Task::done(Message::Band(top_band::Message::Editor(styk_core::commands::Command::DialogAnswer { id: request_id, result: Err("the picker owner closed".into()) }.into())))); }
                 }
+                #[cfg(feature = "devtools")]
                 top_band::Request::InputClick(point) => {
                     if let Some(window_id) = self.window { tasks.push(iced_window::run(window_id, move |window| styk_platform::automation_input::click(window, point)).map(|answer| Message::Band(top_band::Message::InputResult(answer.map_err(|e| e.to_string()))))); }
                 }
+                #[cfg(feature = "devtools")]
                 top_band::Request::InputNumber(text) => {
                     if let Some(window_id) = self.window { tasks.push(iced_window::run(window_id, move |window| styk_platform::automation_input::number(window, &text)).map(|answer| Message::Band(top_band::Message::InputResult(answer.map_err(|e| e.to_string()))))); }
                 }
                 top_band::Request::Minimize => tasks.extend(self.window.map(|id| iced_window::minimize(id, true))),
                 top_band::Request::Close => tasks.push(self.close()),
                 top_band::Request::QuitReady => {
+                    if let Some(window) = self.window { tasks.push(iced_window::run(window, |window| styk_platform::dialogs::NativeDialogs::cancel(window)).discard()); }
                     self.quit_cleared = true;
                     tasks.push(self.close());
                 }
@@ -457,7 +460,8 @@ impl App {
         // The documents host decides first: unsaved projects are asked about (the close prompt) and the recovery lane finishes
         // its copies; an unattended run has no one to ask.
         if self.strategy.is_none() && !self.quit_cleared {
-            return self.band.ask_to_quit().map(Message::Band);
+            let cancel = self.window.map(|id| iced_window::run(id, |window| styk_platform::dialogs::NativeDialogs::cancel(window)).discard()).unwrap_or_else(Task::none);
+            return Task::batch([cancel, self.band.ask_to_quit().map(Message::Band)]);
         }
         if self.band.core.session_end_requested() { return self.finish_session_quit(); }
         // Documents granted QuitReady. Start both maintenance lanes (the layout queue and Settings), even if one is busy;

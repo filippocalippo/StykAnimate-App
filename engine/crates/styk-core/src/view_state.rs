@@ -40,6 +40,8 @@ pub struct ViewState {
     // Derived edit targets, resolved off-thread from the canonical selection and its current revision.
     edit_range: crate::timeline::Selection,
     layers: std::sync::Arc<[String]>,
+    /// Focus and lock is per-document view state, never a saved layer flag.
+    layer_focus: Option<(crate::identity::DocumentId, u64, std::sync::Arc<[String]>)>,
     /// A Draw tool is active: the Inspector shows its options.
     drawing: Option<&'static str>,
 }
@@ -56,6 +58,14 @@ impl ViewState {
 
     fn bump(&mut self) {
         self.version = self.version.wrapping_add(1);
+    }
+
+    pub fn layer_focus_lock(&self, document: crate::identity::DocumentId, lineage: u64) -> Option<std::sync::Arc<[String]>> {
+        self.layer_focus.as_ref().filter(|(id, source, _)| *id == document && *source == lineage).map(|(_, _, ids)| ids.clone())
+    }
+    pub fn set_layer_focus_lock(&mut self, document: crate::identity::DocumentId, lineage: u64, focused: Option<std::sync::Arc<[String]>>) {
+        let next = focused.map(|ids| (document, lineage, ids));
+        if self.layer_focus != next { self.layer_focus = next; self.bump(); }
     }
 
     pub fn tab(&self) -> InspectorTab {

@@ -27,3 +27,18 @@ checks cover changed crates, core/UI/app tests, clippy, the native guard and the
 Decisions: the direct instruction to implement autonomously overrides native-common's
 plan-review pause. This plan is committed before implementation without waiting. Existing
 widgets may receive routing glue; new views and broader stage tools stay out of V0.
+
+## Review round
+
+Merge 924708fd before fixes, retaining the developer panels and idle wake behavior.
+Remove V0's colour service path; keep the facts worker, lineage and pending layout.
+Terminal pen cancellation reaches the Select owner before it can adopt a reply.
+Each Select identity owns a cooperative cancellation token; evaluation, geometry,
+decode and raster work observe it, and the worker disposes its heavy operands.
+Untitled Save follows the shared document-effect consumer, retains the close/quit
+prompt on picker cancellation, and fences edits after an accepted Save.
+Native picker runs use a window-lifetime registration; no app HWND crosses threads.
+Reuse the development feature `devtools` across app, core, platform and services.
+Inject the engine clock per app and restore default parallel test execution.
+Final proof combines changed-crate suites, guards, clippy, removed-wire checks and
+the number-only real window loop in one machine-queued batch.

@@ -77,7 +77,7 @@ fn execute(options: &HostOptions, store: &dyn Recovery, work: Work) -> Reply {
     match work.input {
         Input::List => run_future(store.list(cancel)).map(Output::Listed).map_err(error),
         Input::Save(snapshot) => {
-            let host = EngineHost { engine: Some(&options.engine), cancel: &|| cancel.is_cancelled(), clock: options.clock, helpers: 0, aside: false };
+            let host = EngineHost { engine: Some(&options.engine), cancel: &|| cancel.is_cancelled(), clock: || 0.0, helpers: 0, aside: false };
             let written = save_project(&snapshot.trees, &snapshot.scopes, ProjectRequest { reservation: None, name: Some(snapshot.name.clone()), original_first: snapshot.original_first }, &host)?;
             if let Some(warning) = written.warning { return Err(HostError::Recovery(RecoveryError::Unavailable(warning))); }
             let lease = match &snapshot.owned { Some(owned) => owned.lease.clone(), None => run_future(store.create(cancel)).map_err(error)? };
@@ -92,7 +92,7 @@ fn execute(options: &HostOptions, store: &dyn Recovery, work: Work) -> Reply {
             let bytes = run_future(lease.read(&record, size, cancel)).map_err(error)?;
             drop(memory);
             let mut prepared = PreparedDocument::open_application(&options.engine, bytes, "recovery.styk", &|| cancel.is_cancelled())?;
-            prepared.name = record.name.clone(); prepared.set_clock(options.clock);
+            prepared.name = record.name.clone(); prepared.set_clock_source(options.clock.clone());
             prepared.session.get_mut()?.call_native("@touch", &[], &Value::Null).result?;
             let owned = (!record.read_only && !lease.read_only()).then_some(Owned { lease, record: Some(record) });
             Ok(Output::Restored(prepared, owned))
@@ -469,7 +469,7 @@ mod scheduling_tests {
         let held = Arc::new(ManualSpawner::new());
         let (complete, completed) = mpsc::channel();
         docs.attach_host(HostOptions { engine: engine.clone(), spawner: held.clone(), files: Arc::new(styk_services::files::fake::MemoryFiles::default()),
-            startup: styk_doc::json::parse(STARTUP).unwrap(), clock: || 0.0, notify: Arc::new(move || { complete.send(()).unwrap(); }) }).unwrap();
+            startup: styk_doc::json::parse(STARTUP).unwrap(), clock: Arc::new(|| 0.0), notify: Arc::new(move || { complete.send(()).unwrap(); }) }).unwrap();
         let front = PreparedDocument::open_application(&engine, Arc::from(STARTUP), "Front.styk", &|| false).unwrap();
         docs.open(front).map_err(|(error, _)| error).unwrap();
         let tab = docs.active().unwrap();
@@ -478,7 +478,7 @@ mod scheduling_tests {
         let threads = Arc::new(Threads(Mutex::new(Vec::new())));
         let host = docs.host.as_ref().unwrap();
         let options = Arc::new(HostOptions { engine: engine.clone(), spawner: threads.clone(), files: host.options.files.clone(),
-            startup: host.options.startup.clone(), clock: || 0.0, notify: host.options.notify.clone() });
+            startup: host.options.startup.clone(), clock: Arc::new(|| 0.0), notify: host.options.notify.clone() });
         let (queued, enqueued) = mpsc::channel();
         let scheduler = engine.clone();
         docs.recovery = Some(RecoveryHost::start_scheduled(options, host.lifetime.clone(), store.clone(), Arc::new(FixedClock::new()), move |job| {

@@ -216,11 +216,8 @@ pub enum Step {
     Open(PathBuf),
     /// Next native picker answer in an unattended interaction; no OS dialog opens.
     ChooseFile(PathBuf),
-    ChooseColor([u8; 3]),
     /// Click the mounted stage at document coordinates.
     ClickStage([f64; 2]),
-    /// Click an existing Inspector colour field.
-    ClickColor(String),
     /// Export the active document through its export owner.
     Export,
     /// A measurement budget; the profiling runner judges it after the runs.
@@ -564,16 +561,11 @@ impl Script {
                     _ => return Err(wants("<id> <phase> <pen|eraser> <x> <y> <pressure>")),
                 },
                 "choose-file" if !rest.is_empty() => Step::ChooseFile(PathBuf::from(rest)),
-                "choose-color" => match words.as_slice() {
-                    [r, g, b] => Step::ChooseColor([r.parse().map_err(|_| wants("three bytes"))?, g.parse().map_err(|_| wants("three bytes"))?, b.parse().map_err(|_| wants("three bytes"))?]),
-                    _ => return Err(wants("three bytes")),
-                },
                 "click-stage" => match words.as_slice() {
                     [x, y] => { let point: [f64; 2] = [x.parse().map_err(|_| wants("two finite coordinates"))?, y.parse().map_err(|_| wants("two finite coordinates"))?];
                         if !point.iter().all(|x| x.is_finite()) { return Err(wants("two finite coordinates")); } Step::ClickStage(point) }
                     _ => return Err(wants("two finite coordinates")),
                 },
-                "click-color" if matches!(rest, "figure" | "segment" | "background") => Step::ClickColor(rest.into()),
                 "open" if !rest.is_empty() => Step::Open(PathBuf::from(rest)),
                 "open" => return Err(wants("a path")),
                 "export" if words.is_empty() => Step::Export,

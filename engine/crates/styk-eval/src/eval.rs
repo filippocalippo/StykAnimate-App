@@ -470,12 +470,6 @@ pub fn evaluate_native(doc: &Document, seq: &Seq, index: usize, t: f64) -> Frame
     evaluate_interval(doc, seq, index, t, false, None)
 }
 
-/// [`evaluate_native`] tweening only the figures `uids` and the figures they hang from
-/// (`requestedUids`); the others keep the interval's first pose.
-pub(crate) fn evaluate_native_only(doc: &Document, seq: &Seq, index: usize, t: f64, uids: &[u32]) -> Frame {
-    evaluate_interval(doc, seq, index, t, false, Some(uids))
-}
-
 /// [`evaluate_native`] with every stored value as the editor computes it, for
 /// records (see [`Sampler::angle`]); tweening only the figures `uids` (and those they
 /// hang from) when given, as a figure's pose channel samples its track (`requestedUids`).
@@ -484,18 +478,24 @@ pub(crate) fn evaluate_native_exact_only(doc: &Document, seq: &Seq, index: usize
 }
 
 fn evaluate_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>) -> Frame {
-    let mut frame = tween_interval(doc, seq, index, t, exact, only);
-    correct_origins(doc, &mut frame);
+    evaluate_interval_checked(doc, seq, index, t, exact, only, &|| false)
+}
+fn evaluate_interval_checked(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>, cancelled: &dyn Fn() -> bool) -> Frame {
+    if cancelled() { return Frame::default(); }
+    let mut frame = tween_interval(doc, seq, index, t, exact, only, cancelled);
+    if !cancelled() { correct_origins_checked(doc, &mut frame, cancelled); }
     frame
 }
 
 /// `correctAnimationOrigins`: every unjoined figure with an animation origin is placed so
 /// that its pivot lands where its pose says, as each native interval leaves it.
-pub(crate) fn correct_origins(doc: &Document, frame: &mut Frame) {
+pub(crate) fn correct_origins(doc: &Document, frame: &mut Frame) { correct_origins_checked(doc, frame, &|| false); }
+fn correct_origins_checked(doc: &Document, frame: &mut Frame, cancelled: &dyn Fn() -> bool) {
     if !doc.origins {
         return;
     }
     for object in frame.objects.iter_mut() {
+        if cancelled() { return; }
         let Some(figure) = doc.figure(object.figure) else { continue };
         if let Some(root) = crate::origin::corrected_root(figure, object) {
             Arc::make_mut(object).root = root;
@@ -503,7 +503,7 @@ pub(crate) fn correct_origins(doc: &Document, frame: &mut Frame) {
     }
 }
 
-fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>) -> Frame {
+fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>, cancelled: &dyn Fn() -> bool) -> Frame {
     let keys = &seq.keys;
     let Some(a) = keys.get(index) else { return Frame::default() };
     let Some(b) = keys.get(index + 1) else { return frame_of(a) };
@@ -544,6 +544,7 @@ fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, 
     });
     let mut objects = Vec::with_capacity(a.frame.objects.len());
     for o in &a.frame.objects {
+        if cancelled() { return Frame::default(); }
         if needed.as_ref().is_some_and(|needed| !needed.contains(&o.uid)) {
             objects.push(o.clone());
             continue;
@@ -557,7 +558,7 @@ fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, 
             continue;
         };
         let recs: [Option<&Object>; 4] = frames.map(|f| f.and_then(|f| f.object(o.uid)).filter(|x| x.figure == o.figure).map(|x| &**x));
-        objects.push(Arc::new(tween_object(&sampler, fig, o, next, &recs, auto)));
+        objects.push(Arc::new(tween_object(&sampler, fig, o, next, &recs, auto, cancelled)));
     }
     let camera = match (a.frame.camera, b.frame.camera) {
         (Some(ca), Some(cb)) => {
@@ -599,7 +600,7 @@ fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, 
     }
 }
 
-fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Option<&Object>; 4], auto: bool) -> Object {
+fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Option<&Object>; 4], auto: bool, cancelled: &dyn Fn() -> bool) -> Object {
     let t = s.t;
     let read = |f: &dyn Fn(&Object) -> f64| recs.map(|r| r.map(f));
     let mut out = o.clone();
@@ -677,6 +678,7 @@ fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Op
     let mut angles: Vec<f64> = (0..n).map(|i| o.angles.get(i).copied().unwrap_or(fig.segments[i].angle)).collect();
     let mut done = vec![false; n];
     for &i in &plan.order {
+        if cancelled() { return out; }
         let i = i as usize;
         let parent = plan.parent[i];
         let relative_of = |x: &Object| -> f64 {
@@ -944,13 +946,15 @@ impl Prepared {
         self.evaluate_raw(tick, false)
     }
 
-    fn apply_movieclips(&self, frame: &mut Frame, tick: f64) {
+    fn apply_movieclips(&self, frame: &mut Frame, tick: f64) { self.apply_movieclips_checked(frame, tick, &|| false); }
+    fn apply_movieclips_checked(&self, frame: &mut Frame, tick: f64, cancelled: &dyn Fn() -> bool) {
         if !self.has_clips() {
             return;
         }
         let doc = &self.doc;
         let mut hidden = false;
         for object in frame.objects.iter_mut() {
+            if cancelled() { return; }
             let Some(local) = self.clip_local(object, tick) else { continue };
             hidden |= local.is_none();
             Arc::make_mut(object).clip_time = local;
@@ -973,6 +977,7 @@ impl Prepared {
         // frame had it, built once (`resolveGeometry` of `sampleMovieclipObjects`).
         let mut loose: Option<crate::geometry::Scene> = None;
         for (i, o) in frame.objects.iter().enumerate() {
+            if cancelled() { return; }
             if !keep[i] {
                 continue;
             }
@@ -1004,6 +1009,14 @@ impl Prepared {
         self.evaluate_with(tick, false)
     }
 
+    /// A cancellable worker query. Partial frames are discarded before any caller can adopt them.
+    pub fn evaluate_cancellable(&self, tick: f64, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+        if cancelled() { return None; }
+        let frame = self.evaluate_raw_checked(tick, false, cancelled);
+        if cancelled() { return None; }
+        self.finish_frame_checked(frame, tick, false, cancelled)
+    }
+
     /// Movieclip sources sample their rows at fractional local times.
     pub fn evaluate_clip(&self, tick: f64) -> Frame {
         self.evaluate_with(tick, true)
@@ -1013,25 +1026,32 @@ impl Prepared {
         self.finish_frame(self.evaluate_raw(tick, fractional), tick, fractional)
     }
 
-    fn finish_frame(&self, mut frame: Frame, tick: f64, fractional: bool) -> Frame {
-        self.apply_movieclips(&mut frame, tick);
+    fn finish_frame(&self, frame: Frame, tick: f64, fractional: bool) -> Frame {
+        self.finish_frame_checked(frame, tick, fractional, &|| false).expect("uncancelled frame")
+    }
+    fn finish_frame_checked(&self, mut frame: Frame, tick: f64, fractional: bool, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+        if cancelled() { return None; }
+        self.apply_movieclips_checked(&mut frame, tick, cancelled);
+        if cancelled() { return None; }
         apply_layer_order(&self.doc, &mut frame);
         // Where the camera travels (`cameraTravelAt`, follow clips included) moves parallax
         // layers; camera-motion impulses shake the finished shot on top of it. A movieclip's
         // own frame is drawn with its instance's camera and parallax, never its own.
         let travel = if fractional { frame.camera } else { self.travel(frame.camera, tick) };
+        if cancelled() { return None; }
         if !fractional {
             frame.parallax = crate::parallax::resolve(&self.doc, &frame, travel.as_ref());
         }
         if !self.doc.camera_motion.is_empty() {
             frame.camera = crate::camera::at_time(travel, &self.doc.camera_motion, tick, self.doc.fps);
         }
+        if cancelled() { return None; }
         if self.has_vfx {
             let mut export_vfx = Vec::new();
             frame.vfx = self.frame_vfx(&frame, &mut export_vfx);
             frame.export_vfx = export_vfx;
         }
-        frame
+        if cancelled() { None } else { Some(frame) }
     }
 
     /// The effects to draw for an evaluated `frame`: the document's own clips sampled at its tick, or, in the crop of a
@@ -1082,14 +1102,16 @@ impl Prepared {
         frame
     }
 
-    fn evaluate_raw(&self, tick: f64, fractional: bool) -> Frame {
+    fn evaluate_raw(&self, tick: f64, fractional: bool) -> Frame { self.evaluate_raw_checked(tick, fractional, &|| false) }
+    fn evaluate_raw_checked(&self, tick: f64, fractional: bool, cancelled: &dyn Fn() -> bool) -> Frame {
+        if cancelled() { return Frame::default(); }
         let mut frame = if self.doc.sheet.is_some() {
-            self.sample_sheet(tick)
+            self.sample_sheet_checked(tick, cancelled).unwrap_or_default()
         } else if fractional {
             let (index, t) = row_at_fraction(&self.rows, tick);
-            self.native_interval(index, t, tick)
+            self.native_interval_checked(index, t, tick, cancelled)
         } else {
-            self.native_at(tick)
+            { let (index, t) = row_at(&self.rows, tick); self.native_interval_checked(index, t, tick, cancelled) }
         };
         frame.tick = tick;
         frame
@@ -1105,13 +1127,19 @@ impl Prepared {
 
     // Imported sheet keys call sampleLegacy with an explicit interval ratio even
     // inside one-tick rows. Ordinary paused native playback keeps row_at's rule.
-    fn native_at_fraction(&self, tick: f64) -> Frame {
+    fn native_at_fraction(&self, tick: f64) -> Frame { self.native_at_fraction_checked(tick, &|| false) }
+    fn native_at_fraction_checked(&self, tick: f64, cancelled: &dyn Fn() -> bool) -> Frame {
         let (index, ratio) = row_at_fraction(&self.rows, tick);
-        self.native_interval(index, ratio, tick)
+        self.native_interval_checked(index, ratio, tick, cancelled)
     }
 
     fn native_interval(&self, index: usize, ratio: f64, tick: f64) -> Frame {
-        self.with_channels(self.native_frame(index, ratio), tick)
+        self.native_interval_checked(index, ratio, tick, &|| false)
+    }
+    fn native_interval_checked(&self, index: usize, ratio: f64, tick: f64, cancelled: &dyn Fn() -> bool) -> Frame {
+        let frame = self.native_frame_checked(index, ratio, cancelled);
+        if cancelled() { return Frame::default(); }
+        self.with_channels(frame, tick)
     }
 
     /// The absolute source time corresponding to a local native key interval.
@@ -1135,17 +1163,18 @@ impl Prepared {
         self.retained_source_time(index, t)
     }
 
-    fn native_frame(&self, index: usize, t: f64) -> Frame {
+    fn native_frame_checked(&self, index: usize, t: f64, cancelled: &dyn Fn() -> bool) -> Frame {
         let (Some(source), Some(source_tick)) = (&self.source, self.retained_source_time(index, t))
         else {
-            return evaluate_native(&self.doc, &self.native, index, t);
+            return evaluate_interval_checked(&self.doc, &self.native, index, t, false, None, cancelled);
         };
-        let mut frame = source.evaluate_raw(source_tick, true);
+        let mut frame = source.evaluate_raw_checked(source_tick, true, cancelled);
         if source.doc.vfx_clips.is_some() { frame.retained_vfx_tick = Some(source_tick); }
         // Source clocks are sampled before the local crop restores its presence
         // offsets, as evaluatedFrame does for retained samples. Hidden instances
         // stay present here; apply_movieclips owns visibility filtering.
         for object in &mut frame.objects {
+            if cancelled() { return Frame::default(); }
             let time = source.clip_local(object, source_tick);
             if let Some(time) = time {
                 Arc::make_mut(object).clip_time = time;
@@ -1190,9 +1219,11 @@ impl Prepared {
 
     /// `sample(id)` in `sampleLayerSheet`: the layer's own pose, then the movieclip
     /// frames its key replaces; with what the editor's frame object is (see [`Sampled`]).
-    fn sample_track(&self, id: &str, tick: f64) -> Option<(Frame, Sampled)> {
+    fn sample_track(&self, id: &str, tick: f64) -> Option<(Frame, Sampled)> { self.sample_track_checked(id, tick, &|| false) }
+    fn sample_track_checked(&self, id: &str, tick: f64, cancelled: &dyn Fn() -> bool) -> Option<(Frame, Sampled)> {
+        if cancelled() { return None; }
         let track = self.doc.sheet.as_ref()?.tracks.get(id)?;
-        let sampled = self.sample_base(id, track, tick);
+        let sampled = self.sample_base_checked(id, track, tick, cancelled);
         if tick >= track.end as f64 {
             return sampled;
         }
@@ -1208,6 +1239,7 @@ impl Prepared {
         // The figures the next key replaces too: read once, not once for each figure this key replaces.
         let continuing: Option<std::collections::HashSet<u32>> = next.filter(|_| !held && !key.movieclip_patches.is_empty()).map(|n| n.movieclip_patches.iter().map(|p| p.uid).collect());
         for patch in &key.movieclip_patches {
+            if cancelled() { return None; }
             let source = |fid: &Arc<str>| {
                 let key = self.doc.pose_source(fid)?;
                 Some(frame_of(&KeyRef { frame: key.clone(), duration: 1, easing: None, origin: Some(FrameRef::Source(fid.clone())) }))
@@ -1215,7 +1247,7 @@ impl Prepared {
             // Consecutive replacements of one movieclip tween like any pose track.
             let tweened = !held && continuing.as_ref().is_some_and(|uids| uids.contains(&patch.uid));
             let replacement = match tweened.then(|| self.patch_track(id, patch.uid)).flatten() {
-                Some(seq) => sample_pose_track(&self.doc, &seq, tick),
+                Some(seq) => sample_pose_track_checked(&self.doc, &seq, tick, None, cancelled),
                 None => source(&patch.frame_id),
             };
             let Some(replacement) = replacement else { continue };
@@ -1306,7 +1338,7 @@ impl Prepared {
     }
 
     /// `baseSample`: the layer's pose from its keys, without movieclip replacements.
-    fn sample_base(&self, id: &str, track: &SheetTrack, tick: f64) -> Option<(Frame, Sampled)> {
+    fn sample_base_checked(&self, id: &str, track: &SheetTrack, tick: f64, cancelled: &dyn Fn() -> bool) -> Option<(Frame, Sampled)> {
         if tick >= track.end as f64 && !FIXED.contains(&id) {
             return None;
         }
@@ -1321,7 +1353,7 @@ impl Prepared {
             && matches!(n.value, SheetValue::Frame(None))
         {
             return match &key.value {
-                SheetValue::SourceTick(t) => Some((self.native_at_fraction(*t), Sampled::Native(t.to_bits()))),
+                SheetValue::SourceTick(t) => Some((self.native_at_fraction_checked(*t, cancelled), Sampled::Native(t.to_bits()))),
                 SheetValue::Frame(Some(id)) => self.doc.pose_source(id).map(|k| {
                     (frame_of(&KeyRef { frame: k.clone(), duration: 1, easing: None, origin: Some(FrameRef::Source(id.clone())) }), Sampled::Source(id.clone()))
                 }),
@@ -1339,16 +1371,16 @@ impl Prepared {
                 None => (0.0, source),
             };
             let time = source + fraction * (target - source);
-            return Some((self.native_at_fraction(time), Sampled::Native(time.to_bits())));
+            return Some((self.native_at_fraction_checked(time, cancelled), Sampled::Native(time.to_bits())));
         }
         if self.imported.get(id).copied().unwrap_or(false) {
             let index = at - 1;
             let (seq, first) = self.mixed_window(id, &keys, index);
             let fraction = next.map_or(0.0, |n| (tick - key.tick as f64) / (n.tick as f64 - key.tick as f64));
-            return Some((evaluate_native(&self.doc, &seq, index - first, fraction), Sampled::Track));
+            return Some((evaluate_interval_checked(&self.doc, &seq, index - first, fraction, false, None, cancelled), Sampled::Track));
         }
         let seq = self.tracks.get(id)?;
-        sample_pose_track(&self.doc, seq, tick).map(|frame| (frame, Sampled::Track))
+        sample_pose_track_checked(&self.doc, seq, tick, None, cancelled).map(|frame| (frame, Sampled::Track))
     }
 
     /// A layer that mixes imported and authored keys (an imported animation after an
@@ -1440,12 +1472,13 @@ impl Prepared {
     }
 
     /// `sampleLayerSheet`: compose each layer's own pose track.
-    fn sample_sheet(&self, tick: f64) -> Frame {
+    fn sample_sheet_checked(&self, tick: f64, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
         let doc = &self.doc;
-        let scene = self.sample_track("scene", tick);
-        let camera = self.sample_track("camera", tick);
+        let scene = self.sample_track_checked("scene", tick, cancelled);
+        let camera = self.sample_track_checked("camera", tick, cancelled);
         let layers = doc.layers.clone().unwrap_or_default();
-        let frames: Vec<(&String, Option<(Frame, Sampled)>)> = layers.order.iter().map(|id| (id, self.sample_track(id, tick))).collect();
+        let mut frames = Vec::new();
+        for id in &layers.order { if cancelled() { return None; } frames.push((id, self.sample_track_checked(id, tick, cancelled))); }
         // Imported layers that share one native pose are that pose, whole, slots included.
         if let (Some((scene, identity)), Some((_, other))) = (&scene, &camera)
             && *identity != Sampled::Track
@@ -1457,7 +1490,7 @@ impl Prepared {
         {
             let shared: std::collections::HashSet<&str> = frames.iter().filter(|(_, s)| s.as_ref().is_some_and(|(_, s)| s == identity)).map(|(id, _)| id.as_str()).collect();
             if scene.objects.iter().all(|o| shared.contains(layers.layer_of(o.uid))) && scene.continuations.iter().all(|(uid, _)| shared.contains(layers.layer_of(*uid))) {
-                return Frame { tick, ..scene.clone() };
+                return Some(Frame { tick, ..scene.clone() });
             }
         }
         let mut objects: Vec<Arc<Object>> = Vec::new();
@@ -1465,9 +1498,11 @@ impl Prepared {
         let mut parents: Vec<Option<u32>> = Vec::new();
         let mut continuations = Vec::new();
         for (id, sampled) in &frames {
+            if cancelled() { return None; }
             let Some((frame, _)) = sampled else { continue };
             continuations.extend(frame.continuations.iter().filter(|(uid, _)| layers.layer_of(*uid) == id.as_str()).cloned());
             for &slot in &frame.draw_order {
+                if cancelled() { return None; }
                 let object = &frame.objects[slot as usize];
                 if layers.layer_of(object.uid) != id.as_str() {
                     continue;
@@ -1496,7 +1531,7 @@ impl Prepared {
         };
         let background_color = scene.as_ref().and_then(|s| s.background_color);
         let pose_vfx = scene.as_ref().and_then(|s| s.pose_vfx.clone());
-        Frame {
+        Some(Frame {
             tick,
             retained_vfx_tick: doc.keyframes.first().and_then(|k| k.retained_vfx_tick),
             draw_order: (0..objects.len() as u32).collect(),
@@ -1512,7 +1547,7 @@ impl Prepared {
             vfx: None,
             export_vfx: Vec::new(),
             parallax: None,
-        }
+        })
     }
 }
 
@@ -1668,13 +1703,11 @@ fn virtual_track(doc: &Document, fixed: bool, mut keys: Vec<(&SheetKey, Option<&
     Seq { keys: refs, version: 5, auto_easing: doc.auto_easing, ticks: keys.iter().map(|k| k.0.tick as f64).collect() }
 }
 
-/// `samplePoseTrack`: the interval of the track's own key ticks around `tick`.
-pub(crate) fn sample_pose_track(doc: &Document, seq: &Seq, tick: f64) -> Option<Frame> {
-    sample_pose_track_only(doc, seq, tick, None)
-}
-
-/// [`sample_pose_track`] tweening only the figures `uids` (and those they hang from) when given.
-pub(crate) fn sample_pose_track_only(doc: &Document, seq: &Seq, tick: f64, uids: Option<&[u32]>) -> Option<Frame> {
+/// `samplePoseTrack`: the interval around `tick`, tweening only the figures
+/// `uids` (and their ancestors) when supplied.
+pub(crate) fn sample_pose_track_only(doc: &Document, seq: &Seq, tick: f64, uids: Option<&[u32]>) -> Option<Frame> { sample_pose_track_checked(doc, seq, tick, uids, &|| false) }
+fn sample_pose_track_checked(doc: &Document, seq: &Seq, tick: f64, uids: Option<&[u32]>, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+    if cancelled() { return None; }
     let ticks = &seq.ticks;
     if ticks.is_empty() || tick < ticks[0] {
         return None;
@@ -1684,10 +1717,7 @@ pub(crate) fn sample_pose_track_only(doc: &Document, seq: &Seq, tick: f64, uids:
         Some(&next) if next > ticks[low] => ((tick - ticks[low]) / (next - ticks[low])).clamp(0.0, 1.0),
         _ => 0.0,
     };
-    Some(match uids {
-        Some(uids) => evaluate_native_only(doc, seq, low, fraction, uids),
-        None => evaluate_native(doc, seq, low, fraction),
-    })
+    Some(evaluate_interval_checked(doc, seq, low, fraction, false, uids, cancelled))
 }
 
 /// `applyLayerOrder`: group back-to-front by user layer, stable within each.

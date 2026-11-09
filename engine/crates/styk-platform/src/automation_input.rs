@@ -38,6 +38,7 @@ unsafe extern "system" fn unattended_pointer(hwnd: windows_sys::Win32::Foundatio
 
 /// Type a numeric value into the focused field. Focusing a number field selects its contents.
 pub fn number(window: &dyn HasWindowHandle, text: &str) -> Result<(), WindowError> {
+    if crate::unattended::requested_by_environment().ok().flatten() != Some(crate::unattended::Strategy::HiddenWindow) { return Err(WindowError::Unsupported); }
     for ch in text.chars() {
         let vk = match ch { '0'..='9' => ch as u16, '-' => 0xBD, '.' => 0xBE, _ => return Err(WindowError::NoWindow) };
         crate::input::post_key(window, vk, true)?;
@@ -45,4 +46,27 @@ pub fn number(window: &dyn HasWindowHandle, text: &str) -> Result<(), WindowErro
     }
     crate::input::post_key(window, 0x0D, true)?;
     crate::input::post_key(window, 0x0D, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct NoWindow;
+    impl HasWindowHandle for NoWindow {
+        fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> { Err(raw_window_handle::HandleError::Unavailable) }
+    }
+    #[test]
+    fn input_entries_refuse_without_unattended_window_before_accessing_a_handle() {
+        const CHILD: &str = "STYK_V0_INPUT_GUARD_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(matches!(click(&NoWindow, [1., 1.]), Err(WindowError::Unsupported)));
+            assert!(matches!(number(&NoWindow, "520"), Err(WindowError::Unsupported)));
+            return;
+        }
+        // Isolate the environment without changing process-global state in a parallel suite.
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "automation_input::tests::input_entries_refuse_without_unattended_window_before_accessing_a_handle"])
+            .env_remove("STYK_BACKGROUND_WINDOW").env(CHILD, "1").status().unwrap();
+        assert!(status.success());
+    }
 }

@@ -54,12 +54,13 @@ impl Masks {
 
     /// Each lone glyph of `list` at raster density `resolution`: its mask (filled now if no
     /// frame filled it yet), or `None` where its triangles draw.
-    pub fn prepare(&mut self, list: &DrawList, resolution: f64, smooth: bool) -> Vec<Option<Placed>> {
+    pub fn prepare(&mut self, list: &DrawList, resolution: f64, smooth: bool, cancelled: &dyn Fn() -> bool) -> Vec<Option<Placed>> {
         self.frame += 1;
         self.filled = 0;
         let frame = self.frame;
         let mut placed = Vec::with_capacity(list.glyphs.len());
         for instance in &list.glyphs {
+            if cancelled() { return placed; }
             let layout = instance.mask.layout(resolution, GlyphMask::MAX_DIMENSION).filter(|m| smooth && (m.width as f64) <= LARGEST && (m.height as f64) <= LARGEST);
             let Some(layout) = layout else {
                 placed.push(None);
@@ -76,7 +77,8 @@ impl Masks {
                 placed.push(None);
                 continue;
             }
-            let mask = Arc::new(fill(&instance.triangles, &layout));
+            let Some(mask) = fill(&instance.triangles, &layout, cancelled) else { return placed; };
+            let mask = Arc::new(mask);
             self.bytes += size;
             self.filled += 1;
             self.entries.insert(key, Entry { mask: mask.clone(), used: frame, _triangles: instance.triangles.clone() });
@@ -99,17 +101,18 @@ impl Masks {
 
 /// Fills glyph `triangles` (glyph space) into a mask laid out as `layout`: four samples a
 /// texel, resolved to their average (0, 64, 128, 191 or 255).
-fn fill(triangles: &[[f32; 2]], layout: &GlyphMaskLayout) -> Mask {
+fn fill(triangles: &[[f32; 2]], layout: &GlyphMaskLayout, cancelled: &dyn Fn() -> bool) -> Option<Mask> {
     let (w, h) = (layout.width as usize, layout.height as usize);
     let mut counts = vec![0u8; w * h];
     let [sx, sy, tx, ty] = layout.from_glyph;
     let texel = |p: [f32; 2]| [(sx * p[0] as f64 + tx) as f32, (sy * p[1] as f64 + ty) as f32];
     for t in triangles.as_chunks::<3>().0 {
+        if cancelled() { return None; }
         let Some(triangle) = Triangle::new([texel(t[0]), texel(t[1]), texel(t[2])]) else { continue };
         triangle.each([0, 0, w as i64, h as i64], &FOUR, |x, y, mask| {
             counts[y as usize * w + x as usize] |= mask;
         });
     }
     const LEVELS: [u8; 5] = [0, 64, 128, 191, 255];
-    Mask { width: w, height: h, data: counts.into_iter().map(|m| LEVELS[m.count_ones() as usize]).collect() }
+    Some(Mask { width: w, height: h, data: counts.into_iter().map(|m| LEVELS[m.count_ones() as usize]).collect() })
 }

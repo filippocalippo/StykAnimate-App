@@ -88,11 +88,11 @@ impl FrameBuilder {
         generation: &Generation,
         tick: f64,
         options: &Options,
-        clock: crate::Clock,
+        clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>,
     ) -> FrameData {
         // The existing synchronous worker entry is never cancelled.
         Self::default()
-            .prepare_inner(generation, tick, options, &clock, &|| false, false)
+            .prepare_inner(generation, tick, options, &|| clock(), &|| false, false)
             .expect("uncancelled preparation")
     }
 

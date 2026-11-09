@@ -2,13 +2,15 @@
 use crate::files::FileTarget;
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Filter { pub label: String, pub extensions: Vec<String> }
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Request {
-    Open { title: String },
-    Save { title: String, name: String },
-    Color { initial: [u8; 3] },
+    Open { title: String, filters: Vec<Filter> },
+    Save { title: String, name: String, filter: Filter },
 }
 #[derive(Clone, Debug, PartialEq)]
-pub enum Choice { File(Option<FileTarget>), Color(Option<[u8; 3]>) }
+pub enum Choice { File(Option<FileTarget>) }
 pub type Completion = Box<dyn FnOnce(Result<Choice, String>) + Send>;
 
 pub trait Dialogs: Send + Sync {

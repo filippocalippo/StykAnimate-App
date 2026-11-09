@@ -1,74 +1,85 @@
 # Native visible editing loop (V0)
 
-`Core::start_runtime` starts the document-derived facts, timeline and Select lanes. The
-window's document pump consumes host completions and attaches the published front
-project to its existing `Surface`. Command-line opens explicitly notify that pump;
-recovery opens use the same host completion path. The existing dock mounts the stage
-and Properties. The stage retains navigation and its fitted view.
+`Core::start_runtime` starts the document facts, timeline and Select lanes. The window's
+document pump consumes host completions and attaches the published front project to
+its existing Surface. Command-line opens wake that pump; recovery uses the same host
+completion path. The existing dock mounts the stage and Properties.
 
-## Presses and Properties
+## Selection and Properties
 
-`Core::stage_event` forwards Surface's unconsumed pointers to `styk_core::tools`.
-Only a left press selects. The existing handle/segment queries and alpha-aware artwork
-picker run on a worker. There is at most one submitted query and one latest waiting
-press. A reply must still match its input serial, document lineage, revision, playhead
-and stage view. The common panel lifecycle invalidates it before switching tabs or
-running another command. Empty canvas clears; modifier clicks toggle figures; a
-selected figure's joint changes the session's selected joint. Selection adds no undo.
+Surface forwards unconsumed pointers and terminal cancellations in queue order.
+Interruption identifies its pointer; overflow cancels the current press. Core drains
+that input before adopting any selection reply. A left press uses the existing handle,
+segment and alpha-aware artwork queries on the Select worker. Selection stays in the
+session and adds no history entry. Saved layer locks require `true`; a document's
+Focus and lock view also excludes layers outside its focus.
+`ViewState::set_layer_focus_lock(document, lineage, focused)` is the owner seam for
+A1's focus UI; V0 consumes that state but does not add the later layer controls.
 
-Selection remains in the session. The Inspector context returns to Auto after a pick.
-Its facts lane also returns the selected instances' resolved figures, so their colour
-and segment style include instance overlays. Controls stay pending until those facts
-match the current key; the interface never resolves instance styles or builds geometry.
-Numbers keep the existing field gesture. Solid figure and segment colours call their
-existing session commands. Each committed edit is one undo entry.
+There is one submitted job and one latest lightweight waiting press. Every job owns a
+cancellation token. Superseding input, document replacement/close, view changes and
+teardown cancel it. Evaluation, geometry, picture decode and raster work observe the
+token at their work units. Partial results are discarded, never adopted as a frame or
+cached as a failed image. The worker disposes query payloads and decoded artwork;
+closing the interface never joins that worker. Replies must still match input identity,
+document lineage, revision, playhead, focus version and stage view.
 
-`Effect::RequestFrame` becomes `Message::PollDocuments` in the UI adapter. This starts
-publication after an edit, undo or redo, without waiting for unrelated input. Worker
-receipts refresh the Inspector and revise the active Surface. The pump synchronizes
-the band's undo/redo state as part of that same update.
+The Inspector context returns to Auto after selection. Its facts lane returns resolved
+instance figures, including instance styles. Facts keys include document lineage;
+pending context changes rebuild the model. The interface never resolves styles or
+builds geometry. Numbers keep the existing field gesture and one undo entry per edit.
+B1 owns colour-row commits and B3 owns the picker popover; V0 supplies no colour dialog
+or swatch service continuation.
 
-The always-mounted raw event subscription delivers a tab's button release even when
-Windows batches it with the press, before the drag subscription has been installed.
-An activated tab explicitly schedules publication for its front document.
+`Effect::RequestFrame` becomes `Message::PollDocuments` in the UI adapter, starting
+publication after editing, undo and redo. Worker receipts update Properties, the active
+Surface and the band's history state. The always-mounted raw subscription also delivers
+a tab release batched with its press; activation schedules the new front publication.
 
-## File and colour services
+## Files and lifetime
 
-The registry's file owner routes New, Open, Save, Save As, Save All and Close to the
-documents host, after the shared panel settlement barrier. The band's mark opens the
-existing overlay menu with these currently implemented actions. File prompts and the
-Inspector's existing swatches request `styk_services::dialogs::Dialogs`. The Windows
-implementation runs the window-owned common dialog on a worker. Unattended runs
-refuse OS dialogs; automation supplies choices at the same boundary.
+The registry routes New, Open, Save, Save As, Save All and Close through Documents after
+panel settlement. Every immediate or asynchronous host effect reaches
+`Core::document_effect`, including recovery's Close/Quit Save response. Untitled Save
+opens the shared file picker. Cancelling restores the same prompt and document; an
+accepted Save fences edits until close/quit finishes. Save answers retain prompt identity,
+and Busy continuations retry only on host progress.
 
-Save answers retain the host's prompt identity. Busy continuations are retained and
-retried on host progress, without a polling loop. Cancellation or picker failure
-answers a pending save with no target. A colour answer carries the original document,
-revision, tick, selection and target, and an intervening editor intent invalidates it.
-Window blur alone does not invalidate a colour dialog, since the modal receives focus.
+Open offers the same six localized filter choices as `desktop/main.cjs`, including
+movieclips, figures, Pivot files, Stick Nodes files and archives. Unattended runs refuse
+OS pickers; automation supplies file choices at the service boundary.
 
-V0 adds no views. The native solid-colour dialog is the platform implementation
-behind the service; gradients, the full paint editor and the complete application menu
-remain later view work. Existing untitled close/quit Save availability is unchanged:
-Save or Save As can establish a target before closing. Stage dragging, marquee and
-selection decorations remain later tool work.
+The Windows picker registers its lifetime on the owner window's thread. No application
+HWND enters the detached modal worker. Destruction invalidates the registration; quit
+and session end cancel its current run. A hook checks cancellation in the dialog's own
+message loop and closes it there. Neither window destruction nor session-end completion
+waits for the picker thread, and late results become cancellation.
 
-## Verification entry points
+Application, engine, document and session clocks are captured per instance. There is
+no process-global engine timestamp; parallel test hosts can advance independent clocks.
 
-- `cargo test -p styk-core --test visible_loop`: production worker routing, figure/joint/
-  empty selection, supersession, colour, number, history, save bytes/reopen and front tabs.
-- `cargo test -p styk-app visible_loop`: mounted Properties controls and production
-  subscription/task handling, including publication without a synthetic frame poll.
-- `stykanimate tests/edit/startup.document.json --automation crates/styk-app/automation/visible-loop.styk-auto --size 1560x1000` from `engine/`:
-  real mounted controls, messages posted only to that window, file/colour choices at
-  the service boundary, and PrintWindow captures in `artifacts/native-v0/` (create that
-  output directory first). Steps wait for the stage's current picture. The existing
-  frame-settling interval counts only complete glyph frames, so a held previous frame
-  cannot be mistaken for the new selection's Properties.
+## Development feature and verification
 
-The unattended Windows adapter suppresses that window's OS `MouseLeave` notifications:
-the physical desktop pointer deliberately stays elsewhere. Otherwise iced sees an
-unavailable cursor for the entire posted click batch. The hook exists only after an
-automation click in a background window and removes itself when that window is destroyed.
+The reusable feature is `devtools`: `styk-app/devtools` propagates to
+`styk-core/devtools`, `styk-platform/devtools`, the existing developer UI and tracing.
+Core and platform propagate to `styk-services/devtools`. A crate opts in with its existing
+`devtools` feature and forwards `dependency-name/devtools` for each participating dependency;
+package builds use `--features devtools`. There is no automation-specific feature.
+The platform automation-input module and all app callers require this feature. Both
+mouse and numeric-key entry also require the unattended hidden-window strategy.
 
-All commands run through the machine queue with `STYK_BACKGROUND_WINDOW=1`.
+- `cargo test -p styk-core --test visible_loop`: real document/runtime routing, pen
+  interruption/overflow, selection and lock rules, number/history, save/reopen and
+  untitled Close/Quit picker continuations.
+- `cargo test -p styk-app --features devtools`: mounted controls, publication adapters,
+  capture readiness and independent app clocks. Tests use default parallel execution.
+- `cargo xtask check-shipping-features`: the default shipping feature graph.
+- Build the real app separately with `cargo build -p styk-app --features devtools`.
+  From `engine/`, run `stykanimate tests/edit/startup.document.json --automation
+  crates/styk-app/automation/visible-loop.styk-auto --size 1560x1000` with
+  `STYK_BACKGROUND_WINDOW=1`. The script drives window-addressed input, edits a number,
+  undoes/redoes, saves/reopens, switches and closes. PrintWindow captures go to
+  `artifacts/native-v0-review/`. Complete glyph frames gate capture; no desktop input
+  is injected. The unattended cursor hook removes itself when the window is destroyed.
+
+Every build, test and app run goes through the machine queue.

@@ -85,7 +85,7 @@ pub struct Outcome {
     /// The view or the demanded frame changed: a redraw is due.
     pub changed: bool,
     /// Presses and moves the stage did not take (the tool owner's: none yet).
-    pub routed: Vec<Pointer>,
+    pub routed: Vec<super::input::InputResult>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

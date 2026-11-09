@@ -120,6 +120,10 @@ impl PreparedDocument {
     pub fn set_clock(&mut self, clock: fn() -> f64) {
         if let SessionOwner::Ready(session) = &mut self.session { session.set_clock(clock); }
     }
+    pub fn set_clock_source(&mut self, clock: Arc<dyn Fn() -> f64 + Send + Sync>) {
+        if let SessionOwner::Ready(session) = &mut self.session { session.set_clock_source(clock); }
+    }
+
 
     fn open_application(engine: &Engine, bytes: Arc<[u8]>, name: &str, cancel: &dyn Fn() -> bool) -> Result<Self, OpenError> {
         let mut opened = engine.open_document(OpenSource::File { bytes: &bytes, name }, OpenOptions { layer_timeline: true }, cancel)?;

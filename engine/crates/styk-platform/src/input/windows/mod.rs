@@ -12,7 +12,10 @@ pub mod subclass_id {
     /// The pen, touch and mouse source ([`super::pointer::WindowsInput`]).
     pub const POINTER: usize = 0x5359_4B49;
     /// The off-screen automation cursor ([`crate::automation_input`]).
+    #[cfg(feature = "devtools")]
     pub const AUTOMATION: usize = 0x5359_4B41;
+    /// Native file picker lifetime registration.
+    pub const DIALOGS: usize = 0x5359_4B44;
     /// The frameless window's non-client behaviour ([`crate::windows::chrome`]).
     pub const CHROME: usize = 0x5359_4B43;
 }

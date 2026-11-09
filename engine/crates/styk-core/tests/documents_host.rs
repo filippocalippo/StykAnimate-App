@@ -38,7 +38,7 @@ impl Rig {
         let mut docs = Documents::new();
         docs.attach_host(HostOptions {
             engine: Engine::new(|| 0.0, Budgets::for_device(None)), spawner: Arc::new(Threads), files: files.clone(),
-            startup: json::parse(STARTUP).unwrap(), clock: || 0.0, notify: Arc::new(move || { let _ = send.send(()); }),
+            startup: json::parse(STARTUP).unwrap(), clock: Arc::new(|| 0.0), notify: Arc::new(move || { let _ = send.send(()); }),
         }).unwrap();
         Self { docs, files, wake }
     }

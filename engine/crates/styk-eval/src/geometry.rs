@@ -576,7 +576,7 @@ pub fn segment_pose(obj: &Object, seg: &crate::doc::Segment, i: usize) -> (f64, 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, root: [f64; 2], ik: Option<&crate::ik::Solution>, measure: Measure, render_output: bool) -> Built {
+fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, root: [f64; 2], ik: Option<&crate::ik::Solution>, measure: Measure, render_output: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Built {
     let obj = &frame.objects[slot];
     let n = fig.segments.len();
     let scale = obj.scale;
@@ -615,6 +615,7 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
     let mut authored: Vec<f64> = if has_spatial { vec![f64::NAN; n] } else { Vec::new() };
     let mut start_raws: Vec<Option<[f64; 3]>> = if has_spatial { vec![None; n] } else { Vec::new() };
     for &i in order {
+        if cancelled() { return Built::new(ObjectGeometry::default()); }
         let i = i as usize;
         let seg = &fig.segments[i];
         let parent = plan.parent[i];
@@ -781,6 +782,7 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
         }
     }
     for (pi, poly) in fig.polyfills.iter().enumerate() {
+        if cancelled() { return Built::new(ObjectGeometry::default()); }
         let pp = &plan.polygons[pi];
         let p0 = points.len() as u32;
         // A depth-tested face of a perspective pose is clipped before projection,
@@ -1394,7 +1396,24 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
     build_core(doc, frame, needed, measure, render_output, memory, None).expect("a build without a previous scene gives a scene")
 }
 
-fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>) -> Option<Scene> {
+fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, memory: Option<&mut BuildMemory>, same_as: Option<&Scene>) -> Option<Scene> {
+    build_core_checked(doc, frame, needed, measure, render_output, memory, same_as, &|| false)
+}
+
+/// Query geometry with checkpoints in every parallel object and join level.
+pub fn build_shapes_cancellable(doc: &Document, frame: &Frame, slots: Option<&[usize]>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
+    let needed = slots.map(|slots| {
+        let mut needed = vec![false; frame.objects.len()];
+        for &slot in slots {
+            let mut at = Some(slot);
+            while let Some(i) = at.filter(|&i| i < needed.len() && !needed[i]) { needed[i] = true; at = frame.objects[i].join.map(|j| j.slot as usize); }
+        }
+        needed
+    });
+    build_core_checked(doc, frame, needed.as_deref(), Measure::Shapes, true, None, None, cancelled)
+}
+
+fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
     let count = frame.objects.len();
     if let Some(memory) = memory.as_deref_mut() {
         memory.begin(count, measure, doc.version);
@@ -1411,6 +1430,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
     let mut figure_slot = std::collections::HashMap::new();
     let mut fig_of = vec![u32::MAX; count];
     for (i, o) in frame.objects.iter().enumerate() {
+        if cancelled() { return None; }
         let fig = match &o.figure_override {
             Some(f) => Some(f),
             None => doc.figure(o.figure),
@@ -1446,6 +1466,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
         let mut children: Vec<Vec<usize>> = vec![Vec::new(); count];
         let mut current: Vec<usize> = Vec::new();
         for (i, o) in frame.objects.iter().enumerate() {
+        if cancelled() { return None; }
             match o.join {
                 Some(j) if (j.slot as usize) < count => children[j.slot as usize].push(i),
                 _ => current.push(i),
@@ -1475,6 +1496,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
     let mut anew: Vec<(usize, Kept)> = Vec::new();
     // Publication still follows draw order.
     for slots in order.iter().map(Vec::as_slice) {
+        if cancelled() { return None; }
         let filtered: Vec<usize>;
         let slots = match needed {
             Some(needed) => {
@@ -1496,6 +1518,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
             Some(root)
         };
         let make = |&i: &usize| -> Option<(usize, Arc<Built>, Option<Kept>)> {
+            if cancelled() { return None; }
             let fig = &scene.figures[*fig_of.get(i)? as usize];
             let root = resolve_root(i, &built).unwrap_or(frame.objects[i].root);
             if let Some(clip) = &fig.movieclip {
@@ -1532,10 +1555,11 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
             if let Some(kept) = reuse(previous, i, &frame.objects[i], fig, fig_of[i], root, ik) {
                 return Some((i, kept, None));
             }
-            let built = Arc::new(build_object(doc, doc.version, frame, i, fig_of[i], fig, root, ik, measure, render_output));
+            let built = Arc::new(build_object(doc, doc.version, frame, i, fig_of[i], fig, root, ik, measure, render_output, cancelled));
             Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, ik.cloned(), built))))
         };
         let results: Vec<(usize, Arc<Built>, Option<Kept>)> = crate::par::map(&slots, 32, make).into_iter().flatten().collect();
+        if cancelled() { return None; }
         for (i, b, fresh) in results {
             built[i] = Some(b);
             if let Some(fresh) = fresh {
@@ -1564,6 +1588,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
     scene.measured.reserve(total_measured);
     scene.points.reserve(total_points);
     for &slot in &frame.draw_order {
+        if cancelled() { return None; }
         // Read in place: a build the memory also holds is shared, and only the parts the scene owns are copied.
         let Some(b) = built[slot as usize].take() else { continue };
         let base = scene.points.len() as u32;

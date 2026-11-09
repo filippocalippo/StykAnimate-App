@@ -623,7 +623,7 @@ Interface: stays in JS.
 | `src/vfx-preset-preview.mjs` |  | stays |  |
 | `src/vfx-preset-ui.mjs` |  | stays |  |
 | `src/web-support.js` |  | stays |  |
-| `src/inspector-view.mjs` | `styk-core::inspector` | stays | Native V0 reads resolved instance styles from the facts worker and commits colour through the session |
+| `src/inspector-view.mjs` | `styk-core::inspector` | stays | Native V0 reads resolved instance styles from the facts worker; B1 owns colour commits and B3 owns the picker |
 | `src/app.mjs` | `styk-core::tools; styk-core::file_actions` | stays | Native V0 routes Select clicks and file actions; the browser remains the reference for later tools |
 
 ## Application services

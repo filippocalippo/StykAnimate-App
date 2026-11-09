@@ -145,6 +145,8 @@ impl Host for EngineHost<'_> {
         (self.cancel)()
     }
 
+    fn clock_source(&self) -> Arc<dyn Fn() -> f64 + Send + Sync> { self.engine.map_or_else(|| Arc::new(self.clock) as Arc<dyn Fn() -> f64 + Send + Sync>, Engine::clock_source) }
+
     fn clock(&self) -> fn() -> f64 {
         self.clock
     }
@@ -182,7 +184,7 @@ impl Host for EngineHost<'_> {
 /// how much (`Written::repairs`); when opening would refuse something no repair mends, the file is written all the same, as refusing
 /// leaves the person with nothing, and the answer carries the reason (`Written::warning`).
 pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, host: &dyn Host) -> Result<Written, SaveError> {
-    let clock = host.clock();
+    let clock = host.clock_source();
     let cancel = &|| host.cancelled();
     let started = clock();
     let Some(mut document) = trees.last().cloned() else { return Err(SaveError::Refused("errors.documentExportWorker.theDocumentSnapshotWasNotInitialized".into())) };
@@ -288,7 +290,7 @@ fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], scene: Option<Val
     if host.cancelled() {
         return Err(SaveError::Cancelled);
     }
-    let clock = host.clock();
+    let clock = host.clock_source();
     let started = clock();
     // The jobs own what they use: a worker may still be running one when this returns early.
     // The reader's check only has to be done before the file is, and is the longest single job of the save: it starts first, on a thread the
@@ -296,6 +298,7 @@ fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], scene: Option<Val
     let stop = Arc::new(AtomicBool::new(false));
     let checked: Arc<Mutex<Option<(Openable, f64)>>> = Arc::new(Mutex::new(None));
     let joiner = scene.map(|scene| {
+        let clock = clock.clone();
         let checked = checked.clone();
         let job: Job = Box::new(move |_| {
             let begun = clock();

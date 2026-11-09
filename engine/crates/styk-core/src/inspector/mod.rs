@@ -900,6 +900,3 @@ impl Panel {
         }
     }
 }
-
-#[cfg(feature = "engine")]
-pub mod color;
