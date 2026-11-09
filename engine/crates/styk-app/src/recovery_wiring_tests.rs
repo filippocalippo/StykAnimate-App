@@ -194,9 +194,10 @@ impl Runtime {
         for message in sent { self.message(message); }
         true
     }
+    #[track_caller]
     fn drain(&mut self) {
         for _ in 0..128 { if !self.next() { return; } }
-        panic!("the idle app kept scheduling work");
+        panic!("the idle app kept scheduling work: clock={:?}, deadline={:?}, expired={}, queued={:?}", self.clock.now(), self.app.band.core.wake_deadline(self.app.band.layouts_idle()), self.app.band.core.session_end_expired(), self.messages);
     }
     fn advance_deadline(&mut self) {
         let due = self.app.band.core.documents.recovery_deadline().expect("a real recovery deadline");
@@ -340,10 +341,13 @@ fn dirty_cancel_and_discard_run_from_mounted_buttons_with_autosave_off() {
 #[test]
 fn untitled_save_keeps_an_actionable_close_prompt() {
     let mut rt = Runtime::new(); rt.settled(); rt.dirty(false); rt.close(); rt.prompt();
-    assert_eq!(rt.click(ids::SAVE), 0, "the unavailable Save control sends no answer");
-    rt.drain();
-    assert!(rt.app.band.core.recovery().closing().is_some(), "no file-dialog consumer: keep Discard and Cancel actionable");
-    assert!(!rt.app.band.core.recovery().closing().unwrap().1.save_available);
+    let prompt = rt.app.band.core.recovery().closing().unwrap().0;
+    assert!(rt.app.band.core.recovery().closing().unwrap().1.save_available);
+    assert_eq!(rt.click(ids::SAVE), 1, "the mounted Save control requests the shared picker");
+    rt.drain(); // This harness has no native window: the app refuses the picker through DialogAnswer.
+    assert_eq!(rt.app.band.core.recovery().closing().unwrap().0, prompt, "a refused picker restores the same actionable prompt");
+    assert!(rt.app.band.core.recovery().closing().unwrap().1.save_available);
+    assert!(!rt.app.band.core.file_pending() && !rt.app.band.core.documents.edits_locked());
     rt.settle_prompt_animation();
     {
         // Render the existing prompt into this runtime's private directory; parallel processes share no output.
@@ -436,6 +440,7 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
         for message in sent { rt.message(message); } rt.drain();
         assert!(rt.checkpoint_finished, "release the shutdown block reason");
         assert!(rt.app.closing, "QuitReady must follow without waiting for the gate");
+        assert_eq!(rt.app.band.core.wake_deadline(true), None, "expired session end retires every core deadline");
         assert!(matches!(rt._outcome.try_recv(), Ok(Outcome::Done)), "exit must not wait for another disk save");
         for (path, bytes) in &committed { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
         rt.gate.release();

@@ -381,6 +381,7 @@ impl Core {
     /// One window wake for recovery, session end, overlays and an available layout lane.
     /// An occupied lane resumes from its worker receipt, not repeated expired deadlines.
     pub fn wake_deadline(&self, layouts_ready: bool) -> Option<u64> {
+        if self.session_end_expired() { return None; }
         self.documents.recovery_deadline().into_iter().chain(self.session_end_deadline())
             .map(|due| due.as_millis().min(u128::from(u64::MAX)) as u64)
             .chain(self.next_deadline()).chain(layouts_ready.then(|| self.dock.deadline()).flatten()).min()

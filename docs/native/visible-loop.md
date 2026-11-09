@@ -54,6 +54,8 @@ HWND enters the detached modal worker. Destruction invalidates the registration;
 and session end cancel its current run. A hook checks cancellation in the dialog's own
 message loop and closes it there. Neither window destruction nor session-end completion
 waits for the picker thread, and late results become cancellation.
+After the session-end bound expires, Core retires all its deadlines; an abandoned
+checkpoint or overlay cannot repeatedly wake a window that is finishing its exit.
 
 Application, engine, document and session clocks are captured per instance. There is
 no process-global engine timestamp; parallel test hosts can advance independent clocks.

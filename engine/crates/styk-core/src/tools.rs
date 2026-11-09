@@ -59,9 +59,7 @@ impl Tools {
     }
     fn flush(&mut self, documents: &Documents) {
         let Some(lane) = &self.lane else { return; };
-        if !self.retired.is_empty() {
-            if let Err(retired) = lane.retire(std::mem::take(&mut self.retired)) { self.retired = retired; return; }
-        }
+        if !self.retired.is_empty() && let Err(retired) = lane.retire(std::mem::take(&mut self.retired)) { self.retired = retired; return; }
         if self.submitted { return; }
         let published = documents.published();
         if self.waiting.as_ref().is_some_and(|request| published.is_some_and(|(id, rev, _)| id == request.key.document && rev == request.key.revision))

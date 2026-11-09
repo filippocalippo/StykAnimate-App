@@ -153,11 +153,15 @@ fn quit_save_all_preserves_tab_order_and_stops_on_a_cancelled_picker() {
     assert!(rig.docs.reorder(b, 0)); assert_eq!(rig.docs.successor(b), Some(a));
     let Effect::ConfirmQuit { prompt, names, .. } = rig.dispatch(Request::Quit) else { panic!("quit prompt") };
     assert_eq!(names.len(), 2);
+    let quit_prompt = prompt;
     let Effect::SaveDialog { prompt, document, .. } = rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Save }) else { panic!("save first") };
     assert_eq!(document, a);
     assert!(matches!(rig.docs.call(a, "setFPS", &[Value::Num(90.0)], &Value::Null), Err(DocumentsError::Busy)));
-    assert!(matches!(rig.dispatch(Request::SaveTarget { prompt, target: None }), Effect::None));
+    let Effect::ConfirmQuit { prompt, names, .. } = rig.dispatch(Request::SaveTarget { prompt, target: None }) else { panic!("restore quit prompt") };
+    assert_eq!(prompt, quit_prompt); assert_eq!(names.len(), 2);
+    assert!(!rig.docs.edits_locked());
     assert_eq!(rig.docs.tabs().len(), 2); assert!(rig.docs.tabs().iter().all(|tab| tab.dirty()));
+    assert!(matches!(rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Cancel }), Effect::None));
     rig.fps(a, 31.0); // Cancelling the target dialog releases the accepted-save fence.
     let Effect::ConfirmQuit { prompt, .. } = rig.dispatch(Request::Quit) else { panic!("quit prompt") };
     assert!(matches!(rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Discard }), Effect::QuitReady));
