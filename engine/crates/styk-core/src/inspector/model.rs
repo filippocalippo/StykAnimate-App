@@ -316,6 +316,18 @@ pub struct Swatch {
     pub rgb: [u8; 3],
     /// The accessible name ("Replace #FF0000 · 3 segments").
     pub description: Msg,
+    /// Not pressable or focusable (the panel is pending: the colour may be stale).
+    pub disabled: bool,
+}
+
+/// A list row (`.ui-list-row`: 32 px, a glyph, the name, then its actions), the head of a fill's group: the fill's
+/// colour as a chip swatch (pressing it opens the picker on [`Swatch::target`]) and its delete button.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListRow {
+    pub glyph: &'static str,
+    pub label: Msg,
+    pub swatch: Option<Swatch>,
+    pub actions: Vec<Button>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -389,8 +401,8 @@ pub enum Row {
     /// The palette swatches, one page at a time.
     Swatches { label: Msg, items: Vec<Swatch> },
     Pager { label: Msg, text: Arc<str>, previous: Button, next: Button },
-    /// A fill of the figure: its row (swatch, delete) and fields.
-    Group { label: Msg, rows: Vec<Row> },
+    /// A fill of the figure: its list row (glyph, name, colour chip, delete), then its other rows.
+    Group { label: Msg, head: ListRow, rows: Vec<Row> },
     Slot(Slot),
 }
 

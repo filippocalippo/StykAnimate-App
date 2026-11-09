@@ -711,7 +711,7 @@ fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Fi
             .map(|(offset, (rgb, segments, fills))| {
                 let color = facts::hex(*rgb).to_uppercase();
                 let key = if *fills > 0 { "inspectorView.replaceColorSegmentsAndFills" } else { "inspectorView.replaceColorSegments" };
-                Swatch { target: ColorTarget::Palette((palette_start + offset) as u32), rgb: *rgb, description: Msg::new(key).with("color", color).with("segments", Msg::count("counts.segments", *segments as f64)).with("fills", Msg::count("counts.fills", *fills as f64)) }
+                Swatch { target: ColorTarget::Palette((palette_start + offset) as u32), rgb: *rgb, description: Msg::new(key).with("color", color).with("segments", Msg::count("counts.segments", *segments as f64)).with("fills", Msg::count("counts.fills", *fills as f64)), disabled: false }
             })
             .collect();
         rows.push(Row::Swatches { label: msg("inspectorView.figureColorPalette"), items });
@@ -739,19 +739,11 @@ fn colours(document: &Document, palette: &[([u8; 3], usize, usize)], figure: &Fi
         let position = super::order::position(&drawables, super::order::DrawKind::Polygon, index).unwrap_or(1) as f64;
         let mut delete = Button { action: Action::Panel(PanelAction::DeletePolygon(at)), ..button(CommandId::Undo, Some("trash"), "inspectorView.deletePolygon") };
         delete.label = Msg::new("inspectorView.deletePolygon").with("value", index + 1);
+        let chip = Swatch { target: ColorTarget::Polygon(at), rgb: displayed_color(version, figure, object, polygon.rgb), description: Msg::new("inspectorView.color").with("name", name.clone()), disabled: false };
         rows.push(Row::Group {
             label: name.clone(),
+            head: ListRow { glyph: "polygon", label: name, swatch: Some(chip), actions: vec![delete] },
             rows: vec![
-                Row::Color(ColorRow { paint_picker: false, disabled: false,
-                    target: ColorTarget::Polygon(at),
-                    label: Msg::new("inspectorView.color").with("name", name),
-                    description: None,
-                    paint: Paint::Solid(displayed_color(version, figure, object, polygon.rgb)),
-                    caption: None,
-                    mixed: false,
-                    span: true,
-                }),
-                Row::Actions(ActionsRow { label: None, items: vec![delete] }),
                 grid(vec![
                     Row::Number(number(PropertyKey::PolygonOpacity(at), msg("inspectorView.opacity"), opacity, "%").range(0.0, 100.0)),
                     Row::Number(number(PropertyKey::PolygonZOrder(at), msg("inspectorView.order"), position, "").range(1.0, drawables.len() as f64)),
@@ -1103,7 +1095,15 @@ pub(crate) fn pending(model: &Inspector) -> Inspector {
     fn disable(rows: &mut [Row]) {
         for row in rows {
             match row {
-                Row::Grid { rows: inner, .. } | Row::Group { rows: inner, .. } => disable(inner),
+                Row::Grid { rows: inner, .. } => disable(inner),
+                Row::Group { head, rows: inner, .. } => {
+                    if let Some(swatch) = head.swatch.as_mut() {
+                        swatch.disabled = true;
+                    }
+                    head.actions.iter_mut().for_each(|action| action.disabled = true);
+                    disable(inner);
+                }
+                Row::Swatches { items, .. } => items.iter_mut().for_each(|item| item.disabled = true),
                 Row::Number(number) => number.pending = true,
                 Row::Stepper(stepper) => {
                     stepper.field.pending = true;
@@ -1119,7 +1119,7 @@ pub(crate) fn pending(model: &Inspector) -> Inspector {
                     previous.disabled = true;
                     next.disabled = true;
                 }
-                Row::Segmented(_) | Row::Value { .. } | Row::Meta(_) | Row::Caption(_) | Row::Swatches { .. } | Row::Slot(_) => {}
+                Row::Segmented(_) | Row::Value { .. } | Row::Meta(_) | Row::Caption(_) | Row::Slot(_) => {}
             }
         }
     }

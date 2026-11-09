@@ -520,7 +520,14 @@ fn every_message_the_inspector_shows_is_in_today_s_catalogue() {
     fn walk(rows: &[Row], out: &mut Vec<String>) {
         for row in rows {
             match row {
-                Row::Grid { rows, .. } | Row::Group { rows, .. } => walk(rows, out),
+                Row::Grid { rows, .. } => walk(rows, out),
+                Row::Group { head, rows, .. } => {
+                    out.push(head.label.key.to_string());
+                    out.extend(head.swatch.iter().map(|swatch| swatch.description.key.to_string()));
+                    out.extend(head.actions.iter().map(|item| item.label.key.to_string()));
+                    walk(rows, out);
+                }
+                Row::Swatches { items, .. } => out.extend(items.iter().map(|item| item.description.key.to_string())),
                 Row::Number(number) => out.extend(label_key(&number.label)),
                 Row::Select(select) => out.push(select.label.key.to_string()),
                 Row::Switch(switch) => out.push(switch.label.key.to_string()),

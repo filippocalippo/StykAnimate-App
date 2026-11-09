@@ -23,7 +23,7 @@ use styk_design::widgets::badge::{Tint as DesignTint, badge};
 use styk_design::widgets::button::{Button, IconButton, IconSize, Variant};
 use styk_core::inspector::paint::{PaintSpec, PaintType};
 use styk_core::roving::{NavKey, Orientation, next_index};
-use styk_design::widgets::color::{ColorField, GradientKind, SwatchButton, SwatchPaint, SwatchSize, SwatchStop};
+use styk_design::widgets::color::{ColorField, GradientKind, SwatchButton, SwatchPaint, SwatchSize, SwatchStop, swatch};
 use styk_design::widgets::field::EditField;
 use styk_design::widgets::frame::{self, FieldFrame};
 use styk_design::widgets::focus::{Focusable, Keys, Ring};
@@ -335,6 +335,10 @@ impl Kit<'_> {
             .iter()
             .enumerate()
             .map(|(at, item)| {
+                // A pending panel's swatch is not pressable or focusable.
+                if item.disabled {
+                    return swatch(self.palette, item.rgb, SwatchSize::Grid, 0.5);
+                }
                 let press = send(Event::Color(item.target));
                 let (moves, enter) = (ids.clone(), press.clone());
                 let keys = Keys::Custom(Box::new(move |event| {
@@ -362,31 +366,24 @@ impl Kit<'_> {
         Row::with_children(buttons).spacing(tokens::scale::SPACE_1_5).wrap().boxed()
     }
 
-    /// A fill of the figure (`.inspector-group`, 8 px between its parts): its list row first, then its other rows. The
-    /// list row (`.ui-list-row`: 32 px, the polygon glyph, the name, then the actions) holds the fill's colour as its
-    /// 16 px swatch and the delete button, the group's colour row and its first action row.
-    fn group(&self, label: &Msg, rows: &[m::Row]) -> Element<'static, Message> {
-        let colour = rows.iter().position(|row| matches!(row, m::Row::Color(_)));
-        // The row of the fill's own actions has no name; the order steps' row is named.
-        let delete = rows.iter().position(|row| matches!(row, m::Row::Actions(actions) if actions.label.is_none()));
-        let mut parts: Vec<Element<'static, Message>> = Vec::new();
+    /// A fill of the figure (`.inspector-group`, 8 px between its parts): its list row (`.ui-list-row`: 32 px, the
+    /// glyph, the name, then the colour chip and the actions the core supplies), then its other rows.
+    fn group(&self, head: &m::ListRow, rows: &[m::Row]) -> Element<'static, Message> {
         let mut actions: Vec<Element<'static, Message>> = Vec::new();
-        if let Some(m::Row::Color(color)) = colour.map(|at| &rows[at]) {
-            let rgb = match &color.paint {
-                Paint::Solid(rgb) => *rgb,
-                Paint::Gradient(paint) => paint.stops.first().map_or([0; 3], styk_core::inspector::paint::Stop::rgb),
+        if let Some(chip) = &head.swatch {
+            let chip = if chip.disabled {
+                swatch(self.palette, chip.rgb, SwatchSize::Chip, 0.5)
+            } else {
+                SwatchButton::new(self.id(), FocusArea::Panels, self.palette, chip.rgb, SwatchSize::Chip, send(Event::Color(chip.target))).into_element()
             };
-            let chip = SwatchButton::new(self.id(), FocusArea::Panels, self.palette, rgb, SwatchSize::Chip, send(Event::Color(color.target))).into_element();
             // `margin-inline: var(--space-1)`.
             actions.push(container(chip).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_1 }).boxed());
         }
-        if let Some(m::Row::Actions(delete)) = delete.map(|at| &rows[at]) {
-            actions.extend(delete.items.iter().map(|item| self.button(item, ButtonSize::Small)));
-        }
-        let name = self.text(self.say(label), &tokens::scale::TYPE_UI, self.palette.text_1);
-        let line = row![self.icon("polygon", tokens::scale::ICON_SM, self.palette.text_3), name, Space::new().width(Length::Fill), Row::with_children(actions).align_y(Alignment::Center)].spacing(tokens::scale::SPACE_2).align_y(Alignment::Center);
-        parts.push(container(line).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_2_5 }).center_y(Length::Fixed(tokens::scale::CONTROL_MD)).width(Length::Fill).boxed());
-        parts.extend(rows.iter().enumerate().filter(|(at, _)| Some(*at) != colour && Some(*at) != delete).filter_map(|(_, row)| self.row(row)));
+        actions.extend(head.actions.iter().map(|item| self.button(item, ButtonSize::Small)));
+        let name = self.text(self.say(&head.label), &tokens::scale::TYPE_UI, self.palette.text_1);
+        let line = row![self.icon(head.glyph, tokens::scale::ICON_SM, self.palette.text_3), name, Space::new().width(Length::Fill), Row::with_children(actions).align_y(Alignment::Center)].spacing(tokens::scale::SPACE_2).align_y(Alignment::Center);
+        let mut parts: Vec<Element<'static, Message>> = vec![container(line).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_2_5 }).center_y(Length::Fixed(tokens::scale::CONTROL_MD)).width(Length::Fill).boxed()];
+        parts.extend(rows.iter().filter_map(|row| self.row(row)));
         Column::with_children(parts).spacing(tokens::scale::SPACE_2).boxed()
     }
 
@@ -470,7 +467,7 @@ impl Kit<'_> {
             }
             m::Row::Swatches { items, .. } => self.swatches(items),
             m::Row::Pager { text: page, previous, next, .. } => row![self.button(previous, ButtonSize::Small), Space::new().width(Length::Fill), self.small(page.to_string()), Space::new().width(Length::Fill), self.button(next, ButtonSize::Small)].align_y(Alignment::Center).boxed(),
-            m::Row::Group { label, rows } => self.group(label, rows),
+            m::Row::Group { head, rows, .. } => self.group(head, rows),
             // Another chunk's part of the panel: its place is kept, it draws nothing until that chunk lands.
             m::Row::Slot(slot) => Space::new().width(Length::Fill).height(slot_height(*slot)?).boxed(),
         })
