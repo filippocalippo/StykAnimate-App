@@ -27,15 +27,22 @@ enum Owner {
 /// poses, each lasting until the next key (hidden keys last nothing). A key without
 /// `interpolation` keeps its source pose's easing. Camera and scene tracks drop figures.
 pub(crate) fn track(doc: &Document, channel: &Channel) -> Seq {
+    track_cancellable(doc, channel, &|| false).expect("uncancelled pose track")
+}
+
+pub(crate) fn track_cancellable(doc: &Document, channel: &Channel, cancelled: &dyn Fn() -> bool) -> Option<Seq> {
+    if cancelled() { return None; }
     let fixed = matches!(channel.target, Target::Camera | Target::Scene);
     let mut keys: Vec<&super::Key> = channel.keys.iter().collect();
     // Stable: equal ticks keep hidden keys first.
     keys.sort_by(|a, b| a.tick.total_cmp(&b.tick).then((b.hidden as u8).cmp(&(a.hidden as u8))));
+    if cancelled() { return None; }
     let blank = Arc::new(crate::eval::blank_keyframe());
     let refs = keys
         .iter()
         .enumerate()
         .map(|(i, key)| {
+            if cancelled() { return None; }
             let id = match &key.value {
                 KeyValue::Pose(Some(id)) => Some(id),
                 _ => None,
@@ -59,10 +66,10 @@ pub(crate) fn track(doc: &Document, channel: &Channel) -> Seq {
             } else {
                 keys.get(i + 1).map_or(1.0, |next| (next.tick - key.tick).max(0.0)) as u32
             };
-            KeyRef { easing: key.easing.or(source.easing), duration, frame: source, origin: if fixed { None } else { origin } }
+            Some(KeyRef { easing: key.easing.or(source.easing), duration, frame: source, origin: if fixed { None } else { origin } })
         })
-        .collect();
-    Seq { keys: refs, version: doc.version, auto_easing: doc.auto_easing, ticks: keys.iter().map(|k| k.tick).collect() }
+        .collect::<Option<Vec<_>>>()?;
+    (!cancelled()).then(|| Seq { keys: refs, version: doc.version, auto_easing: doc.auto_easing, ticks: keys.iter().map(|k| k.tick).collect() })
 }
 
 /// `maskedAt`: whether `tick` lies in one of the ordered `[start, end)` ranges.

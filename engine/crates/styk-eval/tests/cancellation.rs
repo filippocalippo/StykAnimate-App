@@ -52,3 +52,23 @@ fn uncancelled_query_evaluation_matches_normal_native_sheet_and_artwork_sampling
         }
     }
 }
+
+#[test]
+fn inspector_bounds_cancel_inside_measurement_and_keep_exact_uncancelled_values() {
+    let prepared = styk_eval::prepare(fixture("drawlist/painted-limbs.json"));
+    let frame = prepared.evaluate(0.0);
+    let slots: Vec<_> = (0..frame.objects.len()).collect();
+    let visits = AtomicUsize::new(0);
+    let checked = geometry::build_only_measured_cancellable(&prepared.doc, &frame, &slots, &|| { visits.fetch_add(1, Ordering::SeqCst); false }).unwrap();
+    let normal = geometry::build_only_measured(&prepared.doc, &frame, &slots);
+    assert_eq!(normal.points, checked.points);
+    let total = visits.load(Ordering::SeqCst);
+    let visits = AtomicUsize::new(0);
+    assert!(geometry::build_only_measured_cancellable(&prepared.doc, &frame, &slots, &|| visits.fetch_add(1, Ordering::SeqCst) >= total / 2).is_none());
+    let expected = styk_eval::drawlist::app_bounds_of(&normal, prepared.doc.as_ref(), &slots);
+    let visits = AtomicUsize::new(0);
+    assert_eq!(styk_eval::drawlist::app_bounds_of_cancellable(&normal, prepared.doc.as_ref(), &slots, &|| { visits.fetch_add(1, Ordering::SeqCst); false }).unwrap(), expected);
+    let total = visits.load(Ordering::SeqCst);
+    let visits = AtomicUsize::new(0);
+    assert!(styk_eval::drawlist::app_bounds_of_cancellable(&normal, prepared.doc.as_ref(), &slots, &|| visits.fetch_add(1, Ordering::SeqCst) >= total / 2).is_none());
+}

@@ -114,6 +114,7 @@ fn numbers(values: impl IntoIterator<Item = f64>) -> Value {
 /// Evaluates frames of one document as records.
 pub struct Records<'a> {
     tree: &'a Value,
+    cancelled: &'a (dyn Fn() -> bool + Sync),
     prepared: &'a Prepared,
     /// `timeline(legacySheetReport(report))`: the native rows without the sheet's cut.
     rows: Vec<Row>,
@@ -125,15 +126,24 @@ pub struct Records<'a> {
 }
 
 impl<'a> Records<'a> {
+    fn check(&self) -> Result<(), Error> {
+        if (self.cancelled)() { Err(Error::Invalid("evaluation cancelled".into())) } else { Ok(()) }
+    }
+
     /// `tree` is the document `prepared` was built from.
     pub fn new(tree: &'a Value, prepared: &'a Prepared) -> Result<Records<'a>, Error> {
+        Self::new_cancellable(tree, prepared, &|| false)
+    }
+
+    pub fn new_cancellable(tree: &'a Value, prepared: &'a Prepared, cancelled: &'a (dyn Fn() -> bool + Sync)) -> Result<Records<'a>, Error> {
+        if cancelled() { return Err(Error::Invalid("evaluation cancelled".into())); }
         let styk = tree.get("_styk");
         let legacy_channels = match styk.and_then(|s| s.get("layerSheet")) {
             Some(sheet) => sheet.path(&["legacyAnimation", "channels"]),
             None => styk.and_then(|s| s.path(&["animation", "channels"])),
         };
-        let legacy = channels::bind_compiled(prepared, &items(legacy_channels))?;
-        Self::from_bound(tree, prepared, legacy)
+        let legacy = channels::bind_compiled_cancellable(prepared, &items(legacy_channels), cancelled)?;
+        Self::from_bound(tree, prepared, legacy, cancelled)
     }
 
     /// A validated live native editor draft on its owning worker. `tree` and
@@ -148,10 +158,10 @@ impl<'a> Records<'a> {
         if tree.path(&["_styk", "layerSheet"]).is_some() {
             return unported("a native channel draft on a layer sheet");
         }
-        Self::from_bound(tree, prepared, channels::bind_draft(prepared, draft)?)
+        Self::from_bound(tree, prepared, channels::bind_draft(prepared, draft)?, &|| false)
     }
 
-    fn from_bound(tree: &'a Value, prepared: &'a Prepared, legacy: Vec<Bound>) -> Result<Records<'a>, Error> {
+    fn from_bound(tree: &'a Value, prepared: &'a Prepared, legacy: Vec<Bound>, cancelled: &'a (dyn Fn() -> bool + Sync)) -> Result<Records<'a>, Error> {
         let styk = tree.get("_styk");
         let clips = |path: &[&str]| items(styk.and_then(|s| s.path(path)));
         let doc = &prepared.doc;
@@ -181,7 +191,7 @@ impl<'a> Records<'a> {
                 }
                 Some(Value::object(document))
             });
-        Ok(Records { tree, prepared, rows, legacy,
+        Ok(Records { tree, prepared, rows, legacy, cancelled,
             source_tree,
         })
     }
@@ -198,12 +208,14 @@ impl<'a> Records<'a> {
     /// Unchanged records keep their identity and unknown fields; a changed root drops the
     /// runtime geometry just as the editor's correction does.
     fn correct_origins(&self, frame: Value) -> Result<Value, Error> {
+        self.check()?;
         if !self.prepared.doc.origins {
             return Ok(frame);
         }
         let mut objects = items(frame.get("objects"));
         let mut changed = false;
         for object in &mut objects {
+            self.check()?;
             // Most poses in a mixed scene need no origin work. Read only an unjoined pose
             // with a pivot, using the base definition: styles affect drawing, not the
             // animation basis (`correct_origins` in the typed evaluator does the same).
@@ -229,6 +241,7 @@ impl<'a> Records<'a> {
 
     /// `snapshotPoseFrame(editor.evaluatedFrame)` at `tick`.
     pub fn snapshot(&self, tick: f64) -> Result<Value, Error> {
+        self.check()?;
         Ok(snapshot_pose_frame(&self.evaluated(tick)?))
     }
 
@@ -236,6 +249,7 @@ impl<'a> Records<'a> {
     /// the evaluated frame, or with `channels` the frame a property edit writes there
     /// (`_sheetPropertyEntries`: `at(report, tick)` with those one-key channels composed).
     pub fn recorded(&self, entry: &Value) -> Result<Value, Error> {
+        self.check()?;
         let tick = num(entry, "tick").unwrap_or(0.0);
         match entry.get("channels").and_then(Value::elements) {
             Some(channels) => {
@@ -248,12 +262,14 @@ impl<'a> Records<'a> {
 
     /// `evaluatedFrame(report, …, tick)` without the runtime clock fields.
     pub fn evaluated(&self, tick: f64) -> Result<Value, Error> {
+        self.check()?;
         self.evaluated_with(tick, true)
     }
 
     /// `evaluatedFrame(report, …, tick, {skipMovieclips: !clips})`: with `clips` off,
     /// movieclips outside their span stay in the frame (what a key's pose is captured from).
     pub fn evaluated_with(&self, tick: f64, clips: bool) -> Result<Value, Error> {
+        self.check()?;
         self.evaluated_options(tick, clips, false)
     }
 
@@ -261,6 +277,7 @@ impl<'a> Records<'a> {
     /// replacements left out (`at(report, tick, {skipMovieclipPatches: true})`): the pose a
     /// key with replacements is written from.
     pub fn evaluated_options(&self, tick: f64, clips: bool, skip_patches: bool) -> Result<Value, Error> {
+        self.check()?;
         self.evaluated_mode(tick, clips, skip_patches, false)
     }
 
@@ -268,27 +285,30 @@ impl<'a> Records<'a> {
     /// channels retain the actual fractional clock. Raw `at`/motion sampling
     /// keeps its existing fractional-row rule through [`Records::evaluated_with`].
     pub fn evaluated_editor_with(&self, tick: f64, clips: bool) -> Result<Value, Error> {
+        self.check()?;
         self.evaluated_mode(tick, clips, false, true)
     }
 
     fn evaluated_mode(&self, tick: f64, clips: bool, skip_patches: bool, editor: bool) -> Result<Value, Error> {
+        self.check()?;
         let frame = match self.tree.path(&["_styk", "layerSheet"]) {
             Some(sheet) => self.sample_sheet(sheet, tick, skip_patches)?,
             None => self.native_at_with(tick, clips, editor)?,
         };
         let frame = if clips { self.sample_clips(frame, tick)? } else { frame };
-        Ok(self.layer_order(frame))
+        self.layer_order(frame)
     }
 
     /// `sampleMovieclipObjects(report, frame, tick)`: every movieclip instance gets its
     /// local time (`_movieclipSample`, a runtime field a snapshot drops), and instances
     /// outside their span leave the frame.
     fn sample_clips(&self, frame: Value, tick: f64) -> Result<Value, Error> {
+        self.check()?;
         if !self.prepared.doc.figures.iter().any(|f| f.movieclip.is_some()) {
             return Ok(frame);
         }
         // The clocks are the typed evaluator's, by identity.
-        let typed = self.prepared.raw(tick);
+        let typed = self.prepared.raw_cancellable(tick, self.cancelled).ok_or_else(|| Error::Invalid("evaluation cancelled".into()))?;
         let times: HashMap<u32, Option<f64>> = typed.objects.iter().filter_map(|o| Some((o.uid, self.prepared.clip_local(o, tick)?))).collect();
         if times.is_empty() {
             return Ok(frame);
@@ -312,6 +332,7 @@ impl<'a> Records<'a> {
         }
         let mut slots: HashMap<usize, usize> = HashMap::new();
         for (slot, object) in objects.iter().enumerate() {
+            self.check()?;
             if shown(object) {
                 slots.insert(slot, slots.len());
             }
@@ -321,6 +342,7 @@ impl<'a> Records<'a> {
         let mut loose: Option<crate::geometry::Scene> = None;
         let mut visible = Vec::with_capacity(slots.len());
         for (slot, object) in objects.iter().enumerate() {
+            self.check()?;
             let Some(&at) = slots.get(&slot) else { continue };
             let mut next = object.as_obj().cloned().unwrap_or_default();
             next.set("object_slot", Value::Num(at as f64));
@@ -363,12 +385,14 @@ impl<'a> Records<'a> {
     /// `sampleLegacy(report, time)`: the native timeline at a time with its property
     /// channels composed, in layer order.
     fn native_at(&self, time: f64) -> Result<Value, Error> {
+        self.check()?;
         #[cfg(test)]
         NATIVE_SAMPLE_TIMES.with(|times| { if let Some(times) = times.borrow_mut().as_mut() { times.push(time.to_bits()); } });
         self.native_at_with(time, false, false)
     }
 
     fn native_at_with(&self, time: f64, clips: bool, editor: bool) -> Result<Value, Error> {
+        self.check()?;
         let (index, t) = if editor { crate::eval::row_at(&self.rows, time) } else {
             let index = self.rows.partition_point(|r| r.start as f64 <= time).saturating_sub(1);
             let t = match self.rows.get(index) {
@@ -383,13 +407,14 @@ impl<'a> Records<'a> {
     /// `evaluatedFrame(report, index, t, time)` on a native timeline, before movieclips:
     /// the interval's frame with the property channels composed at `time`.
     fn native_sample(&self, index: usize, t: f64, time: f64, clips: bool) -> Result<Value, Error> {
+        self.check()?;
         let frame = match (
             &self.source_tree,
             &self.prepared.source,
             self.prepared.retained_source_time(index, t),
         ) {
             (Some(tree), Some(prepared), Some(source_tick)) => {
-                let source = Records::new(tree, prepared)?;
+                let source = Records::new_cancellable(tree, prepared, self.cancelled)?;
                 let sampled = source.evaluated_with(source_tick, clips)?;
                 let keys = items(self.tree.get("keyframes"));
                 let key = keys
@@ -440,28 +465,31 @@ impl<'a> Records<'a> {
             }
             _ => self.native(index, t)?,
         };
-        Ok(self.layer_order(self.compose(frame, &self.legacy, time)?))
+        self.layer_order(self.compose(frame, &self.legacy, time)?)
     }
 
     /// `evaluatedFrame(report, index, t, tick)` of a native timeline: the interval `index` at
     /// fraction `t`, its channels sampled at `tick` (an in-between samples between the rows'
     /// own times), and movieclips at `tick`. A layer sheet has no intervals: its callers read `evaluated_with`.
     pub fn evaluated_interval(&self, index: usize, t: f64, tick: f64) -> Result<Value, Error> {
+        self.check()?;
         if self.tree.path(&["_styk", "layerSheet"]).is_some() {
             return unported("an interval of a layer sheet");
         }
         let frame = self.native_sample(index, t, tick, true)?;
         let frame = self.sample_clips(frame, tick)?;
-        Ok(self.layer_order(frame))
+        self.layer_order(frame)
     }
 
     /// `evaluatedNativeFrame(report, index, t)`: the interval's frame without channels.
     pub fn native_interval(&self, index: usize, t: f64) -> Result<Value, Error> {
+        self.check()?;
         self.native(index, t)
     }
 
     /// `evaluatedNativeFrame(report, index, t)` on the document's own keyframes.
     fn native(&self, index: usize, t: f64) -> Result<Value, Error> {
+        self.check()?;
         let frames = items(self.tree.get("keyframes"));
         self.interval(&self.prepared.native, &|i| Ok(frames.get(i).cloned()), index, t, None)
     }
@@ -470,6 +498,7 @@ impl<'a> Records<'a> {
     /// track's virtual ones. `frame_at` gives the record of each key of `seq`; with
     /// `only`, the other figures keep the interval's first pose (`requestedUids`).
     fn interval(&self, seq: &Seq, frame_at: &dyn Fn(usize) -> Result<Option<Value>, Error>, index: usize, t: f64, only: Option<&[u32]>) -> Result<Value, Error> {
+        self.check()?;
         let (Some(a), Some(key)) = (frame_at(index)?, seq.keys.get(index)) else { return Err(Error::Invalid(format!("no key {index}"))) };
         let Some(b) = frame_at(index + 1)? else { return self.correct_origins(a) };
         if t <= 0.0 || (seq.version < 5 && key.easing.is_none()) {
@@ -487,11 +516,13 @@ impl<'a> Records<'a> {
             return self.correct_origins(b);
         }
         // The numbers: the typed evaluator's tween of the same interval.
-        let typed = evaluate_native_exact_only(&self.prepared.doc, seq, index, t, only);
+        let typed = evaluate_native_exact_only(&self.prepared.doc, seq, index, t, only, self.cancelled);
+        self.check()?;
         let before = &key.frame.objects;
         let next: HashMap<u64, Value> = items(b.get("objects")).into_iter().filter_map(|o| Some((uid(&o)?.to_bits(), o))).collect();
         let mut objects = Vec::new();
         for (slot, o) in items(a.get("objects")).into_iter().enumerate() {
+            self.check()?;
             let pair = typed.objects.get(slot).zip(before.get(slot));
             let origin = pair.is_some_and(|(_, source)| self.prepared.doc.figure(source.figure).is_some_and(|figure| figure.origin.is_some()));
             let corrected = |mut record: Value| {
@@ -552,6 +583,7 @@ impl<'a> Records<'a> {
     /// One frame of `buildVirtualPoseTrack(report, channel)`: the key's pose source
     /// with the key's easing and the time to the next key.
     fn virtual_frame(&self, keys: &[Value], index: usize, fixed: bool) -> Result<Option<Value>, Error> {
+        self.check()?;
         let Some(key) = keys.get(index) else { return Ok(None) };
         let frame_id = key.path(&["value", "frameId"]);
         let blank = matches!(key.get("value"), Some(Value::Null)) || matches!(frame_id, Some(Value::Null));
@@ -566,10 +598,12 @@ impl<'a> Records<'a> {
                 // `blankPoseFrame(report.keyframes[0])`.
                 let mut blank = self.tree.get("keyframes").and_then(|k| k.item(0)).and_then(|f| f.as_obj().cloned()).unwrap_or_default();
                 for key in ["background_color", "_stykBackgroundColor", "_stykVfx"] {
+                    self.check()?;
                     blank.remove(key);
                 }
                 empty_objects(&mut blank);
                 for key in ["background_id", "background_id_b", "background_mix"] {
+                    self.check()?;
                     blank.set(key, Value::Num(0.0));
                 }
                 blank.set("camera", default_camera());
@@ -613,6 +647,7 @@ impl<'a> Records<'a> {
 
     /// `samplePoseTrack(report, channel, tick)` for a layer's own keys.
     fn pose_track(&self, id: &str, keys: &[Value], tick: f64) -> Result<Option<Sample>, Error> {
+        self.check()?;
         let fixed = id == "scene" || id == "camera";
         let Some(seq) = self.prepared.track(id) else { return Err(Error::Invalid(format!("no pose track {id}"))) };
         Ok(self.sample_keys(seq, keys, fixed, tick, None)?.map(|frame| Sample { frame, identity: Identity::Track(id.to_string()) }))
@@ -621,6 +656,7 @@ impl<'a> Records<'a> {
     /// `samplePoseTrack` on keys and the typed sequence built from the same keys, tweening
     /// only the figures `only` when given (`sampleUids`).
     fn sample_keys(&self, seq: &Seq, keys: &[Value], fixed: bool, tick: f64, only: Option<&[u32]>) -> Result<Option<Value>, Error> {
+        self.check()?;
         // `buildVirtualPoseTrack` orders the keys by time, a hidden key before a visible one at
         // the same time (a stable sort, as the typed track's).
         let hidden = |k: &Value| truthy(k.get("hidden"));
@@ -647,7 +683,8 @@ impl<'a> Records<'a> {
     }
 
     /// `applyLayerOrder(report, frame)`: figures drawn layer by layer; slots stay.
-    fn layer_order(&self, frame: Value) -> Value {
+    fn layer_order(&self, frame: Value) -> Result<Value, Error> {
+        self.check()?;
         let state = self.tree.path(&["_styk", "layers"]);
         let objects = items(frame.get("objects"));
         let depth = |o: &Value| o.get("_stykZIndex").and_then(Value::as_f64).unwrap_or(0.0);
@@ -657,7 +694,7 @@ impl<'a> Records<'a> {
             None => vec!["layer-1".into()],
         };
         if (state.is_none() || layers.len() < 2) && !has_depth {
-            return frame;
+            return Ok(frame);
         }
         let order: Vec<usize> = match frame.get("object_draw_order").filter(|o| !o.is_null()) {
             Some(order) => order.numbers().unwrap_or_default().into_iter().map(|s| s as usize).collect(),
@@ -665,25 +702,28 @@ impl<'a> Records<'a> {
         };
         let mut groups: Vec<Vec<usize>> = vec![Vec::new(); layers.len()];
         for &slot in &order {
-            let Some(object) = objects.get(slot) else { return frame };
+            self.check()?;
+            let Some(object) = objects.get(slot) else { return Ok(frame) };
             let id = self.layer_of(uid(object).unwrap_or(f64::NAN));
-            let Some(group) = layers.iter().position(|layer| *layer == id) else { return frame };
+            let Some(group) = layers.iter().position(|layer| *layer == id) else { return Ok(frame) };
             groups[group].push(slot);
         }
         let mut next = Vec::with_capacity(order.len());
         for mut group in groups {
+            self.check()?;
             if has_depth {
                 group.sort_by(|&a, &b| depth(&objects[a]).total_cmp(&depth(&objects[b])));
             }
             next.extend(group);
         }
         if next == order {
-            return frame;
+            return Ok(frame);
         }
         let mut out = frame.as_obj().cloned().unwrap_or_default();
         out.set("object_draw_order", numbers(next.iter().map(|&s| s as f64)));
         out.set("object_draw_order_unique_ids", Value::array(next.iter().map(|&s| objects[s].get("unique_id").cloned().unwrap_or(Value::Null)).collect()));
-        Value::object(out)
+        self.check()?;
+        Ok(Value::object(out))
     }
 
     /// `poseSourceFrame(report, id)`: one canonical COW source lookup owner.
@@ -713,6 +753,7 @@ impl<'a> Records<'a> {
 
     /// `baseSample(id, track)`: a layer's pose from its keys.
     fn base_sample(&self, id: &str, track: &Value, tick: f64, source_at: &impl Fn(f64) -> Result<Value, Error>) -> Result<Option<Sample>, Error> {
+        self.check()?;
         let fixed = id == "scene" || id == "camera";
         let keys: Vec<Value> = items(track.get("keys")).into_iter().filter(|k| !truthy(k.get("patchOnly"))).collect();
         if !fixed && tick >= num(track, "end").unwrap_or(0.0) {
@@ -772,6 +813,7 @@ impl<'a> Records<'a> {
     /// One key of a mixed layer as a native keyframe (`baseSample`'s `imported` branch):
     /// an imported key is the layer's figures of the imported pose at its source tick.
     fn window_frame(&self, id: &str, keys: &[Value], index: usize, fixed: bool, source_at: &impl Fn(f64) -> Result<Value, Error>) -> Result<Value, Error> {
+        self.check()?;
         let entry = &keys[index];
         let frame = match num(entry, "sourceTick") {
             Some(time) => {
@@ -807,6 +849,7 @@ impl<'a> Records<'a> {
 
     /// `sample(id)`: the base pose, then the movieclip frames its key replaces.
     fn sample(&self, sheet: &Value, id: &str, tick: f64, skip_patches: bool, source_at: &impl Fn(f64) -> Result<Value, Error>) -> Result<Option<Sample>, Error> {
+        self.check()?;
         let Some(track) = sheet.path(&["tracks", id]) else { return Ok(None) };
         let mut sample = self.base_sample(id, track, tick, source_at)?;
         let keys = items(track.get("keys"));
@@ -828,23 +871,25 @@ impl<'a> Records<'a> {
         let mut shown_at: Option<Vec<HashMap<u64, Option<Value>>>> = None;
         let mut sorted: Option<(Vec<usize>, Vec<f64>)> = None;
         for patch in &patches {
+            self.check()?;
             let removed = num(patch, "uid").unwrap_or(f64::NAN);
             let continues = !removed.is_nan() && continuing.contains(&removed.to_bits());
             let replacement = if continues && !held {
                 // Consecutive replacements of one movieclip tween like any pose track.
-                let shown_at = shown_at.get_or_insert_with(|| {
-                    keys.iter()
-                        .map(|entry| {
-                            let mut frame_ids: HashMap<u64, Option<Value>> = HashMap::new();
-                            for other in items(entry.get("movieclipPatches")) {
-                                if let Some(uid) = num(&other, "uid").filter(|uid| !uid.is_nan()) {
-                                    frame_ids.entry(uid.to_bits()).or_insert_with(|| other.get("frameId").cloned());
-                                }
-                            }
-                            frame_ids
-                        })
-                        .collect()
-                });
+                if shown_at.is_none() {
+                    let mut shown = Vec::with_capacity(keys.len());
+                    for entry in &keys {
+                        self.check()?;
+                        let mut frame_ids: HashMap<u64, Option<Value>> = HashMap::new();
+                        for other in items(entry.get("movieclipPatches")) {
+                            self.check()?;
+                            if let Some(uid) = num(&other, "uid").filter(|uid| !uid.is_nan()) { frame_ids.entry(uid.to_bits()).or_insert_with(|| other.get("frameId").cloned()); }
+                        }
+                        shown.push(frame_ids);
+                    }
+                    shown_at = Some(shown);
+                }
+                let shown_at = shown_at.as_ref().unwrap();
                 let Some(seq) = self.prepared.patch_track(id, removed as u32) else { return Err(Error::Invalid(format!("no replacement track for {removed} on {id}"))) };
                 // `sample_keys` of the keys as this figure's own track has them (each key showing the pose source it names for the figure), read
                 // at the two keys round `tick`: the order of the keys is the track's whoever the figure is, so it is worked out once.
@@ -1002,6 +1047,7 @@ impl<'a> Records<'a> {
 
     /// `sampleLayerSheet(report, tick)`.
     fn sample_sheet(&self, sheet: &Value, tick: f64, skip_patches: bool) -> Result<Value, Error> {
+        self.check()?;
         // `sampleLayerSheet` clears its sourceAt map for every call. Share complete
         // imported samples across scene, camera, layers and mixed endpoints only
         // during this immutable sampling operation; retain no cross-call state.
@@ -1012,11 +1058,13 @@ impl<'a> Records<'a> {
     fn sample_sheet_with(&self, sheet: &Value, tick: f64, skip_patches: bool,
         source_at: &impl Fn(f64) -> Result<Value, Error>) -> Result<Value, Error>
     {
+        self.check()?;
         let layers: Vec<String> = items(self.tree.path(&["_styk", "layers", "order"])).iter().filter_map(|id| id.as_str().map(str::to_string)).collect();
         let scene = self.sample(sheet, "scene", tick, skip_patches, source_at)?;
         let camera = self.sample(sheet, "camera", tick, skip_patches, source_at)?;
         let mut frames: Vec<(String, Option<Sample>)> = Vec::new();
         for id in &layers {
+            self.check()?;
             frames.push((id.clone(), self.sample(sheet, id, tick, skip_patches, source_at)?));
         }
         let continuations = |frame: &Value| items(frame.path(&["_styk", "movieclipContinuations"]));
@@ -1044,6 +1092,7 @@ impl<'a> Records<'a> {
         let mut seen: Vec<&Sample> = Vec::new();
         let mut partitions: Vec<HashMap<String, Group>> = Vec::new();
         for (id, sample) in &frames {
+            self.check()?;
             let Some(sample) = sample else { continue };
             let at = match seen.iter().position(|s| s.identity == sample.identity) {
                 Some(at) => at,
@@ -1055,6 +1104,7 @@ impl<'a> Records<'a> {
                     };
                     let mut groups: HashMap<String, Group> = HashMap::new();
                     for object in order.iter().filter_map(|&slot| objects.get(slot)) {
+            self.check()?;
                         let parent = object.get("join").filter(|j| j.truthy()).map(|join| {
                             let slot = num(join, "target_object_slot").unwrap_or(f64::NAN);
                             objects.get(slot as usize).filter(|_| slot >= 0.0).and_then(uid)
@@ -1063,6 +1113,7 @@ impl<'a> Records<'a> {
                         groups.entry(owner).or_default().records.push((object.clone(), parent.flatten()));
                     }
                     for step in continuations(&sample.frame) {
+            self.check()?;
                         groups.entry(self.layer_of(num(&step, "uid").unwrap_or(f64::NAN))).or_default().steps.push(step);
                     }
                     seen.push(sample);
@@ -1080,13 +1131,14 @@ impl<'a> Records<'a> {
             .iter()
             .enumerate()
             .map(|(slot, (object, parent))| {
+                self.check()?;
                 let join = object.get("join").filter(|j| j.truthy());
                 let parent_slot = parent.and_then(|p| slots.get(&p.to_bits()).copied());
                 let joined = join.is_some() && parent_slot.is_some();
                 let slot_matches = num(object, "object_slot") == Some(slot as f64);
                 let join_matches = join.is_none() || (joined && join.and_then(|j| num(j, "target_object_slot")) == parent_slot.map(|s| s as f64));
                 if slot_matches && join_matches {
-                    return object.clone();
+                    return Ok(object.clone());
                 }
                 let mut out = object.as_obj().cloned().unwrap_or_default();
                 out.set("object_slot", Value::Num(slot as f64));
@@ -1102,9 +1154,9 @@ impl<'a> Records<'a> {
                         _ => Value::Null,
                     },
                 );
-                Value::object(out)
+                Ok(Value::object(out))
             })
-            .collect();
+            .collect::<Result<_, Error>>()?;
         let template = self.tree.get("keyframes").and_then(|k| k.item(0)).unwrap_or(Value::Null);
         let mut result = template.as_obj().cloned().unwrap_or_default();
         let count = objects.len();
@@ -1138,6 +1190,7 @@ impl<'a> Records<'a> {
                 }
             }
         }
+        self.check()?;
         Ok(Value::object(result))
     }
 }
@@ -1606,5 +1659,28 @@ mod snapshot_sharing_tests {
         assert_eq!(styk_doc::json::to_string(&objects[1]), r#"{"unique_id":2,"object_slot":1,"join":{"target_object_slot":0}}"#);
         assert_eq!(styk_doc::json::to_string(&objects[2]), r#"{"unique_id":3,"object_slot":2}"#);
         assert_eq!(styk_doc::json::to_string(&objects[3]), r#"{"unique_id":4,"object_slot":3}"#);
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[test]
+    fn record_evaluation_observes_cancellation_inside_composition() {
+        let tree = styk_doc::json::parse(include_bytes!("../tests/fixtures/channels/channels-figure.sheet.json")).unwrap();
+        let prepared = crate::prepare(crate::from_value(&tree, "").unwrap());
+        let reference = Records::new(&tree, &prepared).unwrap().evaluated_with(3.5, true).unwrap();
+        let visits = AtomicUsize::new(0);
+        let never = || { visits.fetch_add(1, Ordering::SeqCst); false };
+        let actual = Records::new_cancellable(&tree, &prepared, &never).unwrap().evaluated_with(3.5, true).unwrap();
+        assert_eq!(styk_doc::json::to_string(&actual), styk_doc::json::to_string(&reference));
+        let total = visits.load(Ordering::SeqCst);
+        assert!(total > 6);
+        let visits = AtomicUsize::new(0);
+        let cancelled = || visits.fetch_add(1, Ordering::SeqCst) >= total / 2;
+        let result = Records::new_cancellable(&tree, &prepared, &cancelled).and_then(|records| records.evaluated_with(3.5, true));
+        assert!(result.is_err());
+        assert!(visits.load(Ordering::SeqCst) < total, "stopped inside the composition, not after it");
     }
 }

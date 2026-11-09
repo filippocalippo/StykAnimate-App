@@ -986,7 +986,7 @@ impl Loader {
     /// this slot is the one `previous` had". Only changed poses cross the boundary
     /// while a gesture runs. Figures come from `doc`.
     pub fn edit_frame(&mut self, value: &Value, previous: Option<&crate::eval::Frame>, doc: &Document) -> Result<crate::eval::Frame, Error> {
-        self.edit_frame_with_ik(value, previous, None, doc)
+        self.edit_frame_with_ik(value, previous, None, doc, &|| false)
     }
 
     /// Converts an edit frame with the previous coherent raw/typed record from
@@ -1003,15 +1003,22 @@ impl Loader {
     /// successfully converted by this Loader in `doc`'s current lineage.
     /// `value` may use the same null delta convention as [`Self::edit_frame`].
     pub fn edit_frame_reusing_ik(&mut self, value: &Value, previous_record: &Value, previous: &crate::eval::Frame, doc: &Document) -> Result<crate::eval::Frame, Error> {
-        self.edit_frame_with_ik(value, Some(previous), Some(previous_record), doc)
+        self.edit_frame_with_ik(value, Some(previous), Some(previous_record), doc, &|| false)
     }
 
-    fn edit_frame_with_ik(&mut self, value: &Value, previous: Option<&crate::eval::Frame>, previous_record: Option<&Value>, doc: &Document) -> Result<crate::eval::Frame, Error> {
+    pub(crate) fn edit_frame_cancellable(&mut self, value: &Value, doc: &Document, cancelled: &dyn Fn() -> bool) -> Result<crate::eval::Frame, Error> {
+        self.edit_frame_with_ik(value, None, None, doc, cancelled)
+    }
+
+    fn edit_frame_with_ik(&mut self, value: &Value, previous: Option<&crate::eval::Frame>, previous_record: Option<&Value>, doc: &Document, cancelled: &dyn Fn() -> bool) -> Result<crate::eval::Frame, Error> {
+        let check = || if cancelled() { Err(Error::Format("evaluation cancelled".into())) } else { Ok(()) };
+        check()?;
         let items = value.get("objects").and_then(Value::as_arr).unwrap_or(&[]);
         let previous_items = previous_record.and_then(|record| record.get("objects")).and_then(Value::as_arr)
             .filter(|old| old.len() == items.len() && previous.is_some_and(|frame| frame.objects.len() == items.len()));
         let mut objects = Vec::with_capacity(items.len());
         for (slot, item) in items.iter().enumerate() {
+            check()?;
             if item.is_null() {
                 let kept = previous.and_then(|frame| frame.objects.get(slot)).ok_or_else(|| Error::Format(format!("the edit frame keeps object {slot}, which the previous frame does not have")))?;
                 objects.push(kept.clone());
@@ -1028,7 +1035,7 @@ impl Loader {
             };
             let mut object = Arc::new(object);
             if let Some(base) = doc.figure(object.figure) {
-                self.styled_object(base, &mut object);
+                self.styled_object_cancellable(base, &mut object, cancelled).ok_or_else(|| Error::Format("evaluation cancelled".into()))?;
             }
             objects.push(object);
         }
@@ -1041,6 +1048,7 @@ impl Loader {
             }
             None => crate::vfx::parse::stacks(value.get("_stykVfx"), &mut self.notes),
         };
+        check()?;
         let key = Self::keyframe_of(value, objects, vfx);
         let count = key.objects.len();
         Ok(crate::eval::Frame {
@@ -1325,35 +1333,39 @@ impl Loader {
     /// Stick Nodes sprite's stretch and pivot applied to the figure's pictures, sharing
     /// identical results. Returns whether the object changed.
     fn styled_object(&mut self, base: &Arc<Figure>, object: &mut Arc<Object>) -> bool {
+        self.styled_object_cancellable(base, object, &|| false).expect("uncancelled style")
+    }
+
+    fn styled_object_cancellable(&mut self, base: &Arc<Figure>, object: &mut Arc<Object>, cancelled: &dyn Fn() -> bool) -> Option<bool> {
+        if cancelled() { return None; }
         let (style, sprite) = (object.style.clone(), object.sticknodes_sprite.clone());
         if style.is_none() && sprite.is_none() {
-            return false;
+            return Some(false);
         }
         if object.figure_override.as_ref().is_some_and(|resolved| resolved.base.as_ref().is_some_and(|b| Arc::ptr_eq(b, base))) {
-            return false;
+            return Some(false);
         }
         let mut key = style.as_ref().map_or_else(String::new, |style| style.key.clone());
         if let Some(sprite) = &sprite {
             key.push_str(&format!("\u{1}sprite {:x} {:x} {:x}", sprite.ratio.to_bits(), sprite.pivot[0].to_bits(), sprite.pivot[1].to_bits()));
         }
-        let resolved = self
-            .styled
-            .entry((Arc::as_ptr(base) as usize, key))
-            .or_insert_with(|| {
+        let resolved = match self.styled.entry((Arc::as_ptr(base) as usize, key)) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.get().1.clone(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
                 let mut figure = match &style {
-                    Some(style) => crate::style::resolve(base, style),
+                    Some(style) => crate::style::resolve_cancellable(base, style, cancelled)?,
                     None => (**base).clone(),
                 };
                 if let Some(sprite) = &sprite {
                     crate::sticknodes::sprite_figure(&mut figure, sprite);
                 }
+                if cancelled() { return None; }
                 figure.base = Some(base.clone());
-                (base.clone(), Arc::new(figure))
-            })
-            .1
-            .clone();
+                entry.insert((base.clone(), Arc::new(figure))).1.clone()
+            }
+        };
         Arc::make_mut(object).figure_override = Some(resolved);
-        true
+        Some(true)
     }
 
     /// A frame converted against an earlier document, brought to `doc`: an object whose style overlay or Stick Nodes sprite was resolved
