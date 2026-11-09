@@ -583,6 +583,73 @@ masks = [
   [8, 520, 704, 276, "design difference: the timeline strip and the stage room it frees (today's window keeps the timeline docked at 720 px)"],
 ]
 
+# The developer panels (K-dev panels, views): new screens with no counterpart in today's app, drawn only by a developer
+# build of the application (`--features devtools`; the preview cannot draw them because the developer crates link the engine).
+# Their references are this build's own accepted captures (docs/native/screens/devtools/), judged against the design's described
+# look (devtools.md 3.4, 3.5.1, 3.5.2, 3.5.9, 3.6.1) at 100 % and 200 %; the guard keeps later changes visible. Measured on
+# 2026-11-08 (debug build, headless, `styk image-diff`, no masks): 0.000 each, so each limit is 0.001. `cargo xtask check` compares
+# them in its last step.
+
+["dev-profiler-recording"]
+reference = "docs/native/screens/devtools/dev-profiler-recording.png"
+max_difference = 0.001
+width = 480
+height = 240
+
+["dev-profiler-recording-dark"]
+reference = "docs/native/screens/devtools/dev-profiler-recording-dark.png"
+max_difference = 0.001
+width = 480
+height = 240
+
+["dev-profiler"]
+reference = "docs/native/screens/devtools/dev-profiler.png"
+max_difference = 0.001
+width = 480
+height = 380
+
+["dev-profiler-dark"]
+reference = "docs/native/screens/devtools/dev-profiler-dark.png"
+max_difference = 0.001
+width = 480
+height = 380
+
+["dev-logs"]
+reference = "docs/native/screens/devtools/dev-logs.png"
+max_difference = 0.001
+width = 560
+height = 420
+
+["dev-logs-dark"]
+reference = "docs/native/screens/devtools/dev-logs-dark.png"
+max_difference = 0.001
+width = 560
+height = 420
+
+["dev-parameters"]
+reference = "docs/native/screens/devtools/dev-parameters.png"
+max_difference = 0.001
+width = 360
+height = 600
+
+["dev-parameters-dark"]
+reference = "docs/native/screens/devtools/dev-parameters-dark.png"
+max_difference = 0.001
+width = 360
+height = 600
+
+["dev-overlay"]
+reference = "docs/native/screens/devtools/dev-overlay.png"
+max_difference = 0.001
+width = 520
+height = 400
+
+["dev-overlay-dark"]
+reference = "docs/native/screens/devtools/dev-overlay-dark.png"
+max_difference = 0.001
+width = 520
+height = 400
+
 # The application menus (M1): the mark's StykAnimate menu and the six menus it leads with, each open beside the row that opens it,
 # drawn by today's own `applicationMenuItems`, `showMenu` conversion and `openMenu` (engine/crates/styk-app/automation/menus-reference/screens.mjs,
 # bundled Chromium, LCD text on, opaque surfaces, device scale 1) in a window with nothing selected on the packaged desktop. The limits sit

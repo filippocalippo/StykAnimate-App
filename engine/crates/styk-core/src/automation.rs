@@ -100,6 +100,7 @@ pub enum Expect {
     Property(String, String),
     /// How many entries the active project's undo history holds.
     History(usize),
+    Selection { uid: Option<u32>, joint: i64 },
     /// What the recovery views show.
     Recovery(RecoveryExpect),
     /// How many menus are open (the mark's menu and the submenu beside it count two; none is `0`).
@@ -226,6 +227,10 @@ pub enum Step {
     Measure(String),
     /// Open a project file (relative to the script).
     Open(PathBuf),
+    /// Next native picker answer in an unattended interaction; no OS dialog opens.
+    ChooseFile(PathBuf),
+    /// Click the mounted stage at document coordinates.
+    ClickStage([f64; 2]),
     /// Export the active document through its export owner.
     Export,
     /// A measurement budget; the profiling runner judges it after the runs.
@@ -344,6 +349,9 @@ fn target(text: &str, line: usize) -> Result<Target, ScriptError> {
         "undo" => Target::Command(CommandId::Undo),
         "redo" => Target::Command(CommandId::Redo),
         "save" => Target::Command(CommandId::Save),
+        "open" => Target::Command(CommandId::Open),
+        "save-as" => Target::Command(CommandId::SaveAs),
+        "close-project" => Target::Command(CommandId::CloseProject),
         "export" => Target::Command(CommandId::Export),
         other => match other.split_once(':') {
             Some(("tab", n)) => Target::Tab(number(n, line, "tab")?),
@@ -423,6 +431,8 @@ fn expectation(words: &[&str], line: usize) -> Result<Expect, ScriptError> {
         }
         ["width", n] => Expect::Width(n.parse().map_err(|_| bad("width wants a number"))?),
         ["property", key, value] if value.parse::<f64>().is_ok() => Expect::Property((*key).to_string(), (*value).to_string()),
+        ["selection", "none"] => Expect::Selection { uid: None, joint: -1 },
+        ["selection", uid, joint] => Expect::Selection { uid: Some(uid.parse().map_err(|_| bad("selection wants a figure ID"))?), joint: joint.parse().map_err(|_| bad("selection wants a joint index"))? },
         ["history", n] => Expect::History(n.parse().map_err(|_| bad("history wants a count"))?),
         ["menus", n] => Expect::Menus(n.parse().map_err(|_| bad("menus wants a count"))?),
         ["recovery", "offer", state @ ("shown" | "hidden")] => Expect::Recovery(RecoveryExpect::Offer(*state == "shown")),
@@ -565,6 +575,12 @@ impl Script {
                         Step::Pen(sample)
                     }
                     _ => return Err(wants("<id> <phase> <pen|eraser> <x> <y> <pressure>")),
+                },
+                "choose-file" if !rest.is_empty() => Step::ChooseFile(PathBuf::from(rest)),
+                "click-stage" => match words.as_slice() {
+                    [x, y] => { let point: [f64; 2] = [x.parse().map_err(|_| wants("two finite coordinates"))?, y.parse().map_err(|_| wants("two finite coordinates"))?];
+                        if !point.iter().all(|x| x.is_finite()) { return Err(wants("two finite coordinates")); } Step::ClickStage(point) }
+                    _ => return Err(wants("two finite coordinates")),
                 },
                 "open" if !rest.is_empty() => Step::Open(PathBuf::from(rest)),
                 "open" => return Err(wants("a path")),

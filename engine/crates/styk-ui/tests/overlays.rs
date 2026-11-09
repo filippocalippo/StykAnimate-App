@@ -759,10 +759,11 @@ fn the_marks_menu_is_walked_with_the_keys_the_overlay_host_owns_and_enter_runs_t
     app.key(Named::ArrowLeft);
     assert_eq!(app.core.overlays().menus().len(), 1, "Left closes the submenu and focus returns to its row");
     assert_eq!(label(&app, 0).as_deref(), Some("File"));
-    // Enter on a row of the root dispatches its command: New animation is not ported, so the core answers NotAvailable.
-    app.typed("n", 5000);
-    assert_eq!(label(&app, 0).as_deref(), Some("New animation"));
+    // Enter on a row of the root dispatches its command: Export is not ported, so the core answers NotAvailable.
+    app.typed("e", 5000);
+    app.typed("x", 5100);
+    assert_eq!(label(&app, 0).as_deref(), Some("Export…"));
     app.key(Named::Enter);
-    assert!(app.effects.contains(&Message::NotAvailable(CommandId::New)), "{:?}", app.effects);
+    assert!(app.effects.contains(&Message::NotAvailable(CommandId::Export)), "{:?}", app.effects);
     assert!(app.core.overlays().menus().is_empty());
 }

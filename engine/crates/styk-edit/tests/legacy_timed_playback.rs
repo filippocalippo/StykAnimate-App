@@ -30,7 +30,7 @@ fn a_session_call_prepares_a_timed_sheet_as_the_worker_does() {
             let answered = session.call(method, &arguments).unwrap_or_else(|error| panic!("{name} {method}: {error}"));
             let (mut check, mut progress) = (|| Ok(()), |_| {});
             let expected = worker
-                .call_movieclip_timeline_worker(method, &arguments, &mut TimelineWorker { max_source_bytes: usize::MAX, check: &mut check, progress: &mut progress, clock: || 0.0 })
+                .call_movieclip_timeline_worker(method, &arguments, &mut TimelineWorker { max_source_bytes: usize::MAX, check: &mut check, progress: &mut progress, clock: &|| 0.0 })
                 .unwrap_or_else(|error| panic!("{name} {method} on the worker: {error}"));
             assert_eq!(json::to_string(&answered), json::to_string(&expected), "{name} {method} answer");
             assert_eq!(session.report_json(), worker.report_json(), "{name} {method} document");

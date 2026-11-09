@@ -111,7 +111,7 @@ fn native_key_capacity_matches_every_editor_step() {
                         max_source_bytes: 128 * 1024 * 1024,
                         check: &mut || Ok(()),
                         progress: &mut |_| {},
-                        clock: || 0.0,
+                        clock: &|| 0.0,
                     },
                 )
             } else {

@@ -38,7 +38,7 @@ impl Rig {
         let mut docs = Documents::new();
         docs.attach_host(HostOptions {
             engine: Engine::new(|| 0.0, Budgets::for_device(None)), spawner: Arc::new(Threads), files: files.clone(),
-            startup: json::parse(STARTUP).unwrap(), clock: || 0.0, notify: Arc::new(move || { let _ = send.send(()); }),
+            startup: json::parse(STARTUP).unwrap(), clock: Arc::new(|| 0.0), notify: Arc::new(move || { let _ = send.send(()); }),
         }).unwrap();
         Self { docs, files, wake }
     }
@@ -153,11 +153,15 @@ fn quit_save_all_preserves_tab_order_and_stops_on_a_cancelled_picker() {
     assert!(rig.docs.reorder(b, 0)); assert_eq!(rig.docs.successor(b), Some(a));
     let Effect::ConfirmQuit { prompt, names, .. } = rig.dispatch(Request::Quit) else { panic!("quit prompt") };
     assert_eq!(names.len(), 2);
+    let quit_prompt = prompt;
     let Effect::SaveDialog { prompt, document, .. } = rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Save }) else { panic!("save first") };
     assert_eq!(document, a);
     assert!(matches!(rig.docs.call(a, "setFPS", &[Value::Num(90.0)], &Value::Null), Err(DocumentsError::Busy)));
-    assert!(matches!(rig.dispatch(Request::SaveTarget { prompt, target: None }), Effect::None));
+    let Effect::ConfirmQuit { prompt, names, .. } = rig.dispatch(Request::SaveTarget { prompt, target: None }) else { panic!("restore quit prompt") };
+    assert_eq!(prompt, quit_prompt); assert_eq!(names.len(), 2);
+    assert!(!rig.docs.edits_locked());
     assert_eq!(rig.docs.tabs().len(), 2); assert!(rig.docs.tabs().iter().all(|tab| tab.dirty()));
+    assert!(matches!(rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Cancel }), Effect::None));
     rig.fps(a, 31.0); // Cancelling the target dialog releases the accepted-save fence.
     let Effect::ConfirmQuit { prompt, .. } = rig.dispatch(Request::Quit) else { panic!("quit prompt") };
     assert!(matches!(rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Discard }), Effect::QuitReady));
@@ -233,6 +237,58 @@ fn clip_fps(rig: &Rig, id: DocumentId, type_id: f64) -> f64 {
         .find(|figure| figure.get("figure_type_id").and_then(Value::as_f64) == Some(type_id)).unwrap()
         .path(&["_styk", "movieclip", "document", "fps"]).unwrap().as_f64().unwrap()
 }
+
+fn restored_close_picker(scoped: bool, save: bool) {
+    let mut rig = Rig::new();
+    let (id, type_id) = movieclip(&mut rig);
+    if scoped {
+        rig.dispatch(Request::EnterMovieclip { document: id, type_id });
+        assert!(matches!(rig.next(), Effect::ScopeChanged(_)));
+    }
+    rig.fps(id, 17.0);
+    let lineage = rig.docs.get(id).unwrap().lineage();
+    assert!(rig.docs.get(id).unwrap().target().is_none());
+    let Effect::ConfirmClose { prompt: original, .. } = rig.dispatch(Request::Close(id)) else { panic!("close prompt") };
+    let mut effect = rig.dispatch(Request::Respond { prompt: original, choice: CloseChoice::Save });
+    while matches!(effect, Effect::Started(_) | Effect::ScopeChanged(_) | Effect::None) { effect = rig.next(); }
+    let Effect::SaveDialog { prompt, .. } = effect else { panic!("save picker: {effect:?}") };
+    assert_eq!(rig.docs.get(id).unwrap().scope_depth(), 0);
+    assert!(rig.docs.edits_locked());
+    let settled = rig.docs.get(id).unwrap().records().unwrap().clone();
+    let Effect::ConfirmClose { prompt, document, .. } = rig.dispatch(Request::SaveTarget { prompt, target: None }) else { panic!("restore close prompt") };
+    assert_eq!(prompt, original); assert_eq!(document, id);
+    assert!(rig.docs.get(id).unwrap().records().unwrap().same_node(&settled));
+    assert!(rig.docs.get(id).unwrap().dirty()); assert!(!rig.docs.edits_locked());
+    if save {
+        let Effect::SaveDialog { prompt, .. } = rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Save }) else { panic!("retry save") };
+        let target = FileTarget::new("restored-close.styk");
+        assert!(matches!(rig.dispatch(Request::SaveTarget { prompt, target: Some(target.clone()) }), Effect::Started(_)));
+        assert!(matches!(rig.next(), Effect::Started(_)));
+        let reopened = PreparedDocument::open_bytes(&Engine::new(|| 0., Budgets::for_device(None)), rig.files.get(&target).unwrap(), "saved.styk", &|| false).unwrap();
+        let mut check = Documents::new(); let saved_id = check.open(reopened).map_err(|(error, _)| error).unwrap();
+        let saved = check.get(saved_id).unwrap().records().unwrap();
+        let fps = if scoped {
+            saved.get("figure_types").unwrap().elements().unwrap().iter()
+                .find(|figure| figure.get("figure_type_id").and_then(Value::as_f64) == Some(type_id)).unwrap()
+                .path(&["_styk", "movieclip", "document", "fps"]).unwrap().as_f64().unwrap()
+        } else { saved.get("fps").unwrap().as_f64().unwrap() };
+        assert_eq!(fps, 17.0, "the saved bytes retain the edited root or nested clip");
+    } else {
+        assert!(matches!(rig.dispatch(Request::Respond { prompt, choice: CloseChoice::Discard }), Effect::Started(_)));
+    }
+    assert!(matches!(rig.next(), Effect::Closed(closed) if closed == id));
+    assert_ne!(rig.docs.active().unwrap().lineage(), lineage);
+    assert!(!rig.docs.active().unwrap().dirty());
+}
+
+#[test]
+fn cancelled_close_picker_restores_root_save() { restored_close_picker(false, true); }
+#[test]
+fn cancelled_close_picker_restores_root_discard() { restored_close_picker(false, false); }
+#[test]
+fn cancelled_close_picker_restores_movieclip_save() { restored_close_picker(true, true); }
+#[test]
+fn cancelled_close_picker_restores_movieclip_discard() { restored_close_picker(true, false); }
 
 #[test]
 fn scopes_preserve_the_parent_and_publish_one_undo_entry_or_discard_the_child() {

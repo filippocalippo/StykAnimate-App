@@ -95,7 +95,7 @@ fn prepare_pending(engine: &Engine, generation: &Arc<Generation>, state: &Arc<Sh
         (std::mem::take(&mut state.pending), state.epoch)
     };
     for tick in ticks {
-        let (generation, state, ended, clock) = (generation.clone(), state.clone(), ended.clone(), engine.inner.clock);
+        let (generation, state, ended, clock) = (generation.clone(), state.clone(), ended.clone(), engine.inner.clock.clone());
         engine.spawn(move |_| {
             if ended.load(Ordering::Relaxed) {
                 return;
@@ -414,7 +414,7 @@ impl ExportFrames {
         if tick >= self.ticks() {
             return None;
         }
-        let data = Arc::new(produce(&self.generation, tick as f64, &[], true, false, self.engine.inner.clock));
+        let data = Arc::new(produce(&self.generation, tick as f64, &[], true, false, self.engine.inner.clock.clone()));
         let state = self.state.lock();
         (state.epoch == epoch && state.images_left == 0).then_some(data)
     }

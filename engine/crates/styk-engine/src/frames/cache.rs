@@ -166,7 +166,7 @@ impl Work {
         }
         let Some(tick) = storage.take_wanted() else { return changed; };
         drop(storage);
-        let data = produce(generation, tick.time(), &control.hidden, control.effects, true, engine.inner.clock);
+        let data = produce(generation, tick.time(), &control.hidden, control.effects, true, engine.inner.clock.clone());
         // Returned/ignored and stale data all remain owned outside State.
         self.finish(engine, tick, control.epoch, &control.hidden, control.effects, data, false);
         true
@@ -196,7 +196,7 @@ impl Work {
         let generation = self.generation.as_ref()?;
         if tick.time() >= generation.playable_ticks() as f64 { return None; }
         drop(storage);
-        let data = produce(generation, tick.time(), &control.hidden, control.effects, true, engine.inner.clock);
+        let data = produce(generation, tick.time(), &control.hidden, control.effects, true, engine.inner.clock.clone());
         let frame = self.finish(engine, tick, control.epoch, &control.hidden, control.effects, data, true)?;
         Some(FrameSnapshot { generation: generation.clone(), frame, epoch: control.epoch })
     }

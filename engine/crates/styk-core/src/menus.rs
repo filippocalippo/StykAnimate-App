@@ -352,7 +352,7 @@ impl crate::app::Core {
     /// reads that never evaluate), the settings, the dock's visible panels and the open projects.
     ///
     /// Opening a menu never evaluates or scans a frame: the selection is read from the session, and what kind of figure it is from
-    /// the Inspector's prepared model ([`crate::inspector::Panel::kind_of`]). While that model is pending the Joint rows are
+    /// the Inspector's resolved instance facts ([`crate::inspector::Panel::instance_of`]). While those are pending the Joint rows are
     /// disabled, as the Inspector's own controls are (today's menu always has the frame at hand; the other answer, no selection,
     /// would be wrong for a figure that is selected).
     ///
@@ -370,11 +370,11 @@ impl crate::app::Core {
         if let Some(document) = self.documents.active() {
             let selection = facts::selection(document);
             figure = selection.uid.is_some() || !selection.uids.is_empty();
-            // The Joint menu needs one joint of one figure that is not a movieclip (`noJoint`). What kind of figure it is comes
-            // from the Inspector's prepared model, which is stamped with the revision and the selection it was made for; while
-            // that is pending (or made for another state) the Joint rows are disabled until it lands: nothing is scanned here.
-            let kind = self.inspector().kind_of(document);
-            joint = figure && selection.joint >= 0 && selection.uids.len() <= 1 && kind.is_some_and(|kind| kind != crate::inspector::model::Kind::Movieclip);
+            // The Joint menu needs one joint of one figure that is not a movieclip (`noJoint`). Whether it is a movieclip comes from
+            // the resolved instance facts the worker made for exactly this revision and selection; while they are pending the
+            // Joint rows are disabled until they land: nothing is evaluated or scanned here.
+            let instance = selection.uid.or_else(|| selection.uids.first().copied()).and_then(|uid| self.inspector().instance_of(document, uid));
+            joint = figure && selection.joint >= 0 && selection.uids.len() <= 1 && instance.is_some_and(|figure| figure.movieclip.is_none());
         }
         Facts {
             figure,

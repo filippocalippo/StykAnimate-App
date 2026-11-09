@@ -118,8 +118,8 @@ fn the_mark_command_opens_the_menu_and_a_row_runs_its_command_through_dispatch()
     assert_eq!(menus.len(), 1);
     assert!(core.overlays().menu_of(styk_core::shell::ids::MARK).is_some(), "the mark's menu is open from the mark");
     // A command whose feature is not ported answers NotAvailable, and the menu closes.
-    let effects = press(&mut core, "New animation");
-    assert!(effects.contains(&Effect::NotAvailable(CommandId::New)), "{effects:?}");
+    let effects = press(&mut core, "Export…");
+    assert!(effects.contains(&Effect::NotAvailable(CommandId::Export)), "{effects:?}");
     assert!(core.overlays().menus().is_empty());
 }
 

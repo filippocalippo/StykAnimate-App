@@ -55,7 +55,7 @@ pub(crate) fn frame_objects(frame: &Value) -> Vec<Value> {
     frame.get("objects").and_then(Value::elements).map(|items| items.iter().collect()).unwrap_or_default()
 }
 
-fn uid_of(object: &Value) -> Option<u32> {
+pub(super) fn uid_of(object: &Value) -> Option<u32> {
     object.get("unique_id").and_then(Value::as_f64).and_then(|uid| (uid >= 0.0 && uid.fract() == 0.0 && uid <= f64::from(u32::MAX)).then_some(uid as u32))
 }
 

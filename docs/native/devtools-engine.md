@@ -148,7 +148,8 @@ CLI profile/compare produce structured JSON directly. The measuring `xtask profi
 
 Shipping isolation has two required checks. `check-shipping-features` reads Cargo's resolved
 normal/build feature graph for each separate shipping package, default features, and the actual
-rustc host target. It rejects `styk-devtools` or `styk-trace/enabled`, including transitive activation.
+rustc host target. It rejects developer crates, production-crate `devtools` features and
+`styk-trace/enabled`, including transitive activation; `inspect` remains permitted.
 These selectors match the separate `cargo rustc --locked -p styk-app --bin stykanimate --release`
 and `-p styk-cli --bin styk --release` builds; debug info remains off through the machine environment.
 
@@ -156,9 +157,11 @@ Pass `-- -C link-arg=/MAP:<absolute.map>` to each shipping link, then run
 `cargo xtask check-release <shipping.exe> <matching.map>`. The guard parses linked public/static
 symbols, including mangled Rust identifiers, and rejects trace/devtools code. It validates the map's
 module, timestamp and image base against the PE, requires a nonempty symbol table and bounds lines
-to 16 KiB. Missing/mismatched maps fail. This supersedes the literal-string marker scan, which could
-miss optimized code. The release negative control links a real enabled-trace executable and must
-be rejected. Disabled-macro tests separately cover argument non-evaluation.
+to 16 KiB. Missing/mismatched maps fail. A bounded executable scan additionally rejects the developer
+catalogue keys, including inlined data without a surviving developer symbol; it supplements the
+symbol check. Release negative controls link enabled trace code, the actual Core developer route,
+and data from the actual developer catalogue, and require rejection for those leaks.
+Disabled-macro tests separately cover argument non-evaluation.
 
 ## Process memory attribution
 
@@ -168,3 +171,10 @@ platform worker. `styk memory-capture <new.styktrace>` writes a standalone captu
 video `--memory-report` samples the same implementation. There is no automatic
 collector or control-channel operation. See [memory-probe.md](memory-probe.md)
 for bounds, overlapping counters and ownership limitations.
+
+## First panel core
+
+K-dev panels step 2 adds the process runtime, bounded log/parameter owners and
+production command/wake wiring. See [the panel core handoff](devtools-panels.md)
+for models, lifecycle, startup precedence, release proof and the step-3 view contract.
+The default tools crate remains headless; visible panels still await step 3.

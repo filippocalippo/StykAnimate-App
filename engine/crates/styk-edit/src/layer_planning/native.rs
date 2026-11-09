@@ -276,7 +276,7 @@ fn stage(
     wire: &Value,
     check: &mut impl FnMut() -> Result<(), EditError>,
     progress: &mut impl FnMut(Progress),
-    clock: fn() -> f64,
+    clock: impl Fn() -> f64 + Copy,
 ) -> Result<Option<NativeMigration>, EditError> {
     if wire.is_null() {
         return Ok(None);
@@ -612,7 +612,7 @@ impl Editor {
         wire: &Value,
         mut check: impl FnMut() -> Result<(), EditError>,
         mut progress: impl FnMut(Progress),
-        clock: fn() -> f64,
+        clock: impl Fn() -> f64 + Copy,
     ) -> Result<NativePlan, EditError> {
         check()?;
         if self.report.path(&["_styk", "layerSheet"]).is_some() {

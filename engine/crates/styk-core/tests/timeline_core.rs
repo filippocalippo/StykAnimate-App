@@ -38,7 +38,7 @@ impl Rig {
                 spawner: Arc::new(Threads),
                 files: files.clone(),
                 startup: styk_doc::json::parse(include_bytes!("../../../tests/edit/startup.document.json")).unwrap(),
-                clock: || 0.,
+                clock: Arc::new(|| 0.),
                 notify: notify.clone(),
             })
             .unwrap();

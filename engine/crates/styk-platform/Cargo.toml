@@ -35,7 +35,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Shutdown",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
-    "Win32_UI_Controls",
+    "Win32_UI_Controls", "Win32_UI_Controls_Dialogs",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_Ime",
     "Win32_UI_Input_KeyboardAndMouse",
@@ -50,4 +50,5 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Di
 tiny_http = "0.12"
 
 [features]
+devtools = ["styk-services/devtools"]
 dev-control = []

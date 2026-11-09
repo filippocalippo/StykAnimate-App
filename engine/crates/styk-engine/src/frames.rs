@@ -6,7 +6,7 @@ use std::sync::Arc;
 use styk_eval::doc::Camera;
 use styk_eval::drawlist::DrawList;
 
-use crate::{Clock, Engine, Generation};
+use crate::{Engine, Generation};
 
 /// A prepared frame: everything the renderer needs for one tick.
 pub struct FrameData {
@@ -56,7 +56,7 @@ pub(crate) fn hidden_slots(generation: &Generation, frame: &styk_eval::eval::Fra
 
 /// A frame's draw list. `cull`: the frame is for the screen, where it is drawn clipped to the artboard, so what lies outside the artboard
 /// is left out ([`styk_eval::drawlist::cull_outside`]); an export keeps the whole list (its bytes do not change).
-pub(crate) fn produce(generation: &Generation, tick: f64, hidden_uids: &[u32], effects: bool, cull: bool, clock: Clock) -> FrameData {
+pub(crate) fn produce(generation: &Generation, tick: f64, hidden_uids: &[u32], effects: bool, cull: bool, clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>) -> FrameData {
     crate::frame_builder::FrameBuilder::prepare_fresh(generation, tick, &crate::frame_builder::Options {
         hidden_uids: hidden_uids.to_vec(), effects, clip_to_canvas: cull, ..Default::default()
     }, clock)

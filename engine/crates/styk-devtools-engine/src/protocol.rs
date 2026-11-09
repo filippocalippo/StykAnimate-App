@@ -15,6 +15,7 @@ pub const OPS: &[&str] = &[
     "jobs.get",
     "threads.get",
     "cmd.list",
+    "param.set",
 ];
 /// A connection decoder. An oversized line closes the connection; it is never silently truncated.
 #[derive(Default)]

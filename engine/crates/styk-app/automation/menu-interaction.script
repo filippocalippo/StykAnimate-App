@@ -31,7 +31,7 @@ expect history 1
 
 # A row whose feature is not ported yet closes the menu and changes nothing.
 click mark
-menu press New animation
+menu press Export…
 expect menus 0
 expect history 1
 

@@ -33,7 +33,7 @@ fn compressed_pivot_is_refused_before_installation_and_can_retry_after_memory_fr
     let startup = styk_doc::json::parse(include_bytes!("../../../tests/edit/startup.document.json")).unwrap();
     let mut docs = Documents::new();
     docs.attach_host(HostOptions { engine: Engine::new(|| 0.0, Budgets::for_device(None)), files, spawner: Arc::new(Threads), startup,
-        clock: || 0.0, notify: Arc::new(move || { let _ = send.send(()); }) }).unwrap();
+        clock: Arc::new(|| 0.0), notify: Arc::new(move || { let _ = send.send(()); }) }).unwrap();
     let next = |docs: &mut Documents| {
         for _ in 0..4000 {
             if let Some(effect) = docs.poll() { return effect; }

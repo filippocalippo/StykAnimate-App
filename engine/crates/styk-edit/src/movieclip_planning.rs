@@ -18,7 +18,7 @@ pub struct TimelineWorker<'a> {
     pub max_source_bytes: usize,
     pub check: &'a mut dyn FnMut() -> Result<(), EditError>,
     pub progress: &'a mut dyn FnMut(Progress),
-    pub clock: fn() -> f64,
+    pub clock: &'a dyn Fn() -> f64,
 }
 impl TimelineWorker<'_> {
     pub(crate) fn prepare(&mut self, editor: &mut Editor) -> Result<(), EditError> {
@@ -117,7 +117,7 @@ impl Editor {
         fn clock() -> f64 { 0.0 }
         let mut check = || Ok(());
         let mut progress = |_: Progress| {};
-        let mut worker = TimelineWorker { max_source_bytes: usize::MAX, check: &mut check, progress: &mut progress, clock };
+        let mut worker = TimelineWorker { max_source_bytes: usize::MAX, check: &mut check, progress: &mut progress, clock: &clock };
         run(self, &mut worker)
     }
 }
@@ -303,7 +303,7 @@ pub fn prepare_movieclips(
     request: PreparationRequest<'_>,
     mut check: impl FnMut() -> Result<(), EditError>,
     mut progress: impl FnMut(Progress),
-    clock: fn() -> f64,
+    clock: impl Fn() -> f64 + Copy,
 ) -> Result<Option<SheetPlan>, EditError> {
     check()?;
     let layers = report
@@ -390,7 +390,7 @@ pub fn apply_channels(
     request: ChannelsRequest<'_>,
     mut check: impl FnMut() -> Result<(), EditError>,
     mut progress: impl FnMut(Progress),
-    clock: fn() -> f64,
+    clock: impl Fn() -> f64 + Copy,
 ) -> Result<SheetPlan, EditError> {
     check()?;
     budget(request.max_source_bytes)?;
