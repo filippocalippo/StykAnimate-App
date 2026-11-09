@@ -8533,14 +8533,16 @@
   "desktop.preload.errors.aCallbackIsRequired": {
     "locations": [
       "desktop/preload.cjs:4",
-      "desktop/preload.cjs:30"
+      "desktop/preload.cjs:30",
+      "src/desktop-bridge.mjs:45"
     ],
     "context": "\"desktop.preload.errors.aCallbackIsRequired\": \"A callback is required.\","
   },
   "desktop.preload.errors.uiScaleMustBe75200InStepsOf5": {
     "locations": [
       "desktop/preload.cjs:5",
-      "desktop/preload.cjs:56"
+      "desktop/preload.cjs:56",
+      "src/desktop-bridge.mjs:106"
     ],
     "context": "\"desktop.preload.errors.uiScaleMustBe75200InStepsOf5\": \"UI scale must be 75–200 in steps of 5.\""
   },
