@@ -13,7 +13,7 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
-**Updated 2026-11-09 00:45.** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
+**Updated 2026-11-09 (V0 merged).** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
 tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had only merged N0). Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
@@ -107,11 +107,11 @@ high-risk or unclear one reverts its chunk); no catch-up merges into branches wi
 | K-timeline views 1 | Sonnet | built at `6a591305` (the header, the Advanced sheet, the Simple strip; six screens within limits, identical in the preview; 14 mounted tests with mutations); waits for the core gaps, then drops its stopgap view arithmetic; one Sol review of the whole |
 | K-dev panels | Astra, then Sonnet | ready at `600ac90d` (core: Sol high, three majors fixed; views: Sol high, five majors fixed in two steps): the developer mark, the profiler, logs, live parameters and the pass-through overlay, release build clean; merging native-app into its branch (conflicts with the timeline's registry and routing), then merges alone |
 
-**Step 3 in flight** (`perf/briefs/native/step3-plan.md`; unmerged unless marked):
+**Step 3 in flight** (`perf/briefs/native/step3-plan.md`; unmerged unless marked; `origin/native-app` at `3d55fb73`):
 
 | Chunk | Who | State |
 | --- | --- | --- |
-| V0 visible loop | Astra xhigh | in its final checks (queue priority) |
+| V0 visible loop | Astra xhigh | **merged `3d55fb73`** (alone, pass green, pushed; Sol xhigh twice: six majors, then two, all fixed; engine parity green: Rust fixture suites and containers): open, stage, click-select, Properties edit, undo, redo, save, reopen, switch and close in the real window; Select's picks on a cancellable worker (cancellation through evaluation, geometry, artwork and raster), pen cancellation reaching the tools, native Open and Save pickers tied to the window's life with today's filters, untitled Save from the close prompt, automation input behind `devtools`, the engine clock per app instance |
 | Timeline part 1 gaps and views | Astra core, Sonnet views | `t3/timeline-views-1` `edf88a82`; Sol xhigh: one blocker (redraw work grows with the document) and eight majors (deferred release lost, FPS commits only on Enter and seeded from the effective rate, preview incomplete, popovers placed by the view and outside the overlay host, two view decisions, tests that inject wakes); Astra fixing the core, then Sonnet the views; re-check of the blocker |
 | F4 session-end flake | Astra | **merged `5b4c032f`** (alone, pass green, pushed; Sol xhigh: no findings): two real idle wake loops (an empty frame outbox turned contention into a wake; a contended worker exchange woke the interface at once) fixed so a contended exchange wakes its worker, which resumes the interface after releasing it; the session-end test ordered by a worker gate (80/80 under contention) |
 | G1 gate tooling | Astra | `4a3002d9`; six smokes, 36-comparison save oracle; Sol high: three majors (benchmark workloads differ, export automation bypasses the app path, the Inspector smoke never runs), fixing; the Inspector smoke switches on after V0 |
