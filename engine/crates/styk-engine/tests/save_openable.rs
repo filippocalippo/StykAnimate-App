@@ -1,8 +1,9 @@
 //! A save never writes a file that opening refuses, and is never refused for what opening mends. Beside the lift it runs the reader's check
-//! on every document the project holds: what opening would mend is mended in what is written (and counted), and what no repair mends is
-//! written all the same, with the reason. Each shape found in a person's file or by the gesture fuzz has its test here.
+//! on every document the project holds: what opening would mend is mended in what is written (and counted), and what no repair mends
+//! refuses the save with the reason, so no file on disk is replaced by one that cannot be opened. Each shape found in a person's file or
+//! by the gesture fuzz has its test here.
 use styk_doc::{Value, json};
-use styk_engine::save::{ProjectRequest, Written, save_project};
+use styk_engine::save::{ProjectRequest, SaveError, Written, save_project};
 use styk_formats::{Kind, files};
 
 fn repo(path: &str) -> std::path::PathBuf {
@@ -71,7 +72,6 @@ fn with_dangling_replacements() -> Value {
 fn a_project_with_replacements_its_retained_scene_cannot_supply_is_saved_mended() {
     let written = save(&with_dangling_replacements());
     assert_eq!(written.repairs, 2, "the replacement by a missing figure and the one whose pose is missing");
-    assert_eq!(written.warning, None);
     let (_, repairs) = reopened(&written);
     assert_eq!(repairs, 0, "the file needs no mending when it opens");
 }
@@ -95,7 +95,6 @@ fn a_frame_whose_joins_name_no_figure_is_saved_with_its_neighbours_joins() {
     at(&mut objects[2], "join").make_obj().unwrap().remove("target_unique_id");
     let written = save(&document);
     assert_eq!(written.repairs, 1, "the first frame");
-    assert_eq!(written.warning, None);
     let (opened, repairs) = reopened(&written);
     assert_eq!(repairs, 0);
     assert_eq!(parents(&opened.get("keyframes").and_then(Value::elements).unwrap().get(0).unwrap()), wanted);
@@ -125,27 +124,25 @@ fn a_project_made_too_deep_is_neither_refused_nor_written_unopenable() {
     assert!(styk_edit::load::prepare_editor_load(tree.clone()).is_err(), "the project is deeper than movieclips may run");
     let written = save(&tree);
     assert!(written.repairs >= 1, "retained scenes were let go of");
-    assert_eq!(written.warning, None);
     let (opened, repairs) = reopened(&written);
     assert_eq!(repairs, 0);
     assert!(opened.path(&["_styk", "movieclipSource", "document"]).is_some(), "the retained scenes that fit are kept");
 }
 
 #[test]
-fn what_no_repair_mends_is_written_with_the_reason() {
+fn what_no_repair_mends_refuses_the_save_with_the_reason() {
     // A movieclip whose retained scene has a layer timeline with a broken counter: opening refuses it and there is nothing to mend it from.
     let mut report = with_a_movieclip();
     let clip = last_clip(&mut report);
     let source = at(at(at(at(at(at(clip, "_styk"), "movieclip"), "document"), "_styk"), "movieclipSource"), "document");
     at(at(source, "_styk"), "layerSheet").make_obj().unwrap().set("nextId", Value::Num(0.0));
-    let written = save(&report);
-    assert_eq!(written.repairs, 0);
-    assert!(written.warning.as_deref().is_some_and(|key| key.starts_with("errors.layerSheet.")), "{:?}", written.warning);
-    assert!(!written.bytes.is_empty(), "the file is written");
+    // Bytes that replace a project with a file opening refuses lose it: the save is refused, as the editor words the refusal, and gives no bytes.
+    let refused = save_project(std::slice::from_ref(&report), &[], ProjectRequest { name: None, original_first: false, reservation: None }, &|| false);
+    assert!(matches!(&refused, Err(SaveError::Refused(key)) if key.starts_with("errors.layerSheet.")), "{:?}", refused.as_ref().map(|w| w.bytes.len()));
 }
 
 #[test]
-fn a_sound_project_is_written_without_repairs_or_warning() {
+fn a_sound_project_is_written_without_repairs() {
     let written = save(&with_a_movieclip());
-    assert_eq!((written.repairs, written.warning), (0, None));
+    assert_eq!(written.repairs, 0);
 }

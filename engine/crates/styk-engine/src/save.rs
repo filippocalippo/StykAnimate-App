@@ -45,8 +45,6 @@ pub struct Written {
     pub timings: SaveTimings,
     /// How many things the file's document had that opening would mend, mended in what was written (zero for a document that needed nothing).
     pub repairs: usize,
-    /// What opening would still refuse of what was written, where no repair mends it (the message key of the refusal): the file is written all the same.
-    pub warning: Option<String>,
 }
 
 /// Where a save's time went, by the clock the caller gave (milliseconds; zero without one).
@@ -181,8 +179,9 @@ impl Host for EngineHost<'_> {
 ///
 /// What is written is a file opening accepts. Beside the lift runs the reader's whole check of the document (`check_openable`, on every
 /// document the project holds): when opening would mend something, the document it would make is written instead and the answer says
-/// how much (`Written::repairs`); when opening would refuse something no repair mends, the file is written all the same, as refusing
-/// leaves the person with nothing, and the answer carries the reason (`Written::warning`).
+/// how much (`Written::repairs`); when opening would refuse something no repair mends, the save is refused with that reason, as it
+/// always was: bytes that replace a project with a file opening refuses would lose it, while a refused save leaves the file on disk, the
+/// recovery copy and the open project as they were.
 pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, host: &dyn Host) -> Result<Written, SaveError> {
     let clock = host.clock_source();
     let cancel = &|| host.cancelled();
@@ -219,14 +218,21 @@ pub fn save_project(trees: &[Value], scopes: &[f64], request: ProjectRequest, ho
             if let Some(original) = &original {
                 keep_last(&mut document, original)?;
             }
+            if let Some(unmet) = again.unmet {
+                return Err(unmet.into());
+            }
             let (mut second, _) = write(&document, Kind::Styk, &reserved, None, host)?;
             second.repairs = repairs;
-            second.warning = again.unmet.as_ref().map(describe);
             second.timings.check_ms = written.timings.check_ms;
             written = second;
         }
-        Some(Openable::Refused(refusal)) => written.warning = Some(describe(&refusal)),
-        Some(Openable::Sound) | None => written.warning = unmet.as_ref().map(describe),
+        // Nothing mends what opening refuses: the save is refused, and its bytes go nowhere.
+        Some(Openable::Refused(refusal)) => return Err(refusal.into()),
+        Some(Openable::Sound) | None => {
+            if let Some(unmet) = unmet {
+                return Err(unmet.into());
+            }
+        }
     }
     written.timings.prepare_ms = prepared - started;
     written.timings.total_ms = clock() - started;
@@ -271,14 +277,6 @@ fn keep_last(document: &mut Value, original: &Original) -> Result<(), SaveError>
     Ok(())
 }
 
-/// What a refusal says, as the editor words it: the message key (with its values after a separator).
-fn describe(error: &EditError) -> String {
-    match error {
-        EditError::Invalid(message) => message.clone(),
-        EditError::Unported(feature) => format!("{feature} is not ported to the engine yet"),
-    }
-}
-
 /// The container of a figure file (`.stkz`, `.stykmov`) made of the document an export prepared.
 pub fn save_figure_file(document: &Value, kind: Kind, host: &dyn Host) -> Result<Written, SaveError> {
     write(document, kind, &[], None, host).map(|(written, _)| written)
@@ -320,5 +318,5 @@ fn write(document: &Value, kind: Kind, reserved: &[Arc<[u8]>], scene: Option<Val
         check_ms = took;
     }
     let timings = SaveTimings { lift_ms: lifted_at - started, lift_pieces_ms: lift_times.pieces_ms, lift_splice_ms: lift_times.splice_ms, check_ms, frames: saved.frames, frames_ms: saved.frames_ms, assemble_ms: clock() - lifted_at - saved.frames_ms, ..SaveTimings::default() };
-    Ok((Written { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes, timings, repairs: 0, warning: None }, verdict))
+    Ok((Written { bytes: saved.bytes, raw_bytes: saved.stats.container_raw_bytes, timings, repairs: 0 }, verdict))
 }

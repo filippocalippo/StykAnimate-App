@@ -17,8 +17,8 @@ pub struct Projected {
     pub document: Value,
     /// The document before its pose lists are stored once; [`check_openable`] checks it.
     pub scene: Value,
-    /// What was found wrong of the authored channels or the movieclip graph, which [`project_document`] refuses and a save writes
-    /// the file with ([`check_openable`] mends what it can and the save says what it could not).
+    /// What was found wrong of the authored channels or the movieclip graph, which [`project_document`] refuses, and a save refuses
+    /// unless [`check_openable`] mends it.
     pub unmet: Option<EditError>,
 }
 
@@ -35,7 +35,7 @@ pub enum Openable {
     Sound,
     /// Opening would mend it (`repairs` things); `document` is the document as opening holds it, which the save writes instead.
     Mended { document: Value, repairs: usize },
-    /// Opening would refuse it and nothing can mend what it refuses: the save writes the document and says so.
+    /// Opening would refuse it and nothing can mend what it refuses: the save is refused with this reason.
     Refused(EditError),
 }
 

@@ -52,8 +52,9 @@ named a frame replacement (`movieclipPatches`) for a figure that scene's poses n
 movieclip placed over frames of the timeline and cut the poses down without the sheet: a replacement whose pose is missing is dropped and
 one by a missing figure becomes a replacement by nothing (`layer_state::repair_patches`). A frame of a movieclip, a pose a layer sheet
 retains (`_styk.frameSources`) or a pose of a retained scene whose joins named no figure (a slot that is not there, a figure joined to
-itself, a ring) takes the joins its nearest keyframe that resolves has, by figure identity, else the joins any frame that resolves has, and a
-figure no frame can say a join for is unjoined; the work is linear in the figures of a frame (`load/joins.rs`, only for a document the scene
+itself, a ring) is mended figure by figure: a join that names a figure of the frame, and a figure the frame leaves unjoined, are kept (an
+unjoin on purpose is not undone by another frame); a join that names no figure takes the join its nearest keyframe that resolves has, by
+figure identity, else the one any frame that resolves has; a figure no frame can say a join for is unjoined, as is one that closes a ring; the work is linear in the figures of a frame (`load/joins.rs`, only for a document the scene
 check refused for a join). A timed placement whose end is not after its start (a clip placed in a frame that ended before it started) gets
 the frame after its start as its end (`movieclip::repair_placements`). A figure assigned to a drawing layer, which holds only drawing cels
 (a movieclip placed while one was active), is given the default layer (`drawings::repair_assignments`). Creating a movieclip no longer
@@ -265,9 +266,10 @@ repairs), on the document the save is about to write, and what it finds decides 
   retains a scene at every level; the creation of one that would pass the limit is refused, so such a project is one made before that)
   is brought within it by letting go of the retained scenes, deepest first and only as many as it takes (`load/movieclip.rs`, `shallow`):
   a retained scene is what a clip was made from, and the clip's own frames, which are what shows, are not touched.
-- **What no repair mends:** the file is written all the same, because refusing leaves the person with nothing, and the save carries the reason
-  (`Written::warning`, the message key; `warning` of the timings), which the app shows with advice to keep the previous copy. The authored
-  channels and the movieclip graph, which a save refused before, are in this class now.
+- **What no repair mends:** the save is refused with the reason (`SaveError::Refused`, the message key), as a save of a document whose authored
+  channels, movieclip graph or scene failed its checks always was. Bytes written over a project would replace it with a file nobody can open;
+  a refused save writes nothing, so the file on disk, the recovery copy and the open project with its unsaved changes stay as they were, and the
+  person sees the save's failure message.
 
 The cost is the check's own: it runs on a worker beside the lift and the frames, so the save takes longer only where the check outlasts them
 (`check_ms` against `lift_ms` and `frames_ms` of the save's timings). Measured in the app on two large projects, release builds, Save As six times each (medians, other jobs running on the machine, so the sizes of the differences are directional): the check took 764 ms before (the scene check alone) and 680 ms now on the larger Pivot project (lift 546 ms, frames 1055 ms), and 1578 ms before and 1473 ms now on the larger native project (lift 908 ms, frames 1609 ms); the whole save, as the engine times it, 3123 and 2000 ms on the first and 3205 and 3151 ms on the second, and the wall time of the app's Save As 5110 and 5109 ms, 4084 and 4430 ms. The check already outlasted the lift on the second project and still ends before the frames do, so nothing waits for it; the saved bytes of the four recorded healthy documents are identical.

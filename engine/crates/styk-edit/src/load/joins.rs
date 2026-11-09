@@ -3,10 +3,11 @@
 //! A frame saved by a build that cut a scene down badly can hold joins that name no figure (a slot that is not there, a figure joined to
 //! itself, a ring of figures joined to each other), and the document is refused for it
 //! (`errors.model.joinPointsToAMissingFigureOrHandle`). The keyframes and the poses a layer sheet retains (`_styk.frameSources`, which
-//! the scene of a movieclip keeps) are mended alike: a frame whose joins do not resolve is given the joins the figures have in the
-//! nearest keyframe whose joins do (the same figures are joined in the clip's other frames), else the joins they have in any frame that
-//! resolves, and a figure no frame can say a join for is unjoined, as is one of a ring: a project opens with a figure unjoined rather than
-//! not at all. Every step is linear in the figures of the document. This runs only for a document the load refused for a join: a
+//! the scene of a movieclip keeps) are mended alike: in a frame whose joins do not resolve, a figure whose own join names a figure of the
+//! frame keeps it, and so does a figure that is not joined (a frame unjoins a figure on purpose; another frame's join is no reason to
+//! join it again). Only a join that names no figure is given the join the figure has in the nearest keyframe whose joins do resolve (the
+//! same figures are joined in the clip's other frames), else the join it has in any frame that resolves, and a figure no frame can say
+//! a join for is unjoined, as is one of a ring: a project opens with a figure unjoined rather than not at all. Every step is linear in the figures of the document. This runs only for a document the load refused for a join: a
 //! document whose frames resolve is never touched.
 
 use std::collections::HashMap;
@@ -79,8 +80,9 @@ fn add_to(book: &mut Book, frame: &Value) {
     }
 }
 
-/// `frame` with the joins of `donor` (the nearest frame that resolves, if any), then of `book`, for the figures whose own joins do not
-/// resolve; a figure no one can give a join is unjoined, and so is one of a ring.
+/// `frame` with the joins of `donor` (the nearest frame that resolves, if any), then of `book`, for the figures whose own joins name no
+/// figure of the frame; every other figure keeps its own join or its lack of one. A figure no one can give a join is unjoined, and so is
+/// one of a ring.
 fn mend(frame: &Value, donor: Option<&Value>, book: &Book) -> Value {
     let objects = items(frame.get("objects"));
     let at: HashMap<u64, usize> = objects.iter().enumerate().filter_map(|(i, o)| Some((key(num(o.get("unique_id"))?), i))).collect();
@@ -95,15 +97,18 @@ fn mend(frame: &Value, donor: Option<&Value>, book: &Book) -> Value {
     for (index, object) in objects.iter().enumerate() {
         let uid = num(object.get("unique_id"));
         let from = |source: &Book| uid.and_then(|uid| source.get(&key(uid))).and_then(|(parent, join)| at.get(&key(*parent)).filter(|slot| **slot != index).map(|slot| (*slot, join.clone())));
-        let own = parent_of(&objects, index);
-        let pick = if let Some((slot, join)) = from(&donated) {
-            Some((slot, join, true))
-        } else if let Ok(parent) = own {
-            parent.map(|slot| (slot, object.get("join").cloned().unwrap_or(Value::Null), false))
-        } else if uid.is_some_and(|uid| known.contains(&key(uid))) {
-            None // the donor has the figure and does not join it
-        } else {
-            from(book).map(|(slot, join)| (slot, join, true))
+        let pick = match parent_of(&objects, index) {
+            // A join that names a figure of the frame, or none (an unjoin), is the frame's own and is kept.
+            Ok(parent) => parent.map(|slot| (slot, object.get("join").cloned().unwrap_or(Value::Null), false)),
+            Err(()) => {
+                if let Some((slot, join)) = from(&donated) {
+                    Some((slot, join, true))
+                } else if uid.is_some_and(|uid| known.contains(&key(uid))) {
+                    None // the donor has the figure and does not join it
+                } else {
+                    from(book).map(|(slot, join)| (slot, join, true))
+                }
+            }
         };
         chosen.push(pick);
     }
@@ -274,6 +279,27 @@ mod tests {
         assert_eq!(parents(&frames[0]), vec![None, None, None], "both joins were bad");
         assert_eq!(parents(&frames[1]), vec![None, Some(0.0), None], "the join that resolved stays");
         assert_eq!(parents(&source(&report, "pose")), vec![None, None, Some(1.0)]);
+    }
+
+    #[test]
+    fn a_figure_a_frame_unjoins_on_purpose_stays_unjoined_when_another_join_of_the_frame_is_mended() {
+        // Frame A joins figure 2 to 1 and 3 to 2. Frame B unjoins 2 on purpose and has a join of 3 that names no figure: only 3's join is
+        // taken from A; 2 is not joined to 1 again, which a save would then have written as a change nobody made.
+        let unjoined = json(r#"{"objects":[{"unique_id":1,"join":null},{"unique_id":2,"join":null},{"unique_id":3,"join":{"kind":"a","target_object_slot":7}}]}"#);
+        let mut report = report(vec![chain(3, &[]), unjoined], vec![]);
+        assert_eq!(repair_joins(&mut report), 1);
+        let frames = items(report.get("keyframes"));
+        assert!(resolves(&frames[1]));
+        assert_eq!(parents(&frames[1]), vec![None, None, Some(1.0)], "3 takes A's join; 2 stays unjoined");
+    }
+
+    #[test]
+    fn a_join_that_names_another_figure_of_the_frame_is_kept_over_the_donors() {
+        // B joins 3 to 1 (a valid join A does not have) and has 2's join naming no slot: 3 keeps its own join, 2 takes A's.
+        let own = json(r#"{"objects":[{"unique_id":1,"join":null},{"unique_id":2,"join":{"kind":"a"}},{"unique_id":3,"join":{"kind":"a","target_object_slot":0,"target_unique_id":1}}]}"#);
+        let mut report = report(vec![chain(3, &[]), own], vec![]);
+        assert_eq!(repair_joins(&mut report), 1);
+        assert_eq!(parents(&items(report.get("keyframes"))[1]), vec![None, Some(0.0), Some(0.0)]);
     }
 
     #[test]

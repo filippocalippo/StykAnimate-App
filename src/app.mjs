@@ -3784,10 +3784,9 @@ async function performNativeSave({saveAs}) {
         }
       }
       updateTitle();
-      // What the engine's check of the file found: mended in what was written, or refused by opening and written all the same.
+      // What the engine's check of the file found and mended in what was written (what no repair mends refuses the save before this).
       const checked = state.lastExport?.engine;
-      if (checked?.warning) { const reason = (() => { try { return interfaceText(checked.warning); } catch { return checked.warning; } })(); notify(interfaceText("app.savedButMayNotOpenAgain", {reason}), "app.savedButMayNotOpenAgain", {reason}); }
-      else if (checked?.repairs) notify(interfaceText("app.savedAfterMendingTheProject", {count: checked.repairs}), "app.savedAfterMendingTheProject", {count: checked.repairs});
+      if (checked?.repairs) notify(interfaceText("app.savedAfterMendingTheProject", {count: checked.repairs}), "app.savedAfterMendingTheProject", {count: checked.repairs});
       if (editor.dirty) notify(interfaceText("app.savedACopyNewerChangesAreStillUnsaved"), "app.savedACopyNewerChangesAreStillUnsaved", {});
       else { status({messageKey: "app.projectSaved", messageParams: {}}); scheduleProjectPicture(0, 1); }
     } else status(downloaded ? {messageKey: "app.downloadStartedTheProjectStaysEditedUntilA", messageParams: {}} : {messageKey: "app.saveCancelled", messageParams: {}});

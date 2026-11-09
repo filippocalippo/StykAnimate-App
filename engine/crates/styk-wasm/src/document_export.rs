@@ -35,7 +35,7 @@ impl DocumentExport {
         self.made.raw_bytes
     }
 
-    /// Where a project save's time went: JSON `{prepare_ms, lift_ms, lift_pieces_ms, lift_splice_ms, check_ms, frames_ms, assemble_ms, total_ms, repairs, warning, frames: [{raw, stored, hash_ms, compress_ms}, …]}` (`repairs`: how many things the written document had that opening would mend, mended; `warning`: the message key of what opening would still refuse of it, or null)
+    /// Where a project save's time went: JSON `{prepare_ms, lift_ms, lift_pieces_ms, lift_splice_ms, check_ms, frames_ms, assemble_ms, total_ms, repairs, frames: [{raw, stored, hash_ms, compress_ms}, …]}` (`repairs`: how many things the written document had that opening would mend, mended)
     /// (the skeleton, the arrays section, the payloads section), or an empty string.
     pub fn timings(&self) -> String {
         self.timings.clone()
@@ -222,6 +222,6 @@ pub fn save_project(address: usize, request: &str, cancel: &js_sys::Function) ->
     let written = styk_engine::save::save_project(&trees, &scopes, styk_engine::save::ProjectRequest { name, original_first, reservation }, &styk_engine::save::EngineHost { engine: engine.as_ref(), cancel: &stop, clock: crate::clock, helpers: request.get("helpers").and_then(Value::as_f64).map_or(0, |count| count as usize), aside: request.get("aside").is_some_and(Value::truthy) }).map_err(save_failure)?;
     let t = written.timings;
     let frames: Vec<String> = t.frames.iter().map(|f| format!("{{\"raw\":{},\"stored\":{},\"hash_ms\":{:.3},\"compress_ms\":{:.3}}}", f.raw_bytes, f.stored_bytes, f.hash_ms, f.compress_ms)).collect();
-    let timings = format!("{{\"prepare_ms\":{:.3},\"lift_ms\":{:.3},\"lift_pieces_ms\":{:.3},\"lift_splice_ms\":{:.3},\"check_ms\":{:.3},\"frames_ms\":{:.3},\"assemble_ms\":{:.3},\"total_ms\":{:.3},\"repairs\":{},\"warning\":{},\"frames\":[{}]}}", t.prepare_ms, t.lift_ms, t.lift_pieces_ms, t.lift_splice_ms, t.check_ms, t.frames_ms, t.assemble_ms, t.total_ms, written.repairs, json::to_string(&written.warning.as_deref().map_or(Value::Null, Value::str)), frames.join(","));
+    let timings = format!("{{\"prepare_ms\":{:.3},\"lift_ms\":{:.3},\"lift_pieces_ms\":{:.3},\"lift_splice_ms\":{:.3},\"check_ms\":{:.3},\"frames_ms\":{:.3},\"assemble_ms\":{:.3},\"total_ms\":{:.3},\"repairs\":{},\"frames\":[{}]}}", t.prepare_ms, t.lift_ms, t.lift_pieces_ms, t.lift_splice_ms, t.check_ms, t.frames_ms, t.assemble_ms, t.total_ms, written.repairs, frames.join(","));
     Ok(DocumentExport { made: Made { raw_bytes: written.raw_bytes, bytes: written.bytes, figure_type_id: None, drawings: false }, timings })
 }
