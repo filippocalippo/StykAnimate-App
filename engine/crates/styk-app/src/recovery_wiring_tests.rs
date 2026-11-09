@@ -432,6 +432,13 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
             .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "styk"))
             .map(|entry| (entry.path(), std::fs::read(entry.path()).unwrap())).collect();
         assert!(!committed.is_empty());
+        // Shutdown also retires a live UI timer; an otherwise idle overlay cannot prove that route.
+        rt.message(Message::Band(top_band::Message::Editor(styk_ui::Message::Notice(styk_core::commands::Notice {
+            message: styk_core::i18n::Msg::new("privacyUi.operationFailedPleaseTryAgain"),
+            severity: styk_core::commands::Severity::Warning,
+        }))));
+        rt.drain();
+        assert!(rt.app.band.core.overlay_deadline().is_some());
         rt.message(Message::SessionEnd); rt.drain();
         assert!(!rt.app.closing && !rt.checkpoint_finished);
         assert!(rt.app.band.core.recovery().closing().is_none());
@@ -445,7 +452,11 @@ fn stalled_session_checkpoint_expires_through_the_mounted_wake_and_ignores_late_
         for message in sent { rt.message(message); } rt.drain();
         assert!(rt.checkpoint_finished, "release the shutdown block reason");
         assert!(rt.app.closing, "QuitReady must follow without waiting for the gate");
-        assert_eq!(rt.app.band.core.wake_deadline(true), None, "expired session end retires every core deadline");
+        let mut idle = Driver::new(rt.app.band.wake_widget().map(Message::Band).boxed(), WINDOW, &styk_design::fonts::ALL);
+        idle.redraw();
+        assert!(idle.messages().is_empty(), "expired session end must not publish another window wake");
+        assert!(matches!(idle.redraw_request, iced::window::RedrawRequest::Wait));
+        drop(idle);
         assert!(matches!(rt._outcome.try_recv(), Ok(Outcome::Done)), "exit must not wait for another disk save");
         for (path, bytes) in &committed { assert_eq!(&std::fs::read(path).unwrap(), bytes); }
         rt.gate.release();
