@@ -4,7 +4,7 @@ use crate::shortcuts::{Platform, Scope, Shortcut};
 
 /// The feature module whose handler owns a command; unported features fail explicitly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Owner { History, Selection, Camera, ViewState, Timeline, Dock, Focus, NotYet }
+pub enum Owner { History, Selection, Camera, ViewState, Files, Timeline, Dock, Focus, NotYet }
 
 // Each row declares its identity, serialisation spelling and metadata once.
 macro_rules! commands {

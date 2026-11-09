@@ -223,3 +223,14 @@ If its OS-derived deadline expires first, the core instead uses the same asynchr
 `Documents::drop`: pending work is cancelled, both lanes are detached, and their payloads and any late
 reply are reclaimed on workers. This terminal path preserves committed recovery files and never calls
 normal quit cleanup. The app exits without waiting for another disk operation.
+
+
+## V0 window routing
+
+The [visible loop](visible-loop.md) supplies registry file actions and an asynchronous
+native picker boundary. Command-line and automation opens explicitly wake the existing
+document pump. File effects pass through `Core::document_effect`; save cancellation
+answers its original prompt with no target, and Busy continuation requests are retained
+until host progress. `operations_pending()` exposes existing host work to the automation
+runner without maintaining a second job state. No save format or replacement algorithm
+changes in this wiring.

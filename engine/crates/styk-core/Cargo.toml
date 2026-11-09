@@ -8,7 +8,7 @@ publish.workspace = true
 
 [features]
 default = ["engine"]
-engine = ["dep:styk-alloc", "dep:styk-drawing", "dep:styk-edit", "dep:styk-engine", "dep:styk-eval", "dep:styk-math", "dep:styk-trace", "dep:styk-render"]
+engine = ["dep:styk-alloc", "dep:styk-drawing", "dep:styk-edit", "dep:styk-engine", "dep:styk-eval", "dep:styk-export", "dep:styk-math", "dep:styk-trace", "dep:styk-render"]
 # `styk_core::testing`: what the interface's tests need to open a document without naming an engine crate.
 testing = []
 inspect = ["engine", "styk-edit/inspect", "styk-engine/inspect", "styk-eval/inspect"]
@@ -20,6 +20,7 @@ styk-drawing = { path = "../styk-drawing", optional = true }
 styk-edit = { path = "../styk-edit", optional = true }
 styk-engine = { path = "../styk-engine", optional = true }
 styk-eval = { path = "../styk-eval", optional = true }
+styk-export = { path = "../styk-export", optional = true }
 styk-math = { path = "../styk-math", optional = true }
 styk-render = { path = "../styk-render", optional = true }
 styk-services = { path = "../styk-services" }

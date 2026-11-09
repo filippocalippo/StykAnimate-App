@@ -322,6 +322,16 @@ impl App {
         let mut tasks = vec![task.map(Message::Band)];
         for request in requests {
             match request {
+                top_band::Request::Dialog { id: request_id, request } => {
+                    if let Some(window_id) = self.window { tasks.push(native_dialog(window_id, request_id, request)); }
+                    else { tasks.push(Task::done(Message::Band(top_band::Message::Editor(styk_core::commands::Command::DialogAnswer { id: request_id, result: Err("the picker owner closed".into()) }.into())))); }
+                }
+                top_band::Request::InputClick(point) => {
+                    if let Some(window_id) = self.window { tasks.push(iced_window::run(window_id, move |window| styk_platform::automation_input::click(window, point)).map(|answer| Message::Band(top_band::Message::InputResult(answer.map_err(|e| e.to_string()))))); }
+                }
+                top_band::Request::InputNumber(text) => {
+                    if let Some(window_id) = self.window { tasks.push(iced_window::run(window_id, move |window| styk_platform::automation_input::number(window, &text)).map(|answer| Message::Band(top_band::Message::InputResult(answer.map_err(|e| e.to_string()))))); }
+                }
                 top_band::Request::Minimize => tasks.extend(self.window.map(|id| iced_window::minimize(id, true))),
                 top_band::Request::Close => tasks.push(self.close()),
                 top_band::Request::QuitReady => {
@@ -916,4 +926,18 @@ mod capture_tests {
         drop(app.frame());
         assert!(app.capturing, "the existing two-frame wait should now be complete");
     }
+}
+
+/// Only service wiring: the core retains the dialog's identity and validates its answer.
+fn native_dialog(window: iced_window::Id, id: u64, request: styk_services::dialogs::Request) -> Task<Message> {
+    use styk_services::dialogs::Dialogs;
+    iced_window::run(window, move |window| {
+        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+        let result = styk_platform::dialogs::NativeDialogs::new(window).and_then(|dialogs| dialogs.choose(request, Box::new(move |result| {
+            if sender.send(result).is_err() { eprintln!("picker owner closed before its answer"); }
+        })));
+        (result, receiver)
+    }).then(move |(started, receiver)| Task::perform(async move {
+        match started { Err(error) => Err(error), Ok(()) => receiver.await.unwrap_or_else(|error| Err(error.to_string())) }
+    }, move |result| Message::Band(top_band::Message::Editor(styk_core::commands::Command::DialogAnswer { id, result }.into()))))
 }

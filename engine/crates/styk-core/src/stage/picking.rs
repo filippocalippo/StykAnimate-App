@@ -10,7 +10,8 @@ pub struct Prepared<'a> {
 }
 impl Prepared<'_> {
     /// Same reverse order, preferred-figure handling and strict boundaries as
-    /// the browser's numeric query binding. Point and matrix are document->stage.
+    /// the browser's numeric query binding. The point is in document coordinates;
+    /// the optional projection maps both it and the handles into stage coordinates.
     pub fn handle(&self, point: [f64; 2], options: &engine::PickOptions) -> Option<engine::Hit> {
         engine::pick_handle(self.handles, point, options)
     }

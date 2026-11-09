@@ -14,6 +14,9 @@ use styk_services::{Clock, FixedClock, Cancel};
 use styk_services::recovery::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "visible_loop_tests.rs"]
+mod visible_loop;
+
 #[path = "timeline_quit_tests.rs"]
 mod timeline;
 
@@ -252,15 +255,15 @@ impl Runtime {
         self.app.band.core.documents.call(id, "setFPS", &[styk_core::engine::Value::Num(30.0)], &styk_core::engine::Value::Null).unwrap().result.unwrap();
     }
     fn prompt(&mut self) { self.until(|app| app.band.core.recovery().closing().is_some()); }
-    fn inspector_input(&mut self, scrub: bool) {
-        use styk_core::inspector::property::PropertyKey::Fps;
+    fn inspector_input(&mut self, scrub: bool) { self.inspector_field(styk_core::inspector::property::PropertyKey::Fps, scrub, "42"); }
+    fn inspector_field(&mut self, key: styk_core::inspector::property::PropertyKey, scrub: bool, text: &str) {
         use styk_ui::inspector::{self, View};
         let element = |app: &App| styk_ui::dock::docked(inspector::view(View::of(&app.band.core, Theme::Light).expect("the live inspector")), Theme::Light)
             .map(|message| Message::Band(top_band::Message::Editor(message))).boxed();
         let mut driver = Driver::new(element(&self.app), Size::new(320.0, 900.0), &styk_design::fonts::ALL);
         driver.redraw();
         if scrub {
-            let bounds = driver.snapshot().bounds_of(inspector::label_id(Fps)).expect("the live FPS scrub label");
+            let bounds = driver.snapshot().bounds_of(inspector::label_id(key)).expect("the live FPS scrub label");
             let start = bounds.center(); driver.point_at(start);
             driver.events(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left))]);
             for delta in [8.0, 24.0] {
@@ -269,16 +272,16 @@ impl Runtime {
             }
             driver.events(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left))]);
         } else {
-            driver.focus(inspector::input_id(Fps)); driver.events(&[]);
+            driver.focus(inspector::input_id(key)); driver.events(&[]);
         }
         let sent = driver.messages(); assert!(!scrub || !sent.is_empty(), "the mounted scrub must publish");
         for message in sent { self.message(message); }
         if scrub { return; }
-        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(Fps));
+        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(key));
         for _ in 0..12 { driver.press(iced::keyboard::key::Named::Backspace); }
-        driver.typewrite("42");
+        driver.typewrite(text);
         let sent = driver.messages(); assert!(!sent.is_empty()); for message in sent { self.message(message); }
-        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(Fps)); driver.press(iced::keyboard::key::Named::Enter);
+        driver = driver.rebuild(element(&self.app)); driver.focus(inspector::input_id(key)); driver.press(iced::keyboard::key::Named::Enter);
         let sent = driver.messages(); assert!(!sent.is_empty()); for message in sent { self.message(message); }
     }
 }
@@ -602,6 +605,8 @@ fn legacy_restore_from_mounted_offer_adopts_only_an_orphan() {
         let restore = offer.actions.iter().position(|action| action.command == styk_core::overlay::messages::Do::Recovery(styk_core::recovery::model::Event::Restore)).unwrap();
         let button = styk_core::overlay::host::message_button_id(offer.id, restore);
         rt.click(button); rt.until(|app| app.band.core.documents.active().is_some()); rt.drain();
+        rt.until(|app| app.band.core.stage().is_some() && !app.band.core.inspector().pending());
+        assert_eq!(rt.app.band.core.inspector().model().unwrap().number(styk_core::inspector::property::PropertyKey::RootX).unwrap().value, 480., "the restored front document reaches Properties through the real runtime");
         assert!(rt.app.band.core.documents.active().unwrap().dirty());
         rt.close(); rt.prompt();
         assert!(!rt.app.band.core.recovery().closing().unwrap().1.retry(), "a restored read-only source checkpoints into a new writable slot");

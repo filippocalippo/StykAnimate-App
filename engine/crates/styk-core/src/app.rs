@@ -58,6 +58,9 @@ pub struct Core {
     quit_pending: bool,
     now: u64,
     runtime: Option<Runtime>,
+    tools: Option<crate::tools::Tools>,
+    pickers: crate::file_actions::Pickers,
+    file_waiting: Option<crate::documents::Request>,
     audio_open: Option<styk_services::worker::Worker<(), Result<crate::audio::AudioTransport, String>>>,
     command_queue: crate::command_queue::GestureQueue,
     space_origin: Option<crate::stage::View>,
@@ -84,7 +87,7 @@ impl Default for Core {
             select_commands: None,
             presentation: Presentation::english(),
             timeline: Default::default(), settings: Default::default(), settings_store: None, deferred: None, now: 0,
-            runtime: None, audio_open: None, quit_pending: false,
+            runtime: None, tools: None, pickers: Default::default(), file_waiting: None, audio_open: None, quit_pending: false,
             command_queue: Default::default(), space_origin: None, alt_graph: false, settings_mode_pending: false,
             recovery: crate::recovery::Panel::default(),
             dock: crate::dock::Dock::new(crate::layout::Size { w: 1560.0, h: 1000.0 }, 1.0, "unhosted"),
@@ -98,6 +101,7 @@ fn warn(message: Msg) -> Effect {
 
 impl Core {
     pub fn start_runtime(&mut self, spawner: Arc<dyn styk_services::Spawner>, clock: Arc<dyn styk_services::Clock>, progress: Arc<crate::stage::Progress>) -> Result<(), styk_services::SpawnError> {
+        self.tools = Some(crate::tools::Tools::start(spawner.as_ref(), progress.wake())?);
         self.start_timeline(spawner.as_ref(), progress.wake())?;
         self.set_facts(Facts::start(spawner.as_ref(), progress.wake())?);
         self.runtime = Some(Runtime { spawner, clock, progress, published: None }); Ok(())
@@ -126,6 +130,7 @@ impl Core {
         }
         if let Some(runtime) = &mut self.runtime { runtime.published = published; }
     }
+    pub fn tools_pending(&self) -> bool { self.tools.as_ref().is_some_and(crate::tools::Tools::pending) }
     pub fn timeline(&self) -> &crate::timeline::Panel { &self.timeline }
     pub fn settings(&self) -> &crate::settings::Settings { &self.settings }
     pub fn start_timeline(&mut self, spawner: &dyn styk_services::Spawner, wake: Arc<dyn Fn() + Send + Sync>) -> Result<(), styk_services::SpawnError> {
@@ -292,8 +297,19 @@ impl Core {
     /// `Documents::dispatch` here. What the core does with it comes back as effects, like a command's.
     pub fn document_effect(&mut self, effect: &crate::documents::Effect) -> Vec<Effect> {
         if self.session_end_expired() { return Vec::new(); }
-        let effects = self.recovery.effect(effect, &self.documents, &mut self.overlays, &mut self.focus);
-        effects.into_iter().chain(self.refresh()).collect()
+        let mut effects = self.recovery.effect(effect, &self.documents, &mut self.overlays, &mut self.focus);
+        use crate::documents::Effect as Doc;
+        let picker = match effect {
+            Doc::OpenDialog => self.pickers.open(self.presentation.text(&Msg::new("menu.openProject"))),
+            Doc::SaveDialog { prompt, name, .. } => self.pickers.save(*prompt, self.presentation.text(&Msg::new("common.saveAs")), name.clone()),
+            _ => None,
+        };
+        if let Some((id, request)) = picker { effects.push(Effect::Dialog { id, request }); }
+        else if let Doc::SaveDialog { prompt, .. } = effect {
+            // A conflicting dialog must release the documents host's save continuation.
+            effects.extend(self.file_request(crate::documents::Request::SaveTarget { prompt: *prompt, target: None }));
+        }
+        effects.extend(self.refresh()); effects
     }
 
     pub fn request_quit(&mut self) -> Vec<Effect> {
@@ -318,7 +334,9 @@ impl Core {
 
     /// Called once on a host wake, after its bounded poll, never from refresh or view.
     pub fn documents_progress(&mut self) -> Vec<Effect> {
-        self.recovery.progress(&mut self.documents, &mut self.overlays, &mut self.focus)
+        let mut effects = self.recovery.progress(&mut self.documents, &mut self.overlays, &mut self.focus);
+        if let Some(request) = self.file_waiting.take() { effects.extend(self.file_request(request)); }
+        effects
     }
 
     /// The shared notice effect reaches the existing bounded stage-message owner.
@@ -397,6 +415,10 @@ impl Core {
     pub fn dispatch(&mut self, command: Command) -> Vec<Effect> {
         // Accepted document quit fences all input. Only preference maintenance and
         // overlay housekeeping may run; a wake must never replay deferred edits.
+        if let Command::DialogAnswer { id, result } = command {
+            self.session = Session::default();
+            return self.dialog_answer(id, result);
+        }
         if self.input_fenced() {
             return match command {
                 Command::Overlay { event, now } => self.overlay_event(event, now),
@@ -410,8 +432,13 @@ impl Core {
                 _ => Vec::new(),
             };
         }
+        if matches!(&command, Command::Activate(_) | Command::Run(_) | Command::Inspector(_) | Command::Timeline(_) | Command::Quit | Command::Blur | Command::Recovery(_)) {
+            if let Some(tools) = &mut self.tools { tools.cancel(); }
+            if !matches!(&command, Command::Blur | Command::Inspector(crate::inspector::Event::Field(_, crate::inspector::FieldEvent::Focus | crate::inspector::FieldEvent::Blur))) { self.pickers.invalidate_color(); }
+        }
         self.session = Session::default();
-        let mut effects = match command {
+        let effects = match command {
+            Command::DialogAnswer { .. } => Vec::new(), // handled before the quit fence: saves may be completing quit
             Command::Quit => {
                 self.quit_pending = true;
                 let mut effects = Vec::new();
@@ -464,8 +491,60 @@ impl Core {
                 self.dock_effects(effects)
             }
         };
+        let mut routed = Vec::new();
+        for effect in effects {
+            if let Effect::PickColor(target) = effect {
+                match crate::inspector::color::initial(&self.inspector, target).and_then(|initial| self.pickers.color(&self.documents, target, initial)) {
+                    Some((id, request)) => routed.push(Effect::Dialog { id, request }),
+                    None => routed.push(warn(Msg::new("errors.engineOwner.notSupported"))),
+                }
+            } else { routed.push(effect); }
+        }
+        routed.extend(self.refresh()); routed
+    }
+    pub fn file_pending(&self) -> bool { self.pickers.pending() || self.file_waiting.is_some() || self.documents.operations_pending() }
+
+    fn file_request(&mut self, request: crate::documents::Request) -> Vec<Effect> {
+        use crate::documents::{Request, DocumentsError, HostError};
+        // A previously accepted save can finish after quit fenced ordinary edits.
+        let result = if matches!(request, Request::SaveTarget { .. }) { self.documents.dispatch(request) } else { self.dispatch_document(request) };
+        match result {
+            Ok(effect) => self.document_effect(&effect).into_iter().chain([Effect::PollDocuments]).collect(),
+            Err((HostError::Documents(DocumentsError::Busy), request)) => { self.file_waiting = Some(request); Vec::new() }
+            Err((HostError::Documents(error), _)) => vec![warn(Msg::owned(error.message_key().to_owned()))],
+            Err(_) => vec![warn(Msg::new("privacyUi.operationFailedPleaseTryAgain"))],
+        }
+    }
+
+    fn dialog_answer(&mut self, id: u64, result: Result<styk_services::dialogs::Choice, String>) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        let choice = match result { Ok(choice) => Some(choice), Err(_) => { effects.push(warn(Msg::new("privacyUi.operationFailedPleaseTryAgain"))); None } };
+        match self.pickers.answer(id, choice, &self.documents) {
+            Ok(crate::file_actions::Answer::Document(request)) => effects.extend(self.file_request(request)),
+            Ok(crate::file_actions::Answer::Color(target, rgb)) if !self.input_fenced() => {
+                match crate::inspector::color::commit(&mut self.documents, &self.view, &mut self.session, target, rgb) {
+                    Ok(()) => effects.push(Effect::RequestFrame), Err(message) => effects.push(warn(message)),
+                }
+            }
+            Ok(_) => {}
+            Err(message) => effects.push(warn(message)),
+        }
         effects.extend(self.refresh()); effects
     }
+
+    fn file_menu(&mut self) -> Vec<Effect> {
+        use crate::overlay::{host::Event, menu::{Anchor, Entry, Item}};
+        let entries = [CommandId::New, CommandId::Open, CommandId::Save, CommandId::SaveAs, CommandId::SaveAll, CommandId::CloseProject].into_iter().map(|id| {
+            let mut item = Item::new(id, self.presentation.text(&Msg::new(id.info().label)));
+            item.icon = id.info().icon.map(str::to_owned);
+            item.disabled = self.pickers.pending() || (self.documents.active().is_none() && !matches!(id, CommandId::New | CommandId::Open));
+            Entry::Item(item)
+        }).collect();
+        let invoker = crate::shell::ids::MARK;
+        let anchor = self.overlays.bound_of(invoker).map(Anchor::Root).unwrap_or(Anchor::Point { x: 8., y: 40. });
+        self.overlay_event(Event::OpenMenu { entries, anchor, invoker: Some(invoker), keyboard: false }, self.now)
+    }
+
     fn show_notices(&mut self, effects: &[Effect]) {
         for effect in effects { if let Effect::Notice(notice) = effect { drop(self.show_notice(notice.clone())); } }
     }
@@ -474,10 +553,17 @@ impl Core {
         self.now = now;
         let mut effects = self.refresh();
         if let Some(answer) = self.audio_open.as_ref().and_then(|worker| worker.take()) { self.audio_open = None; self.set_audio(answer); }
-        if let Some(stage) = self.stage() { drop(stage.event(crate::stage::Event::Progress)); }
+        effects.extend(self.stage_event(crate::stage::Event::Progress));
+        let stage = self.stage();
+        if let Some(tools) = &mut self.tools {
+            match tools.progress(&mut self.documents, stage.as_deref(), &mut self.session) {
+                Ok(true) => { self.view.set_context(crate::view_state::InspectorContext::Auto); effects.push(Effect::RequestFrame); }
+                Ok(false) => {}
+                Err(message) => effects.push(warn(message)),
+            }
+        }
         effects.extend(self.settings_event(crate::settings::Event::Wake { now }));
         effects.extend(self.overlay_event(crate::overlay::host::Event::Tick, now));
-        effects.extend(self.timeline_event(crate::timeline::Event::Wake { now }));
         if self.documents.active().is_none_or(|d| d.view().is_ok()) {
             if let Some((identity, command)) = self.deferred.take() {
                 if identity == self.active_identity() { effects.extend(self.dispatch(command)); }
@@ -666,9 +752,15 @@ impl Core {
         effects
     }
 
-    /// A stage event for the active document's stage. The stage keeps navigation; what it does not take goes back to the
-    /// tool owner, which no chunk has built yet, so it does nothing.
+    /// Navigation stays with the stage; unconsumed presses go to the tools owner.
     fn stage_event(&mut self, event: crate::stage::Event) -> Vec<Effect> {
+        use crate::stage::{Event as StageEvent, input::PointerPhase};
+        let supersedes = match &event {
+            StageEvent::Pointer(pointer) => matches!(pointer.phase, PointerPhase::Down | PointerPhase::Cancel),
+            StageEvent::Wheel(_) | StageEvent::Pan(_) | StageEvent::Zoom { .. } | StageEvent::FitCanvas | StageEvent::PanTool(_) => true,
+            _ => false,
+        };
+        if supersedes && let Some(tools) = &mut self.tools { tools.cancel(); }
         if matches!(event, crate::stage::Event::Blur) {
             let effects = self.dispatch(Command::Blur);
             if let Some(stage) = self.stage() { drop(stage.event(event)); }
@@ -681,15 +773,26 @@ impl Core {
             return self.timeline_event(crate::timeline::Event::Action { id: CommandId::TimelineSeek, payload: crate::timeline::Payload::Number(tick), now: self.now });
         }
         let progress = matches!(event, crate::stage::Event::Progress | crate::stage::Event::Tick);
-        if let Some(stage) = self.stage() {
-            // A refusal (a closed stage, a NaN from a device) leaves the view as it was.
-            drop(stage.event(event));
+        let mut effects = Vec::new();
+        if let Some(stage) = self.stage() && let Ok(outcome) = stage.event(event) {
+            for pointer in outcome.routed {
+                if pointer.phase == crate::stage::input::PointerPhase::Down { self.pickers.invalidate_color(); }
+                if pointer.phase == crate::stage::input::PointerPhase::Down && !self.finish_panels(&mut effects) {
+                    effects.push(warn(Msg::new("errors.editorSessions.finishTheCurrentOperationFirst")));
+                    continue;
+                }
+                if let Some(tools) = &mut self.tools && let Err(message) = tools.pointer(pointer, &self.documents, &stage) { effects.push(warn(message)); }
+            }
         }
-        if progress { self.timeline_event(crate::timeline::Event::Wake { now: self.now }) } else { Vec::new() }
+        if progress { effects.extend(self.timeline_event(crate::timeline::Event::Wake { now: self.now })); }
+        effects
     }
 
     /// Every panel finishes what it has open.
     fn finish_panels(&mut self, effects: &mut Vec<Effect>) -> bool {
+        // Shell tab switches use this same barrier, including an A-B-A switch before a worker answers.
+        if let Some(tools) = &mut self.tools { tools.cancel(); }
+        self.pickers.invalidate_color();
         let stage = self.stage();
         if let Err(message) = self.timeline.finish(&mut self.documents, &mut self.session, stage.as_deref()) { effects.push(warn(message)); return false; }
         let panels: [&mut dyn Lifecycle; 1] = [&mut self.inspector];
@@ -719,6 +822,12 @@ impl Core {
         let mut effects = Vec::new();
         if !self.finish_panels(&mut effects) { effects.extend(self.defer(Command::Run(id))); return effects; }
         match id.info().owner {
+            Owner::Files => {
+                if id == CommandId::Menu { return self.file_menu(); }
+                if self.pickers.pending() || self.file_waiting.is_some() { return vec![warn(Msg::new("errors.editorSessions.finishTheCurrentOperationFirst"))]; }
+                if let Some(request) = crate::file_actions::request(id, &self.documents) { effects.extend(self.file_request(request)); }
+                return effects;
+            }
             Owner::Dock => {
                 let focused = self.focus.focused().filter(|id| self.dock.panel_of(*id).is_some())
                     .or_else(|| self.focus.focused_area().and_then(|area| self.dock.region_panel_target(area)));
@@ -748,7 +857,7 @@ impl Core {
                 effects.push(Effect::NotAvailable(id));
                 return effects;
             }
-            Owner::Dock | Owner::Focus => return effects,
+            Owner::Dock | Owner::Focus | Owner::Files => return effects,
         };
         match result {
             Ok(()) => effects.push(Effect::RequestFrame),

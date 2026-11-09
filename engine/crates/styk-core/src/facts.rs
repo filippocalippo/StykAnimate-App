@@ -20,6 +20,7 @@ use crate::frames::{FrameDocument, Wake};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FactsKey {
     pub document: u64,
+    pub lineage: u64,
     pub revision: u64,
     /// The playhead as bits (an exact fractional tick).
     pub tick: u64,
@@ -28,8 +29,8 @@ pub struct FactsKey {
 }
 
 impl FactsKey {
-    pub fn new(document: u64, revision: u64, tick: f64, uids: &[u32]) -> FactsKey {
-        FactsKey { document, revision, tick: tick.to_bits(), uids: uids.into() }
+    pub fn new(document: u64, lineage: u64, revision: u64, tick: f64, uids: &[u32]) -> FactsKey {
+        FactsKey { document, lineage, revision, tick: tick.to_bits(), uids: uids.into() }
     }
 }
 
@@ -40,6 +41,8 @@ pub struct Ready {
     /// The app's `selectionBounds()`: `[minX, minY, maxX, maxY]` of the selected figures' `boundsOf` at the tick, `None`
     /// when none of them is drawn there (or fewer than two are selected: nothing asks).
     pub bounds: Option<[f64; 4]>,
+    /// Selected instances as evaluated, including their style overlays; shared, never resolved by a view.
+    pub figures: Arc<std::collections::HashMap<u32, Arc<crate::engine::doc::Figure>>>,
     /// The frame on show at the key's tick and the views it was made from, for the session to adopt
     /// ([`crate::documents::Document::adopt_evaluation`]); `None` when the evaluation failed.
     pub evaluation: Option<(Arc<crate::engine::Prepared>, crate::engine::Value)>,
@@ -67,9 +70,12 @@ fn make(request: Request) -> Answer {
     let Request { key, source, report } = request;
     let Some(generation) = source.snapshot(key.revision, 0) else { return Answer::Unpublished(key) };
     let evaluation = styk_edit::editor_frame(&report, &generation.prepared, f64::from_bits(key.tick)).ok().map(|frame| (generation.prepared.clone(), frame));
+    let prepared = &generation.prepared;
+    let frame = prepared.evaluate(f64::from_bits(key.tick));
+    let figures = Arc::new(frame.objects.iter().filter(|object| key.uids.contains(&object.uid)).filter_map(|object| {
+        object.figure_override.as_ref().or_else(|| prepared.doc.figure(object.figure)).map(|figure| (object.uid, figure.clone()))
+    }).collect());
     let bounds = if key.uids.len() < 2 { None } else {
-        let prepared = &generation.prepared;
-        let frame = prepared.evaluate(f64::from_bits(key.tick));
         let slots: Vec<usize> = frame.objects.iter().enumerate().filter(|(_, object)| key.uids.contains(&object.uid)).map(|(slot, _)| slot).collect();
         let scene = styk_eval::geometry::build_only_measured(&prepared.doc, &frame, &slots);
         // (No selected figure drawn at the tick measures to nothing.)
@@ -78,7 +84,7 @@ fn make(request: Request) -> Answer {
             Some(union.map_or(b, |u| [u[0].min(b[0]), u[1].min(b[1]), u[2].max(b[2]), u[3].max(b[3])]))
         })
     };
-    Answer::Ready(Ready { key, bounds, evaluation })
+    Answer::Ready(Ready { key, bounds, figures, evaluation })
 }
 
 /// The interface's handle on the facts lane.

@@ -44,6 +44,8 @@ const SETTLE_FRAMES: u32 = 3;
 #[derive(Clone, Debug)]
 pub enum Message {
     Progress,
+    TypeNumber(String),
+    InputResult(Result<(), String>),
     Editor(styk_ui::message::Message),
     /// A message of the band's views.
     Ui(view::Message),
@@ -51,8 +53,6 @@ pub enum Message {
     Raw(Event, bool),
     /// The pointer moved to this window position while a tab is pressed.
     Cursor(f32, f32),
-    /// The primary button came up while a tab is pressed.
-    Released,
     /// The focus state of the tree after an update.
     Snapshot(focus::Snapshot),
     /// A frame was drawn: time passes for the strip and the automation.
@@ -70,6 +70,9 @@ pub enum Message {
 pub enum Request {
     /// Minimize.
     Minimize,
+    InputClick([f64; 2]),
+    InputNumber(String),
+    Dialog { id: u64, request: styk_services::dialogs::Request },
     /// Close the window.
     Close,
     /// Resize to this logical size.
@@ -94,6 +97,7 @@ struct Run {
     base: PathBuf,
     failures: Vec<String>,
     capturing: bool,
+    choices: VecDeque<styk_services::dialogs::Choice>,
 }
 
 pub struct TopBand {
@@ -264,7 +268,7 @@ impl TopBand {
         let text = read_script(path)?;
         let script = Script::parse(&text).map_err(|error| format!("{}: {error}", path.display()))?;
         let base = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        self.run = Some(Run { steps: script.steps, next: 0, settle: SETTLE_FRAMES, base, failures: Vec::new(), capturing: false });
+        self.run = Some(Run { steps: script.steps, next: 0, settle: SETTLE_FRAMES, base, failures: Vec::new(), capturing: false, choices: VecDeque::new() });
         Ok(())
     }
 
@@ -273,11 +277,12 @@ impl TopBand {
         for file in files {
             self.requests.push_back(Ask::OpenFile(FileTarget::new(file.clone())));
         }
+        if !files.is_empty() { self.progress.0.notify(); }
     }
 
     /// Nothing is opening, so what the window shows is complete.
     pub fn idle(&self) -> bool {
-        self.requests.is_empty() && !self.busy && (self.core.documents.active().is_none() || (!self.core.timeline().model().pending && self.core.stage().is_some()))
+        self.requests.is_empty() && !self.busy && !self.core.file_pending() && !self.core.tools_pending() && !self.core.inspector().pending() && (self.core.documents.active().is_none() || (!self.core.timeline().model().pending && self.core.stage().is_some()))
     }
     /// Final maintenance after QuitReady, through the same core dispatch fence.
     pub fn flush_settings(&mut self) -> bool {
@@ -469,7 +474,6 @@ impl TopBand {
         if self.shell.tracking() {
             subscriptions.push(event::listen_with(|event, _, _| match event {
                 Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::Cursor(position.x, position.y)),
-                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(Message::Released),
                 _ => None,
             }));
         }
@@ -502,10 +506,10 @@ impl TopBand {
 
     /// Gives the shell an event and runs what it answers. The workspace switch's asks are answered here by a stand-in
     /// for the drawing and Build sessions: they succeed at once, and Build brings its session's buttons with it. The
-    /// commands the band's buttons ask for (Save, Export, Close, Rename, New, Done...) are K-cmd's and K-doc's: they are
-    /// dropped here.
+    /// commands the band's buttons ask for go through the registry and the shared panel settlement barrier.
     fn dispatch(&mut self, event: shell::Event) -> Task<Message> {
         use shell::Event as E;
+        if matches!(event, E::Mark) { return styk_ui::message::update(&mut self.core, styk_core::commands::Command::Run(CommandId::Menu).into()).map(Message::Editor); }
         if matches!(event, E::PointerReleased | E::TabKey(..) | E::TabClose(_) | E::Workspace(_) | E::Undo | E::Redo | E::Save | E::Export | E::Cancel | E::Done(_) | E::CtrlTab { .. } | E::SwitcherKey(_) | E::SwitcherPick(_) | E::ModifierReleased | E::Neighbour(_) | E::Home | E::New) {
             let effects = self.core.dispatch(styk_core::commands::Command::Shell(event));
             let tasks: Vec<_> = effects.into_iter().map(|effect| match effect {
@@ -528,7 +532,11 @@ impl TopBand {
                         Answer::Session(session) => shell::Event::Session(session),
                     })),
                     Effect::FocusTab(id) => tasks.push(TopBand::focus(ids::tab(id))),
-                    Effect::Activated(_) | Effect::Edited => tasks.push(styk_ui::message::run(self.core.refresh()).map(Message::Editor)),
+                    Effect::Activated(_) => {
+                        tasks.push(styk_ui::message::run(self.core.refresh()).map(Message::Editor));
+                        tasks.push(Task::done(Message::Editor(styk_ui::Message::PollDocuments)));
+                    }
+                    Effect::Edited => tasks.push(styk_ui::message::run(self.core.refresh()).map(Message::Editor)),
                     Effect::Command(command) => tasks.push(styk_ui::message::update(&mut self.core, command.into()).map(Message::Editor)),
                     Effect::DocumentCommand { command, document } => {
                         tasks.push(styk_ui::message::update(&mut self.core, styk_core::commands::Command::Activate(document).into()).map(Message::Editor));
@@ -564,6 +572,14 @@ impl TopBand {
                 (vec![Request::PreferencesProgress], Task::batch([task, wake]))
             }
             Message::Editor(styk_ui::message::Message::ShellReady(event)) => (Vec::new(), self.dispatch_ready(event)),
+            Message::Editor(styk_ui::message::Message::Dialog { id, request }) => {
+                if let Some(run) = &mut self.run {
+                    let result = run.choices.pop_front().ok_or_else(|| "automation did not supply the native picker answer".to_string());
+                    (Vec::new(), Task::done(Message::Editor(styk_core::commands::Command::DialogAnswer { id, result }.into())))
+                } else { (vec![Request::Dialog { id, request }], Task::none()) }
+            }
+            Message::TypeNumber(text) => (vec![Request::InputNumber(text)], Task::none()),
+            Message::InputResult(result) => { if let Err(error) = result { self.fail(error); } (Vec::new(), Task::none()) },
             Message::Editor(styk_ui::message::Message::PollDocuments) => (Vec::new(), self.pump()),
             Message::Editor(styk_ui::message::Message::QuitReady) => (vec![Request::QuitReady], Task::none()),
             Message::Editor(styk_ui::message::Message::SessionCheckpointFinished) => (vec![Request::SessionCheckpointFinished], Task::none()),
@@ -577,7 +593,6 @@ impl TopBand {
             Message::Ui(view::Message::CloseWindow) => (vec![Request::Close], Task::none()),
             Message::Raw(event, ignored) => (Vec::new(), self.raw(&event, ignored)),
             Message::Cursor(x, y) => (Vec::new(), self.dispatch(shell::Event::PointerMoved(x, y))),
-            Message::Released => (Vec::new(), self.dispatch(shell::Event::PointerReleased)),
             Message::Snapshot(snapshot) => {
                 // The core's own focus state follows the same walk: the host's focus decisions (a menu's rows, a dialog's scope, a
                 // message's buttons) read it.
@@ -630,7 +645,11 @@ impl TopBand {
         // The overlays take the inputs that are theirs first (a dialog's keys, a button's release).
         let now = self.now();
         if let Some(task) = styk_ui::message::raw_at(&mut self.core, event, ignored, now) {
-            return task.map(Message::Editor).chain(TopBand::snapshot());
+            let overlay = task.map(Message::Editor).chain(TopBand::snapshot());
+            // The release can share the press's OS batch, before the tracking subscription exists.
+            // The always-mounted raw adapter must end it; overlay bookkeeping also keeps its release.
+            let tab = if matches!(event, Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))) && self.shell.tracking() { self.dispatch(E::PointerReleased) } else { Task::none() };
+            return Task::batch([overlay, tab]);
         }
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
@@ -732,8 +751,11 @@ impl TopBand {
             && let Some(request) = self.requests.pop_front()
         {
             match self.core.dispatch_document(request) {
-                Ok(Opened::Started(_)) => self.busy = true,
-                Ok(_) => {}
+                Ok(effect) => {
+                    self.busy = matches!(effect, Opened::Started(_));
+                    tasks.push(styk_ui::message::run(self.core.document_effect(&effect)).map(Message::Editor));
+                    tasks.push(Task::done(Message::Documents));
+                }
                 // The host is not ready for another request yet: ask again next frame.
                 Err((HostError::Documents(styk_core::documents::DocumentsError::Busy), request)) => self.requests.push_front(request),
                 Err((error, _)) => self.fail(error.to_string()),
@@ -766,8 +788,14 @@ impl TopBand {
     /// Runs the next step of the script when the window has settled and the band is measured.
     fn step(&mut self) -> (Vec<Request>, Task<Message>) {
         let none = (Vec::new(), Task::none());
-        let waiting = !self.measured || !self.idle();
+        let waiting = !self.measured || !self.idle() || self.core.stage().is_some_and(|stage| !stage.ready());
         let Some(run) = &mut self.run else { return none };
+        // The renderer holds its previous complete frame while new text is being prepared.
+        // Only complete frames count toward the existing settling interval, as for --screenshot.
+        if styk_design::glyphs::incomplete() {
+            run.settle = SETTLE_FRAMES;
+            return none;
+        }
         if run.capturing || waiting {
             return none;
         }
@@ -800,8 +828,33 @@ impl TopBand {
         let outcome: Result<(Vec<Request>, Task<Message>), String> = (|| {
             Ok(match step {
                 Step::Open(path) => {
-                    self.requests.push_back(Ask::OpenFile(FileTarget::new(resolved(path))));
-                    (Vec::new(), Task::none())
+                    self.open_all(&[resolved(path)]);
+                    (Vec::new(), Task::done(Message::Documents))
+                }
+                Step::ChooseFile(path) => { if let Some(run) = &mut self.run { run.choices.push_back(styk_services::dialogs::Choice::File(Some(FileTarget::new(resolved(path))))); } (Vec::new(), Task::none()) }
+                Step::ChooseColor(rgb) => { if let Some(run) = &mut self.run { run.choices.push_back(styk_services::dialogs::Choice::Color(Some(rgb))); } (Vec::new(), Task::none()) }
+                Step::ClickStage(point) => {
+                    let stage = self.core.stage().ok_or("no stage")?;
+                    let canvas = self.core.documents.active().and_then(|doc| doc.with_document_ready(|doc| doc.canvas)).ok_or("canvas pending")?;
+                    let local = stage.view().ok_or("stage view pending")?.document_to_stage(point, canvas, None);
+                    let viewport = stage.viewport().ok_or("stage viewport pending")?;
+                    (vec![Request::InputClick(viewport.stage_to_window(local).map(|v| v * viewport.dpr))], Task::none())
+                }
+                Step::ClickColor(name) => {
+                    use styk_core::inspector::model::ColorTarget;
+                    let target = match name.as_str() { "figure" => ColorTarget::Figure, "segment" => ColorTarget::Segment, _ => ColorTarget::Background };
+                    let rect = self.core.overlays().bound_of(styk_ui::inspector::color_id(target)).ok_or("colour field is not mounted")?;
+                    let dpr = self.core.stage().and_then(|s| s.viewport()).map_or(1., |v| v.dpr);
+                    (vec![Request::InputClick([(rect.x + rect.width / 2.) * dpr, (rect.y + rect.height / 2.) * dpr])], Task::none())
+                }
+                Step::Inspector(automation::InspectorStep::Type { key, text }) => {
+                    let key = styk_core::inspector::property::PropertyKey::from_id(&key).ok_or("unknown property")?;
+                    let id = styk_ui::inspector::input_id(key);
+                    if self.core.overlays().bound_of(id).is_none() { return Err("number field is not mounted".into()); }
+                    let task = operate(focus::focus(id)).discard()
+                        .chain(operate(iced::advanced::widget::operation::text_input::select_all::<()>(focus::widget_id(id))).discard())
+                        .chain(Task::done(Message::TypeNumber(text)));
+                    (Vec::new(), task)
                 }
                 Step::Wait(frames) => {
                     if let Some(run) = &mut self.run {
@@ -820,7 +873,23 @@ impl TopBand {
                     };
                     (Vec::new(), self.dispatch(E::Session(session)))
                 }
-                Step::Click(target) => (Vec::new(), self.click(target)?),
+                Step::Click(target) => {
+                    let id = match &target {
+                        Target::Command(command) => {
+                            let menu = self.core.overlays().menus().iter().find_map(|menu| menu.entries().iter().enumerate().find_map(|(index, entry)| {
+                                matches!(entry, styk_core::overlay::menu::Entry::Item(item) if item.action == styk_core::overlay::menu::RowAction::Command(*command)).then_some(styk_core::overlay::host::row_id(menu.id(), index))
+                            }));
+                            menu.or(match command { CommandId::Menu => Some(ids::MARK), CommandId::Undo => Some(ids::UNDO), CommandId::Redo => Some(ids::REDO), CommandId::Save => Some(ids::SAVE), CommandId::New => Some(ids::ADD), _ => None })
+                        }
+                        Target::Tab(number) => Some(ids::tab(self.id_of(*number)?)),
+                        _ => None,
+                    };
+                    if let Some(id) = id {
+                        let rect = self.core.overlays().bound_of(id).ok_or("control is not mounted")?;
+                        let dpr = self.core.stage().and_then(|s| s.viewport()).map_or(1., |v| v.dpr);
+                        (vec![Request::InputClick([(rect.x + rect.width / 2.) * dpr, (rect.y + rect.height / 2.) * dpr])], Task::none())
+                    } else { (Vec::new(), self.click(target)?) }
+                },
                 Step::Key(key) => (Vec::new(), self.key(key)),
                 Step::DragTab { from, to, after } => {
                     let (from, to) = (self.id_of(from)?, self.id_of(to)?);
@@ -913,6 +982,19 @@ impl TopBand {
         let number_of = |id: DocumentId| self.opened.iter().position(|opened| *opened == id).map_or(0, |at| at + 1);
         let same = |what: &str, wanted: String, found: String| if wanted == found { Ok(()) } else { Err(format!("expected {what} {wanted}, found {found}")) };
         match expectation {
+            Expect::Selection { uid, joint } => {
+                let selection = self.core.documents.active().ok_or("no document")?.selection().map_err(|e| e.to_string())?;
+                same("selection", format!("{uid:?}:{joint}"), format!("{:?}:{}", selection.uid, selection.joint))
+            }
+            Expect::History(expected) => {
+                let history = self.core.documents.active().ok_or("no document")?.view().map_err(|e| e.to_string())?.history;
+                same("undo entries", expected.to_string(), history.undo.to_string())
+            }
+            Expect::Property(key, expected) => {
+                let key = styk_core::inspector::property::PropertyKey::from_id(key).ok_or("unknown property")?;
+                let actual = self.core.inspector().model().and_then(|model| model.number(key)).ok_or("property missing from Inspector")?.value;
+                same("property", expected.clone(), actual.to_string())
+            }
             Expect::Front(n) => same("the tab in front", n.to_string(), self.core.documents.active().map_or(0, |d| number_of(d.id())).to_string()),
             Expect::Order(order) => same("the tabs' order", format!("{order:?}"), format!("{:?}", self.core.documents.tabs().iter().map(|d| number_of(d.id())).collect::<Vec<_>>())),
             Expect::Tabs(count) => same("the tabs in the band", count.to_string(), self.shell.layout().tabs().count().to_string()),
@@ -1068,6 +1150,30 @@ mod tests {
     }
 
     #[test]
+    fn automation_capture_waits_for_complete_glyph_frames() {
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) { iced::advanced::graphics::text::set_candidate_incomplete(self.0); }
+        }
+        let _restore = Restore(styk_design::glyphs::incomplete());
+        let (mut top, _) = band();
+        top.measured = true;
+        top.run = Some(Run { steps: vec![(1, Step::Screenshot("unused-test-output.png".into()))], next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false, choices: VecDeque::new() });
+        assert!(top.idle());
+        iced::advanced::graphics::text::set_candidate_incomplete(true);
+        let (requests, _) = top.update(Message::Frame);
+        assert!(!requests.iter().any(|request| matches!(request, Request::Capture(_))), "a held glyph frame must not be captured as the new selection");
+        assert_eq!(top.run.as_ref().unwrap().next, 0);
+        iced::advanced::graphics::text::set_candidate_incomplete(false);
+        for _ in 0..SETTLE_FRAMES {
+            let (requests, _) = top.update(Message::Frame);
+            assert!(!requests.iter().any(|request| matches!(request, Request::Capture(_))));
+        }
+        let (requests, _) = top.update(Message::Frame);
+        assert!(requests.iter().any(|request| matches!(request, Request::Capture(_))), "complete frames release the capture without another input");
+    }
+
+    #[test]
     fn the_overlay_messages_reach_the_core_through_the_window_and_the_deadline_it_asks_for_ends_them() {
         use styk_core::commands::Command;
         use styk_core::overlay::host::Event as Overlay;
@@ -1139,7 +1245,7 @@ mod tests {
             Ok(top) => top,
             Err(error) => panic!("{error}"),
         };
-        real.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
+        real.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false, choices: VecDeque::new() });
         let _ = real.execute(7, Step::Advance(1));
         assert!(real.run.as_ref().unwrap().failures[0].contains("--clock fixed"));
     }
@@ -1153,7 +1259,7 @@ mod tests {
     #[test]
     fn the_dock_interaction_script_runs_through_the_one_handler() {
         let (mut top, _) = band();
-        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
+        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false, choices: VecDeque::new() });
         let script = Script::parse(include_str!("../automation/dock-interaction.script")).unwrap();
         for (line, step) in script.steps {
             match step {
@@ -1301,7 +1407,7 @@ mod tests {
         assert!(!top.idle(), "automation must still wait for the pending document");
         let mut messages = redraw(&top);
         assert!(!messages.iter().any(|message| matches!(message, Message::Frame)), "pending workers must not poll frames on redraw");
-        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false });
+        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false, choices: VecDeque::new() });
         messages.extend(redraw(&top));
         assert!(!messages.iter().any(|message| matches!(message, Message::Frame)), "automation also waits for Progress during work");
         top.run = None;

@@ -1,0 +1,55 @@
+styk-auto/1
+# Run with tests/edit/startup.document.json on the command line, --size 1560x1000.
+expect tabs 1
+screenshot ../../../../artifacts/native-v0/01-open.png
+click-stage 20 20
+expect selection none
+click-stage 480 280
+expect selection 1 -1
+expect property root_x 480
+screenshot ../../../../artifacts/native-v0/02-figure.png
+click-stage 480 202
+expect selection 1 0
+expect property joint_length 78
+screenshot ../../../../artifacts/native-v0/03-joint.png
+click-stage 480 280
+inspector type root_x 520
+expect property root_x 520
+expect history 1
+screenshot ../../../../artifacts/native-v0/04-edited.png
+click undo
+expect property root_x 480
+expect history 0
+screenshot ../../../../artifacts/native-v0/05-undo.png
+click redo
+expect property root_x 520
+expect history 1
+screenshot ../../../../artifacts/native-v0/06-redo.png
+choose-color 220 60 60
+click-color figure
+expect history 2
+screenshot ../../../../artifacts/native-v0/07-colour.png
+choose-file ../../../../artifacts/native-v0/edited.styk
+click mark
+click save-as
+expect dirty 1 no
+screenshot ../../../../artifacts/native-v0/08-saved.png
+choose-file ../../../../artifacts/native-v0/edited.styk
+click mark
+click open
+expect tabs 2
+click-stage 520 280
+expect property root_x 520
+expect history 0
+screenshot ../../../../artifacts/native-v0/09-reopened.png
+click tab:1
+expect front 1
+expect property root_x 520
+screenshot ../../../../artifacts/native-v0/10-switched.png
+click tab:2
+click mark
+click close-project
+expect tabs 1
+expect front 1
+expect property root_x 520
+screenshot ../../../../artifacts/native-v0/11-closed.png

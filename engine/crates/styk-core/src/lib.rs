@@ -76,3 +76,9 @@ pub mod inspect;
 pub use styk_services as services;
 
 pub mod identity;
+
+#[cfg(feature = "engine")]
+pub mod tools;
+
+#[cfg(feature = "engine")]
+mod file_actions;

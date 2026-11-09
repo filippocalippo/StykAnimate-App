@@ -296,6 +296,10 @@ impl Documents {
         self.host.as_ref().is_some_and(|host| host.quit_committed || matches!(host.after_save, Some(AfterSave::All { quit: true, .. })))
     }
 
+    /// Work whose completion changes the visible document or finishes a file request.
+    pub fn operations_pending(&self) -> bool {
+        self.host.as_ref().is_some_and(|host| host.pending.is_some() || host.continue_save.is_some() || host.publication_needed)
+    }
     pub fn recency(&self) -> impl Iterator<Item = &Document> { self.recent.iter().filter_map(|id| self.get(*id)) }
     pub fn saving(&self, id: DocumentId) -> bool {
         self.host.as_ref().is_some_and(|host| host.pending.as_ref().is_some_and(|pending| matches!(pending.action, Action::Save { stamp, .. } if stamp.id == id))
