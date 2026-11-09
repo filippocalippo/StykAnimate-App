@@ -39,7 +39,7 @@ pub enum InputResult {
     ViewChanged,
     Captured,
     Route(Pointer),
-    Cancel,
+    Cancel(Option<u32>),
 }
 
 /// Pen data is never reduced to a mouse event: the original pressure, provenance,
@@ -68,7 +68,7 @@ impl Host {
             if self.pan_gesture.is_some_and(|g| g.0 == pointer.id) {
                 self.pan_gesture = None;
             }
-            return Ok(InputResult::Cancel);
+            return Ok(InputResult::Cancel(Some(pointer.id)));
         }
         if pointer.phase == PointerPhase::Down
             && self.pan_gesture.is_none()
@@ -152,11 +152,11 @@ impl Host {
                 if self.pan_gesture.is_some_and(|g| g.0 == pointer) {
                     self.pan_gesture = None;
                 }
-                Ok(InputResult::Cancel)
+                Ok(InputResult::Cancel(Some(pointer)))
             }
             InputEvent::Overflowed { .. } => {
                 self.pan_gesture = None;
-                Ok(InputResult::Cancel)
+                Ok(InputResult::Cancel(None))
             }
         }
     }

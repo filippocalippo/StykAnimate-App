@@ -101,3 +101,6 @@ pub fn describe_tick(prepared: &eval::Prepared, tick: u32) -> String {
 
 #[cfg(feature = "inspect")]
 pub mod inspect;
+
+#[cfg(test)]
+mod cancel_tests;

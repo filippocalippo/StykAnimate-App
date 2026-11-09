@@ -20,9 +20,12 @@ use styk_design::widgets::focus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
+    #[cfg(feature = "devtools")]
+    DeveloperEffect(styk_core::dev_extension::Event),
     /// The core accepted the shared lifecycle barrier; the application can hand this to its shell owner.
     ShellReady(styk_core::shell::Event),
     PollDocuments,
+    Dialog { id: u64, request: styk_core::commands::DialogRequest },
     QuitReady,
     SessionCheckpointFinished,
     Notice(styk_core::commands::Notice),
@@ -84,6 +87,8 @@ impl From<Command> for Message {
 #[cfg(feature = "engine")]
 pub fn update(core: &mut Core, message: Message) -> Task<Message> {
     match message {
+        #[cfg(feature = "devtools")]
+        Message::DeveloperEffect(_) => Task::none(), // consumed by the application extension adapter
         Message::Command(command) => {
             let mut effects = core.dispatch(command);
             // The views the command changed are brought in line; their effects (the recovery offer's message, a dialog that closed) go with it.
@@ -133,7 +138,7 @@ pub fn update(core: &mut Core, message: Message) -> Task<Message> {
             use styk_core::overlay::host::Event;
             overlay(core, match event { View::Show { target, content, touch, keyboard } => Event::TooltipShow { target, content, touch, keyboard }, View::Hide => Event::TooltipHide })
         }
-        Message::PollDocuments | Message::QuitReady | Message::SessionCheckpointFinished | Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
+        Message::Dialog { .. } | Message::PollDocuments | Message::QuitReady | Message::SessionCheckpointFinished | Message::ShortcutReleased(_) | Message::OverlayEffect(_) | Message::OverlayChoice { .. } | Message::MessageDismissed(_) | Message::NotAvailable(_) => Task::none(),
         Message::Snapshot(mut snapshot) => {
             for (scope, targets) in &mut snapshot.scopes {
                 if *scope != styk_core::focus::ScopeId::ROOT { continue; }
@@ -165,8 +170,11 @@ pub fn run(effects: Vec<Effect>) -> Task<Message> {
 #[cfg(feature = "engine")]
 pub fn effect(effect: Effect) -> Task<Message> {
     match effect {
+        Effect::Dialog { id, request } => Task::done(Message::Dialog { id, request }),
+        #[cfg(feature = "devtools")]
+        Effect::Developer(event) => Task::done(Message::DeveloperEffect(event)),
         Effect::ShellReady(event) => Task::done(Message::ShellReady(event)),
-        Effect::PollDocuments => Task::done(Message::PollDocuments),
+        Effect::RequestFrame | Effect::PollDocuments => Task::done(Message::PollDocuments),
         Effect::QuitReady => Task::done(Message::QuitReady),
         Effect::SessionCheckpointFinished => Task::done(Message::SessionCheckpointFinished),
         Effect::Overlay(styk_core::overlay::Effect::Focus(id)) => match id { Some(id) => operate(focus::focus(id)).discard(), None => operate(focus::unfocus()).discard() },
@@ -183,7 +191,7 @@ pub fn effect(effect: Effect) -> Task<Message> {
         .discard(),
         Effect::NotAvailable(id) => Task::done(Message::NotAvailable(id)),
         Effect::Notice(notice) => Task::done(Message::Notice(notice)),
-        Effect::SettingsChanged(_) | Effect::RequestFrame | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
+        Effect::SettingsChanged(_) | Effect::PickColor(_) | Effect::ScrubHint(_) => Task::none(),
     }
 }
 
@@ -218,6 +226,8 @@ pub fn dock_shortcut_at(core: &mut Core, event: &iced::Event, ignored: bool, now
         // Synthetic/headless inputs have no hardware code. The spelling is adapted, never matched to a command here.
         Physical::Unidentified(_) => match key.as_ref() {
             Key::Named(Named::F6) => "F6".into(),
+            #[cfg(feature = "devtools")]
+            Key::Named(Named::F11) => "F11".into(),
             Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_alphabetic() => format!("Key{}", c.to_uppercase()),
             Key::Character(c) if c.len() == 1 && c.as_bytes()[0].is_ascii_digit() => format!("Digit{c}"),
             _ => return None,

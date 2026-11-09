@@ -161,6 +161,8 @@ pub const SPECS: &[PanelSpec] = &[
     },
 ];
 pub fn spec(kind: &str) -> Option<&'static PanelSpec> {
+    #[cfg(feature = "devtools")]
+    if let Some(spec) = crate::dev_extension::PANELS.iter().find(|s|s.kind==kind) { return Some(spec); }
     SPECS.iter().find(|s| s.kind == kind)
 }
 #[derive(Clone, Debug, PartialEq)]

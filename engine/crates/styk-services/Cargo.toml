@@ -10,4 +10,5 @@ publish.workspace = true
 raw-window-handle = "0.6"
 
 [features]
+devtools = []
 test-fakes = []

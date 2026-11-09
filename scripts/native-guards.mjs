@@ -6,7 +6,7 @@ import {resolve, relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {sourceErrors} from './native-source-guards.mjs';
 import {previewGraphCheck, previewParityCheck} from './native-preview-check.mjs';
-import {screenCheck} from './native-screen-guards.mjs';
+import {screenCheck, developerScreenCheck} from './native-screen-guards.mjs';
 import {TOOLCHAIN, THREADED_WASM_ARGS, threadedWasmEnv} from './engine-wasm-config.mjs';
 
 const frontend = new Set(['styk-screens', 'styk-app', 'styk-ui', 'styk-design', 'styk-devtools', 'styk-devtools-engine', 'styk-platform', 'styk-text-check', 'xtask']);
@@ -207,6 +207,8 @@ export function check(root, wasm = false) {
   previewGraphCheck(root);
   screenCheck(root, execFileSync, metadata.target_directory);
   previewParityCheck(root, metadata.target_directory);
+  // Last: it builds the developer application over the shipping one in the same target folder.
+  developerScreenCheck(root, execFileSync, metadata.target_directory);
   // Still verify every independent rule when a branch awaits merge approval.
   if (wasm) wasmCheck(root, metadata);
   if (approvalErrors.length) throw new Error(approvalErrors.join('\n'));

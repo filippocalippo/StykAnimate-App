@@ -84,7 +84,7 @@ src/animation-properties.mjs	engine	styk-eval::channels	partial	Rust: property v
 src/animation-property-state.mjs	engine	styk-eval	removed	deleted: nothing read the inspector provenance of a native timeline property key any more
 src/animation-style.mjs	engine	styk-eval::channels	verified	Rust: style overlays and style channels (styk_eval::channels), recolouring (styk-edit/src/recolor.rs). The JavaScript keeps validateAnimationStyle and what the interface reads of an instance: resolveInstanceFigure, animationStyleValue, styleColor and meshPaletteColor
 src/app-dialogs.mjs	ui	-	stays	
-src/app.mjs	ui	-	stays	
+src/app.mjs	ui	styk-core::tools; styk-core::file_actions	stays	Native V0 routes Select clicks and file actions; the browser remains the reference for later tools
 src/application-menu.mjs	ui	-	stays	
 src/asset-library.mjs	ui	-	stays	
 src/audio-encode.mjs	platform	styk-export	js	encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine
@@ -311,7 +311,7 @@ src/inspector-dom.mjs	ui	-	stays
 src/inspector-header.mjs	ui	-	stays	
 src/inspector-kit.mjs	ui	-	stays	
 src/inspector-legacy.mjs	ui	-	stays	
-src/inspector-view.mjs	ui	-	stays	
+src/inspector-view.mjs	ui	styk-core::inspector	stays	Native V0 reads resolved instance styles from the facts worker; B1 owns colour commits and B3 owns the picker
 src/keyframe-easing-popover.mjs	ui	-	stays	
 src/keyframe-easing-view.mjs	ui	-	stays	
 src/keyframe-easing.mjs	engine	styk-eval	partial	Rust: easing curves (linear, eased, bezier, constant, Auto); validation still JS

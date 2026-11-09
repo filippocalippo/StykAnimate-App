@@ -266,6 +266,7 @@ pub struct Shown {
     /// One figure is selected and the lane's facts for this state have not landed: its rows wait.
     pub awaiting: bool,
     key: Option<FactsKey>,
+    pub(crate) figures: Arc<std::collections::HashMap<u32, Arc<crate::engine::doc::Figure>>>,
 }
 
 /// The number field being edited: its model (typed text, the open gesture's value) and its session gesture.
@@ -472,7 +473,7 @@ impl Panel {
 
     /// What the facts lane made of the one selected figure, when it is for the state now.
     fn subject(&self, document: &crate::documents::Document) -> Option<&crate::facts::Subject> {
-        let key = FactsKey::new(document.id().get(), document.revision(), facts::tick(document), &facts::subjects(document));
+        let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), &facts::subjects(document));
         (self.shown.key.as_ref() == Some(&key)).then_some(self.shown.subject.as_deref()).flatten()
     }
 
@@ -639,27 +640,26 @@ impl Panel {
             self.shown = Shown::default();
             return;
         };
-        let key = FactsKey::new(document.id().get(), document.revision(), facts::tick(document), &subjects);
-        // Take what landed first (an "unpublished" answer frees the key to be asked again).
+        let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), &subjects);
+        // Take what landed first. An unpublished key waits for its publication receipt.
         if let Some(landed) = facts.latest()
-            && landed.key.document == key.document
+            && landed.key.document == key.document && landed.key.lineage == key.lineage
             && let Some((views, frame)) = &landed.evaluation
         {
             document.adopt_evaluation(landed.key.revision, views.clone(), f64::from_bits(landed.key.tick), frame.clone());
         }
         let ready = document.frame_records_ready().is_some() && document.with_document_ready(|_| ()).is_some();
         let measure = selection.uids.len() > 1;
-        // One figure: what the panel shows of it (its style overlay, its palette rows) is the lane's, made for this state.
-        let single = subjects.len() == 1;
-        let asked = (!ready || measure || single) && source.is_some();
+        let asked = (!ready || !subjects.is_empty()) && source.is_some();
         if asked && let Some(source) = source {
-            facts.request(key.clone(), source, facts::records(document).clone());
+            let publication = source.publication_receipt().or_else(|| documents.published().map(|(_, _, generation)| generation));
+            facts.request(key.clone(), source, facts::records(document).clone(), publication);
         }
         facts.flush();
         // A fact is shown only for exactly this state; otherwise nothing is, and its rows are pending.
         self.shown = match facts.latest() {
-            Some(landed) if (measure || single) && landed.key == key => Shown { bounds: landed.bounds, subject: landed.subject.clone(), awaiting: false, key: Some(landed.key.clone()) },
-            _ => Shown { awaiting: single && asked, ..Shown::default() },
+            Some(landed) if landed.key == key => Shown { bounds: landed.bounds.filter(|_| measure), subject: landed.subject.clone(), figures: landed.figures.clone(), awaiting: false, key: Some(landed.key.clone()) },
+            _ => Shown { awaiting: !subjects.is_empty() && asked, ..Shown::default() },
         };
     }
 
@@ -702,9 +702,9 @@ impl Panel {
             self.pending = false;
             return;
         };
-        let waiting = self.shown.awaiting;
-        let Some(frame) = document.frame_records_ready().filter(|_| document.with_document_ready(|_| ()).is_some() && !waiting) else {
-            // Not ready (or a restyled instance not resolved yet): the facts lane makes them; nothing is evaluated here.
+        let instances_ready = !self.shown.awaiting;
+        let Some(frame) = document.frame_records_ready().filter(|_| document.with_document_ready(|_| ()).is_some()) else {
+            // Not ready: the facts lane makes them; nothing is evaluated here.
             if !self.pending {
                 self.model = self.model.as_deref().map(|model| Arc::new(contexts::pending(model)));
                 self.pending = true;
@@ -712,7 +712,9 @@ impl Panel {
             self.key = None;
             return;
         };
-        self.pending = false;
+        // Selection context is available before instance facts. Show its current layout immediately,
+        // with pending controls, instead of leaving the previous figure's layout on show.
+        self.pending = !instances_ready;
         let selection = facts::selection(document);
         let key = Key {
             document: document.id(),
@@ -731,6 +733,7 @@ impl Panel {
             return;
         }
         let (built, pickers) = contexts::build(document, &frame, &contexts::Inputs { view, memory: &self.memory, panel: &self.state, shown: &self.shown, can_paste: key.paste });
+        let built = if self.pending { contexts::pending(&built) } else { built };
         for section in &built.sections {
             if section.place == model::Place::Titled && !section.auto {
                 self.memory.rule_released(built.kind.id(), section.id);

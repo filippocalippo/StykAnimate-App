@@ -152,7 +152,7 @@ fn refresh(
     id: &str,
     check: &mut impl FnMut() -> Result<(), EditError>,
     progress: &mut impl FnMut(Progress),
-    clock: fn() -> f64,
+    clock: impl Fn() -> f64 + Copy,
 ) -> Result<(), EditError> {
     let keys = plan.keys(id);
     let total = keys.len();
@@ -197,7 +197,7 @@ fn sample(
     maxbytes: usize,
     check: &mut impl FnMut() -> Result<(), EditError>,
     progress: &mut impl FnMut(Progress),
-    clock: fn() -> f64,
+    clock: impl Fn() -> f64 + Copy,
 ) -> Result<(), EditError> {
     let end = ids
         .iter()
@@ -386,7 +386,7 @@ pub fn sheet_layer_plan(
     request: Request<'_>,
     mut check: impl FnMut() -> Result<(), EditError>,
     mut progress: impl FnMut(Progress),
-    clock: fn() -> f64,
+    clock: impl Fn() -> f64 + Copy,
 ) -> Result<Option<SheetPlan>, EditError> {
     check()?;
     let records = Records::new(report, prepared).map_err(EditError::from)?;
@@ -566,7 +566,7 @@ fn deletion(
     focus: Option<&FocusLock>,
     check: &mut impl FnMut() -> Result<(), EditError>,
     progress: &mut impl FnMut(Progress),
-    clock: fn() -> f64,
+    clock: impl Fn() -> f64 + Copy,
 ) -> Result<SheetPlan, EditError> {
     let layers = report
         .path(&["_styk", "layers"])

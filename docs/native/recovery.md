@@ -154,9 +154,11 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
 - **The close prompt** opens from the host's `ConfirmClose` and `ConfirmQuit` effects (`Core::document_effect`, which the window
   hands every effect it takes from `Documents::poll` and `dispatch`). `Don't save`, `Cancel`, `Save`, and `Retry` while the recovery
   copy's failure shows under the body (`Recovery copy could not be written: {reason}`); Escape and its close button are Cancel. `Save`'s
-  file dialog is the save flow's (K-doc, K-cmd): no platform save-dialog consumer exists yet.
-  Save is therefore unavailable when any affected dirty document lacks a target; Discard and Cancel
-  stay actionable. Existing targets use the normal K-doc save sequence. The accepted layout and labels are unchanged.
+  file dialog uses the shared `Core::document_effect` consumer, including immediate effects returned by the recovery panel.
+  Save is available for untitled documents. It settles movieclip scopes before requesting a target; cancelling the picker
+  restores the same prompt identity with a stamp for the now-current document, so Save and Discard remain answerable.
+  Accepted Save fences edits through saving, close/quit cleanup and window teardown; cancelling the picker releases that
+  fence while preserving the dirty document and restored prompt. Existing targets use the same save sequence.
 - **Times** are written as today's English `Intl` writes them (`02:03 PM`, `11/8/26, 2:03 PM`) in the person's UTC offset
   (`Core::set_utc_offset`; the platform supplies it, 0 until it does) in every language, until the catalogue has date formats.
 - **The window's wiring** (`styk-app`): a real run (no `--screen`, `--automation` or unattended strategy) builds
@@ -174,6 +176,10 @@ request (`Request::Recovery(Command::..)`, `Request::Respond`); nothing in a vie
   stream, the mounted deadline widget and mounted recovery controls over a private local store.
   It never supplies periodic document polls. The playback, scrub, drawing, import and export
   owners do not yet report `set_recovery_activity`.
+
+Worker exchange contention queues a turn on the existing bounded worker channel. The worker
+notifies the interface after releasing the exchange, even when no job was admitted; a waiting
+interface does not schedule its own immediate retry. Empty frame outboxes likewise schedule nothing.
 
 **Quit order.** The documents host decides first: Busy keeps the intent, the close prompt stays until its answer is
 accepted, and Save/Discard/Cancel and recovery finish before `QuitReady` grants window exit. The documents host fences edits

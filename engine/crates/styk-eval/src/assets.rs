@@ -608,23 +608,27 @@ pub struct DecodedImage {
 }
 
 /// Decodes a drawing cel into its atlas slots (every level, see [`crate::drawing`]).
-pub fn decode_cel(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> {
+pub fn decode_cel(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> { decode_cel_checked(assets, cel, &|| false) }
+
+fn decode_cel_checked(assets: &Assets, cel: &Arc<DrawingTiles>, cancelled: &dyn Fn() -> bool) -> Vec<DecodedImage> {
     let Some(slots) = assets.cel_slots(cel) else { return Vec::new() };
     let placement = assets.placement(cel.key());
     let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
-    crate::drawing::decode_cel(cel)
+    crate::drawing::decode_cel_cancellable(cel, cancelled)
         .into_iter()
         .map(|(level, index, rgba)| DecodedImage { index: slots[level as usize][index as usize], drawing: true, soft: false, width: side, height: side, rgba, placement })
         .collect()
 }
 
 /// [`decode_cel`] for the tiles the cel's placement writes (`Assets::cel_dirty`): the whole cel when it writes it whole.
-pub fn decode_cel_changed(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> {
-    let Some(dirty) = assets.cel_dirty(cel.key()) else { return decode_cel(assets, cel) };
+pub fn decode_cel_changed(assets: &Assets, cel: &Arc<DrawingTiles>) -> Vec<DecodedImage> { decode_cel_changed_checked(assets, cel, &|| false) }
+
+fn decode_cel_changed_checked(assets: &Assets, cel: &Arc<DrawingTiles>, cancelled: &dyn Fn() -> bool) -> Vec<DecodedImage> {
+    let Some(dirty) = assets.cel_dirty(cel.key()) else { return decode_cel_checked(assets, cel, cancelled) };
     let Some(slots) = assets.cel_slots(cel) else { return Vec::new() };
     let placement = assets.placement(cel.key());
     let side = crate::drawing::TILE + 2 * crate::drawing::BORDER;
-    crate::drawing::decode_cel_dirty(cel, dirty)
+    crate::drawing::decode_cel_dirty_cancellable(cel, dirty, cancelled)
         .into_iter()
         .map(|(level, index, rgba)| DecodedImage { index: slots[level as usize][index as usize], drawing: true, soft: false, width: side, height: side, rgba, placement })
         .collect()
@@ -701,27 +705,30 @@ impl Assets {
 /// Decodes `picture` of `doc` (an image, or every display level of a drawing cel) for the atlas `assets` laid out.
 /// The decoders allocate in pieces nothing can refuse, so a picture is decoded only when the memory can hold its
 /// work; an error says it cannot (see `styk_alloc::reserve`).
-pub fn decode_picture(doc: &Document, assets: &Assets, picture: Picture) -> Result<Vec<DecodedImage>, styk_alloc::OutOfMemory> {
+pub fn decode_picture(doc: &Document, assets: &Assets, picture: Picture) -> Result<Vec<DecodedImage>, styk_alloc::OutOfMemory> { decode_picture_cancellable(doc, assets, picture, &|| false) }
+
+pub fn decode_picture_cancellable(doc: &Document, assets: &Assets, picture: Picture, cancelled: &dyn Fn() -> bool) -> Result<Vec<DecodedImage>, styk_alloc::OutOfMemory> {
+    if cancelled() { return Ok(Vec::new()); }
     match picture {
         Picture::Image(index) => {
             let _working = styk_alloc::reserve(decode_image_working_bytes(assets, index))?;
-            Ok(decode_image(doc, assets, index).into_iter().collect())
+            Ok(decode_image_checked(doc, assets, index, cancelled).into_iter().collect())
         }
         Picture::Soft(index) => {
             let _working = styk_alloc::reserve(soften_working_bytes(assets, index))?;
-            Ok(soften_image(doc, assets, index).into_iter().collect())
+            Ok(soften_image_checked(doc, assets, index, cancelled).into_iter().collect())
         }
         Picture::Cel(cel) => {
             let Some((tiles, _)) = assets.cels.get(&cel) else { return Ok(Vec::new()) };
             let _working = styk_alloc::reserve(3 * assets.picture_bytes(picture))?;
-            Ok(decode_cel(assets, tiles))
+            Ok(decode_cel_checked(assets, tiles, cancelled))
         }
         Picture::CelChanged(cel) => {
             let Some((tiles, _)) = assets.cels.get(&cel) else { return Ok(Vec::new()) };
             // The tiles written, their neighbours and what they are reduced from: a dozen times what is written, at the most the whole cel.
             let whole = assets.picture_bytes(Picture::Cel(cel));
             let _working = styk_alloc::reserve(3 * assets.picture_bytes(picture).saturating_mul(12).min(whole))?;
-            Ok(decode_cel_changed(assets, tiles))
+            Ok(decode_cel_changed_checked(assets, tiles, cancelled))
         }
     }
 }
@@ -754,18 +761,21 @@ pub fn soften_working_bytes(assets: &Assets, index: usize) -> usize {
 /// The soft copy of image `index`: the picture's premultiplied pixels averaged over the `SOFT_SCALE` × `SOFT_SCALE`
 /// blocks of its atlas page (so it lines up with the picture whatever its place), the rest of the pixels dropped.
 /// `None` when the image has no place in the atlas or cannot be decoded.
-pub fn soften_image(doc: &Document, assets: &Assets, index: usize) -> Option<DecodedImage> {
+pub fn soften_image(doc: &Document, assets: &Assets, index: usize) -> Option<DecodedImage> { soften_image_checked(doc, assets, index, &|| false) }
+
+fn soften_image_checked(doc: &Document, assets: &Assets, index: usize, cancelled: &dyn Fn() -> bool) -> Option<DecodedImage> {
     let data = doc.images.get(index)?;
     let entry = assets.atlas.get(index).filter(|entry| entry.valid)?;
     // The stored picture (premultiplied, with its gutter) is the only buffer of the picture's size: decoding it as
     // [`decode_image`] does holds no more than a picture that is kept whole does.
-    let stored = stored_pixels(&data.bytes, data.color_key, (entry.w, entry.h))?;
+    let stored = stored_pixels_checked(&data.bytes, data.color_key, (entry.w, entry.h), cancelled)?;
     let (sx0, sy0, sw, sh) = soft_rect(entry);
     let mut out = Vec::new();
     out.try_reserve_exact((sw * sh * 4) as usize).ok()?;
     out.resize((sw * sh * 4) as usize, 0u8);
     let row = entry.w as usize + 2;
     for sy in 0..sh {
+        if cancelled() { return None; }
         // The rows of the picture in this block of the page.
         let top = ((sy0 + sy) * SOFT_SCALE).max(entry.y) - entry.y;
         let bottom = ((sy0 + sy + 1) * SOFT_SCALE).min(entry.y + entry.h) - entry.y;
@@ -794,10 +804,12 @@ pub fn soften_image(doc: &Document, assets: &Assets, index: usize) -> Option<Dec
 
 /// Decodes image `index` of `doc` for the atlas `assets` laid out. `None` when the
 /// image has no place in the atlas or cannot be decoded.
-pub fn decode_image(doc: &Document, assets: &Assets, index: usize) -> Option<DecodedImage> {
+pub fn decode_image(doc: &Document, assets: &Assets, index: usize) -> Option<DecodedImage> { decode_image_checked(doc, assets, index, &|| false) }
+
+fn decode_image_checked(doc: &Document, assets: &Assets, index: usize, cancelled: &dyn Fn() -> bool) -> Option<DecodedImage> {
     let data = doc.images.get(index)?;
     let entry = assets.atlas.get(index).filter(|entry| entry.valid)?;
-    let rgba = stored_pixels(&data.bytes, data.color_key, (entry.w, entry.h))?;
+    let rgba = stored_pixels_checked(&data.bytes, data.color_key, (entry.w, entry.h), cancelled)?;
     Some(DecodedImage { index: index as u32, drawing: false, soft: false, width: entry.w + 2, height: entry.h + 2, rgba, placement: 0 })
 }
 
@@ -808,20 +820,26 @@ pub fn decode_image(doc: &Document, assets: &Assets, index: usize) -> Option<Dec
 /// end of its final buffer and bordered there ([`border_in_place`]), so the buffer of the stored size is the only
 /// one of that size that exists; decoding, converting and bordering made three (tdd2's 4K pictures, decoded two at a
 /// time, held 300 MiB more than the document while it opened). Any other picture takes the general path.
-fn stored_pixels(bytes: &[u8], color_key: Option<[u8; 3]>, size: (u32, u32)) -> Option<Vec<u8>> {
+#[cfg(test)]
+fn stored_pixels(bytes: &[u8], color_key: Option<[u8; 3]>, size: (u32, u32)) -> Option<Vec<u8>> { stored_pixels_checked(bytes, color_key, size, &|| false) }
+
+fn stored_pixels_checked(bytes: &[u8], color_key: Option<[u8; 3]>, size: (u32, u32), cancelled: &dyn Fn() -> bool) -> Option<Vec<u8>> {
     let (w, h) = (size.0 as usize, size.1 as usize);
     let stored = (w + 2).checked_mul(h + 2)?.checked_mul(4)?;
     // The one allocation of the picture's size that is not the decoder's: a failure is a picture that cannot be shown.
     let mut out = Vec::new();
     out.try_reserve_exact(stored).ok()?;
     out.resize(stored, 0u8);
-    if let Some(channels) = read_into_tail(bytes, size, &mut out) {
-        border_in_place(&mut out, (w, h), channels, color_key);
+    if let Some(channels) = read_into_tail(bytes, size, &mut out, cancelled) {
+        border_in_place(&mut out, (w, h), channels, color_key, cancelled);
+        if cancelled() { return None; }
         return Some(out);
     }
-    let mut rgba = image::load_from_memory(bytes).ok()?.into_rgba8();
+    if cancelled() { return None; }
+    let mut rgba = image::ImageReader::new(CheckedReader { bytes: std::io::Cursor::new(bytes), cancelled }).with_guessed_format().ok()?.decode().ok()?.into_rgba8();
     if let Some(key) = color_key {
         for pixel in rgba.pixels_mut() {
+            if cancelled() { return None; }
             if pixel[0] == key[0] && pixel[1] == key[1] && pixel[2] == key[2] {
                 pixel[3] = 0;
             }
@@ -831,10 +849,11 @@ fn stored_pixels(bytes: &[u8], color_key: Option<[u8; 3]>, size: (u32, u32)) -> 
     if rgba.dimensions() == size {
         out[start..].copy_from_slice(rgba.as_raw());
     } else {
-        resize_triangle(rgba.as_raw(), rgba.dimensions(), size, &mut out[start..]);
+        resize_triangle(rgba.as_raw(), rgba.dimensions(), size, &mut out[start..], cancelled);
     }
     drop(rgba);
-    border_in_place(&mut out, (w, h), 4, None);
+    border_in_place(&mut out, (w, h), 4, None, cancelled);
+    if cancelled() { return None; }
     Some(out)
 }
 
@@ -843,7 +862,7 @@ fn stored_pixels(bytes: &[u8], color_key: Option<[u8; 3]>, size: (u32, u32)) -> 
 /// width and the new height between them (129 MiB for a 4096 x 2160 picture, on top of the picture and its resize);
 /// the passes are separable by row, so this does both for one output row at a time and the float row is the only
 /// intermediate. The weights, their order of summing and the rounding are the library's.
-fn resize_triangle(from: &[u8], (sw, sh): (u32, u32), (dw, dh): (u32, u32), to: &mut [u8]) {
+fn resize_triangle(from: &[u8], (sw, sh): (u32, u32), (dw, dh): (u32, u32), to: &mut [u8], cancelled: &dyn Fn() -> bool) {
     // A picture with a zero side (a header that claims one) has nothing to sample: the library gives a blank picture.
     if sw == 0 || sh == 0 {
         to.fill(0);
@@ -874,6 +893,7 @@ fn resize_triangle(from: &[u8], (sw, sh): (u32, u32), (dw, dh): (u32, u32), to: 
     let across: Vec<(usize, Vec<f32>)> = (0..dw as u32).map(|x| weights(sw as u32, dw as u32, x)).collect();
     let mut row = vec![0.0f32; sw * 4];
     for y in 0..dh {
+        if cancelled() { return; }
         let (top, down) = weights(sh, dh, y);
         for x in 0..sw {
             let mut t = [0.0f32; 4];
@@ -904,9 +924,28 @@ fn resize_triangle(from: &[u8], (sw, sh): (u32, u32), (dw, dh): (u32, u32), to: 
 
 /// Decodes `bytes` into the end of `out` (a buffer of the stored size) when the picture is 8-bit RGB or RGBA of
 /// exactly `size`: the channels it has. `None` leaves the picture to the general path.
-fn read_into_tail(bytes: &[u8], size: (u32, u32), out: &mut [u8]) -> Option<usize> {
+struct CheckedReader<'a> { bytes: std::io::Cursor<&'a [u8]>, cancelled: &'a dyn Fn() -> bool }
+impl CheckedReader<'_> {
+    fn check(&self) -> std::io::Result<()> { if (self.cancelled)() { Err(std::io::Error::other("picture decode cancelled")) } else { Ok(()) } }
+}
+impl std::io::Read for CheckedReader<'_> {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        self.check()?; let count = out.len().min(64 * 1024); std::io::Read::read(&mut self.bytes, &mut out[..count])
+    }
+}
+impl std::io::BufRead for CheckedReader<'_> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        self.check()?; let bytes = std::io::BufRead::fill_buf(&mut self.bytes)?; Ok(&bytes[..bytes.len().min(64 * 1024)])
+    }
+    fn consume(&mut self, count: usize) { std::io::BufRead::consume(&mut self.bytes, count); }
+}
+impl std::io::Seek for CheckedReader<'_> {
+    fn seek(&mut self, from: std::io::SeekFrom) -> std::io::Result<u64> { self.check()?; std::io::Seek::seek(&mut self.bytes, from) }
+}
+
+fn read_into_tail(bytes: &[u8], size: (u32, u32), out: &mut [u8], cancelled: &dyn Fn() -> bool) -> Option<usize> {
     use image::ImageDecoder;
-    let decoder = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?.into_decoder().ok()?;
+    let decoder = image::ImageReader::new(CheckedReader { bytes: std::io::Cursor::new(bytes), cancelled }).with_guessed_format().ok()?.into_decoder().ok()?;
     let channels = match decoder.color_type() {
         image::ColorType::Rgb8 => 3,
         image::ColorType::Rgba8 => 4,
@@ -926,10 +965,11 @@ fn read_into_tail(bytes: &[u8], size: (u32, u32), out: &mut [u8]) -> Option<usiz
 /// transparent. Pixels are written in order and never reach a pixel still to be read: each stored row starts
 /// before the source row it reads (`4 * (w + 2)` against `channels * w` bytes a row), and the last stored rows,
 /// which read the last source row again, stay a pixel behind it.
-fn border_in_place(out: &mut [u8], (w, h): (usize, usize), channels: usize, color_key: Option<[u8; 3]>) {
+fn border_in_place(out: &mut [u8], (w, h): (usize, usize), channels: usize, color_key: Option<[u8; 3]>, cancelled: &dyn Fn() -> bool) {
     let (gw, gh) = (w + 2, h + 2);
     let base = out.len() - w * h * channels;
     for gy in 0..gh {
+        if cancelled() { return; }
         let sy = gy.saturating_sub(1).min(h - 1);
         for gx in 0..gw {
             let sx = gx.saturating_sub(1).min(w - 1);
@@ -1032,7 +1072,7 @@ mod tests {
             let source = image::RgbaImage::from_raw(from.0, from.1, pixels).unwrap();
             let library = image::imageops::resize(&source, to.0, to.1, image::imageops::FilterType::Triangle);
             let mut ours = vec![0u8; to.0 as usize * to.1 as usize * 4];
-            resize_triangle(source.as_raw(), from, to, &mut ours);
+            resize_triangle(source.as_raw(), from, to, &mut ours, &|| false);
             assert_eq!(library.as_raw(), &ours, "{from:?} to {to:?}");
         }
     }

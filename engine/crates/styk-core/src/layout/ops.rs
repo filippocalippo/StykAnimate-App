@@ -10,6 +10,8 @@ pub enum Zone {
 }
 #[derive(Clone, Debug)]
 pub enum Operation {
+    #[cfg(feature = "devtools")]
+    DeveloperOpen(crate::dev_extension::Panel),
     Move(PanelId, Zone),
     MoveGroup(GroupId, Zone),
     Activate(GroupId, usize),
@@ -54,6 +56,12 @@ impl Layout {
     }
     fn perform(&mut self, op: Operation, w: Workspace) -> Result<(), LayoutError> {
         match op {
+            #[cfg(feature = "devtools")]
+            Operation::DeveloperOpen(panel) => {
+                let p = PanelId::new(panel.id());
+                if !self.panels().contains(&p) { self.closed.push(p.clone()); }
+                if self.closed.contains(&p) { self.restore(p)?; }
+            }
             Operation::Move(p, z) => self.move_panel(p, z)?,
             Operation::MoveGroup(id, z) => {
                 let g = self

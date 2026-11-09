@@ -447,6 +447,50 @@
             "op"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "properties": {
+                "name": {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                "value": {
+                  "maxLength": 2048,
+                  "type": [
+                    "number",
+                    "integer",
+                    "boolean",
+                    "string"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "detail": {
+              "enum": [
+                "short",
+                "full"
+              ]
+            },
+            "id": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "param.set"
+            },
+            "version": {
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "op"
+          ],
+          "type": "object"
         }
       ]
     },

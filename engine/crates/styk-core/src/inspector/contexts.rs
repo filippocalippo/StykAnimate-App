@@ -30,6 +30,12 @@ pub(crate) struct Inputs<'a> {
     pub can_paste: bool,
 }
 
+/// A selected figure as the facts lane's evaluation drew it for exactly this state, its style overlay resolved there
+/// (`resolveInstanceFigure`); the definition until those facts land (the panel's controls are pending meanwhile).
+fn instance_figure(document: &Document, object: &Value, shown: &super::Shown) -> Option<Arc<Figure>> {
+    facts::uid_of(object).and_then(|uid| shown.figures.get(&uid).cloned()).or_else(|| facts::figure_of(document, object))
+}
+
 const STEP_DOWN: &str = "step-down";
 const STEP_UP: &str = "step-up";
 
@@ -219,15 +225,12 @@ fn build_for(document: &Document, frame: &Value, inputs: &Inputs<'_>, object: Op
         (InspectorContext::Layer, _) => layer(records),
         (InspectorContext::Frame, _) => frame_context(document, records),
         (InspectorContext::Scene, _) | (_, None) => scene(records, &frame),
-        (_, Some(object)) => match facts::figure_of(document, &object) {
+        (_, Some(object)) => match instance_figure(document, &object, inputs.shown) {
             None => scene(records, &frame),
             Some(figure) if count == 1 && figure.movieclip.is_some() => movieclip(&figure, records),
             Some(_) if count > 1 => figures(document, records, &frame, inputs, count),
             Some(figure) if spatial_origin(records, figure.id) => spatial_rig(&figure, &object),
             Some(figure) => {
-                // `inspectorDescriptor` shows the instance as its style overlay resolves it (made on the facts lane).
-                // Refresh waits for the lane before it builds; a resolution for another figure shows nothing as current.
-                let Some(figure) = instance(inputs.shown, figure, &object) else { return pending(&scene(records, &frame)) };
                 let joint = facts::selection(document).joint;
                 match usize::try_from(joint).ok().and_then(|joint| figure.segments.get(joint)) {
                     Some(segment) => joint_context(document, records, &figure, &object, segment, inputs),
@@ -783,7 +786,7 @@ fn figures(document: &Document, records: &Value, frame: &Value, inputs: &Inputs<
     opacities.dedup();
     let mut colours: Vec<[u8; 3]> = objects
         .iter()
-        .filter_map(|item| facts::figure_of(document, item).map(|figure| palette(version, &figure, item)))
+        .filter_map(|item| instance_figure(document, item, inputs.shown).map(|figure| palette(version, &figure, item)))
         .flat_map(|entries| entries.into_iter().map(|entry| entry.0))
         .collect();
     colours.sort_unstable();
@@ -1041,18 +1044,6 @@ fn drawing(tool: &'static str) -> Inspector {
     }
 }
 
-/// The figure as its pose's style overlay resolves it, from the facts lane's [`crate::facts::Subject`] made for exactly
-/// this state: the definition when the pose restyles nothing (or no lane runs), its resolution when it does; `None`
-/// while the lane's facts are for another state.
-fn instance(shown: &super::Shown, figure: Arc<Figure>, object: &Value) -> Option<Arc<Figure>> {
-    let uid = num(object.get("unique_id")).map(|uid| uid as u32);
-    match &shown.subject {
-        Some(subject) if Some(subject.uid) == uid && subject.figure == figure.id => if subject.restyled { subject.instance.clone() } else { Some(figure) },
-        None if !shown.awaiting => Some(figure),
-        _ => None,
-    }
-}
-
 /// What a colour row's picker opens with (`installColorPickers`' resolver in `src/app.mjs`).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Picked {
@@ -1102,7 +1093,7 @@ fn pickers(document: &Document, frame: &Value, model: &Inspector, lane: &super::
     let records = facts::records(document);
     let version = num(records.get("version")).unwrap_or(0.0);
     let solid = |rgb: [u8; 3], opacity: f64, alpha: bool| Picked { paint: Paint2::solid(rgb, opacity), gradients: false, alpha, from: None };
-    let selected = object.and_then(|object| Some((instance(lane, facts::figure_of(document, &object)?, &object)?, object)));
+    let selected = object.and_then(|object| Some((instance_figure(document, &object, lane)?, object)));
     let joint = facts::selection(document).joint;
     let mut out = Vec::new();
     for (target, shown) in targets {

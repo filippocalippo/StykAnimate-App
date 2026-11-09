@@ -163,7 +163,7 @@ struct Record {
 }
 
 /// `composePoseChannels`.
-pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f64) -> Frame {
+pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
     let channels: Vec<(usize, &Channel)> = compiled.animation.channels.iter().enumerate().filter(|(_, c)| c.property == Property::Pose).collect();
     if channels.is_empty() {
         return base;
@@ -189,6 +189,7 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
         parallax: base.parallax.clone(),
     };
     for &(index, channel) in &channels {
+        if cancelled() { return Frame::default(); }
         let frame = if masked_at(&channel.masked, tick) {
             None
         } else if channel.use_base_pose {
@@ -199,7 +200,7 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
                 Target::Figure { uid } => Some(std::slice::from_ref(uid)),
                 _ => None,
             };
-            compiled.tracks[index].as_ref().and_then(|seq| crate::eval::sample_pose_track_only(doc, seq, tick, only)).map(|frame| {
+            compiled.tracks[index].as_ref().and_then(|seq| crate::eval::sample_pose_track_checked(doc, seq, tick, only, cancelled)).map(|frame| {
                 sampled.push(frame);
                 Source::Sampled(sampled.len() - 1)
             })
@@ -239,6 +240,7 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
     let mut by_figure: HashMap<u32, usize> = HashMap::new();
     let mut by_layer: HashMap<&str, usize> = HashMap::new();
     for (r, (owner, _, _)) in replacements.iter().enumerate() {
+        if cancelled() { return Frame::default(); }
         match owner {
             Owner::Figure(uid) => {
                 by_figure.insert(*uid, r);
@@ -267,13 +269,16 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
     let mut included: HashSet<u32> = HashSet::new();
     // Unchanged figures keep their native slots; new appearances follow in source order.
     for (slot, object) in base.objects.iter().enumerate() {
+        if cancelled() { return Frame::default(); }
         if replacement_of(object.uid).is_none() {
             records.push(Record { object: object.clone(), source: Source::Base, slot });
             included.insert(object.uid);
         }
     }
     for (r, (_, source, _)) in replacements.iter().enumerate() {
+        if cancelled() { return Frame::default(); }
         for &slot in &brought[r] {
+            if cancelled() { return Frame::default(); }
             let object = &frame_of(*source).objects[slot];
             if included.insert(object.uid) {
                 records.push(Record { object: object.clone(), source: *source, slot });
@@ -291,6 +296,7 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
     let mut objects: Vec<Arc<Object>> = Vec::with_capacity(records.len());
     let mut origins: Vec<Option<(FrameRef, u32)>> = Vec::with_capacity(records.len());
     for record in &records {
+        if cancelled() { return Frame::default(); }
         let native = replacement_of(record.object.uid).is_some_and(|r| replacements[r].2);
         let mut object = if native { native_appearance(doc, &record.object, natives.get(&record.object.uid).copied()) } else { record.object.clone() };
         let source = frame_of(record.source);
@@ -309,7 +315,13 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
                     }
                 }
                 None => {
-                    let scene = geometry.entry(key(record.source)).or_insert_with(|| crate::geometry::build(doc, source));
+                    let scene = match geometry.entry(key(record.source)) {
+                        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            let Some(scene) = crate::geometry::build_cancellable(doc, source, cancelled) else { return Frame::default(); };
+                            entry.insert(scene)
+                        }
+                    };
                     let root = scene.objects.get(record.slot).filter(|g| g.resolved).map_or(record.object.root, |g| g.root);
                     let loose = Arc::make_mut(&mut object);
                     loose.root = root;
@@ -325,12 +337,14 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
     let count = objects.len();
     let mut done = vec![false; count];
     for start in 0..count {
+        if cancelled() { return Frame::default(); }
         if done[start] {
             continue;
         }
         let (mut path, mut visiting) = (Vec::new(), HashSet::new());
         let mut slot = start;
         while !done[slot] {
+            if cancelled() { return Frame::default(); }
             // Layer poses that join each other in a ring (the editor refuses to make one; a file can hold it): the figure that
             // closes the ring comes loose where its own pose has it, as the frame record has it (`records::channels`).
             if !visiting.insert(slot) {
@@ -344,6 +358,7 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
             }
         }
         for &child in path.iter().rev() {
+            if cancelled() { return Frame::default(); }
             if done[child] {
                 continue;
             }
@@ -369,6 +384,7 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
     }
     // Each layer keeps its sampled pose's stacking order; anchored figures follow their anchor.
     let mut stack = Stacking {
+        cancelled,
         objects: &objects,
         slots: &slots,
         anchors: HashMap::new(),
@@ -377,6 +393,7 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
         placed: vec![false; count],
     };
     for (_, channel) in &channels {
+        if cancelled() { return Frame::default(); }
         if let (Some(anchor), Target::Figure { uid }) = (channel.order_anchor, &channel.target) {
             stack.anchors.entry(anchor).or_default().push(*uid);
         }
@@ -388,10 +405,12 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
         }
         let frame = frame_of(replacements[r].1);
         for &slot in &brought[r] {
+            if cancelled() { return; }
             stack.append(frame.objects[slot].uid);
         }
     };
     for slot in ordered(&base) {
+        if cancelled() { return Frame::default(); }
         let uid = base.objects[slot].uid;
         match replacement_of(uid) {
             Some(r) => emit(&mut stack, r),
@@ -400,6 +419,7 @@ pub(crate) fn compose(doc: &Document, compiled: &Compiled, base: Frame, tick: f6
         stack.append_anchors(uid);
     }
     for r in 0..replacements.len() {
+        if cancelled() { return Frame::default(); }
         emit(&mut stack, r);
     }
     let mut order = std::mem::take(&mut stack.order);
@@ -421,6 +441,7 @@ fn set(replacements: &mut Vec<(Owner, Source, bool)>, id: Owner, source: Source,
 
 /// The drawing order being built (`append`, `appendAnchors`).
 struct Stacking<'a> {
+    cancelled: &'a (dyn Fn() -> bool + Sync),
     objects: &'a [Arc<Object>],
     slots: &'a HashMap<u32, usize>,
     anchors: HashMap<u32, Vec<u32>>,
@@ -431,6 +452,7 @@ struct Stacking<'a> {
 
 impl Stacking<'_> {
     fn append(&mut self, uid: u32) {
+        if (self.cancelled)() { return; }
         if let Some(&slot) = self.slots.get(&uid)
             && !self.placed[slot]
         {
@@ -441,7 +463,7 @@ impl Stacking<'_> {
     }
 
     fn append_anchors(&mut self, uid: u32) {
-        if !self.anchored.insert(uid) {
+        if (self.cancelled)() || !self.anchored.insert(uid) {
             return;
         }
         for child in self.anchors.get(&uid).cloned().unwrap_or_default() {

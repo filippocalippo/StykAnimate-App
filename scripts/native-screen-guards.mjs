@@ -21,6 +21,10 @@ export function catalogueIds(source) {
   return [...new Set(ids)].sort();
 }
 
+// The developer panels' screens live with their views (they need the developer crates, which link the engine, so the preview
+// cannot draw them): their ids are read the same way, and only a developer build of the application draws them.
+export const DEVELOPER_SCREENS = 'engine/crates/styk-devtools/src/ui/screens.rs';
+
 // `masks`: the parts of a screen another chunk owns, compared once that chunk lands. A multi-line TOML array of
 // rectangles in the screen's pixels, each naming its owner, one per line:
 //   masks = [
@@ -98,7 +102,8 @@ export function maskedCopies(reference, actual, masks, out, id) {
 export function screenCheck(root, run = execFileSync, target = resolve(root, 'engine/target')) {
   const ids = catalogueIds(readFileSync(resolve(root, 'engine/crates/styk-ui/src/screens.rs'), 'utf8'));
   const specs = parseLimits(readFileSync(resolve(root, 'docs/native/screens/limits.toml'), 'utf8'));
-  for (const id of specs.keys()) if (!ids.includes(id)) throw new Error(`docs/native/screens/limits.toml:${specs.get(id).line}: screenshot: unknown screen ${id}`);
+  const developer = catalogueIds(readFileSync(resolve(root, DEVELOPER_SCREENS), 'utf8'));
+  for (const id of specs.keys()) if (!ids.includes(id) && !developer.includes(id)) throw new Error(`docs/native/screens/limits.toml:${specs.get(id).line}: screenshot: unknown screen ${id}`);
   let references = 0;
   for (const id of ids) {
     const spec = specs.get(id);
@@ -123,4 +128,30 @@ export function screenCheck(root, run = execFileSync, target = resolve(root, 'en
     references++;
   }
   console.log(`screenshots: active, ${references} references (${ids.length} catalogue screens)`);
+}
+
+// The developer panels' screens, drawn by a developer build of the application (`--features devtools`, its own cargo invocation
+// so the shipping build never sees the feature) and compared with their accepted captures like any other screen. They are new
+// screens with no counterpart in today's app: the reference is this build's own capture.
+export function developerScreenCheck(root, run = execFileSync, target = resolve(root, 'engine/target')) {
+  const ids = catalogueIds(readFileSync(resolve(root, DEVELOPER_SCREENS), 'utf8'));
+  const specs = parseLimits(readFileSync(resolve(root, 'docs/native/screens/limits.toml'), 'utf8'));
+  const out = resolve(root, 'artifacts/native-screens');
+  mkdirSync(out, {recursive: true});
+  const options = {cwd: root, stdio: 'inherit', env: {...process.env, STYK_BACKGROUND_WINDOW: 'headless'}, timeout: 45000};
+  run('cargo', ['build', '--quiet', '--locked', '--manifest-path', 'engine/Cargo.toml', '-p', 'styk-app', '--features', 'styk-app/devtools'], {...options, timeout: 0});
+  for (const id of ids) {
+    const spec = specs.get(id);
+    if (!spec?.reference) throw new Error(`docs/native/screens/limits.toml: screenshot: developer screen ${id} has no reference`);
+    const reference = resolve(root, spec.reference);
+    if (!existsSync(reference)) throw new Error(`docs/native/screens/limits.toml:${spec.line}: screenshot: missing reference for ${id}`);
+    const actual = resolve(out, `${id}.png`);
+    rmSync(actual, {force: true});
+    try {
+      run(resolve(target, 'debug/stykanimate.exe'), ['--screen', id, '--size', `${spec.width}x${spec.height}`, '--scale', '1', '--screenshot', actual], options);
+      const [left, right] = maskedCopies(reference, actual, spec.masks, out, id);
+      run(resolve(target, 'debug/styk.exe'), ['image-diff', left, right, String(spec.max_difference)], options);
+    } catch (error) { throw new Error(`docs/native/screens/limits.toml:${spec.line}: screenshot: ${id}: ${error.message}`); }
+  }
+  console.log(`screenshots: ${ids.length} developer screens compared`);
 }

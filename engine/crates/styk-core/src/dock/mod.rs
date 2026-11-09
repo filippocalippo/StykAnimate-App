@@ -169,6 +169,18 @@ pub struct Dock {
 }
 
 impl Dock {
+    #[cfg(feature = "devtools")]
+    pub fn developer_panel(&mut self, panel: crate::dev_extension::Panel, open: bool, now: u64) -> Vec<Effect> {
+        self.clock = now;
+        let id = PanelId::new(panel.id());
+        if !open {
+            return if self.layout().groups().iter().any(|g|g.tabs.contains(&id)) { self.handle(Event::Close(id),now) } else { Vec::new() };
+        }
+        let mut effects = Vec::new();
+        self.edit(Operation::DeveloperOpen(panel), &mut effects);
+        self.reveal(id, &mut effects);
+        effects
+    }
     /// The default arrangements in a window of this size. `writer` names this process in the file's stamps.
     pub fn new(window: Size, scale: f64, writer: impl Into<String>) -> Dock {
         let state = |workspace: Workspace| LayoutState::new(default_layout(workspace, window.h).unwrap_or_else(|_| crate::layout::essentials(workspace)));
@@ -994,6 +1006,12 @@ impl Dock {
     /// The title words key of a panel (the catalogue's `shell.panel.*`), or its plain name.
     pub fn title_key(kind: &str) -> Option<&'static str> {
         match kind {
+            #[cfg(feature = "devtools")]
+            "dev.profiler" => Some("dev.profiler"),
+            #[cfg(feature = "devtools")]
+            "dev.logs" => Some("dev.logs"),
+            #[cfg(feature = "devtools")]
+            "dev.parameters" => Some("dev.parameters"),
             "properties" => Some("shell.panel.properties"),
             "vfx" => Some("shell.panel.vfx"),
             "library" => Some("shell.panel.library"),

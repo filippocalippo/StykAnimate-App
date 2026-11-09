@@ -37,3 +37,5 @@ pub mod memory;
 
 pub mod text_environment;
 pub mod storage;
+
+pub mod dialogs;

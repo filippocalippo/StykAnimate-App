@@ -203,3 +203,13 @@ gesture arbitration, grids/guides, selection and artwork queries, handles,
 marquee, pose/IK/3D tools, previews and HUD. This host does not edit documents or
 introduce live pose/drawing mutation paths. K-doc publication, N2's widget and the
 Animate/Draw chunks must connect those existing services before the stage is usable.
+
+
+## V0 application integration
+
+[The visible loop](visible-loop.md) connects the existing runtime, stage widget and
+Inspector. Surface's routed presses now reach `styk_core::tools`; its bounded worker
+uses this module's picking queries and the existing artwork picker. Only Select's
+figure/joint/empty click is implemented here. Selection decorations and broader tools
+remain outside this slice. Inspector edits, undo and redo explicitly start document
+publication through the production UI effect adapter.

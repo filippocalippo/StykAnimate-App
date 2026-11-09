@@ -226,7 +226,8 @@ impl super::WorkerSession {
                     return editor.assign_figures_to_layer_checked(&arg(0), &arg(1), &mut checked).map(Value::Bool);
                 }
                 if editor.sheet() || method == "bakeMovieclip" {
-                    let clock = editor.clock.unwrap_or(|| 0.0);
+                    let source = editor.clock.clone();
+                    let clock = &|| source.as_ref().map_or(0.0, |clock| clock());
                     let mut worker = crate::movieclip_planning::TimelineWorker { max_source_bytes: usize::MAX, check: &mut checked, progress: &mut |_| {}, clock };
                     editor.call_movieclip_timeline_worker(method, args, &mut worker)
                 } else { editor.call_worker_checked(method, &Value::array(args.to_vec()), &mut checked) }

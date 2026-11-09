@@ -93,6 +93,18 @@ pub mod fake {
                 w.wake();
             }
         }
+        fn wait_if_paused(&self, cx: &Context<'_>, cancel: &Cancel) -> bool {
+            let mut s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            // Releasing the pause can race the transaction's earlier failure read.
+            // Check and register under the same lock used by fail(), or its wake is lost.
+            if s.failure != Failure::PauseBeforeCommit { return false; }
+            if !s.waiters.iter().any(|w| w.will_wake(cx.waker())) {
+                s.waiters.push(cx.waker().clone());
+                let wake = cx.waker().clone();
+                cancel.on_cancel(move || wake.wake());
+            }
+            true
+        }
     }
     struct Transaction<'a> {
         store: &'a MemoryStorage,
@@ -190,12 +202,7 @@ pub mod fake {
                     this.cancel.cancel();
                 }
                 Failure::PauseBeforeCommit => {
-                    let mut s = this.store.0.lock().unwrap_or_else(|e| e.into_inner());
-                    if !s.waiters.iter().any(|w| w.will_wake(cx.waker())) {
-                        s.waiters.push(cx.waker().clone());
-                        let wake = cx.waker().clone();
-                        this.cancel.on_cancel(move || wake.wake());
-                    }
+                    if !this.store.wait_if_paused(cx, this.cancel) { cx.waker().wake_by_ref(); }
                     return Poll::Pending;
                 }
                 Failure::None => {}
@@ -237,6 +244,32 @@ pub mod fake {
                 acquired: false,
                 done: false,
             })
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn releasing_a_pause_before_registration_cannot_strand_the_transaction() {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            struct Wakes(AtomicUsize);
+            impl std::task::Wake for Wakes {
+                fn wake(self: Arc<Self>) { self.0.fetch_add(1, Ordering::SeqCst); }
+            }
+            let storage = MemoryStorage::default();
+            let cancel = Cancel::new();
+            let wakes = Arc::new(Wakes(AtomicUsize::new(0)));
+            let waker = Waker::from(wakes.clone());
+            let cx = Context::from_waker(&waker);
+            storage.fail(Failure::PauseBeforeCommit);
+            // The transaction observed Pause, then the owner released it before registration.
+            storage.fail(Failure::None);
+            assert!(!storage.wait_if_paused(&cx, &cancel), "retry immediately when the release already happened");
+            storage.fail(Failure::PauseBeforeCommit);
+            assert!(storage.wait_if_paused(&cx, &cancel));
+            storage.fail(Failure::None);
+            assert_eq!(wakes.0.load(Ordering::SeqCst), 1, "a release after registration wakes the transaction");
         }
     }
 }

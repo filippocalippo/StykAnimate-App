@@ -446,8 +446,13 @@ impl Compiled {
 
     /// The frame with every channel applied at `tick`: pose channels, then the others.
     pub fn compose(&self, doc: &crate::doc::Document, frame: crate::eval::Frame, tick: f64) -> crate::eval::Frame {
-        let frame = if self.animation.poses { pose::compose(doc, self, frame, tick) } else { frame };
-        if self.animation.scalars { scalar::compose(doc, &self.animation, frame, tick) } else { frame }
+        self.compose_checked(doc, frame, tick, &|| false)
+    }
+
+    pub(crate) fn compose_checked(&self, doc: &crate::doc::Document, frame: crate::eval::Frame, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> crate::eval::Frame {
+        let frame = if self.animation.poses { pose::compose(doc, self, frame, tick, cancelled) } else { frame };
+        if cancelled() { return crate::eval::Frame::default(); }
+        if self.animation.scalars { scalar::compose(doc, &self.animation, frame, tick, cancelled) } else { frame }
     }
 }
 

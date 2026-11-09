@@ -16,14 +16,18 @@ mod execution;
 pub use execution::*;
 
 use crate::{i18n::Msg, inspector};
+pub use styk_services::dialogs::Request as DialogRequest;
 
 /// What the interface asks the core to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    #[cfg(feature = "devtools")]
+    Developer(crate::dev_extension::Event),
     /// Settle the editor before the shell performs a tab/workspace/history transition.
     Shell(crate::shell::Event),
     /// Retain quit through panel settlement, then ask the recovery/document owner for clearance.
     Quit,
+    DialogAnswer { id: u64, result: Result<styk_services::dialogs::Choice, String> },
     KeyPressed { chord: crate::text_entry::Chord, repeat: bool, prevented: bool },
     KeyReleased { key: String, cancelled: bool },
     Blur,
@@ -65,10 +69,13 @@ pub enum Severity {
 /// change). Effects carry plain data, never a borrowed document.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
+    #[cfg(feature = "devtools")]
+    Developer(crate::dev_extension::Event),
     ShellReady(crate::shell::Event),
     SettingsChanged(crate::settings::Change),
     /// One bounded documents poll; subsequent progress follows host notifications/deadlines.
     PollDocuments,
+    Dialog { id: u64, request: styk_services::dialogs::Request },
     QuitReady,
     SessionCheckpointFinished,
     Overlay(crate::overlay::Effect),
