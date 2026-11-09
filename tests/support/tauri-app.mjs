@@ -91,7 +91,8 @@ async function launch({ executablePath, args = [], env = process.env, cwd = root
   const { env: childEnv, scratch } = launchEnvironment(env, { port });
   // Checked again where the process starts: no path through this module starts the app without its own data folder.
   if (!childEnv.STYK_USER_DATA_DIR) throw new Error('Refusing to start the app without STYK_USER_DATA_DIR.');
-  const cleanup = () => { if (scratch) rmSync(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); };
+  // WebView2's helpers can hold the folder a moment after the app ends; a scratch folder left behind is only temp.
+  const cleanup = () => { if (scratch) try { rmSync(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); } catch { /* Left in temp. */ } };
   // Electron smokes passed the source folder as the first argument; the Tauri app needs no such argument.
   const launchArgs = args.filter(arg => path.resolve(String(arg)) !== root);
   const child = spawnImpl(file, launchArgs, {

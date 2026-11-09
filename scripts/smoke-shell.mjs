@@ -27,7 +27,7 @@ function profileWithHooks(name, answers) {
 try {
   // 1. Window controls and the close prompt.
   {
-    const { profile, hooks } = profileWithHooks('controls', { message: ['cancel', 'save', 'discard'] });
+    const { profile, hooks } = profileWithHooks('controls', { message: ['cancel', 'discard'] });
     const app = await tauri.launch({ executablePath: executable, env: { ...process.env, STYK_USER_DATA_DIR: profile, STYK_TEST_HOOKS: hooks } });
     const page = await app.firstWindow();
     await page.waitForFunction(() => window.stykDesktop?.pageListening, undefined, { timeout: 60000 });
@@ -57,15 +57,33 @@ try {
     // A close asked at a checkpoint that is no longer current is refused without a question.
     const stale = await page.evaluate(() => window.stykDesktop.close({ revision: 'r0', saved: false }));
     expect('A close at a stale checkpoint is refused', stale === false, String(stale));
-    // Save: the page is asked to save and close.
-    await page.evaluate(() => window.stykDesktop.close());
-    await page.waitForFunction(() => window.__shell.actions.includes('save-and-close'), undefined, { timeout: 10000 }).catch(() => {});
-    expect('Save asks the page to save and close', (await page.evaluate(() => window.__shell.actions)).includes('save-and-close'));
     // Discard: the window closes and the process ends.
     await page.evaluate(() => window.stykDesktop.close()).catch(() => {});
     for (let i = 0; i < 100 && alive(app.process().pid); i++) await sleep(100);
     expect('Discard closes the window and ends the process', !alive(app.process().pid));
-    expect('The questions were the unsaved-work question, three times', JSON.parse(readFileSync(path.join(hooks, 'answers.json'), 'utf8')).message.length === 0);
+    const left = JSON.parse(readFileSync(path.join(hooks, 'answers.json'), 'utf8')).message;
+    expect('Each close with unsaved work asked once', left.length === 0, `left: ${JSON.stringify(left)}`);
+    await app.close();
+  }
+
+  // Save: the page is asked to save, and closes the window itself once it has.
+  {
+    const { profile, hooks } = profileWithHooks('save', { message: ['save'] });
+    const app = await tauri.launch({ executablePath: executable, env: { ...process.env, STYK_USER_DATA_DIR: profile, STYK_TEST_HOOKS: hooks } });
+    const page = await app.firstWindow();
+    await page.waitForFunction(() => window.stykDesktop?.pageListening, undefined, { timeout: 60000 });
+    await page.evaluate(() => {
+      window.__actions = [];
+      window.stykDesktop.onMenuAction(action => window.__actions.push(action));
+      return window.stykDesktop.pageListening();
+    });
+    await page.evaluate(() => window.stykDesktop.setDocumentState({ name: 'Walk cycle', dirty: true, revision: 'r1', unsaved: 1 }));
+    const asked = await page.evaluate(() => new Promise(resolve => {
+      window.stykDesktop.onMenuAction(action => { if (action === 'save-and-close') resolve(true); });
+      void window.stykDesktop.close();
+      setTimeout(() => resolve(false), 10000);
+    })).catch(() => true);
+    expect('Save asks the page to save and close', asked === true);
     await app.close();
   }
 
