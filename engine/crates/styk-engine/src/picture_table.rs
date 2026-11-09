@@ -22,7 +22,7 @@ pub(crate) struct PictureTable {
 }
 
 fn lock(table: &Mutex<PictureTable>) -> MutexGuard<'_, PictureTable> {
-    table.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    styk_doc::lock::spinning(table)
 }
 
 impl Engine {
@@ -57,7 +57,7 @@ impl Engine {
                 return;
             }
             // The frames the stage draws are culled to the artboard: a picture off it is not one a layer is wanted for.
-            let frame = crate::frames::produce(generation, tick as f64, &[], false, true, self.inner.clock);
+            let frame = crate::frames::produce(generation, tick as f64, &[], false, true, self.inner.clock.clone());
             let row: Arc<[u32]> = pictures_of(&frame.list, index).into();
             let mut table = lock(&self.inner.picture_table);
             if table.generation == generation.id {
@@ -108,10 +108,10 @@ mod tests {
         while engine.step() {}
         let (mut table, mut whole) = (0, 0);
         for tick in 0..generation.playable_ticks() {
-            let drawn = pictures_of(&crate::frames::produce(&generation, tick as f64, &[], false, true, || 0.0).list, &index);
+            let drawn = pictures_of(&crate::frames::produce(&generation, tick as f64, &[], false, true, std::sync::Arc::new(|| 0.0)).list, &index);
             assert_eq!(engine.picture_row(generation.id, tick).unwrap().as_ref(), drawn.as_slice(), "tick {tick}: what the stage draws");
             table += drawn.len();
-            whole += pictures_of(&crate::frames::produce(&generation, tick as f64, &[], false, false, || 0.0).list, &index).len();
+            whole += pictures_of(&crate::frames::produce(&generation, tick as f64, &[], false, false, std::sync::Arc::new(|| 0.0)).list, &index).len();
         }
         assert!(whole > 0 && table < whole, "the artboard clips pictures away ({table} of {whole})");
     }

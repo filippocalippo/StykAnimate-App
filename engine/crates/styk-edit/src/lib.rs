@@ -138,9 +138,10 @@ pub fn timeline_rows(report: &Value) -> Vec<(f64, f64)> {
     timeline::rows(report).into_iter().map(|row| (row.start, row.count)).collect()
 }
 
-pub use history::{Command, CommandKind, HistoryLimits};
-pub use frame::FrameSlice;
+pub use history::{Command, CommandKind, EntryCosts, HistoryLimits, HistoryMarks};
+pub use frame::{FrameSlice, editor_frame, editor_frame_cancellable};
 pub use onion_skins::{Ghost, OnionSet, MAX_GHOSTS};
+pub use recolor::{attached_palette_rows, attached_palette_rows_resolved};
 pub use layer_focus::FocusLock;
 pub use select::Selection;
 pub use shown::{Flavor, ShownScene};
@@ -336,6 +337,9 @@ pub struct Editor {
     pub(crate) camera_clipboard: Option<Value>,
     /// `editor.audioRipple` (the app sets it) and `_audioRippling`: frame edits of every layer move the audio.
     pub(crate) audio_ripple: bool,
+    /// How many movieclips the document is inside of (the interface's `_movieclipScopes`): its own movieclips nest that much deeper in the
+    /// project it belongs to, and the limit on how deep they may run is the project's.
+    pub(crate) outer_depth: usize,
     pub(crate) audio_rippling: bool,
     /// The layers Focus and lock holds (`editor.getLayerFocus()` with a lock), as the view of the call in progress has them.
     pub(crate) focus_lock: Option<FocusLock>,
@@ -382,7 +386,10 @@ pub struct Editor {
     pub(crate) onions: RefCell<onion_skins::Cache>,
     pub(crate) camera_views: RefCell<camera_views::Cache>,
     /// The host's clock (milliseconds), which a read that is given a time to take is held to; without one it takes what it needs.
-    pub(crate) clock: Option<fn() -> f64>,
+    pub(crate) clock: Option<std::sync::Arc<dyn Fn() -> f64 + Send + Sync>>,
+    /// Whether the host can take about this many more bytes (the allocator's headroom): asked before a command copies a large part of the
+    /// document, which refuses the command, nothing changed, rather than run the module out of memory. Without one every command runs.
+    pub(crate) memory_gate: Option<fn(usize) -> bool>,
     /// The last document checked for unported features, and the answer.
     gate: RefCell<Option<(Value, Option<&'static str>)>>,
 }
@@ -487,6 +494,7 @@ impl Editor {
             camera_clipboard: None,
             audio_clipboard: None,
             audio_ripple: false,
+            outer_depth: 0,
             audio_rippling: false,
             focus_lock: None,
             camera_motion_clipboard: None,
@@ -510,6 +518,7 @@ impl Editor {
             onions: RefCell::default(),
             camera_views: RefCell::default(),
             clock: None,
+            memory_gate: None,
             gate: RefCell::new(None),
         }
     }
@@ -600,11 +609,15 @@ impl Editor {
             can_redo: !self.redo.is_empty(),
             undo_label: self.undo.last().map(|c| c.label.clone()).unwrap_or_default(),
             redo_label: self.redo.last().map(|c| c.label.clone()).unwrap_or_default(),
-            dirty: self.revision != self.saved_revision || self.drag.as_ref().is_some_and(|d| d.changed) || self.property_edit.as_ref().is_some_and(|e| e.changed),
+            dirty: self.dirty(),
             layer_revision: self.layer_revision,
             next_frame_identity: self.next_frame_identity,
             next_uid: self.next_uid,
         }
+    }
+
+    pub(crate) fn dirty(&self) -> bool {
+        self.revision != self.saved_revision || self.drag.as_ref().is_some_and(|d| d.changed) || self.property_edit.as_ref().is_some_and(|e| e.changed)
     }
 
     /// `editor.autoKey`, which the app sets from its settings.
@@ -901,6 +914,11 @@ impl Editor {
         if let Some(result) = self.property_call_checked(method, args, check) {
             return result;
         }
+        match method {
+            "updateBuilderSegmentStyle" => return self.update_builder_segment_style_checked(args.first(), args.get(1), check),
+            "replaceFigureColor" => return self.replace_figure_color_checked(args.first(), args.get(1), &arg(2), check),
+            _ => {}
+        }
         if let Some(result) = self.range_call(method, args) {
             return result;
         }
@@ -924,7 +942,7 @@ impl Editor {
             "selectPolygon" => self.select_polygon(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),
             "toggleSegment" => self.toggle_segment(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),
             "selectBranch" => self.select_branch(select::index(args.first()).and_then(|id| u32::try_from(id).ok()), select::index(args.get(1))).map(Value::Bool),
-            "seek" | "@seek" => self.seek_checked(arg(0).as_f64().unwrap_or(0.0),check),
+            "seek" | "@seek" => self.seek_options_checked(arg(0).as_f64().unwrap_or(0.0), arg(1).get("allowBeyondEnd").is_some_and(Value::truthy), check),
             "beginDrag" => {
                 let translation = match arg(1).get("scope").and_then(Value::as_str) {
                     None | Some("selection") => false,
@@ -1315,3 +1333,6 @@ mod figure_row_tests {
         assert_eq!(row(r#"{"figure_type_id":6,"text_assets":[{}],"segments":[{"segment_type":"image"}]}"#), r#"{"id":6,"name":null,"cel":null,"kind":"Text","segments":1,"pictures":true}"#);
     }
 }
+
+#[cfg(feature = "inspect")]
+pub mod inspect;

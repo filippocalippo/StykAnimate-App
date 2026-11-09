@@ -23,7 +23,9 @@ pub mod digest;
 pub mod fanout;
 pub mod fast;
 pub mod json;
+pub mod lock;
 mod number;
+pub mod paint;
 pub mod payload;
 mod value;
 

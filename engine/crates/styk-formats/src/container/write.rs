@@ -607,7 +607,7 @@ pub fn lift_together_within(document: &Value, reserved: &[Arc<[u8]>], max_bytes:
         let reserved_map = Arc::new(lifter.reserved.clone());
         for (batch_number, batch) in pieces.chunks(threads * 2).enumerate() {
             let slots: Vec<Arc<Mutex<Option<Result<Piece, ContainerError>>>>> = batch.iter().map(|_| Arc::new(Mutex::new(None))).collect();
-            let mut jobs: Vec<Job> = batch
+            let jobs: Vec<Job> = batch
                 .iter()
                 .zip(&slots)
                 .map(|(piece_items, slot)| {

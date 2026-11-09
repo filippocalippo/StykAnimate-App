@@ -38,6 +38,10 @@ pub enum OpenSource<'a> {
     Owned { bytes: Vec<u8>, name: &'a str },
     /// A document as JSON text, and the name it is shown under.
     Json { bytes: &'a [u8], name: &'a str },
+    /// A document already in memory as a tree, and the name it is shown under: a movieclip's own, taken from the project that holds it (as the
+    /// project holds it: its arrays shared with the project's other records, which the open unshares once its memory is reserved, so that the
+    /// document is the one its text would give). Nothing is read from text, so what the open makes is the normalized document and its views.
+    Tree { document: Value, name: &'a str },
 }
 
 /// How far an open got.
@@ -115,6 +119,17 @@ fn block(bytes: usize) -> Result<(), OpenError> {
     copy.try_reserve_exact(bytes).map_err(|_| OpenError::out_of_memory(styk_alloc::OutOfMemory { requested: bytes, available: styk_alloc::headroom() }))
 }
 
+/// How many times the text of a document that is already a tree the open of it may take: the normalized copy and the typed views (a clip of
+/// every figure of a large project took one time its text; the open of its text takes sixteen, for the buffers it parses through).
+pub const OPEN_BYTES_PER_TREE_BYTE: usize = 3;
+
+/// What opening `tree` may take, for the reservation that precedes the open.
+pub fn open_tree_estimate(tree: &Value) -> usize {
+    let text = styk_doc::json::utf16_units_checked::<std::convert::Infallible>(tree, || Ok(())).unwrap_or(0);
+    // The copy that gives the text's arrays (`Value::unshared`) is made once the memory is reserved, and what it allocates is not what the text says.
+    text.saturating_mul(OPEN_BYTES_PER_TREE_BYTE).saturating_add(tree.unshared_cost()).max(OPEN_MINIMUM_BYTES)
+}
+
 /// What opening a document of `file_bytes` bytes may take, for the reservation that precedes the open.
 pub fn open_estimate(file_bytes: usize) -> usize {
     file_bytes.saturating_mul(OPEN_BYTES_PER_BYTE).max(OPEN_MINIMUM_BYTES)
@@ -156,49 +171,52 @@ fn inflated_size(file: &[u8], cancel: &dyn Fn() -> bool) -> Option<usize> {
     }
 }
 
-/// The reservation the open of `source` makes before it starts. A Pivot file's size says little of what it opens to (a project of
-/// 120 MB of pictures stored as they were needs a tenth of what 16 times its size says, and a compressed one needs more of it), so a Pivot
-/// file the estimate by size refuses is asked what it inflates to, and refused only when that does not fit either.
+/// Reserve from the expanded payload even when the compressed file estimate fits. A small file can
+/// inflate to hundreds of megabytes. This projection is followed by counted checks between stages.
 fn reserve_for_open(source: &OpenSource<'_>, cancel: &dyn Fn() -> bool) -> Result<styk_alloc::Reservation, OpenError> {
     let estimate = open_estimate_of(source);
-    let refused = match styk_alloc::reserve(estimate) {
-        Ok(reservation) => return Ok(reservation),
-        Err(refused) => refused,
-    };
     let (bytes, name): (&[u8], &str) = match source {
         OpenSource::File { bytes, name } => (bytes, name),
         OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
-        OpenSource::Json { .. } => return Err(OpenError::out_of_memory(refused)),
+        OpenSource::Json { .. } | OpenSource::Tree { .. } => return styk_alloc::reserve(estimate).map_err(OpenError::out_of_memory),
     };
     if !matches!(extension(name).to_ascii_lowercase().as_str(), "piv" | "stk") {
-        return Err(OpenError::out_of_memory(refused));
+        return styk_alloc::reserve(estimate).map_err(OpenError::out_of_memory);
     }
     let counted = inflated_size(bytes, cancel);
     if cancel() {
         return Err(OpenError::cancelled());
     }
-    match counted.map(|size| size.saturating_mul(PIVOT_OPEN_BYTES_PER_INFLATED_BYTE).max(OPEN_MINIMUM_BYTES)) {
-        Some(real) if real < estimate => styk_alloc::reserve(real).map_err(OpenError::out_of_memory),
-        _ => Err(OpenError::out_of_memory(refused)),
-    }
+    let projected = counted.map_or(estimate, |size| size.saturating_mul(PIVOT_OPEN_BYTES_PER_INFLATED_BYTE).max(OPEN_MINIMUM_BYTES));
+    styk_alloc::reserve(projected).map_err(OpenError::out_of_memory)
+}
+
+fn check_memory(memory: &styk_alloc::Reservation) -> Result<(), OpenError> {
+    memory.overrun().map_or(Ok(()), |error| Err(OpenError::out_of_memory(error)))
 }
 
 /// What opening `source` may take, for the reservation that precedes the open: [`open_estimate`] of the file, or for a project
-/// container (which states how large its parts are) what its parts take, never more than the file's estimate.
+/// container (which states how large its parts are) what its expanded parts take.
 fn open_estimate_of(source: &OpenSource<'_>) -> usize {
     let (bytes, name): (&[u8], &str) = match source {
         OpenSource::File { bytes, name } => (bytes, name),
         OpenSource::Owned { bytes, name } => (bytes.as_slice(), name),
         OpenSource::Json { bytes, .. } => return open_estimate(bytes.len()),
+        OpenSource::Tree { document, .. } => return open_tree_estimate(document),
     };
     let by_size = open_estimate(bytes.len());
     let Some(kind) = styk_formats::Kind::from_extension(&extension(name).to_ascii_lowercase()) else { return by_size };
-    styk_formats::container::open_cost(bytes, kind).map_or(by_size, |cost| cost.clamp(OPEN_MINIMUM_BYTES, by_size))
+    styk_formats::container::open_cost(bytes, kind).map_or(by_size, |cost| cost.max(OPEN_MINIMUM_BYTES))
 }
 
 impl OpenError {
     fn decode(message: impl Into<String>) -> OpenError {
         OpenError { message: message.into(), key: None, params: Vec::new(), code: None, status: None, stage: OpenStage::Decode }
+    }
+
+    /// A refusal that is a message of the interface's, for a document that cannot be opened as asked.
+    pub fn refused(key: &str) -> OpenError {
+        OpenError { key: Some(key.into()), stage: OpenStage::Prepare, ..OpenError::decode(key) }
     }
 
     fn unreadable() -> OpenError {
@@ -428,9 +446,7 @@ impl Engine {
         let fan = OpenFanout { engine: self, cancel, helpers, lost_before: self.workers_lost(), marks: Default::default(), spawned: Default::default() };
         let began = self.now();
         fan.mark("started");
-        // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        // The open allocates in pieces nothing can refuse: it starts only when the memory can hold all of it.
-        let _memory = reserve_for_open(&source, cancel)?;
+        let memory = reserve_for_open(&source, cancel)?;
 
         let mut check = None;
         let (document, kind, version, name, facts) = match source {
@@ -451,6 +467,12 @@ impl Engine {
                     None => read_file(&bytes, name, cancel, &fan, &mut check)?,
                 },
             },
+            OpenSource::Tree { document, name } => {
+                // Copied only now that the open holds the memory it asked for: the copy is as large as the text of the document.
+                let document = document.unshared();
+                let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
+                (document, "json", version, name.to_string(), None)
+            }
             OpenSource::Json { bytes, name } => {
                 let document = styk_doc::json::parse(bytes).map_err(|_| OpenError::unreadable())?;
                 let version = document.get("version").and_then(Value::as_f64).unwrap_or(5.0);
@@ -458,13 +480,14 @@ impl Engine {
             }
         };
         let decoded = self.now();
+        check_memory(&memory)?;
         // A Pivot project's fingerprint (what the codec records of the document read from the file) is computed on a helper while the
         // document is prepared: it holds the document as it was read, and the preparation copies what it changes.
         let fingerprint = facts.map(|facts| {
             let document = document.clone();
             (facts, styk_doc::fanout::start(&fan, move || styk_piv::source_digest(&document).map_err(|error| error.message)))
         });
-        let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan);
+        let opened = self.prepare_opened(document, kind, version, name, options, cancel, &fan, &memory);
         let prepared = self.now();
         let source = match (fingerprint, &opened) {
             (Some((facts, digest)), Ok(_)) => match digest.wait(&fan) {
@@ -475,6 +498,7 @@ impl Engine {
             _ => None,
         };
         let original_first = source.is_some();
+        check_memory(&memory)?;
         // A skeleton that does not match its checksum is the file's error, whatever became of the document read from it. A stopped
         // open does not wait for the check.
         match check {
@@ -504,12 +528,13 @@ impl Engine {
 
     /// The tail of an open: the document read, normalized and made into typed views.
     #[allow(clippy::too_many_arguments)]
-    fn prepare_opened(&self, document: Value, kind: &'static str, version: f64, name: String, options: OpenOptions, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>) -> Result<OpenedDocument, OpenError> {
+    fn prepare_opened(&self, document: Value, kind: &'static str, version: f64, name: String, options: OpenOptions, cancel: &dyn Fn() -> bool, fan: &OpenFanout<'_>, memory: &styk_alloc::Reservation) -> Result<OpenedDocument, OpenError> {
         if cancel() {
             return Err(OpenError::cancelled());
         }
         let started = self.now();
         let mut indexes = styk_edit::load::prepare_for_editor_with(document, options.layer_timeline, fan).map_err(OpenError::from_edit)?;
+        check_memory(memory)?;
         let prepared = self.now();
         if cancel() {
             return Err(OpenError::cancelled());
@@ -527,11 +552,13 @@ impl Engine {
                 OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) }
             }
         })?;
+        check_memory(memory)?;
         if cancel() {
             return Err(OpenError::cancelled());
         }
         let assets = Arc::new(Assets::build(&converted));
         let prepared_views = Arc::new(Prepared::new(Arc::new(converted)));
+        check_memory(memory)?;
         let lineage = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let views = self.now() - prepared;
         let prepare = prepared - started;
@@ -542,7 +569,7 @@ impl Engine {
     /// is now: the stage draws it, playback and exports read it. What changed in `tree` since `typed` was made
     /// is converted again; nothing else is.
     pub fn activate(&self, typed: &Typed, tree: &Value, revision: u64) -> Result<Committed, OpenError> {
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         store.loader = typed.loader.clone();
         store.lineage = typed.lineage;
         store.assets = Some(typed.assets.clone());
@@ -560,10 +587,29 @@ impl Engine {
         self.publish_tree_with(lineage, tree, revision, None)
     }
 
+    /// Worker-only native activation/publication from the session's immutable head. The session stays on its owner
+    /// thread; no open-time tree or loader must be kept alive just to activate a resting project later.
+    pub fn activate_tree_with(&self, lineage: u64, tree: Value, revision: u64, made: Option<Arc<Prepared>>) -> Result<Committed, OpenError> {
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
+        if store.lineage != lineage {
+            store.loader = Loader::new();
+            store.lineage = lineage;
+            store.assets = None;
+            store.prepared = None;
+            store.tree = Value::Null;
+        }
+        let views = if tree.same_node(&store.tree) {
+            store.prepared.clone().map_or(Views::Convert, Views::Same)
+        } else {
+            made.map_or(Views::Convert, Views::Made)
+        };
+        self.publish_locked(store, tree, revision, views)
+    }
+
     /// [`Engine::publish_tree`] with the typed views the caller already made of `tree` (the editing session converts the
     /// document for its own reads): they are published as they are, and the document is converted once.
     pub fn publish_tree_with(&self, lineage: u64, tree: Value, revision: u64, made: Option<Arc<Prepared>>) -> Result<Option<Committed>, OpenError> {
-        let store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = styk_doc::lock::spinning(&self.inner.store);
         if store.lineage != lineage || store.prepared.is_none() {
             return Ok(None);
         }
@@ -578,7 +624,7 @@ impl Engine {
 
     /// The typed views of the document the engine holds, when `tree` is the tree it was published from.
     pub fn views_of(&self, tree: &Value) -> Option<Arc<Prepared>> {
-        let store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let store = styk_doc::lock::spinning(&self.inner.store);
         store.tree.same_node(tree).then(|| store.prepared.clone()).flatten()
     }
 
@@ -587,8 +633,9 @@ impl Engine {
         let (prepared, assets, converted) = match views {
             Views::Same(prepared) => (prepared, store.assets.clone().expect("an activated document has its atlas"), Default::default()),
             Views::Made(prepared) => {
+                let quiet = self.pictures_settled();
                 let assets = Arc::new(match &store.assets {
-                    Some(previous) => previous.extended(&prepared.doc),
+                    Some(previous) => previous.extended_inheriting(&prepared.doc, quiet),
                     None => Assets::build(&prepared.doc),
                 });
                 (prepared, assets, Default::default())
@@ -597,8 +644,9 @@ impl Engine {
                 let name = tree.path(&["_styk", "name"]).and_then(Value::as_str).unwrap_or("").to_string();
                 let document = store.loader.document(&tree, &name).map_err(|error| OpenError { stage: OpenStage::Prepare, ..OpenError::decode(error.to_string()) })?;
                 let converted = store.loader.converted;
+                let quiet = self.pictures_settled();
                 let assets = Arc::new(match &store.assets {
-                    Some(previous) => previous.extended(&document),
+                    Some(previous) => previous.extended_inheriting(&document, quiet),
                     None => Assets::build(&document),
                 });
                 (Arc::new(Prepared::new(Arc::new(document))), assets, converted)
@@ -653,7 +701,7 @@ impl Engine {
     /// a planner reads never include a draft. `None` while no document is open.
     pub fn publish_draft(&self, token: u64, draft: &Draft) -> Result<Option<Committed>, OpenError> {
         let started = self.now();
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         if store.prepared.is_none() {
             return Ok(None);
         }
@@ -677,7 +725,7 @@ impl Engine {
     /// Takes a draft out: the document itself is the generation in front again. `None` when none is held.
     pub fn clear_draft(&self) -> Option<Committed> {
         let started = self.now();
-        let mut store = self.inner.store.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut store = styk_doc::lock::spinning(&self.inner.store);
         store.draft.take()?;
         let (prepared, assets) = (store.prepared.clone()?, store.assets.clone()?);
         let revision = store.revision;

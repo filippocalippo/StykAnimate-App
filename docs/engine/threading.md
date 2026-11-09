@@ -11,6 +11,11 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   revision, prepared document, assets), a task queue, the frame cache and
   image decoding. Every change publishes a new generation; results computed
   for an older one are dropped.
+  Publication retires only queued decodes and redecodes of the replaced lineage.
+  Generic `Engine::spawn` jobs and work owned by another lineage survive in their
+  existing order, before new publication work and frames; idle jobs still follow
+  frames. Queue nodes are detached without allocating or disposing payloads under
+  State; retirement releases the removed nodes and generation on a worker.
 - Frame scheduler (`frames.rs`): the interface admits ticks with
   `try_request_samples`; workers evaluate and encode them (`FrameData`: draw
   list, camera, background). `Budgets::for_device` supplies the existing logical
@@ -104,6 +109,16 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   rechecks readiness without changing the counter. Publishing the document (`Engine::activate`,
   `publish_tree`, [document.md](document.md)) takes the document's lock only for pointer exchanges;
   a worker that reads the document (an edit session starting) tries it once.
+- **No blocking lock on the interface thread, whatever its critical section.** `Mutex::lock` waits with `memory.atomic.wait32`, which
+  throws on a page thread (`RuntimeError: Atomics.wait cannot be called in this context`). The exception passes through the engine's frames
+  without unwinding them, so the objects the call was made on (the `Stage` and the `EditSession` it was given) stay marked as borrowed for
+  good: every later call answers `recursive use of an object detected which would lead to unsafe aliasing in rust`, the stage stops drawing,
+  and a save cannot take its snapshot, so the project cannot be saved from that session. It happened on a movieclip's scene cache (`styk_eval::geometry::clip_scene`,
+  taken by the interface thread and by the workers that prepare frames; seen on a project restored after a crash, whose frames were being
+  prepared as it opened). A mutex the interface thread shares with workers is therefore taken with `styk_doc::lock::once` (one
+  attempt: a cache is skipped where busy and the work done again) or, where the interface thread cannot go without it (the engine's
+  store, the picture and snapshot registries), `styk_doc::lock::spinning`; `Shared::try_lock` and `Shared::lock` are the engine
+  state's own. The interface smoke `scripts/smoke-movieclip-save.mjs` (`STYK_TRACE_WASM=1`) names the first call that throws.
 - No rayon in WebAssembly: `styk_eval::par::map` is sequential there;
   parallelism is whole frames on workers.
 - Library code has no clock, file or thread of its own: the host injects a
@@ -132,6 +147,12 @@ WebAssembly aborts on a panic: the thread's wasm instance traps, no destructor r
 - **Other waiters on a dead worker are not handled.** A frame job on a thread that trapped leaves its tick in flight (`Storage.inflight`) until the next revision or grid change clears it, so that frame is never prepared in between; an image re-decode on one keeps `images.preparation_active()` true, which holds back ordinary tasks and frames (`frames/cache.rs`) until the preparation is cancelled. A small step through `workers_lost` would close both: when the count moves, clear `inflight` (and requeue the wanted ticks) and cancel the image preparation, under the state lock, with the epoch bumped so a late result of a live worker is refused. It needs a trapped thread to test against and is not done: a thread that traps inside the state lock leaves it locked, which nothing outside can undo.
 
 ## Prepared samples
+
+The native host's request owner is [`styk_core::frames`](../native/frames.md).
+Its bounded consumer slots, revision/resource identities, worker-owned ready cache
+and borrowed presentation callback are separate from the browser's existing cache
+controls below. Both prepare through the engine's common `frame_builder` pipeline;
+the native interface never calls a synchronous frame preparation entry.
 
 Fractional interface playback requests use `Engine::try_request_samples` and `frame_at`
 on the existing frame cache. `FrameData::tick` is now `f64`; integer entry points remain
@@ -232,3 +253,24 @@ worker's start, release and fallbacks); `node --test tests/engine-previews.test.
 (the preview worker's queue, cancellation, failure and idle release);
 `engine/viewer/` (a bare page over the engine with `window.viewer` benchmarks);
 the app parity tool.
+
+## Native instance clocks and cancellable Select queries
+
+Native application hosts use `Engine::with_clock` and a captured `HostOptions::clock`;
+opened and restored sessions receive that source through `Session::set_clock_source`.
+The function-pointer constructors remain available to existing engine hosts. Save
+workers take an owned clock source, so parallel jobs do not borrow interface state or
+share an application timestamp. Parallel app instances and fixed-clock tests are independent.
+
+The Select lane owns one cancellation per press and one latest waiting intent. Its
+checked evaluation, geometry, image-decoding and raster APIs discard incomplete work.
+Cancellation never mutates an already published generation. Teardown cancels before
+handing retained payloads to `Worker::shutdown`, which disposes them on the worker;
+the interface neither frees those payloads nor joins the worker.
+
+The same query cancellation reaches movieclip source evaluation (including fractional
+local time), nested scene construction and attached-mesh vertex/face loops, and pose
+channels' source-track sampling and detached-parent geometry. Cancelled clip scenes
+are never inserted into the shared clip cache. Non-cancelled calls retain the same
+arithmetic and traversal order; `styk-eval` tests compare geometry and draw-list bits
+from independent cold loaders as well as the frozen engine fixture suites.

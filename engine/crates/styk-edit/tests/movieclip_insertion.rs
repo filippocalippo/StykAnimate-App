@@ -131,7 +131,7 @@ fn movieclip_insertion_matches_every_editor_step() {
                         max_source_bytes: 128 * 1024 * 1024,
                         check: &mut || Ok(()),
                         progress: &mut |_| {},
-                        clock: || 0.0,
+                        clock: &|| 0.0,
                     },
                 )
             } else {
@@ -228,7 +228,7 @@ fn insertion_publication_rejection_preserves_live_editor() {
                 },
                 check: &mut check,
                 progress: &mut progress,
-                clock: || 0.0,
+                clock: &|| 0.0,
             },
         );
         match result {
@@ -278,7 +278,7 @@ fn combined_movieclip_history_uses_exact_recorded_structural_retention_and_sourc
             let call = items(step.get("call"));
             let method = call[0].as_str().unwrap();
             let result = if sheet && method == "addFigure" {
-                e.call_movieclip_timeline_worker(method, &call[1..], &mut TimelineWorker { max_source_bytes:128*1024*1024, check:&mut ||Ok(()), progress:&mut |_|{}, clock:||0.0 })
+                e.call_movieclip_timeline_worker(method, &call[1..], &mut TimelineWorker { max_source_bytes:128*1024*1024, check:&mut ||Ok(()), progress:&mut |_|{}, clock:&||0.0 })
             } else { e.call(method, &call[1..]) };
             match (result, step.get("error").filter(|v| !v.is_null())) {
                 (Ok(_), None) => (),

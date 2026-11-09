@@ -1,5 +1,60 @@
 # Memory
 
+## Native export ownership
+
+`Engine::for_export` creates an engine with no stage picture consumer. Publication
+still prepares the document and generated materials; `ExportFrames` alone requests
+picture pixels and cel bounds. `Engine::new` and `with_notifier` retain their stage
+preloading behavior. The headless commands use a 32 MiB decode queue, drained after
+each engine step; a larger picture is decoded alone under the existing admission
+protocol. GPU upload batches release their decoded and staging copies before taking
+more. CPU exports retain the pixels their rasterizer reads. Input file buffers are
+dropped after opening.
+
+For more than two sprite pages, native frame sources use the existing `Resident`
+exporter. Two pages are a soft working-set budget; all pages a frame draws are held
+and grow the atlas when necessary. Native exports also protect the previous
+complete frame while loading the next: capacity is bounded by the largest union
+of two adjacent working sets (or the initial two pages), not by export length.
+Older pages remain eligible for eviction; an unchanged working set is not uploaded
+again. Unused pictures are not decoded. Drawing cels
+are first decoded for their bounds, then their visible tiles are requested and
+uploaded under the same readiness/refusal protocol as other resident exports.
+Uploads wait on the exporter's interruptible GPU poller, so cancellation or device
+loss also wakes a pending upload batch. A frame never draws partial residency.
+
+The native video worker prefetches exactly its next ordered frame after submitting
+the current frame's last tile and before waiting for readback. Evaluation/decode
+and uploads can overlap the submitted drawing. An empty upload batch never waits
+for the GPU; actual staging batches retain their existing byte bound and wait.
+All of this work remains inside the producer's draw-time measurement. The next
+frame stays in the existing bounded `ExportFrames` cache until taken. Reverse and
+shuffled orders use the caller's actual successor. No extra decode thread or queue
+is created; cancellation uses the same interrupt and disposer.
+
+Native devices use wgpu's default allocation policy. The small-block and geometric
+pool experiments were removed after exclusive paired measurements; pool design is
+deferred until native commitment can be measured. Resource lifetime retention and
+byte bounds remain. Live GPU allocations and reserved allocator blocks are
+separate, overlapping measures; neither attributes all process-private commitment.
+Native exports keep at most one frame's tiles in flight, within the existing
+64 MiB readback budget. Serializing tiles reduced overlap but regressed frame time
+in paired measurements; the tiles remain pipelined. Browser hosts still pipeline
+tiles and frames to hide mapping latency across processes.
+
+Isolation page counts and power-of-two primitive capacities retain their high-water
+marks while the renderer is alive. Unused isolation, MSAA and effect slots remain
+available to the next frame. Readbacks retain one frame's tile capacity for the
+export. The existing disposal path releases these owners at export end or document
+close; no frame-count timer stands in for stage idle time.
+Exact page/effect dimensions still follow the frame because normalized sampling
+depends on them; changing those dimensions still replaces the texture. Array
+textures retain D11's two-layer minimum. Stage admission includes retained capacity
+and actual replacement dimensions, including both owners during replacement, without
+raising its byte limit. Non-exact callers retain dimensions until view
+reconfiguration or owner close; the native stage uses exact dimensions for parity.
+Pipelines and effect uniforms remain reusable.
+
 The engine, its documents, their edit sessions and history, and the decoded pictures share one
 WebAssembly memory with a fixed maximum (2 GiB, else the largest the browser reserves:
 [D14](decisions/0014-shared-memory-maximum.md)). A module that runs out of it aborts
@@ -164,7 +219,9 @@ cannot be refused are covered by the loss of the worker it ends with (`finish` i
 the app, exports it unchanged and edited, saves it as a project and opens that. The opened padded Ayame exports unchanged (the file again, byte for byte), saves as a project and opens that again at 100 and 122 MB (release build), and
 exports edited at 100. The document the codec is sent for a Pivot export is JSON of at most 256 MiB, and it holds the padding twice over, as a project's pictures are
 (`data_base64` and `data_url`): at 122 MB it is 265 MB of 268, and at 133 MB the export, edited or not, is refused with "The request exceeds the configured size
-limit" while the project opens (as it did with the codec holding the original: the document is the same).
+limit" while the project opens (as it did with the codec holding the original: the document is the same). That limit is the request's, not the file's: the engine's native export (`Output::Pivot`) writes the file from the tree without a request, and a padded file of 133 MB edited once exports (140,043,076 bytes, identical to what the codec writes given room for the request, 7.4 s, a peak of 2,008 MiB private bytes natively, 1,338 over the edited document that was open: the export asks for the codec's working storage and the original twice, and for the rest as it goes: it is refused, with nothing written, as soon as it has outgrown the memory, see `docs/engine/document.md`). The browser still sends the request.
+
+**A very compressible file, natively.** A Pivot file of 1.1 MB that inflates to the 256 MiB a project may be opens and peaks at 1,368 MiB (5.5 times what it inflates to), holds 599 with the document open, and the process holds what it held before once the document is closed (`tests/memory_release.rs`). The memory that stays after such an open in the browser is the allocator's high-water mark (above), not the engine's. The 256 MiB a project may be, as a file and inflated, is today's limit and not a new one (`codecs/piv_codec.py`: `MAX_PAYLOAD_BYTES = 256 * 1024 * 1024`, "Project exceeds size limit" for a longer file, "Decompressed project exceeds size limit" for a longer payload, a payload of exactly that length read; `the_size_limits_are_those_of_the_python_codec` in `styk-piv`). A cancelled Pivot export is seen within a tenth of a second on a 60 MB padded file (595 ms before the fingerprint and the original's hash asked as they went: `tests/export_cancel.rs`).
 
 **The allocator lock** (`std`'s wasm allocator: one spinning lock for every thread). Timed with a gate in front of it, tdd2
 and svr_uriel through open, play and scrub, eight workers: a worker finds the lock taken on 5 to 40 % of its calls and

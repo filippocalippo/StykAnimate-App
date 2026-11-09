@@ -50,7 +50,7 @@
 //!
 //! A module whose limit is not set (the codec, the drawing engine) is never refused. Native builds
 //! use the system allocator, which does not count: there [`live_bytes`] stays 0 and only a limit a
-//! test sets ([`with_limit`]) makes [`admit`] refuse.
+//! test sets ([`with_limit`]) makes [`admit`] refuse, unless the program installs [`Counting`], the system allocator with the bytes counted.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -135,7 +135,7 @@ pub fn with_limit<T>(bytes: usize, run: impl FnOnce() -> T) -> T {
     run()
 }
 
-fn limit() -> usize {
+pub fn limit() -> usize {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(bytes) = TEST_LIMIT.with(std::cell::Cell::get) {
         return bytes;
@@ -187,6 +187,8 @@ pub fn admit(bytes: usize) -> Result<(), OutOfMemory> {
 #[derive(Debug)]
 pub struct Reservation {
     bytes: usize,
+    /// The bytes handed out when it was made: what the work has taken since is what it has used.
+    live: usize,
     /// The name the work gave it ([`reserve_named`]), under which the host can give it back if the work dies without dropping it.
     token: Option<u64>,
 }
@@ -217,6 +219,17 @@ impl Reservation {
     /// The bytes held.
     pub fn bytes(&self) -> usize {
         self.bytes
+    }
+
+    /// Whether the work that holds this reservation has taken more than the memory has for it: what it has taken since the reservation was
+    /// made against what the memory still had then, less what others have reserved since. For work that allocates in pieces nothing can
+    /// refuse one by one and asks between its steps, so that it stops, with its buffers dropped, instead of reaching into the reserve.
+    /// Where the allocator does not count the answer is always `None`.
+    pub fn overrun(&self) -> Option<OutOfMemory> {
+        let others = RESERVED.load(Ordering::Relaxed).saturating_sub(self.bytes);
+        let available = ceiling().saturating_sub(self.live).saturating_sub(others);
+        let used = live_bytes().saturating_sub(self.live);
+        (used > available).then_some(OutOfMemory { requested: used, available })
     }
 }
 
@@ -258,7 +271,7 @@ fn reserve_as(bytes: usize, token: Option<u64>) -> Result<Reservation, OutOfMemo
                 if let Some(token) = token {
                     NAMED.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((token, bytes));
                 }
-                return Ok(Reservation { bytes, token });
+                return Ok(Reservation { bytes, live: live_bytes(), token });
             }
             Err(now) => reserved = now,
         }
@@ -270,6 +283,11 @@ fn reserve_as(bytes: usize, token: Option<u64>) -> Result<Reservation, OutOfMemo
 fn refuses(size: usize, live: usize, limit: usize) -> bool {
     size >= LARGE_BYTES && live.saturating_add(size) > limit - limit / 16
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native;
+#[cfg(not(target_arch = "wasm32"))]
+pub use native::Counting;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -353,6 +371,32 @@ mod tests {
             drop(done);
             assert_eq!(release_named(9), 0);
             assert_eq!(reserved_bytes(), before);
+        });
+    }
+
+    #[test]
+    fn work_that_outgrows_its_memory_is_told_so_between_its_steps() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        with_limit(64 << 20, || {
+            LIVE.store(10 << 20, Ordering::Relaxed);
+            let work = reserve(8 << 20).unwrap();
+            assert_eq!(work.overrun(), None, "nothing taken yet");
+            // 40 MiB more: the ceiling is 60 MiB and 10 MiB were there.
+            LIVE.store(50 << 20, Ordering::Relaxed);
+            assert_eq!(work.overrun(), None, "it took more than it reserved, and the memory had it");
+            LIVE.store(61 << 20, Ordering::Relaxed);
+            let over = work.overrun().expect("51 MiB taken of the 50 the memory had");
+            assert_eq!((over.requested, over.available), (51 << 20, 50 << 20));
+            // What others reserved since is not the work's to take.
+            LIVE.store(10 << 20, Ordering::Relaxed);
+            let other = reserve(5 << 20).unwrap();
+            LIVE.store(50 << 20, Ordering::Relaxed);
+            assert_eq!(work.overrun(), None, "40 MiB taken of the 45 left");
+            LIVE.store(56 << 20, Ordering::Relaxed);
+            let over = work.overrun().expect("46 MiB taken of the 45 left");
+            assert_eq!((over.requested, over.available), (46 << 20, 45 << 20));
+            drop(other);
+            LIVE.store(0, Ordering::Relaxed);
         });
     }
 

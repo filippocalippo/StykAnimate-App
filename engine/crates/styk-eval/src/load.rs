@@ -46,6 +46,9 @@ pub struct Loader {
     pub notes: Vec<String>,
     /// Image index by the address of its payload (a blob's bytes or a string's text), while the payload exists.
     image_of: HashMap<usize, (Payload, u32)>,
+    /// The tiles of a drawing cel by the address of the payload they were read from (a figure record that changed only in
+    /// its bounds or revision names the same payload): read once, shared by every view of them.
+    tile_sets: HashMap<usize, (Payload, Arc<TileSet>)>,
     /// The images with the same length and hash, to find an image whose payload was made anew.
     images_by_content: HashMap<(usize, u64), Vec<u32>>,
     /// Typed views by the address of the record they were built from. The source
@@ -94,6 +97,17 @@ impl Source {
     fn held(&self) -> bool {
         self.0.strong_count() > 0
     }
+}
+
+/// A drawing cel's tile payload, read: its tiles, the tiles drawn at each level and the identity of the pixels.
+struct TileSet {
+    tiles: Vec<(i32, i32, Arc<[u8]>)>,
+    levels: Vec<Vec<(i32, i32)>>,
+    identity: Arc<()>,
+    /// What decoding the pixels resolves ([`DrawingTiles::decoded_bounds`], [`DrawingTiles::tile_ink`]): a property of the payload, so every
+    /// view of it shares them.
+    decoded_bounds: Arc<std::sync::OnceLock<Option<[f64; 4]>>>,
+    tile_ink: Arc<std::sync::OnceLock<Arc<HashMap<(i32, i32), [i64; 4]>>>>,
 }
 
 /// The payload of an image field, held without keeping it alive (as [`Source`] does for records).
@@ -233,6 +247,7 @@ impl Loader {
             images: Vec::new(),
             notes: Vec::new(),
             image_of: HashMap::new(),
+            tile_sets: HashMap::new(),
             images_by_content: HashMap::new(),
             figures: HashMap::new(),
             keyframes: HashMap::new(),
@@ -572,6 +587,7 @@ impl Loader {
         self.animations.retain(|_, (source, _)| source.held());
         self.tracks.retain(|_, (source, _)| source.held());
         self.image_of.retain(|_, (payload, _)| payload.held());
+        self.tile_sets.retain(|_, (payload, _)| payload.held());
         let live: std::collections::HashSet<usize> = self.figures.values().map(|(_, figure)| Arc::as_ptr(figure) as usize).collect();
         self.styled.retain(|(base, _), _| live.contains(base));
     }
@@ -760,12 +776,24 @@ impl Loader {
             (Some(w), Some(h)) => Some([w, h]),
             _ => None,
         };
-        let tiles = a.get("styk_tiles").and_then(Value::payload_bytes).and_then(|bytes| {
+        let tiles = a.get("styk_tiles").and_then(|field| {
             let anchor = point(a.get("drawing_anchor")).unwrap_or(start);
-            crate::drawing::parse_tiles(&bytes).map(|tiles| {
-                let levels = crate::drawing::level_tiles(&tiles);
-                Arc::new(DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: Default::default(), tiles, levels })
-            })
+            let (identity, payload) = match field {
+                Value::Blob(blob) => (blob.bytes.as_ptr() as usize, Payload::Bytes(Arc::downgrade(&blob.bytes))),
+                Value::Str(text) => (text.as_ptr() as usize, Payload::Text(Arc::downgrade(text))),
+                _ => return None,
+            };
+            let set = match self.tile_sets.get(&identity) {
+                Some((_, set)) => set.clone(),
+                None => {
+                    let tiles = crate::drawing::parse_tiles(&field.payload_bytes()?)?;
+                    let levels = crate::drawing::level_tiles(&tiles);
+                    let set = Arc::new(TileSet { tiles, levels, identity: Arc::new(()), decoded_bounds: Arc::default(), tile_ink: Arc::default() });
+                    self.tile_sets.insert(identity, (payload, set.clone()));
+                    set
+                }
+            };
+            Some(Arc::new(DrawingTiles { anchor, pixels_per_unit, bounds, decoded_bounds: set.decoded_bounds.clone(), tile_ink: set.tile_ink.clone(), inherited_ink: Default::default(), tiles: set.tiles.clone(), levels: set.levels.clone(), identity: set.identity.clone() }))
         });
         let image = if tiles.is_some() { None } else { self.image(a, &["data_url", "data_base64", "data_uri"]) };
         let size = match (num(a, "width"), num(a, "height")) {
@@ -958,7 +986,7 @@ impl Loader {
     /// this slot is the one `previous` had". Only changed poses cross the boundary
     /// while a gesture runs. Figures come from `doc`.
     pub fn edit_frame(&mut self, value: &Value, previous: Option<&crate::eval::Frame>, doc: &Document) -> Result<crate::eval::Frame, Error> {
-        self.edit_frame_with_ik(value, previous, None, doc)
+        self.edit_frame_with_ik(value, previous, None, doc, &|| false)
     }
 
     /// Converts an edit frame with the previous coherent raw/typed record from
@@ -975,15 +1003,22 @@ impl Loader {
     /// successfully converted by this Loader in `doc`'s current lineage.
     /// `value` may use the same null delta convention as [`Self::edit_frame`].
     pub fn edit_frame_reusing_ik(&mut self, value: &Value, previous_record: &Value, previous: &crate::eval::Frame, doc: &Document) -> Result<crate::eval::Frame, Error> {
-        self.edit_frame_with_ik(value, Some(previous), Some(previous_record), doc)
+        self.edit_frame_with_ik(value, Some(previous), Some(previous_record), doc, &|| false)
     }
 
-    fn edit_frame_with_ik(&mut self, value: &Value, previous: Option<&crate::eval::Frame>, previous_record: Option<&Value>, doc: &Document) -> Result<crate::eval::Frame, Error> {
+    pub(crate) fn edit_frame_cancellable(&mut self, value: &Value, doc: &Document, cancelled: &dyn Fn() -> bool) -> Result<crate::eval::Frame, Error> {
+        self.edit_frame_with_ik(value, None, None, doc, cancelled)
+    }
+
+    fn edit_frame_with_ik(&mut self, value: &Value, previous: Option<&crate::eval::Frame>, previous_record: Option<&Value>, doc: &Document, cancelled: &dyn Fn() -> bool) -> Result<crate::eval::Frame, Error> {
+        let check = || if cancelled() { Err(Error::Format("evaluation cancelled".into())) } else { Ok(()) };
+        check()?;
         let items = value.get("objects").and_then(Value::as_arr).unwrap_or(&[]);
         let previous_items = previous_record.and_then(|record| record.get("objects")).and_then(Value::as_arr)
             .filter(|old| old.len() == items.len() && previous.is_some_and(|frame| frame.objects.len() == items.len()));
         let mut objects = Vec::with_capacity(items.len());
         for (slot, item) in items.iter().enumerate() {
+            check()?;
             if item.is_null() {
                 let kept = previous.and_then(|frame| frame.objects.get(slot)).ok_or_else(|| Error::Format(format!("the edit frame keeps object {slot}, which the previous frame does not have")))?;
                 objects.push(kept.clone());
@@ -1000,7 +1035,7 @@ impl Loader {
             };
             let mut object = Arc::new(object);
             if let Some(base) = doc.figure(object.figure) {
-                self.styled_object(base, &mut object);
+                self.styled_object_cancellable(base, &mut object, cancelled).ok_or_else(|| Error::Format("evaluation cancelled".into()))?;
             }
             objects.push(object);
         }
@@ -1013,6 +1048,7 @@ impl Loader {
             }
             None => crate::vfx::parse::stacks(value.get("_stykVfx"), &mut self.notes),
         };
+        check()?;
         let key = Self::keyframe_of(value, objects, vfx);
         let count = key.objects.len();
         Ok(crate::eval::Frame {
@@ -1297,35 +1333,39 @@ impl Loader {
     /// Stick Nodes sprite's stretch and pivot applied to the figure's pictures, sharing
     /// identical results. Returns whether the object changed.
     fn styled_object(&mut self, base: &Arc<Figure>, object: &mut Arc<Object>) -> bool {
+        self.styled_object_cancellable(base, object, &|| false).expect("uncancelled style")
+    }
+
+    fn styled_object_cancellable(&mut self, base: &Arc<Figure>, object: &mut Arc<Object>, cancelled: &dyn Fn() -> bool) -> Option<bool> {
+        if cancelled() { return None; }
         let (style, sprite) = (object.style.clone(), object.sticknodes_sprite.clone());
         if style.is_none() && sprite.is_none() {
-            return false;
+            return Some(false);
         }
         if object.figure_override.as_ref().is_some_and(|resolved| resolved.base.as_ref().is_some_and(|b| Arc::ptr_eq(b, base))) {
-            return false;
+            return Some(false);
         }
         let mut key = style.as_ref().map_or_else(String::new, |style| style.key.clone());
         if let Some(sprite) = &sprite {
             key.push_str(&format!("\u{1}sprite {:x} {:x} {:x}", sprite.ratio.to_bits(), sprite.pivot[0].to_bits(), sprite.pivot[1].to_bits()));
         }
-        let resolved = self
-            .styled
-            .entry((Arc::as_ptr(base) as usize, key))
-            .or_insert_with(|| {
+        let resolved = match self.styled.entry((Arc::as_ptr(base) as usize, key)) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.get().1.clone(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
                 let mut figure = match &style {
-                    Some(style) => crate::style::resolve(base, style),
+                    Some(style) => crate::style::resolve_cancellable(base, style, cancelled)?,
                     None => (**base).clone(),
                 };
                 if let Some(sprite) = &sprite {
                     crate::sticknodes::sprite_figure(&mut figure, sprite);
                 }
+                if cancelled() { return None; }
                 figure.base = Some(base.clone());
-                (base.clone(), Arc::new(figure))
-            })
-            .1
-            .clone();
+                entry.insert((base.clone(), Arc::new(figure))).1.clone()
+            }
+        };
         Arc::make_mut(object).figure_override = Some(resolved);
-        true
+        Some(true)
     }
 
     /// A frame converted against an earlier document, brought to `doc`: an object whose style overlay or Stick Nodes sprite was resolved

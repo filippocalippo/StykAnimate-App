@@ -31,6 +31,14 @@ impl EngineHandle {
         EngineHandle { engine: Engine::with_notifier(clock, Budgets::for_device(device_memory_gib), Some(notify_progress)), jobs: Default::default() }
     }
 
+    /// Sets the memory the module may hold before large requests are refused, and answers the limit it had: for a test that makes a
+    /// project too large for it, then puts the limit back.
+    pub fn limit_memory(&self, bytes: f64) -> f64 {
+        let before = styk_alloc::limit();
+        styk_alloc::set_limit(bytes as usize);
+        before as f64
+    }
+
     /// An address a worker passes to [`worker_run`]. Each call adds one owner.
     pub fn address(&self) -> usize {
         Box::into_raw(Box::new(self.engine.clone())) as usize

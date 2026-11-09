@@ -126,6 +126,18 @@ impl EngineHandle {
         }
     }
 
+    /// Opens the movieclip `type_id` of the project `session` holds, on this thread: its document is taken from the project's tree, as it is,
+    /// not read from text (a clip of every figure of a large project is hundreds of megabytes of it). The pose arrays the clip shares with the
+    /// project are the clip's own, as the text of it would give them (`Value::unshared`: a file stores an array that two places share once).
+    pub fn open_movieclip(&self, session: &EditSession, type_id: f64, options: &str) -> Result<OpenedDocument, JsError> {
+        let (options, _) = options_of(options)?;
+        let (document, name) = session.movieclip_document(type_id).map_err(|key| js_error(OpenError::refused(key).to_json()))?;
+        match self.engine.open_document_with(OpenSource::Tree { document, name: &name }, options, &|| false, 0) {
+            Ok(opened) => Ok(OpenedDocument::new(self.engine.clone(), opened, None)),
+            Err(error) => Err(js_error(error.to_json())),
+        }
+    }
+
     /// Opens a document on this thread and returns it: for small documents (a new one, a tutorial's), where
     /// the editor needs the document at once.
     pub fn open_document_now(&self, bytes: &[u8], name: &str, source: &str, options: &str) -> Result<OpenedDocument, JsError> {
@@ -152,6 +164,7 @@ fn build_meta(opened: &Opened) -> String {
     out.set("savedDraft", Value::Bool(opened.indexes.saved_draft));
     // Whether the document was read from a Pivot file it can carry (`attach_source`).
     out.set("source", Value::Bool(opened.source.is_some()));
+    out.set("repairs", Value::Num(opened.indexes.repairs as f64));
     out.set("indexes", opened.indexes.indexes());
     let mut timings = Obj::new();
     for (phase, ms) in &opened.timings {
@@ -315,7 +328,7 @@ impl ViewPart {
 #[wasm_bindgen]
 impl OpenedDocument {
     /// What the interface needs to know before it reads the document, as JSON: its `name`, `kind`, `version`,
-    /// the `lineage` of its generations, whether it stored a frame draft (`savedDraft`), the `indexes` the editor
+    /// the `lineage` of its generations, whether it stored a frame draft (`savedDraft`), how many things the load mended (`repairs`), the `indexes` the editor
     /// adopts (next identities, figures per layer, tracks) and the `splits` its view arrives in
     /// (`path`, and `count` of an array or `keys` of an object).
     pub fn meta(&self) -> String {

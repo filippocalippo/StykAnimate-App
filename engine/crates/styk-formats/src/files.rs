@@ -207,7 +207,10 @@ pub trait Host {
         1
     }
 
-    /// Milliseconds, for timings; a plain function so that any thread can call it. Zero by default.
+    /// Monotonic milliseconds, including a captured host clock when supplied.
+    fn clock_source(&self) -> std::sync::Arc<dyn Fn() -> f64 + Send + Sync> { std::sync::Arc::new(self.clock()) }
+
+    /// Legacy function-pointer clock, zero by default.
     fn clock(&self) -> fn() -> f64 {
         || 0.0
     }
@@ -305,7 +308,7 @@ pub fn save(kind: Kind, skeleton: Arc<Vec<u8>>, arrays: Arc<Vec<u8>>, payloads: 
         native::validate_figure(&json::parse(&skeleton).map_err(ContainerError::from)?, kind)?;
     }
     let stats = SaveStats { container_raw_bytes: skeleton.len() + arrays.len() + payloads.len() };
-    let clock = host.clock();
+    let clock = host.clock_source();
     let mut frames_ms = 0.0;
     let mut timings = [FrameTimings::default(); 3];
     let blocks = [skeleton, arrays, payloads];
@@ -321,6 +324,7 @@ pub fn save(kind: Kind, skeleton: Arc<Vec<u8>>, arrays: Arc<Vec<u8>>, payloads: 
         // the size of the worst case, and three of them at once would put the largest two beside the sections in the memory.
         {
             let (blocks, made) = (blocks.clone(), made.clone());
+            let clock = clock.clone();
             jobs.push(Box::new(move |stop_now| {
                 for &index in &order {
                     // One call per frame, so a stop is obeyed before it and after it, not inside it.
@@ -338,6 +342,7 @@ pub fn save(kind: Kind, skeleton: Arc<Vec<u8>>, arrays: Arc<Vec<u8>>, payloads: 
         }
         for &index in &order {
             let (raw, made) = (blocks[index].clone(), made.clone());
+            let clock = clock.clone();
             jobs.push(Box::new(move |stop_now| {
                 let started = clock();
                 if let Some(digest) = styk_doc::digest::sha256_until(&raw, stop_now) {

@@ -893,6 +893,7 @@ impl Editor {
                 ("timing", Value::Bool(true)),
             ],
         );
+        self.publish_property_preview(edit.preview);
         Ok(true)
     }
     pub(super) fn cancel_native_animation_edit(&mut self) -> Result<bool, EditError> {

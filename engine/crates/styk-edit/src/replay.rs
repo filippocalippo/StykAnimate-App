@@ -159,7 +159,7 @@ fn replay_with_worker(reference: &Value, worker: bool, max_source_bytes: usize) 
                     max_source_bytes,
                     check: &mut || Ok(()),
                     progress: &mut |_| {},
-                    clock: || 0.0,
+                    clock: &|| 0.0,
                 })
             } else { editor.call(&method, args) }
         };

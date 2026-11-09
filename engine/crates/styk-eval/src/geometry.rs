@@ -442,8 +442,10 @@ struct Built {
 /// What a build keeps of one object for the next build over the same document.
 #[derive(Clone)]
 struct Kept {
-    object: Arc<Object>,
-    figure: Arc<Figure>,
+    // Identity only: a sleeping reuse owner must not pin sampled pose graphs.
+    // Weak keeps the allocation identity stable even after its payload is gone.
+    object: std::sync::Weak<Object>,
+    figure: std::sync::Weak<Figure>,
     /// Where the figure stood in the scene's table (the items name it).
     table: u32,
     root: [u64; 2],
@@ -455,7 +457,7 @@ struct Kept {
 
 impl Kept {
     fn new(object: &Arc<Object>, figure: &Arc<Figure>, table: u32, root: [f64; 2], ik: Option<crate::ik::Solution>, built: Arc<Built>) -> Kept {
-        Kept { object: object.clone(), figure: figure.clone(), table, root: root.map(f64::to_bits), ik, built, serial: 0 }
+        Kept { object: Arc::downgrade(object), figure: Arc::downgrade(figure), table, root: root.map(f64::to_bits), ik, built, serial: 0 }
     }
 }
 
@@ -463,7 +465,7 @@ impl Kept {
 /// (the same node of the typed frame), its figure, the root it hangs from and the pose inverse kinematics gave it.
 fn reuse(previous: Option<&[Option<Kept>]>, slot: usize, object: &Arc<Object>, figure: &Arc<Figure>, table: u32, root: [f64; 2], ik: Option<&crate::ik::Solution>) -> Option<Arc<Built>> {
     let kept = previous?.get(slot)?.as_ref()?;
-    (Arc::ptr_eq(&kept.object, object) && Arc::ptr_eq(&kept.figure, figure) && kept.table == table && kept.root == root.map(f64::to_bits) && kept.ik.as_ref() == ik).then(|| kept.built.clone())
+    (kept.object.as_ptr() == Arc::as_ptr(object) && kept.figure.as_ptr() == Arc::as_ptr(figure) && kept.table == table && kept.root == root.map(f64::to_bits) && kept.ik.as_ref() == ik).then(|| kept.built.clone())
 }
 
 /// Numbers the builds of every memory: an object's build is never taken for another memory's.
@@ -574,7 +576,7 @@ pub fn segment_pose(obj: &Object, seg: &crate::doc::Segment, i: usize) -> (f64, 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, root: [f64; 2], ik: Option<&crate::ik::Solution>, measure: Measure, render_output: bool) -> Built {
+fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, root: [f64; 2], ik: Option<&crate::ik::Solution>, measure: Measure, render_output: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Built {
     let obj = &frame.objects[slot];
     let n = fig.segments.len();
     let scale = obj.scale;
@@ -613,6 +615,7 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
     let mut authored: Vec<f64> = if has_spatial { vec![f64::NAN; n] } else { Vec::new() };
     let mut start_raws: Vec<Option<[f64; 3]>> = if has_spatial { vec![None; n] } else { Vec::new() };
     for &i in order {
+        if cancelled() { return Built::new(ObjectGeometry::default()); }
         let i = i as usize;
         let seg = &fig.segments[i];
         let parent = plan.parent[i];
@@ -779,6 +782,7 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
         }
     }
     for (pi, poly) in fig.polyfills.iter().enumerate() {
+        if cancelled() { return Built::new(ObjectGeometry::default()); }
         let pp = &plan.polygons[pi];
         let p0 = points.len() as u32;
         // A depth-tested face of a perspective pose is clipped before projection,
@@ -1050,7 +1054,8 @@ struct JoinedParent<'a> {
 /// bone alone owns its orientation and the instance's root is the bone's start. The app's `boundsOf` measures the mesh's faces
 /// ([`Scene::measured`]); the handle paints nothing.
 #[allow(clippy::too_many_arguments)]
-fn build_clip_mesh(frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, clip: &Movieclip, meshes: &[Arc<crate::spatial::ClipMesh>], mut root: [f64; 2], parent: Option<JoinedParent<'_>>, measure: Measure) -> Built {
+fn build_clip_mesh(frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, clip: &Movieclip, meshes: &[Arc<crate::spatial::ClipMesh>], mut root: [f64; 2], parent: Option<JoinedParent<'_>>, measure: Measure, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Built> {
+    if cancelled() { return None; }
     let obj = &frame.objects[slot];
     let local_angle = obj.angles.first().copied().unwrap_or(0.0);
     let scale = obj.scale;
@@ -1072,7 +1077,7 @@ fn build_clip_mesh(frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, c
     let angle = attachment.as_ref().map_or(local_angle, |a| a.figure_angle);
     let end = [root[0] + 40.0 * scale * styk_math::cos(angle), root[1] + 40.0 * scale * styk_math::sin(angle)];
     let mut built = Built::new(ObjectGeometry { slot: slot as u32, uid: obj.uid, figure: fig.id, root, scale, ends: vec![end], starts: vec![root], lengths: vec![40.0 * scale], raw_segments: vec![RawSegment { drawing_end: end, ..Default::default() }], opacity, resolved: true, spatial: None, rig: None, extent: handle_extent(root, end), angles: vec![angle], solution: None });
-    let Some(local) = obj.clip_time else { return built };
+    let Some(local) = obj.clip_time else { return Some(built) };
     let transition = match &obj.color_transition {
         Some(c) => {
             built.transitions.push(**c);
@@ -1092,7 +1097,7 @@ fn build_clip_mesh(frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, c
         attachment,
         colors: mesh.colors.iter().map(|&c| object_rgb(c, obj.color, obj.color_transition.as_deref())).collect(),
     };
-    let mut geometry = crate::spatial::evaluate_clip_mesh(mesh, pose);
+    let mut geometry = crate::spatial::evaluate_clip_mesh_cancellable(mesh, pose, cancelled)?;
     for drawable in geometry.split(&[]) {
         built.items.push(Item {
             slot: slot as u32,
@@ -1126,19 +1131,32 @@ fn build_clip_mesh(frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, c
     if matches!(measure, Measure::Bounds | Measure::Shapes) {
         built.measured = built.items.clone();
     }
-    built
+    if cancelled() { None } else { Some(built) }
 }
 
 /// The clip's own scene at a local time, shared by every instance.
 pub fn clip_scene(clip: &Movieclip, local: f64) -> Arc<Scene> {
+    clip_scene_checked(clip, local, &|| false).expect("uncancelled clip scene")
+}
+
+fn clip_scene_checked(clip: &Movieclip, local: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Arc<Scene>> {
+    if cancelled() { return None; }
     let key = local.to_bits();
-    if let Some(s) = clip.cache.lock().unwrap().get(&key) {
-        return s.clone();
+    // The interface thread builds frames too, beside the workers that prepare them, and may not wait: the cache is tried once and a scene is
+    // made again where it is held (`styk_doc::lock::once`; a blocking lock throws on a browser's page thread and leaves the stage and the
+    // sessions marked as borrowed for good).
+    if let Some(cache) = styk_doc::lock::once(&clip.cache) {
+        if let Some(s) = cache.get(&key) {
+            return Some(s.clone());
+        }
     }
-    let frame = clip.prepared.evaluate_clip(clip.source_start + local);
-    let scene = Arc::new(build(&clip.document, &frame));
-    let mut cache = clip.cache.lock().unwrap();
-    cache.publish(key, scene, &clip.document.scene_budget)
+    let frame = clip.prepared.evaluate_clip_cancellable(clip.source_start + local, cancelled)?;
+    let scene = Arc::new(build_cancellable(&clip.document, &frame, cancelled)?);
+    if cancelled() { return None; }
+    Some(match styk_doc::lock::once(&clip.cache) {
+        Some(mut cache) => cache.publish(key, scene, &clip.document.scene_budget),
+        None => scene,
+    })
 }
 
 /// The drawing a spatial bone turns a movieclip to (`rotatedDrawing`): the view its turn and
@@ -1209,7 +1227,9 @@ fn yaw_step(yaw: f64, steps: f64) -> f64 {
 }
 
 /// `buildMovieclipGeometrySteps`: the clip's scene placed at its pivot.
-fn build_clip(frame: &Frame, slot: usize, fig: &Figure, clip: &Movieclip, root: [f64; 2], parent: Option<JoinedParent<'_>>) -> Built {
+#[allow(clippy::too_many_arguments)]
+fn build_clip(frame: &Frame, slot: usize, fig: &Figure, clip: &Movieclip, root: [f64; 2], parent: Option<JoinedParent<'_>>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Built> {
+    if cancelled() { return None; }
     let obj = &frame.objects[slot];
     let drawing = parent.as_ref().and_then(|parent| rotated_drawing(clip, obj, parent));
     let root = drawing.as_ref().map_or(root, |d| d.root);
@@ -1220,10 +1240,10 @@ fn build_clip(frame: &Frame, slot: usize, fig: &Figure, clip: &Movieclip, root: 
     let end = [root[0] + 40.0 * angle.cos() * scale, root[1] + 40.0 * angle.sin() * scale];
     let opacity = 1.0 - obj.transparency / 255.0;
     let mut built = Built::new(ObjectGeometry { slot: slot as u32, uid: obj.uid, figure: fig.id, root, scale, ends: vec![end], starts: vec![root], lengths: vec![40.0 * scale], raw_segments: vec![RawSegment { drawing_end: end, ..Default::default() }], opacity, resolved: true, spatial: None, rig: None, extent: handle_extent(root, end), angles: vec![angle], solution: None });
-    let Some(local) = obj.clip_time else { return built };
+    let Some(local) = obj.clip_time else { return Some(built) };
     // A rotated drawing shows the frame its bone selects, whatever the clip's own time.
     let local = drawing.as_ref().map_or(local, |d| d.frame);
-    let source = clip_scene(clip, local);
+    let source = clip_scene_checked(clip, local, cancelled)?;
     // Meshes inside the clip keep their evaluated positions: the editor places a
     // clip's points, starts and ends, and a mesh drawable has none of them.
     built.meshes = source.meshes.clone();
@@ -1245,6 +1265,7 @@ fn build_clip(frame: &Frame, slot: usize, fig: &Figure, clip: &Movieclip, root: 
     let hidden = clip.document.layers.as_ref().map(|l| l.hidden.clone()).unwrap_or_default();
     let mut chain_ids: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
     for it in &source.items {
+        if cancelled() { return None; }
         let child = &source.objects[it.slot as usize];
         if !hidden.is_empty()
             && let Some(layers) = &clip.document.layers
@@ -1262,6 +1283,7 @@ fn build_clip(frame: &Frame, slot: usize, fig: &Figure, clip: &Movieclip, root: 
         });
         let p0 = built.points.len() as u32;
         for p in source.points_of(it) {
+            if cancelled() { return None; }
             built.points.push(point(*p));
         }
         let p1 = built.points.len() as u32;
@@ -1283,7 +1305,7 @@ fn build_clip(frame: &Frame, slot: usize, fig: &Figure, clip: &Movieclip, root: 
             ..it.clone()
         });
     }
-    built
+    if cancelled() { None } else { Some(built) }
 }
 
 /// How a movieclip joined to a spatial bone is placed when its drawings turn with the bone (`g.drawingView` and
@@ -1318,6 +1340,11 @@ pub fn build_remembering_plain(doc: &Document, frame: &Frame, memory: &mut Build
 /// so that the scene a build would give is `previous` itself (its stamp, and what was made of it, stay).
 pub fn build_remembering_plain_over(doc: &Document, frame: &Frame, memory: &mut BuildMemory, previous: &Scene) -> Option<Scene> {
     build_core(doc, frame, None, Measure::Off, true, Some(memory), Some(previous))
+}
+
+/// Worker build carrying cancellation into nested clips.
+pub fn build_cancellable(doc: &Document, frame: &Frame, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
+    build_core_checked(doc, frame, None, Measure::Off, true, None, None, cancelled)
 }
 
 /// Builds the scene for an evaluated frame.
@@ -1385,7 +1412,39 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
     build_core(doc, frame, needed, measure, render_output, memory, None).expect("a build without a previous scene gives a scene")
 }
 
-fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>) -> Option<Scene> {
+fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, memory: Option<&mut BuildMemory>, same_as: Option<&Scene>) -> Option<Scene> {
+    build_core_checked(doc, frame, needed, measure, render_output, memory, same_as, &|| false)
+}
+
+/// Query geometry with checkpoints in every parallel object and join level.
+pub fn build_shapes_cancellable(doc: &Document, frame: &Frame, slots: Option<&[usize]>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
+    let needed = slots.map(|slots| {
+        let mut needed = vec![false; frame.objects.len()];
+        for &slot in slots {
+            let mut at = Some(slot);
+            while let Some(i) = at.filter(|&i| i < needed.len() && !needed[i]) { needed[i] = true; at = frame.objects[i].join.map(|j| j.slot as usize); }
+        }
+        needed
+    });
+    build_core_checked(doc, frame, needed.as_deref(), Measure::Shapes, true, None, None, cancelled)
+}
+
+/// Query geometry with checkpoints in every parallel object and join level.
+pub fn build_only_measured_cancellable(doc: &Document, frame: &Frame, slots: &[usize], cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
+    if cancelled() { return None; }
+    let mut needed = vec![false; frame.objects.len()];
+    for &slot in slots {
+        let mut at = Some(slot);
+        while let Some(i) = at.filter(|&i| i < needed.len() && !needed[i]) {
+            if cancelled() { return None; }
+            needed[i] = true;
+            at = frame.objects[i].join.map(|j| j.slot as usize);
+        }
+    }
+    build_core_checked(doc, frame, Some(&needed), Measure::Bounds, true, None, None, cancelled)
+}
+
+fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
     let count = frame.objects.len();
     if let Some(memory) = memory.as_deref_mut() {
         memory.begin(count, measure, doc.version);
@@ -1402,6 +1461,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
     let mut figure_slot = std::collections::HashMap::new();
     let mut fig_of = vec![u32::MAX; count];
     for (i, o) in frame.objects.iter().enumerate() {
+        if cancelled() { return None; }
         let fig = match &o.figure_override {
             Some(f) => Some(f),
             None => doc.figure(o.figure),
@@ -1437,6 +1497,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
         let mut children: Vec<Vec<usize>> = vec![Vec::new(); count];
         let mut current: Vec<usize> = Vec::new();
         for (i, o) in frame.objects.iter().enumerate() {
+        if cancelled() { return None; }
             match o.join {
                 Some(j) if (j.slot as usize) < count => children[j.slot as usize].push(i),
                 _ => current.push(i),
@@ -1466,6 +1527,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
     let mut anew: Vec<(usize, Kept)> = Vec::new();
     // Publication still follows draw order.
     for slots in order.iter().map(Vec::as_slice) {
+        if cancelled() { return None; }
         let filtered: Vec<usize>;
         let slots = match needed {
             Some(needed) => {
@@ -1487,6 +1549,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
             Some(root)
         };
         let make = |&i: &usize| -> Option<(usize, Arc<Built>, Option<Kept>)> {
+            if cancelled() { return None; }
             let fig = &scene.figures[*fig_of.get(i)? as usize];
             let root = resolve_root(i, &built).unwrap_or(frame.objects[i].root);
             if let Some(clip) = &fig.movieclip {
@@ -1503,9 +1566,9 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
                     return Some((i, kept, None));
                 }
                 let built = if let Some(meshes) = &clip.meshes {
-                    build_clip_mesh(frame, i, fig_of[i], fig, clip, meshes, root, parent, measure)
+                    build_clip_mesh(frame, i, fig_of[i], fig, clip, meshes, root, parent, measure, cancelled)?
                 } else {
-                    build_clip(frame, i, fig, clip, root, parent)
+                    build_clip(frame, i, fig, clip, root, parent, cancelled)?
                 };
                 let built = Arc::new(built);
                 // Kept whether or not it can be reused, so that the build is numbered: what reads the scene learns the instance changed.
@@ -1523,10 +1586,11 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
             if let Some(kept) = reuse(previous, i, &frame.objects[i], fig, fig_of[i], root, ik) {
                 return Some((i, kept, None));
             }
-            let built = Arc::new(build_object(doc, doc.version, frame, i, fig_of[i], fig, root, ik, measure, render_output));
+            let built = Arc::new(build_object(doc, doc.version, frame, i, fig_of[i], fig, root, ik, measure, render_output, cancelled));
             Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, ik.cloned(), built))))
         };
         let results: Vec<(usize, Arc<Built>, Option<Kept>)> = crate::par::map(&slots, 32, make).into_iter().flatten().collect();
+        if cancelled() { return None; }
         for (i, b, fresh) in results {
             built[i] = Some(b);
             if let Some(fresh) = fresh {
@@ -1555,6 +1619,7 @@ fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: M
     scene.measured.reserve(total_measured);
     scene.points.reserve(total_points);
     for &slot in &frame.draw_order {
+        if cancelled() { return None; }
         // Read in place: a build the memory also holds is shared, and only the parts the scene owns are copied.
         let Some(b) = built[slot as usize].take() else { continue };
         let base = scene.points.len() as u32;

@@ -422,7 +422,7 @@ impl Editor {
             Some(live) => Source { report: &live.report, prepared: &live.prepared, draft: live.draft.as_deref() },
             None => base,
         };
-        let deadline = budget.zip(self.clock).map(|(ms, clock)| clock() + ms);
+        let deadline = budget.zip(self.clock.as_ref()).map(|(ms, clock)| clock() + ms);
         let mut sampled = false;
         let records = if active.iter().any(|&at| cache.trails[at].waiting > 0) { Some(source.records()?) } else { None };
         loop {
@@ -436,7 +436,7 @@ impl Editor {
                 }
             }
             let Some(lead) = lead else { break };
-            if sampled && deadline.zip(self.clock).is_some_and(|(deadline, clock)| clock() > deadline) {
+            if sampled && deadline.zip(self.clock.as_ref()).is_some_and(|(deadline, clock)| clock() > deadline) {
                 break;
             }
             sampled = true;

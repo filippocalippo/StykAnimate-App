@@ -17,3 +17,4 @@ styk-render = { path = "../styk-render", default-features = false }
 # The GPU renderer, for comparisons where an adapter exists.
 styk-render = { path = "../styk-render" }
 pollster = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }

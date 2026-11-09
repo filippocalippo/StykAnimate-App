@@ -350,16 +350,32 @@ fn resolved_figure(figure: &Value, object: &Value) -> Value {
 
 /// `attachedFigurePalette(report, frame, uid)`: the palette of a figure and those joined below
 /// it, each colour naming the instances that show it (when there are several figures).
-fn attached_palette(version: f64, figures: &[Value], objects: &[Value], id: u32) -> Result<Vec<Row>, EditError> {
-    let Some(start) = objects.iter().position(|o| uid(o) == Some(id)) else { return Ok(Vec::new()) };
+fn attached_palette(version: f64, figures: &[Value], objects: &[Value], uid: u32) -> Result<Vec<Row>, EditError> {
+    attached_palette_with(objects, uid, &|| Ok(()), &|object| {
+        let type_id = num(object, "figure_type_id");
+        figures.iter().find(|figure| num(figure, "figure_type_id") == type_id && type_id.is_some())
+            .map(|figure| Ok((figure_palette(version, figure, object)?, figure.get("figure_type_id").cloned().unwrap_or(Value::Null)))).transpose()
+    })
+}
+
+type InstancePalette = Option<(Vec<Row>, Value)>;
+
+fn attached_palette_with(objects: &[Value], id: u32, check: &dyn Fn() -> Result<(), EditError>, palette: &dyn Fn(&Value) -> Result<InstancePalette, EditError>) -> Result<Vec<Row>, EditError> {
+    let mut start = None;
+    for (at, object) in objects.iter().enumerate() {
+        check()?;
+        if crate::record::uid(object) == Some(id) { start = Some(at); break; }
+    }
+    let Some(start) = start else { return Ok(Vec::new()); };
     let mut queue = vec![start];
     let mut cursor = 0;
     let mut rows: Vec<Row> = Vec::new();
     while cursor < queue.len() {
         let object = &objects[queue[cursor]];
-        let type_id = num(object, "figure_type_id");
-        if let Some(figure) = figures.iter().find(|f| num(f, "figure_type_id") == type_id && type_id.is_some()) {
-            for entry in figure_palette(version, figure, object)? {
+        check()?;
+        if let Some((entries, figure_type)) = palette(object)? {
+            for entry in entries {
+                check()?;
                 let row = match rows.iter().position(|r| r.color == entry.color) {
                     Some(at) => &mut rows[at],
                     None => {
@@ -378,7 +394,7 @@ fn attached_palette(version: f64, figures: &[Value], objects: &[Value], id: u32)
                     }
                 }
                 if let Some(id) = uid(object) {
-                    let figure_type = figure.get("figure_type_id").cloned().unwrap_or(Value::Null);
+                    let figure_type = figure_type.clone();
                     match row.instances.iter_mut().find(|(u, _, _)| *u == id) {
                         Some(instance) => *instance = (id, entry.targets.clone(), figure_type),
                         None => row.instances.push((id, entry.targets.clone(), figure_type)),
@@ -388,6 +404,7 @@ fn attached_palette(version: f64, figures: &[Value], objects: &[Value], id: u32)
         }
         let slot = queue[cursor];
         for (child, o) in objects.iter().enumerate() {
+            check()?;
             if crate::record::join_target(o) == Some(slot) && !queue.contains(&child) {
                 queue.push(child);
             }
@@ -816,6 +833,11 @@ impl Editor {
     /// `editFigureColors(operation, {indices, ...options})`: the selected figures (or
     /// `options.uids`) recoloured at the playhead or across `indices`.
     pub(crate) fn edit_figure_colors(&mut self, operation: &Value, options: &Value) -> Result<Value, EditError> {
+        self.edit_figure_colors_checked(operation, options, &mut || Ok(()))
+    }
+
+    pub(crate) fn edit_figure_colors_checked(&mut self, operation: &Value, options: &Value, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
+        check()?;
         let recolor = validate_recolor(operation)?;
         let uids: Vec<u32> = match options.get("uids").filter(|u| !u.is_null()) {
             Some(list) => list.elements().map(|e| e.iter().filter_map(|v| v.as_f64()).map(|v| v as u32).collect()).unwrap_or_default(),
@@ -847,12 +869,17 @@ impl Editor {
         }
         merged.set("label", Value::str(label));
         let merged = Value::object(merged);
-        self.apply_figure_range(crate::range::Request::Recolor(Box::new(recolor)), crate::range::Options::of(&merged, merged.get("indices")))
+        self.apply_figure_range_checked(crate::range::Request::Recolor(Box::new(recolor)), crate::range::Options::of(&merged, merged.get("indices")), check)
     }
 
     /// `replaceFigureColor(from, color, {targets, ...options})`: with a whole figure selected,
     /// a colour of the assembly's palette is replaced in every figure that shows it.
     fn replace_figure_color(&mut self, from: Option<&Value>, color: Option<&Value>, options: &Value) -> Result<Value, EditError> {
+        self.replace_figure_color_checked(from, color, options, &mut || Ok(()))
+    }
+
+    pub(crate) fn replace_figure_color_checked(&mut self, from: Option<&Value>, color: Option<&Value>, options: &Value, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
+        check()?;
         let mut operation = Obj::new();
         operation.set("mode", Value::str("replace"));
         if let Some(from) = from {
@@ -903,8 +930,61 @@ impl Editor {
             let ids = instances.as_obj().map(|o| o.keys().filter_map(|k| k.parse::<f64>().ok()).map(Value::Num).collect()).unwrap_or_default();
             options.set("uids", Value::array(ids));
         }
-        self.edit_figure_colors(&Value::object(next), &Value::object(options))
+        self.edit_figure_colors_checked(&Value::object(next), &Value::object(options), check)
     }
+}
+
+/// `editor.figurePalette()` while the figure `uid` is selected without a joint (`attachedFigurePalette` over `objects`,
+/// the frame on show): each colour (`#rrggbb`) with its row as `replaceFigureColor` takes it for `targets`. It walks
+/// the figure, the figures joined to it and their styles: a worker prepares it, and a palette swatch's picker
+/// captures the ready row when it opens.
+pub fn attached_palette_rows(report: &Value, objects: &[Value], uid: u32) -> Result<Vec<(String, Value)>, EditError> {
+    let figures: Vec<Value> = report.get("figure_types").and_then(Value::elements).map(|e| e.iter().collect()).unwrap_or_default();
+    let version = num(report, "version").unwrap_or(f64::NAN);
+    Ok(attached_palette(version, &figures, objects, uid)?.into_iter().map(|row| (row.color.clone(), row_value(&row))).collect())
+}
+
+/// Palette target metadata from the evaluator's resolved instances. No style resolution is repeated.
+pub fn attached_palette_rows_resolved(report: &Value, objects: &[Value], uid: u32, doc: &styk_eval::doc::Document, frame: &styk_eval::eval::Frame, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<(String, Value)>, EditError> {
+    let check = || if cancelled() { Err(invalid("evaluation cancelled")) } else { Ok(()) };
+    let version = num(report, "version").unwrap_or(f64::NAN);
+    let mut figures = std::collections::HashMap::new();
+    for object in &frame.objects {
+        check()?;
+        if let Some(figure) = object.figure_override.as_ref().or_else(|| doc.figure(object.figure)) { figures.insert(object.uid, figure); }
+    }
+    let rows = attached_palette_with(objects, uid, &check, &|object| {
+        let Some(figure) = crate::record::uid(object).and_then(|uid| figures.get(&uid)) else { return Ok(None) };
+        let mut mode = Obj::new();
+        if figure.segment_colors { let mut styk = Obj::new(); styk.set("colorMode", Value::str("segments")); mode.set("_styk", Value::object(styk)); }
+        let mode = Value::object(mode);
+        let full = uses_segment_colors(version, &mode, object) && to_uint32(override_raw(object)) >> 24 == 255;
+        let color = |rgb: [u8; 3]| displayed_color(version, &mode, object, rgb.map(f64::from));
+        let mut rows = Vec::new();
+        for segment in &figure.segments {
+            check()?;
+            // segmentPaint's first and last colours override the saved paint stops, already normalized by the loader.
+            let mut colors: Vec<[u8; 3]> = segment.paint.as_ref().map(|paint| paint.stops.iter().map(|stop| stop.rgb).collect()).unwrap_or_else(|| {
+                let mut colors = vec![segment.rgb];
+                if let Some((rgb, _)) = segment.secondary { colors.push(rgb); }
+                colors
+            });
+            if let Some(first) = colors.first_mut() { *first = segment.rgb; }
+            if colors.len() > 1 && let Some((rgb, _)) = segment.secondary { *colors.last_mut().unwrap() = rgb; }
+            if full { colors.truncate(1); }
+            for (stop, rgb) in colors.into_iter().enumerate() {
+                check()?;
+                let row = palette_row(&mut rows, color(rgb));
+                let id = f64::from(segment.id);
+                if !row.targets.segments.iter().any(|(handle, _)| *handle == id) { row.targets.segments.push((id, Vec::new())); }
+                row.targets.segments.iter_mut().find(|(handle, _)| *handle == id).unwrap().1.push(stop);
+            }
+        }
+        for polygon in &figure.polyfills { check()?; palette_row(&mut rows, color(polygon.rgb)).targets.polygons.push(f64::from(polygon.id)); }
+        for (index, rgb) in figure.mesh_colors.iter().enumerate() { check()?; palette_row(&mut rows, color(*rgb)).targets.mesh.get_or_insert_with(Vec::new).push(index); }
+        Ok(Some((rows, Value::Num(f64::from(figure.id)))))
+    })?;
+    Ok(rows.into_iter().map(|row| (row.color.clone(), row_value(&row))).collect())
 }
 
 /// A palette row as `attachedFigurePalette` returns it (`{color, segments, polygons, meshColors?, instances}`).
@@ -964,5 +1044,46 @@ impl Editor {
         let mut options = Obj::new();
         options.set("uids", Value::array(vec![object.get("unique_id").cloned().unwrap_or(Value::Null)]));
         Some(self.edit_figure_colors(&Value::object(operation), &Value::object(options)).map(|result| Value::Bool(result.get("changedFrames").and_then(Value::as_f64).is_some_and(|n| n > 0.0))))
+    }
+}
+
+#[cfg(test)]
+mod resolved_palette_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[test]
+    fn resolved_palettes_preserve_gradient_style_and_mesh_targets() {
+        for name in ["drawlist/painted-limbs.json", "channels/channels-style.sheet.json", "spatial/mesh-instances.json"] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures").join(name);
+            let report = styk_doc::json::parse(&std::fs::read(path).unwrap()).unwrap();
+            let prepared = styk_eval::prepare(styk_eval::from_value(&report, "").unwrap());
+            for tick in [0.0, 3.5] {
+                let frame = prepared.evaluate(tick);
+                let records = crate::editor_frame(&report, &prepared, tick).unwrap();
+                let objects = crate::frame::objects_of(&records);
+                for object in &objects {
+                    let uid = uid(object).unwrap();
+                    assert_eq!(attached_palette_rows_resolved(&report, &objects, uid, &prepared.doc, &frame, &|| false).unwrap(), attached_palette_rows(&report, &objects, uid).unwrap(), "{name} {tick} {uid}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resolved_palette_matches_the_record_owner_and_cancels_inside_rows() {
+        let report = styk_doc::json::parse(include_bytes!("../../../tests/edit/property-sheet.document.json")).unwrap();
+        let prepared = styk_eval::prepare(styk_eval::from_value(&report, "").unwrap());
+        let frame = prepared.evaluate(0.0);
+        let records = crate::editor_frame(&report, &prepared, 0.0).unwrap();
+        let objects = crate::frame::objects_of(&records);
+        let expected = attached_palette_rows(&report, &objects, 1).unwrap();
+        let visits = AtomicUsize::new(0);
+        let actual = attached_palette_rows_resolved(&report, &objects, 1, &prepared.doc, &frame, &|| { visits.fetch_add(1, Ordering::SeqCst); false }).unwrap();
+        assert_eq!(actual, expected);
+        let total = visits.load(Ordering::SeqCst);
+        assert!(total > 6);
+        let visits = AtomicUsize::new(0);
+        assert!(attached_palette_rows_resolved(&report, &objects, 1, &prepared.doc, &frame, &|| visits.fetch_add(1, Ordering::SeqCst) >= total / 2).is_err());
+        assert!(visits.load(Ordering::SeqCst) < total);
     }
 }

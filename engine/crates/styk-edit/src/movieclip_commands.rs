@@ -16,6 +16,12 @@ fn object(fields: &[(&str, Value)]) -> Value {
     }
     Value::object(o)
 }
+/// What a figure's record in a frame costs a clip that copies it: the copied record and its typed view (measured on a clip of every figure of a
+/// large project, `docs/engine/editing.md`).
+const CLIP_BYTES_PER_OBJECT: usize = 2 << 10;
+/// What the record of one figure replaced at one key costs (the patch and the typed view of it).
+const CLIP_BYTES_PER_REPLACEMENT: usize = 512;
+
 pub(crate) fn error(key: &str) -> EditError {
     EditError::Invalid(format!("errors.editorMovieclips.{key}"))
 }
@@ -223,6 +229,22 @@ pub(crate) fn filtered_frame(frame: &Value, selected: &HashSet<u32>) -> Value {
     Value::object(result)
 }
 
+/// `filtered_frame` for a scene that is cut down to a clip's figures: a figure whose parent the cut does not keep is unjoined. A join left without
+/// its target is refused when the file opens (`errors.model.joinPointsToAMissingFigureOrHandle`). (A single instance copied to other
+/// keyframes keeps the join it has, which refuses the copy: `extend_native_movieclip`.)
+fn cut_frame(frame: &Value, selected: &HashSet<u32>) -> Value {
+    let mut cut = filtered_frame(frame, selected);
+    let Some(objects) = cut.make_obj().and_then(|frame| frame.get_mut("objects")).and_then(Value::make_arr) else { return cut };
+    for object in objects {
+        let orphan = object.get("join").is_some_and(|join| join.truthy() && join.get("target_object_slot").is_none());
+        if orphan {
+            if let Some(object) = object.make_obj() {
+                object.set("join", Value::Null);
+            }
+        }
+    }
+    cut
+}
 /// The imported animation of a clip keeps the channels of the figures it holds and of the layers they are on.
 fn keep_channels(animation: &mut Obj, selected: &HashSet<u32>, layers: &HashSet<String>) {
     let channels = items(animation.get("channels"))
@@ -243,20 +265,75 @@ fn keep_vfx_clips(vfx: &mut Obj, selected: &HashSet<u32>) {
         .collect();
     vfx.set("clips", Value::array(clips));
 }
+/// The frame replacements a retained scene's layer sheet records (`movieclipPatches`) keep naming only figures their pose source still holds
+/// (`keyframes` are the scene's, as cut, and so are its `frameSources`): a replacement by a figure the cut dropped from that frame becomes a
+/// replacement by nothing, which is what the scene has left to show of it, and a file whose sheet named it is refused when it opens
+/// (`invalidMovieclipFrameReplacement`). Whether the figure is held is asked of the cut frame itself and not of the identities the clip holds:
+/// a scene numbers its figures on its own, and the figure it names may be one of another definition than the clip's. Only that is changed: a
+/// replacement by a figure its source holds stays exactly as it was (so does the saved file).
+fn prune_patches(styk: &mut Obj, keyframes: Vec<Value>) {
+    let kept = styk.get("frameSources").cloned();
+    let sources = crate::load::PoseSources::of(kept.as_ref(), keyframes);
+    let Some(tracks) = styk.get_mut("layerSheet").and_then(Value::make_obj).and_then(|sheet| sheet.get_mut("tracks")).and_then(Value::make_obj) else { return };
+    let ids: Vec<String> = tracks.keys().map(|id| id.to_string()).collect();
+    let dropped = |patch: &Value| {
+        let Some(replacement) = patch.get("replacementUid").filter(|replacement| !replacement.is_null()) else { return false };
+        sources.frame(patch.get("frameId")).is_some_and(|frame| !items(frame.get("objects")).iter().any(|object| object.get("unique_id") == Some(replacement)))
+    };
+    for id in ids {
+        let Some(keys) = tracks.get(&id).and_then(|track| track.get("keys")).map(|keys| items(Some(keys))) else { continue };
+        if !keys.iter().any(|key| items(key.get("movieclipPatches")).iter().any(dropped)) {
+            continue;
+        }
+        let keys: Vec<Value> = keys
+            .into_iter()
+            .map(|key| {
+                let patches = items(key.get("movieclipPatches"));
+                if !patches.iter().any(dropped) {
+                    return key;
+                }
+                let kept: Vec<Value> = patches
+                    .into_iter()
+                    .map(|mut patch| {
+                        if dropped(&patch) {
+                            if let Some(object) = patch.make_obj() {
+                                object.remove("replacementUid");
+                            }
+                        }
+                        patch
+                    })
+                    .collect();
+                let mut next = key.clone();
+                if let Some(object) = next.make_obj() {
+                    object.set("movieclipPatches", Value::array(kept));
+                }
+                next
+            })
+            .collect();
+        if let Some(track) = tracks.get_mut(&id).and_then(Value::make_obj) {
+            track.set("keys", Value::array(keys));
+        }
+    }
+}
 /// `captureMovieclip`'s `prune`: a clip made inside a movieclip retains the scene the outer clip retains (a chain of `movieclipSource`
-/// documents), cut down to the figures the new clip holds: their poses, effect clips and imported animation.
-fn prune_retained(document: &mut Value, selected: &HashSet<u32>, layers: &HashSet<String>) {
+/// documents), cut down to the figures the new clip holds: their poses, effect clips and imported animation. A retained scene is an older
+/// scene, whose identities are its own: an object of it that shares a number with a figure of the clip is not that figure, and a scene
+/// shares the clip's definitions (`inheritFigures`), so only objects of a definition the clip holds (`types`) stay in it.
+fn prune_retained(document: &mut Value, selected: &HashSet<u32>, layers: &HashSet<String>, types: &HashSet<u32>) {
     let Some(document) = document.make_obj() else { return };
+    // The figures of the clip a frame of this scene holds: of a definition the clip holds, and named by the clip's identity.
+    let held = |frame: &Value| -> HashSet<u32> { objects_of(frame).iter().filter(|o| num(o, "figure_type_id").is_some_and(|kind| types.contains(&(kind as u32)))).filter_map(uid).filter(|u| selected.contains(u)).collect() };
     if let Some(frames) = document.get("keyframes") {
-        let frames = items(Some(frames)).iter().map(|frame| filtered_frame(frame, selected)).collect();
+        let frames = items(Some(frames)).iter().map(|frame| cut_frame(frame, &held(frame))).collect();
         document.set("keyframes", Value::array(frames));
     }
+    let keyframes = items(document.get("keyframes"));
     let Some(styk) = document.get_mut("_styk").and_then(Value::make_obj) else { return };
     if let Some(vfx) = styk.get_mut("vfxClips").filter(|v| v.truthy()).and_then(Value::make_obj) {
         keep_vfx_clips(vfx, selected);
     }
     if let Some(sources) = styk.get_mut("frameSources").filter(|v| v.truthy()).and_then(Value::make_obj) {
-        let filtered: Vec<(String, Value)> = sources.iter().map(|(id, frame)| (id.to_string(), filtered_frame(frame, selected))).collect();
+        let filtered: Vec<(String, Value)> = sources.iter().map(|(id, frame)| (id.to_string(), cut_frame(frame, &held(frame)))).collect();
         for (id, frame) in filtered {
             sources.set(&id, frame);
         }
@@ -264,8 +341,9 @@ fn prune_retained(document: &mut Value, selected: &HashSet<u32>, layers: &HashSe
     if let Some(animation) = styk.get_mut("animation").filter(|v| v.truthy()).and_then(Value::make_obj) {
         keep_channels(animation, selected, layers);
     }
+    prune_patches(styk, keyframes);
     if let Some(retained) = styk.get_mut("movieclipSource").filter(|v| v.truthy()).and_then(Value::make_obj).and_then(|source| source.get_mut("document")) {
-        prune_retained(retained, selected, layers);
+        prune_retained(retained, selected, layers, types);
     }
 }
 
@@ -336,6 +414,16 @@ impl Editor {
                 Err(error)
             }
         }
+    }
+    /// A project's movieclips nest at most eight deep (counting the scenes they retain) and number at most 4096: a project beyond that is
+    /// refused when it is saved and when it opens. A movieclip that would take it there is refused before anything changes.
+    fn check_nesting(&self, figure: &Value) -> Result<(), EditError> {
+        self.check_definition_depth([figure])?;
+        let mut report = self.report.clone();
+        if let Some(figures) = report.make_obj().and_then(|r| r.get_mut("figure_types")).and_then(Value::make_arr) {
+            figures.push(figure.clone());
+        }
+        crate::load::validate_movieclip_graph(&report)
     }
     pub(crate) fn create_empty_movieclip(&mut self, name: &Value) -> Result<Value, EditError> {
         let name = if name.is_null() { Value::str("Movieclip") } else { name.clone() };
@@ -487,13 +575,28 @@ impl Editor {
             }
             index += 1;
         }
+        // The clip copies every record of its figures, in the frames and in the pose sources, and the engine makes typed views of the copy: a
+        // clip of everything in a large project is refused here, before anything is copied, if the host cannot take it.
+        let clipped = frames.iter().chain(sources.iter().map(|(_, f)| f)).map(|f| items(f.get("objects")).iter().filter(|o| uid(o).is_some_and(|u| selected.contains(&u))).count()).sum::<usize>();
         let selected_layers: HashSet<String> = selected.iter().map(|u| self.layer_of(*u)).collect();
-        let filtered = frames.iter().map(|f| filtered_frame(f, &selected)).collect::<Vec<_>>();
+        // And the layer sheet records the replacement of each figure at the clip's first frame and at every key of its layer inside it: a clip
+        // of every figure of a project for its whole length is a record for each figure at each key.
+        let replacements: usize = selected_layers
+            .iter()
+            .map(|layer| {
+                let keys = items(self.report.path(&["_styk", "layerSheet", "tracks", layer, "keys"])).iter().filter(|k| num(k, "tick").is_some_and(|t| t > start && t < end)).count();
+                selected.iter().filter(|u| self.layer_of(**u) == *layer).count().saturating_mul(1 + keys)
+            })
+            .sum();
+        self.admit(clipped.saturating_mul(CLIP_BYTES_PER_OBJECT).saturating_add(replacements.saturating_mul(CLIP_BYTES_PER_REPLACEMENT)))?;
+        let filtered = frames.iter().map(|f| cut_frame(f, &selected)).collect::<Vec<_>>();
         let mut source_table = Obj::new();
         for (k, f) in &sources {
-            source_table.set(k, filtered_frame(f, &selected));
+            source_table.set(k, cut_frame(f, &selected));
         }
         let used_types: HashSet<u32> = filtered.iter().chain(source_table.iter().map(|(_, f)| f)).flat_map(objects_of).filter_map(|o| num(&o, "figure_type_id").map(|n| n as u32)).collect();
+        // The definition each figure of the clip has, for the layers it is assigned to below.
+        let kind_of: HashMap<u32, u32> = filtered.iter().chain(source_table.iter().map(|(_, f)| f)).flat_map(objects_of).filter_map(|o| Some((uid(&o)?, num(&o, "figure_type_id")? as u32))).collect();
         let mut figures = items(self.report.get("figure_types")).into_iter().filter(|f| num(f, "figure_type_id").is_some_and(|n| used_types.contains(&(n as u32)))).collect::<Vec<_>>();
         // Captured drawings become the clip's own cels, as copied keys do: sharing the project's cel identities would show and
         // edit the project's pixels. They are the published pixels the definitions carry.
@@ -515,15 +618,25 @@ impl Editor {
         metadata.set("animation", Value::object(animation));
         metadata.set("frameSources", Value::object(source_table));
         metadata.remove("simpleFrameDraft");
+        prune_patches(&mut metadata, filtered.clone());
         // What the clip it is made in retains is cut down to its figures too.
         if let Some(retained) = metadata.get_mut("movieclipSource").and_then(Value::make_obj).and_then(|source| source.get_mut("document")) {
-            prune_retained(retained, &selected, &selected_layers);
+            prune_retained(retained, &selected, &selected_layers, &used_types);
         }
         if let Some(layers) = metadata.get_mut("layers").and_then(Value::make_obj) {
+            // A drawing layer holds only drawing cels: a figure the project had assigned to one (a movieclip placed while one was active) is
+            // assigned to the default layer in the clip, or the clip's own timeline would hold a figure on a drawing layer, which opening refuses.
+            let drawing_layers: HashSet<String> = layers.get("byId").and_then(Value::as_obj).map(|by_id| by_id.iter().filter(|(_, layer)| layer.path(&["drawing", "version"]).and_then(Value::as_f64) == Some(1.0)).map(|(id, _)| id.to_string()).collect()).unwrap_or_default();
+            let default_layer = layers.get("defaultLayerId").and_then(Value::as_str).unwrap_or("layer-1").to_string();
+            let drawn: HashSet<u32> = figures.iter().filter(|f| f.path(&["_styk", "drawing"]).is_some_and(Value::truthy)).filter_map(|f| num(f, "figure_type_id")).map(|n| n as u32).collect();
             if let Some(assignments) = layers.get_mut("assignments").and_then(Value::make_obj) {
                 let removed = assignments.iter().filter(|(u, _)| u.parse::<u32>().ok().is_none_or(|u| !selected.contains(&u))).map(|(u, _)| u.to_string()).collect::<Vec<_>>();
                 for u in removed {
                     assignments.remove(&u);
+                }
+                let misplaced = assignments.iter().filter(|(u, layer)| layer.as_str().is_some_and(|layer| drawing_layers.contains(layer)) && u.parse::<u32>().ok().and_then(|u| kind_of.get(&u)).is_some_and(|kind| !drawn.contains(kind))).map(|(u, _)| u.to_string()).collect::<Vec<_>>();
+                for u in misplaced {
+                    assignments.set(&u, Value::str(&default_layer));
                 }
             }
         }
@@ -552,7 +665,7 @@ impl Editor {
         ticks.dedup();
         let mut local = vec![];
         for (i, t) in ticks.iter().enumerate() {
-            let mut frame = filtered_frame(&self.evaluated(*t, false)?, &selected).as_obj().cloned().unwrap();
+            let mut frame = cut_frame(&self.evaluated(*t, false)?, &selected).as_obj().cloned().unwrap();
             if let Some(objects) = frame.get_mut("objects").and_then(Value::make_arr) {
                 for o in objects {
                     if uses_presence(o) {
@@ -610,6 +723,7 @@ impl Editor {
             clip_drawing_keys(&mut doc, &local)?;
         }
         let figure = movieclip_figure(allocate_type(&self.report), name, doc, end - start, pivot);
+        self.check_nesting(&figure)?;
         if options.get("replace").and_then(Value::as_bool) == Some(false) {
             return self.movieclip_batch("Create movieclip", |editor| {
                 editor.publish_definition(items(editor.report.get("figure_types")).len(), figure.clone(), "Create movieclip")?;
@@ -806,6 +920,7 @@ impl Editor {
                 mapping.insert(old, (id, path));
                 ids.push(id);
             }
+            let figures = items(editor.report.get("figure_types"));
             for (_, source) in &mut frames {
                 let mut frame = source.as_obj().cloned().unwrap();
                 let order = frame_order(&frame).iter().filter_map(|old| mapping.get(&(*old as u32)).map(|(id, _)| *id as f64)).collect::<Vec<_>>();
@@ -814,6 +929,16 @@ impl Editor {
                         let (id, path) = mapping.get(&uid(object).unwrap()).unwrap();
                         let object = object.make_obj().unwrap();
                         object.set("unique_id", Value::Num(*id as f64));
+                        // A figure with an animation origin is posed with one: what the clip's scene made of it has none, and opening refuses a pose that lacks it.
+                        if !object.contains("_stykAnimationOrigin") {
+                            if let Some(figure) = figures.iter().find(|f| f.get("figure_type_id") == object.get("figure_type_id")) {
+                                if figure.path(&["_styk", "animationOrigin"]).is_some_and(Value::truthy) {
+                                    if let Some(fixed) = crate::figures::with_origin_pivot(figure, Value::object(object.clone())).as_obj() {
+                                        *object = fixed.clone();
+                                    }
+                                }
+                            }
+                        }
                         if reuse_parts { object.set("_stykMovieclipPart", crate::movieclip_commands::object(&[("instance", Value::Num(previous as f64)), ("path", Value::str(path))])); }
                     }
                 }
@@ -837,7 +962,10 @@ impl Editor {
                         vec![]
                     };
                     set_continuations(&mut frame, steps);
-                    editor.replace_at(&mut plan, &layer, tick, previous, &Value::object(frame), None, tick + 1.0)?;
+                    // The figures were posed with an animation origin whose pivot the frame they are added to places.
+                    let mut posed = Value::object(frame);
+                    editor.synchronize_origin_frame(&mut posed, &objects_of(&at), true)?;
+                    editor.replace_at(&mut plan, &layer, tick, previous, &posed, None, tick + 1.0)?;
                     replaced = true;
                 }
             }
@@ -865,5 +993,114 @@ impl Editor {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(text: &str) -> Value { styk_doc::json::parse(text.as_bytes()).unwrap() }
+
+    /// A scene cut down to some figures leaves the figures joined to the ones it kept joined, and unjoins those whose parent it dropped:
+    /// a join without its target is refused when the file opens (`errors.model.joinPointsToAMissingFigureOrHandle`).
+    #[test]
+    fn a_figure_whose_parent_is_cut_away_is_unjoined_and_one_whose_parent_stays_follows_it() {
+        let scene = frame(
+            r#"{"duration_raw":1,"objects":[
+                {"object_slot":0,"unique_id":1,"figure_type_id":1,"join":null},
+                {"object_slot":1,"unique_id":2,"figure_type_id":1,"join":{"target_object_slot":0,"target_handle_id":1}},
+                {"object_slot":2,"unique_id":3,"figure_type_id":1,"join":{"target_object_slot":0,"target_handle_id":1}}],
+              "object_draw_order":[0,1,2],"object_draw_order_unique_ids":[1,2,3]}"#,
+        );
+        let kept = cut_frame(&scene, &[2, 3].into_iter().collect());
+        let objects = objects_of(&kept);
+        assert_eq!(objects.len(), 2);
+        assert!(objects.iter().all(|o| o.get("join").is_some_and(Value::is_null)), "the parent (1) is not kept: {objects:?}");
+        let kept = cut_frame(&scene, &[1, 3].into_iter().collect());
+        let objects = objects_of(&kept);
+        let joined = objects.iter().find(|o| uid(o) == Some(3)).unwrap();
+        assert_eq!(joined.path(&["join", "target_object_slot"]).and_then(Value::as_f64), Some(0.0));
+        assert_eq!(joined.path(&["join", "target_unique_id"]).and_then(Value::as_f64), Some(1.0));
+    }
+
+    /// A chain of figures joined one to the next: a figure follows its parent where the cut keeps it, and is unjoined where the cut drops it,
+    /// whatever became of the parent's own parent.
+    #[test]
+    fn a_chain_of_joins_is_cut_where_the_parents_are_dropped_and_kept_where_they_stay() {
+        let scene = frame(
+            r#"{"duration_raw":1,"objects":[
+                {"object_slot":0,"unique_id":1,"figure_type_id":1,"join":null},
+                {"object_slot":1,"unique_id":2,"figure_type_id":1,"join":{"target_object_slot":0,"target_handle_id":1}},
+                {"object_slot":2,"unique_id":3,"figure_type_id":1,"join":{"target_object_slot":1,"target_handle_id":1}}],
+              "object_draw_order":[0,1,2],"object_draw_order_unique_ids":[1,2,3]}"#,
+        );
+        let parents = |kept: &[u32]| -> Vec<(u32, Option<u32>)> {
+            let cut = cut_frame(&scene, &kept.iter().copied().collect());
+            let objects = objects_of(&cut);
+            objects.iter().map(|o| (uid(o).unwrap(), o.get("join").filter(|j| j.truthy()).and_then(|j| num(j, "target_object_slot")).and_then(|slot| objects.get(slot as usize)).and_then(uid))).collect()
+        };
+        assert_eq!(parents(&[3]), vec![(3, None)], "both parents dropped");
+        assert_eq!(parents(&[2, 3]), vec![(2, None), (3, Some(2))], "the parent of 2 is dropped, 3 follows 2");
+        assert_eq!(parents(&[1, 3]), vec![(1, None), (3, None)], "3's parent is dropped though its grandparent stays");
+        assert_eq!(parents(&[1, 2, 3]), vec![(1, None), (2, Some(1)), (3, Some(2))], "nothing dropped, nothing changes");
+    }
+
+    /// Replacements the cut leaves alone are left exactly as they were, and only one that names a figure the cut dropped loses that name.
+    #[test]
+    fn a_replacement_is_only_touched_where_it_names_a_figure_the_cut_dropped() {
+        let sheet = |patches: &str| -> Obj {
+            // The poses the cut left: both hold the figure 1.
+            let document = frame(&format!(r#"{{"frameSources":{{"a":{{"objects":[{{"unique_id":1}}]}},"b":{{"objects":[{{"unique_id":1}}]}}}},"layerSheet":{{"tracks":{{"layer-1":{{"keys":[{{"id":"cell-1","tick":0,"movieclipPatches":{patches}}},{{"id":"cell-2","tick":3}}]}}}}}}}}"#));
+            document.as_obj().cloned().unwrap()
+        };
+        let text = |styk: &Obj| styk_doc::json::to_string(&Value::object(styk.clone()));
+        // The figure the replacement names is held by its pose, another's replacement names nothing, and a pose still used elsewhere is not looked at.
+        let mut untouched = sheet(r#"[{"uid":1,"frameId":"a","replacementUid":1},{"uid":9,"frameId":"a"},{"uid":9,"frameId":"b","replacementUid":1}]"#);
+        let before = text(&untouched);
+        prune_patches(&mut untouched, Vec::new());
+        assert_eq!(text(&untouched), before);
+        // A replacement by a figure the cut dropped becomes a replacement by nothing, in the key that holds it and no other.
+        let mut cut = sheet(r#"[{"uid":9,"frameId":"a","replacementUid":5},{"uid":1,"frameId":"a","replacementUid":1}]"#);
+        prune_patches(&mut cut, Vec::new());
+        assert_eq!(text(&cut), text(&sheet(r#"[{"uid":9,"frameId":"a"},{"uid":1,"frameId":"a","replacementUid":1}]"#)));
+    }
+
+    /// A scene a clip retains numbers its figures on its own: an object of it with the number of a figure the clip holds, of a definition the clip
+    /// does not hold, goes with the rest, at every level of the chain (it would be an unknown figure to the file's reader).
+    #[test]
+    fn a_retained_scene_keeps_only_figures_of_definitions_the_clip_holds() {
+        let scene = |inner: &str| frame(&format!(
+            r#"{{"keyframes":[{{"duration_raw":1,"objects":[
+                {{"object_slot":0,"unique_id":1,"figure_type_id":1,"join":null}},
+                {{"object_slot":1,"unique_id":2,"figure_type_id":4,"join":null}}],"object_draw_order":[0,1],"object_draw_order_unique_ids":[1,2]}}],
+              "_styk":{{"frameSources":{{"pose":{{"duration_raw":1,"objects":[{{"object_slot":0,"unique_id":1,"figure_type_id":1,"join":null}}]}}}}{inner}}}}}"#
+        ));
+        let mut retained = scene(&format!(r#","movieclipSource":{{"inheritFigures":true,"document":{}}}"#, styk_doc::json::to_string(&scene(""))));
+        prune_retained(&mut retained, &[1, 2].into_iter().collect(), &HashSet::new(), &[4].into_iter().collect());
+        let kinds = |document: &Value| -> Vec<u32> { items(document.get("keyframes")).iter().flat_map(objects_of).filter_map(|o| num(&o, "figure_type_id")).map(|n| n as u32).collect() };
+        let sources = |document: &Value| -> usize { document.path(&["_styk", "frameSources", "pose"]).map_or(0, |pose| objects_of(pose).len()) };
+        let inner = retained.path(&["_styk", "movieclipSource", "document"]).unwrap();
+        assert_eq!((kinds(&retained), sources(&retained)), (vec![4], 0), "the scene");
+        assert_eq!((kinds(inner), sources(inner)), (vec![4], 0), "and the scene it retains");
+    }
+
+    /// A replacement is kept only while the pose it names holds the figure it says: the figure may have the clip's identity and another definition
+    /// than the clip's (a retained scene numbers its figures on its own), and the cut then dropped it from the pose.
+    #[test]
+    fn a_replacement_by_a_figure_the_definitions_of_the_clip_dropped_from_its_pose_names_nothing() {
+        let scene = frame(
+            r#"{"keyframes":[{"duration_raw":1,"objects":[{"object_slot":0,"unique_id":1,"figure_type_id":1,"join":null}],"object_draw_order":[0],"object_draw_order_unique_ids":[1]}],
+              "_styk":{"frameSources":{"pose":{"duration_raw":1,"objects":[{"object_slot":0,"unique_id":1,"figure_type_id":1,"join":null}],"object_draw_order":[0],"object_draw_order_unique_ids":[1]}},
+                "layerSheet":{"tracks":{"layer-1":{"keys":[{"id":"cell-1","tick":0,"movieclipPatches":[{"uid":9,"frameId":"pose","replacementUid":1}]}]}}}}}"#,
+        );
+        let mut retained = scene;
+        // The clip holds figure 1, of the definition 4: the scene's figure 1 is of the definition 1.
+        prune_retained(&mut retained, &[1].into_iter().collect(), &HashSet::new(), &[4].into_iter().collect());
+        let pose = retained.path(&["_styk", "frameSources", "pose"]).unwrap();
+        assert!(objects_of(pose).is_empty(), "the cut dropped the figure of the other definition from the pose");
+        let keys = items(retained.path(&["_styk", "layerSheet", "tracks", "layer-1", "keys"]));
+        let patch = items(keys[0].get("movieclipPatches")).remove(0);
+        assert!(patch.get("replacementUid").is_none(), "so the replacement names nothing: {}", styk_doc::json::to_string(&patch));
     }
 }
