@@ -228,7 +228,12 @@ impl WebAssets {
             let (relative, kind) = checked_path(uri.path(), self.development())?;
             let if_none_match =
                 request.headers().get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()).unwrap_or("");
-            self.load(&relative, kind, method, if_none_match)
+            let mut answer = self.load(&relative, kind, method, if_none_match)?;
+            if relative == "index.html" && !answer.body.is_empty() {
+                answer.body = allow_ipc(&answer.body);
+                answer.length = answer.body.len();
+            }
+            Ok(answer)
         })();
         match result {
             Ok(answer) => Response::builder()
@@ -247,6 +252,15 @@ impl WebAssets {
             Err(refusal) => failure(&refusal),
         }
     }
+}
+
+/// The page's own policy (`index.html`) lets it connect to its origin only; Tauri's IPC is a fetch to its own origin
+/// (`http://ipc.localhost` on Windows, `ipc:` elsewhere). Without it every call falls back to `postMessage`, where an
+/// answer's bytes become a JSON array of numbers and a request's raw bytes do not arrive at all. Only that origin is
+/// added; the rest of the policy is the page's.
+fn allow_ipc(html: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(html);
+    text.replacen("connect-src 'self'", "connect-src 'self' http://ipc.localhost ipc:", 1).into_bytes()
 }
 
 /// The JSON answer to a request that failed, as today.
@@ -285,6 +299,14 @@ pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_page_may_reach_tauris_ipc_and_nothing_else_more() {
+        let page = br#"<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; worker-src 'self' blob:">"#;
+        assert_eq!(String::from_utf8(allow_ipc(page)).unwrap(), r#"<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://ipc.localhost ipc:; worker-src 'self' blob:">"#);
+        let index = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../index.html")).unwrap();
+        assert!(String::from_utf8(allow_ipc(&index)).unwrap().contains("connect-src 'self' http://ipc.localhost ipc:;"), "index.html keeps the directive this relies on");
+    }
 
     #[test]
     fn paths_follow_todays_rules() {

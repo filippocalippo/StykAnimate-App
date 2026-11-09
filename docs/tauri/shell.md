@@ -87,7 +87,10 @@ areas are the window's caption: WebView2's non-client region support (on in wry)
 - `stykanimate://open`, `privacy`, `library` and `library/<public id>` are accepted, as today. A packaged first
   process registers itself as the handler for the current user (as `setAsDefaultProtocolClient` did).
 - File associations are the Electron app's: the same extensions, names (ProgIDs) and roles, in `tauri.conf.json`.
-- GPU switches: WebView2 enables WebGPU through D3D12 with no switch; `STYK_GPU_UNSAFE=1` adds the opt-in.
+- GPU switches: WebView2 enables WebGPU through D3D12 with no opt-in (`STYK_GPU_UNSAFE=1` adds it). Its sandboxed GPU
+  process cannot load the runtime's `dxcompiler.dll` (the runtime ships no `dxil.dll`; error 87, no WebGPU device), so
+  the app passes `--disable-dawn-features=use_dxc` and Dawn compiles shaders with FXC, sandbox kept on (`shell/gpu.rs`;
+  `STYK_GPU_DXC=1` keeps DXC). Development builds also take `STYK_EXTRA_BROWSER_ARGS` for diagnosis.
 
 ## Updates
 

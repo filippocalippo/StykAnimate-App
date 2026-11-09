@@ -1,10 +1,19 @@
 //! The browser switches that decide whether the editor gets a hardware WebGPU adapter (port of
 //! desktop/gpu-switches.cjs). On Windows WebView2 uses Chromium's normal driver allowlist and enables WebGPU through
-//! D3D12, so nothing is needed. `STYK_GPU_UNSAFE=1` forces the WebGPU opt-in; `STYK_GPU_UNSAFE=0` leaves the
+//! D3D12, so no opt-in is needed (but see the shader compiler below). `STYK_GPU_UNSAFE=1` forces the WebGPU opt-in; `STYK_GPU_UNSAFE=0` leaves the
 //! browser's own allowlist untouched (useful when diagnosing a driver problem).
 //!
 //! The engine keeps its own safety net: no WebGPU adapter selects its WebGL2 backend, so a driver that cannot do
 //! WebGPU still edits and plays back correctly.
+//!
+//! **Shader compiler (Windows).** WebView2's WebGPU (Dawn on D3D12) compiles shaders with DXC, loading
+//! `dxcompiler.dll` from the runtime's folder when the first device is made. The WebView2 runtime ships
+//! `dxcompiler.dll` without `dxil.dll`, and inside the GPU process's sandbox that load fails ("DynamicLib.Open:
+//! dxcompiler.dll Windows Error: 87"): no device, so the engine never starts. Found 2026-11-09 with runtime
+//! 157.0.4341.42; turning the sandbox off makes the same load succeed, so it is the sandbox, not our folder or
+//! search path. The app therefore asks Dawn for its FXC path (`d3dcompiler_47.dll`, which the runtime ships and
+//! loads before the sandbox) with `--disable-dawn-features=use_dxc`, and keeps the sandbox on. The engine's shaders
+//! use no DXC-only feature (no `f16`, no subgroups). `STYK_GPU_DXC=1` keeps DXC (to check a newer runtime).
 //!
 //! WebView2 takes all its switches as one string, and every window sharing a browser profile must pass the same
 //! one. Tauri's defaults (`msWebOOUI`, `msPdfOOUI`, `msSmartScreenProtection` off) are kept.
@@ -17,8 +26,9 @@ pub struct Switches {
 }
 
 pub fn switches(gpu_unsafe: Option<&str>, background: bool, remote_debugging_port: Option<u16>) -> Switches {
+    let dxc = std::env::var("STYK_GPU_DXC").as_deref() == Ok("1");
     let mut out = Switches {
-        switches: Vec::new(),
+        switches: if cfg!(windows) && !dxc { vec!["--disable-dawn-features=use_dxc".into()] } else { Vec::new() },
         disable_features: vec!["msWebOOUI".into(), "msPdfOOUI".into(), "msSmartScreenProtection".into()],
     };
     if gpu_unsafe == Some("1") {
@@ -51,7 +61,11 @@ mod tests {
 
     #[test]
     fn windows_needs_no_gpu_switch_and_scripts_keep_drawing_off_screen() {
-        assert_eq!(switches(None, false, None).arguments(), "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+        let plain = switches(None, false, None).arguments();
+        assert!(plain.ends_with("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"));
+        // The GPU process keeps its sandbox; shaders go through FXC (see the module's notes).
+        assert_eq!(plain.contains("--disable-dawn-features=use_dxc"), cfg!(windows));
+        assert!(!plain.contains("sandbox"));
         let driven = switches(Some("1"), true, Some(9333)).arguments();
         assert!(driven.contains("--enable-unsafe-webgpu"));
         assert!(driven.contains("CalculateNativeWinOcclusion"));

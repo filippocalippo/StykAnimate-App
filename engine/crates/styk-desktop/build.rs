@@ -2,6 +2,16 @@
 //! only those are declared here, so a command missing from the capability file cannot be called from the page.
 fn main() {
     println!("cargo:rerun-if-changed=capabilities/main.json");
+    // Every executable of the crate (the app and its test binaries) gets the app manifest from the linker: test
+    // binaries link Tauri too, and Windows will not start them without Common Controls 6 (STATUS_ENTRYPOINT_NOT_FOUND).
+    // windows/app.manifest is the manifest tauri-build would embed into the app alone.
+    let msvc = std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+    if msvc {
+        let manifest = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir")).join("windows").join("app.manifest");
+        println!("cargo:rerun-if-changed=windows/app.manifest");
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+    }
     println!("cargo:rerun-if-changed=../../../src/desktop-bridge.mjs");
     println!("cargo:rerun-if-changed=../../../desktop/release-info.json");
     // Names this build's embedded web assets in their entity tags.
@@ -22,7 +32,9 @@ fn main() {
     let commands: &'static [&'static str] =
         Box::leak(commands.into_iter().map(|c| &*Box::leak(c.into_boxed_str())).collect::<Vec<_>>().into_boxed_slice());
     tauri_build::try_build(
-        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(commands)),
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(commands))
+            .windows_attributes(if msvc { tauri_build::WindowsAttributes::new_without_app_manifest() } else { tauri_build::WindowsAttributes::new() }),
     )
     .expect("tauri build");
 }

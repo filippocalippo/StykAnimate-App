@@ -173,7 +173,13 @@ pub fn create(app: &AppHandle) -> Result<WebviewWindow, Box<dyn std::error::Erro
     } else {
         None
     };
-    let switches = gpu::switches(std::env::var("STYK_GPU_UNSAFE").ok().as_deref(), background, debugging);
+    let mut switches = gpu::switches(std::env::var("STYK_GPU_UNSAFE").ok().as_deref(), background, debugging);
+    // Diagnosing a driver or browser problem: more switches, in development and developer builds only.
+    if cfg!(any(debug_assertions, feature = "devtools"))
+        && let Ok(extra) = std::env::var("STYK_EXTRA_BROWSER_ARGS")
+    {
+        switches.switches.extend(extra.split_whitespace().map(str::to_owned));
+    }
     let url = WebviewUrl::CustomProtocol(url::Url::parse(web_host::origin())?);
     let mut builder = tauri::WebviewWindowBuilder::new(app, MAIN, url)
         .title("StykAnimate")
