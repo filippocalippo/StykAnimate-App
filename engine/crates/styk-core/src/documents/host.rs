@@ -489,7 +489,10 @@ impl Documents {
             let restored = self.host()?.save_return.take();
             return Ok(match restored {
                 Some(Prompt::Close { id, stamp }) => {
-                    let name = self.get(stamp.id).ok_or(HostError::Stale)?.project_name().to_owned();
+                    // Save may have settled movieclip scopes since this close was asked.
+                    // Keep the question's identity, but answer against the current root.
+                    let tab = self.get(stamp.id).ok_or(HostError::Stale)?;
+                    let (stamp, name) = (Stamp::of(tab), tab.project_name().to_owned());
                     self.host()?.prompt = Some(Prompt::Close { id, stamp });
                     Effect::ConfirmClose { prompt: id, document: stamp.id, name, recovery_error: None }
                 }
