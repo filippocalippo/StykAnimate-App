@@ -652,11 +652,24 @@ export function createDockHost({document: doc = globalThis.document, window: win
       setAttr(el, 'aria-valuemax', String(divider.max));
       setAttr(el, 'aria-valuenow', String(divider.now));
       localizedAttribute(el, 'aria-valuetext', 'dockHost.sizePixels', {count: divider.now});
-      const names = divider.tabs.map(id => (descriptor(id)?.titleKey ? {messageKey: descriptor(id).titleKey} : title(id)));
-      localizedAttribute(el, 'aria-label', 'dockHost.resizePanels', {panels: {format: 'list', value: names.length ? names : [{messageKey: 'dockHost.stage'}]}});
+      // Named by what it resizes, as today: the timeline, Structure, Properties, else the panels on its controlled side.
+      const resized = divider.controlTabs;
+      const labelKey = resized.length === 1 && resized[0] === 'timeline' ? 'dockHost.resizeTimeline' : resized.includes('structure') ? 'dockHost.resizeFigureStructure'
+        : resized.includes('properties') ? 'dockHost.resizePropertiesPanel' : 'dockHost.resizePanels';
+      const names = resized.map(id => (descriptor(id)?.titleKey ? {messageKey: descriptor(id).titleKey} : title(id)));
+      localizedAttribute(el, 'aria-label', labelKey, labelKey === 'dockHost.resizePanels' ? {panels: {format: 'list', value: names.length ? names : [{messageKey: 'dockHost.stage'}]}} : {});
       place(el, divider.rect);
+      const before = elementOfGroup(divider.controlGroup);
+      if (before && before !== stage && before.parentElement === workspace && el.nextElementSibling !== before) before.before(el);
     }
     for (const [key, el] of dividerEls) if (!live.has(key)) { if (dragging?.key === key) continue; el.remove(); dividerEls.delete(key); }
+  }
+
+  /** The element that draws a group (its island, strip or the timeline's own island). */
+  function elementOfGroup(groupId) {
+    const group = solution?.groups.find(item => item.id === groupId);
+    if (!group) return null;
+    return group.timeline && group.state !== 'strip' ? timeline : group.state === 'strip' ? strips.get(group.id) : islands.get(group.id);
   }
 
   let dragging = null;
@@ -684,7 +697,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
       if (event.button !== 0 || dragging || !divider) return;
       event.preventDefault();
       el.focus({preventScroll: true});
-      onBeforeChange?.();
+      // A resize moves no panel: playback and edits carry on, as today's splitters let them.
       dragging = {key, pointerId: event.pointerId, origin: coordinate(event, divider.axis), divider};
       el.setPointerCapture(event.pointerId);
       el.dataset.dragging = 'true';
@@ -963,7 +976,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
     const current = presentation(id);
     if (current === 'hidden') {
       edit(layout => reopenPanel(layout, id, options()));
-      return showPanel(id, {focus, invoker});
+      return presentation(id) === 'hidden' ? false : showPanel(id, {focus, invoker});
     }
     if (current === 'sheet') { openSheet(id, {invoker, focus}); return true; }
     if (current === 'strip') {
@@ -1169,8 +1182,8 @@ export function createDockHost({document: doc = globalThis.document, window: win
       if (!panel) return false;
       onBeforeChange?.();
       const s = solution ?? commit();
-      const width = Math.min(320, s.stage.width - 32), height = Math.min(520, s.stage.height - 32);
-      const at = rect ?? {x: Math.round(s.stage.x + s.stage.width - width - 24), y: Math.round(s.stage.y - origin.y + 56), w: width, h: height};
+      const width = Math.min(320, s.stage.width - 32), height = Math.max(120, Math.min(520, s.stage.height - s.stageHead - 24));
+      const at = rect ?? {x: Math.round(s.stage.x + s.stage.width - width - 24), y: Math.round(s.viewport.y - origin.y + 12), w: width, h: height};
       return edit(layout => movePanel(layout, id, {kind: 'float', rect: at}, options()));
     },
     placeFloat(floatId, rect) { return edit(layout => placeFloat(layout, floatId, rect)); },

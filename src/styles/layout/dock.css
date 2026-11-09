@@ -65,7 +65,7 @@
   /* A dragged tab: its origin dims, a small pill follows the pointer, and the
    * place the release gives the panel shows as a soft area with its name. */
   :where(.shell-tabs [role="tab"], .shell-strip-button)[data-dragging] { opacity: 0.4; }
-  .shell-drag-zone {
+  .shell-drag-zone, .shell-drop {
     position: fixed; inset: auto; z-index: var(--z-floating); border-radius: var(--radius-xl); pointer-events: none;
     transition: left var(--dur-fast) var(--ease-out), top var(--dur-fast) var(--ease-out), width var(--dur-fast) var(--ease-out), height var(--dur-fast) var(--ease-out);
   }
@@ -73,7 +73,7 @@
     content: ""; position: absolute; inset-block: 6px; inset-inline-start: var(--insert-at, 8px); inline-size: 2px; border-radius: 1px; background: var(--accent-line);
   }
   @media (prefers-reduced-motion: reduce) {
-    .shell-drag-zone { transition: none; }
+    .shell-drag-zone, .shell-drop { transition: none; }
   }
   .shell-drag-ghost {
     position: fixed; inset-block-start: 0; inset-inline-start: 0; z-index: var(--z-floating); pointer-events: none;

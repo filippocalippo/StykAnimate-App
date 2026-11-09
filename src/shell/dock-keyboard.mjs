@@ -62,7 +62,7 @@ export function createDockKeyboard({document: doc = globalThis.document, window:
 
   let move = null;
   const zone = doc.createElement('div');
-  zone.className = 'ui-drop-zone shell-drag-zone shell-drop';
+  zone.className = 'ui-drop-zone shell-drop';
   zone.hidden = true;
   const zoneLabel = doc.createElement('span');
   zoneLabel.className = 'ui-drop-label';

@@ -292,7 +292,7 @@ export function applyPreset(state, mode, presetId, {catalog = PANEL_CATALOG, wor
   if (!layout) return state;
   const shares = builtIn(presetId, mode)?.shares;
   if (shares && workspaceHeight > 0) {
-    layout = cloneJSON(layout);
+    layout = structuredClone(layout);
     for (const group of groupsOf(layout)) if (shares[group.id]) group.size = Math.round(shares[group.id] * workspaceHeight);
   }
   return withEntry(state, mode, {preset: presetId, layout, focus: null});
@@ -308,20 +308,17 @@ export function toggleFocus(state, mode, {on} = {}) {
   const active = Boolean(entry.focus);
   if ((on ?? !active) === active) return state;
   if (active) return withEntry(state, mode, {layout: entry.focus, focus: null});
-  const layout = cloneJSON(entry.layout);
+  const layout = structuredClone(entry.layout);
   for (const group of groupsOf(layout)) group.collapsed = true;
   return withEntry(state, mode, {layout, focus: entry.layout});
 }
 
 export const focusActive = (state, mode) => Boolean(state.workspaces[normalizeMode(mode)]?.focus);
 
-/** Re-applies the workspace's preset (Reset layout): always succeeds, built-ins are repaired data. */
+/** Returns the workspace to its default layout (Reset layout): always succeeds, built-ins are repaired data. */
 export function resetWorkspace(state, mode, {catalog = PANEL_CATALOG} = {}) {
   mode = normalizeMode(mode);
-  const entry = state.workspaces[mode];
-  const layout = presetLayout(entry.preset, mode, {catalog, state}) ?? defaultLayout(mode, {catalog});
-  const preset = presetLayout(entry.preset, mode, {catalog, state}) ? entry.preset : DEFAULT_PRESETS[mode];
-  return withEntry(state, mode, {preset, layout, focus: null});
+  return withEntry(state, mode, {preset: DEFAULT_PRESETS[mode], layout: defaultLayout(mode, {catalog}), focus: null});
 }
 
 /** Every workspace at its default preset; saved layouts stay (Settings › Reset workspace). */

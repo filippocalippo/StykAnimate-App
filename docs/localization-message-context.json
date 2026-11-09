@@ -7293,7 +7293,7 @@
       "src/camera-motion-ui.mjs:78",
       "src/color-picker.mjs:157",
       "src/localization-bindings.mjs:208",
-      "src/shell/layout-popover.mjs:191",
+      "src/shell/layout-popover.mjs:195",
       "src/studio-shell.mjs:126",
       "src/touch/timeline-scrubber.mjs:55",
       "src/ui/command-catalog.mjs:110",
@@ -7358,8 +7358,8 @@
     "locations": [
       "src/background-dialog.mjs:62",
       "src/inspector-view.mjs:301",
-      "src/shell/layout-popover.mjs:209",
-      "src/shell/layout-popover.mjs:218",
+      "src/shell/layout-popover.mjs:213",
+      "src/shell/layout-popover.mjs:222",
       "src/vfx-preset-ui.mjs:48",
       "src/vfx-preset-ui.mjs:69"
     ],
@@ -7419,7 +7419,7 @@
   "common.reset": {
     "locations": [
       "src/rig-test-ui.mjs:48",
-      "src/shell/layout-popover.mjs:84",
+      "src/shell/layout-popover.mjs:87",
       "src/ui/quick-actions.mjs:92",
       "src/vfx-inspector.mjs:177"
     ],
@@ -9647,39 +9647,58 @@
   },
   "dockHost.layoutFileUnreadable": {
     "locations": [
-      "src/shell/dock-host.mjs:1222",
-      "src/shell/layout-popover.mjs:241",
-      "src/shell/layout-popover.mjs:243"
+      "src/shell/dock-host.mjs:1235",
+      "src/shell/layout-popover.mjs:245",
+      "src/shell/layout-popover.mjs:247"
     ],
     "context": "if (result?.error) throw messageError(new Error(''), result.error === 'newer' ? 'dockHost.layoutFromNewerVersion' : result.error === 'limit' ? 'dockHost.layoutL"
   },
   "dockHost.layoutFromNewerVersion": {
     "locations": [
-      "src/shell/dock-host.mjs:1222"
+      "src/shell/dock-host.mjs:1235"
     ],
     "context": "if (result?.error) throw messageError(new Error(''), result.error === 'newer' ? 'dockHost.layoutFromNewerVersion' : result.error === 'limit' ? 'dockHost.layoutL"
   },
   "dockHost.layoutLimitReached": {
     "locations": [
-      "src/shell/dock-host.mjs:1202",
-      "src/shell/dock-host.mjs:1222",
-      "src/shell/layout-popover.mjs:216",
-      "src/shell/layout-popover.mjs:279"
+      "src/shell/dock-host.mjs:1215",
+      "src/shell/dock-host.mjs:1235",
+      "src/shell/layout-popover.mjs:220",
+      "src/shell/layout-popover.mjs:283"
     ],
     "context": "if (result?.error) throw messageError(new Error(''), result.error === 'limit' ? 'dockHost.layoutLimitReached' : 'dockHost.nameThePresetFirst', {count: MAX_SAVED"
   },
   "dockHost.nameThePresetFirst": {
     "locations": [
-      "src/shell/dock-host.mjs:1202",
-      "src/shell/dock-host.mjs:1210"
+      "src/shell/dock-host.mjs:1215",
+      "src/shell/dock-host.mjs:1223"
     ],
     "context": "if (result?.error) throw messageError(new Error(''), result.error === 'limit' ? 'dockHost.layoutLimitReached' : 'dockHost.nameThePresetFirst', {count: MAX_SAVED"
   },
+  "dockHost.resizeFigureStructure": {
+    "locations": [
+      "src/shell/dock-host.mjs:657"
+    ],
+    "context": "const labelKey = resized.length === 1 && resized[0] === 'timeline' ? 'dockHost.resizeTimeline' : resized.includes('structure') ? 'dockHost.resizeFigureStructure"
+  },
   "dockHost.resizePanels": {
     "locations": [
-      "src/shell/dock-host.mjs:656"
+      "src/shell/dock-host.mjs:658",
+      "src/shell/dock-host.mjs:660"
     ],
-    "context": "localizedAttribute(el, 'aria-label', 'dockHost.resizePanels', {panels: {format: 'list', value: names.length ? names : [{messageKey: 'dockHost.stage'}]}});"
+    "context": ": resized.includes('properties') ? 'dockHost.resizePropertiesPanel' : 'dockHost.resizePanels';"
+  },
+  "dockHost.resizePropertiesPanel": {
+    "locations": [
+      "src/shell/dock-host.mjs:658"
+    ],
+    "context": ": resized.includes('properties') ? 'dockHost.resizePropertiesPanel' : 'dockHost.resizePanels';"
+  },
+  "dockHost.resizeTimeline": {
+    "locations": [
+      "src/shell/dock-host.mjs:657"
+    ],
+    "context": "const labelKey = resized.length === 1 && resized[0] === 'timeline' ? 'dockHost.resizeTimeline' : resized.includes('structure') ? 'dockHost.resizeFigureStructure"
   },
   "dockHost.restoreTimelineHeight": {
     "locations": [
@@ -9695,13 +9714,13 @@
   },
   "dockHost.stage": {
     "locations": [
-      "src/shell/dock-host.mjs:656"
+      "src/shell/dock-host.mjs:660"
     ],
-    "context": "localizedAttribute(el, 'aria-label', 'dockHost.resizePanels', {panels: {format: 'list', value: names.length ? names : [{messageKey: 'dockHost.stage'}]}});"
+    "context": "localizedAttribute(el, 'aria-label', labelKey, labelKey === 'dockHost.resizePanels' ? {panels: {format: 'list', value: names.length ? names : [{messageKey: 'doc"
   },
   "dockHost.thisPresetNoLongerExists": {
     "locations": [
-      "src/shell/dock-host.mjs:1210"
+      "src/shell/dock-host.mjs:1223"
     ],
     "context": "if (result?.error) throw messageError(new Error(''), result.error === 'name' ? 'dockHost.nameThePresetFirst' : 'dockHost.thisPresetNoLongerExists');"
   },
@@ -9727,7 +9746,7 @@
     "locations": [
       "src/shell/dock-keyboard.mjs:110",
       "src/shell/dock-tabs.mjs:166",
-      "src/shell/dock-tabs.mjs:401"
+      "src/shell/dock-tabs.mjs:403"
     ],
     "context": "announce(interfaceText('dockKeyboard.panelLocation', {title: panelName(id), place: {messageKey: zoneLabelKey(target)}}));"
   },
@@ -9856,7 +9875,7 @@
   },
   "dockTabs.moveCancelled": {
     "locations": [
-      "src/shell/dock-tabs.mjs:387"
+      "src/shell/dock-tabs.mjs:389"
     ],
     "context": "if (!commit || !target) { if (!commit) announce(interfaceText('dockTabs.moveCancelled')); return; }"
   },
@@ -15068,28 +15087,25 @@
   },
   "errors.layoutSchema.unknownWorkspace": {
     "locations": [
-      "src/shell/layout-schema.mjs:150"
+      "src/shell/layout-schema.mjs:151"
     ],
     "context": "if (mode !== 'build' && !MODES.includes(mode)) throw messageError(new TypeError(''), \"errors.layoutSchema.unknownWorkspace\", {value: String(mode)});"
   },
   "errors.layoutStore.aLayoutStoreNeedsReadAndWrite": {
     "locations": [
-      "src/shell/dock-store.mjs:172",
-      "src/shell/layout-store.mjs:162"
+      "src/shell/dock-store.mjs:172"
     ],
     "context": "if (typeof read !== 'function' || typeof write !== 'function') throw messageError(new TypeError(''), \"errors.layoutStore.aLayoutStoreNeedsReadAndWrite\", {});"
   },
   "errors.layoutStore.layoutStorageIsUnavailable": {
     "locations": [
-      "src/shell/dock-store.mjs:108",
-      "src/shell/layout-store.mjs:70"
+      "src/shell/dock-store.mjs:108"
     ],
     "context": "if (!storage) throw messageError(new Error(''), \"errors.layoutStore.layoutStorageIsUnavailable\", {});"
   },
   "errors.layoutStore.theWorkspaceLayoutDoesNotFitInThe": {
     "locations": [
-      "src/shell/dock-store.mjs:81",
-      "src/shell/layout-store.mjs:226"
+      "src/shell/dock-store.mjs:81"
     ],
     "context": "if (!fitted.ok) throw messageError(new Error(''), \"errors.layoutStore.theWorkspaceLayoutDoesNotFitInThe\", {});"
   },
@@ -23554,117 +23570,117 @@
   },
   "layoutPopover.closeLayout": {
     "locations": [
-      "src/shell/layout-popover.mjs:109"
+      "src/shell/layout-popover.mjs:112"
     ],
     "context": "const popover = createPopover({anchor: target, title: interfaceText('layoutPopover.layout'), titleKey: 'layoutPopover.layout', closeLabel: interfaceText('layout"
   },
   "layoutPopover.delete": {
     "locations": [
-      "src/shell/layout-popover.mjs:191"
+      "src/shell/layout-popover.mjs:195"
     ],
     "context": "{label: interfaceText('layoutPopover.delete'), labelKey: 'common.delete', icon: 'trash', danger: true, run: () => { guard(() => workspace.deleteLayout(item.id))"
   },
   "layoutPopover.exportLayout": {
     "locations": [
-      "src/shell/layout-popover.mjs:97"
+      "src/shell/layout-popover.mjs:100"
     ],
     "context": "{label: interfaceText('layoutPopover.exportLayout'), labelKey: 'layoutPopover.exportLayout', icon: 'export', run: () => exportFile()},"
   },
   "layoutPopover.fightSetup": {
     "locations": [
-      "src/shell/layout-popover.mjs:218"
+      "src/shell/layout-popover.mjs:222"
     ],
     "context": "const name = await prompt({title: interfaceText('layoutPopover.saveLayoutAsPreset'), titleKey: 'layoutPopover.saveLayoutAsPreset', label: interfaceText('common."
   },
   "layoutPopover.importLayout": {
     "locations": [
-      "src/shell/layout-popover.mjs:96"
+      "src/shell/layout-popover.mjs:99"
     ],
     "context": "{label: interfaceText('layoutPopover.importLayout'), labelKey: 'layoutPopover.importLayout', icon: 'import', run: () => importFile()},"
   },
   "layoutPopover.layout": {
     "locations": [
-      "src/shell/layout-popover.mjs:109",
-      "src/shell/layout-popover.mjs:230"
+      "src/shell/layout-popover.mjs:112",
+      "src/shell/layout-popover.mjs:234"
     ],
     "context": "const popover = createPopover({anchor: target, title: interfaceText('layoutPopover.layout'), titleKey: 'layoutPopover.layout', closeLabel: interfaceText('layout"
   },
   "layoutPopover.layoutPresets": {
     "locations": [
-      "src/shell/layout-popover.mjs:63"
+      "src/shell/layout-popover.mjs:66"
     ],
     "context": "localizedAttribute(presets, 'aria-label', 'layoutPopover.layoutPresets', {});"
   },
   "layoutPopover.modified": {
     "locations": [
-      "src/shell/layout-popover.mjs:168"
+      "src/shell/layout-popover.mjs:172"
     ],
     "context": "if (card.modified) localizedAttribute(choice, 'aria-description', 'layoutPopover.modified', {}); else choice.removeAttribute('aria-description');"
   },
   "layoutPopover.moreLayoutActions": {
     "locations": [
-      "src/shell/layout-popover.mjs:93"
+      "src/shell/layout-popover.mjs:96"
     ],
     "context": "localizedAttribute(more, 'aria-label', 'layoutPopover.moreLayoutActions', {});"
   },
   "layoutPopover.nameThePresetFirst": {
     "locations": [
-      "src/shell/layout-popover.mjs:210",
-      "src/shell/layout-popover.mjs:219"
+      "src/shell/layout-popover.mjs:214",
+      "src/shell/layout-popover.mjs:223"
     ],
     "context": "validate: value => (value.trim() ? null : interfaceText('layoutPopover.nameThePresetFirst'))});"
   },
   "layoutPopover.panels": {
     "locations": [
-      "src/shell/layout-popover.mjs:67"
+      "src/shell/layout-popover.mjs:70"
     ],
     "context": "localizedAttribute(rows, 'aria-label', 'layoutPopover.panels', {});"
   },
   "layoutPopover.rename": {
     "locations": [
-      "src/shell/layout-popover.mjs:188"
+      "src/shell/layout-popover.mjs:192"
     ],
     "context": "{label: interfaceText('layoutPopover.rename'), labelKey: 'layoutPopover.rename', icon: 'file', run: () => renameSaved(item)},"
   },
   "layoutPopover.rename2": {
     "locations": [
-      "src/shell/layout-popover.mjs:209"
+      "src/shell/layout-popover.mjs:213"
     ],
     "context": "const name = await prompt({title: interfaceText('layoutPopover.renamePreset'), titleKey: 'layoutPopover.renamePreset', label: interfaceText('common.name'), labe"
   },
   "layoutPopover.renamePreset": {
     "locations": [
-      "src/shell/layout-popover.mjs:209"
+      "src/shell/layout-popover.mjs:213"
     ],
     "context": "const name = await prompt({title: interfaceText('layoutPopover.renamePreset'), titleKey: 'layoutPopover.renamePreset', label: interfaceText('common.name'), labe"
   },
   "layoutPopover.resetLayout": {
     "locations": [
-      "src/shell/layout-popover.mjs:85"
+      "src/shell/layout-popover.mjs:88"
     ],
     "context": "localizedAttribute(reset, 'aria-label', 'layoutPopover.resetLayout', {});"
   },
   "layoutPopover.saveAsPreset": {
     "locations": [
-      "src/shell/layout-popover.mjs:99"
+      "src/shell/layout-popover.mjs:102"
     ],
     "context": "const save = translatedElement(button(interfaceText('layoutPopover.saveAsPreset'), 'outline', () => saveAs()), 'layoutPopover.saveAsPreset', {});"
   },
   "layoutPopover.saveLayoutAsPreset": {
     "locations": [
-      "src/shell/layout-popover.mjs:218"
+      "src/shell/layout-popover.mjs:222"
     ],
     "context": "const name = await prompt({title: interfaceText('layoutPopover.saveLayoutAsPreset'), titleKey: 'layoutPopover.saveLayoutAsPreset', label: interfaceText('common."
   },
   "layoutPopover.savePreset": {
     "locations": [
-      "src/shell/layout-popover.mjs:218"
+      "src/shell/layout-popover.mjs:222"
     ],
     "context": "const name = await prompt({title: interfaceText('layoutPopover.saveLayoutAsPreset'), titleKey: 'layoutPopover.saveLayoutAsPreset', label: interfaceText('common."
   },
   "layoutPopover.update": {
     "locations": [
-      "src/shell/layout-popover.mjs:189"
+      "src/shell/layout-popover.mjs:193"
     ],
     "context": "{label: interfaceText('layoutPopover.update'), labelKey: 'layoutPopover.update', icon: 'save', run: () => { guard(() => workspace.updateLayout(item.id)); refocu"
   },
@@ -27396,49 +27412,49 @@
   "shell.preset.animate": {
     "locations": [
       "src/shell/dock-workspaces.mjs:66",
-      "src/shell/layout-schema.mjs:195"
+      "src/shell/layout-schema.mjs:196"
     ],
     "context": "{id: 'animate', titleKey: 'shell.preset.animate', modes: ['animate'],"
   },
   "shell.preset.build": {
     "locations": [
       "src/shell/dock-workspaces.mjs:76",
-      "src/shell/layout-schema.mjs:202"
+      "src/shell/layout-schema.mjs:203"
     ],
     "context": "{id: 'build', titleKey: 'shell.preset.build', modes: ['rig'],"
   },
   "shell.preset.buildTimeline": {
     "locations": [
       "src/shell/dock-workspaces.mjs:78",
-      "src/shell/layout-schema.mjs:204"
+      "src/shell/layout-schema.mjs:205"
     ],
     "context": "{id: 'build-timeline', titleKey: 'shell.preset.buildTimeline', modes: ['rig'],"
   },
   "shell.preset.draw": {
     "locations": [
       "src/shell/dock-workspaces.mjs:74",
-      "src/shell/layout-schema.mjs:201"
+      "src/shell/layout-schema.mjs:202"
     ],
     "context": "{id: 'draw', titleKey: 'shell.preset.draw', modes: ['draw'],"
   },
   "shell.preset.focus": {
     "locations": [
       "src/shell/dock-workspaces.mjs:71",
-      "src/shell/layout-schema.mjs:198"
+      "src/shell/layout-schema.mjs:199"
     ],
     "context": "{id: 'focus', titleKey: 'shell.preset.focus', modes: [...MODES], toggle: true},"
   },
   "shell.preset.review": {
     "locations": [
       "src/shell/dock-workspaces.mjs:72",
-      "src/shell/layout-schema.mjs:199"
+      "src/shell/layout-schema.mjs:200"
     ],
     "context": "{id: 'review', titleKey: 'shell.preset.review', modes: ['animate'],"
   },
   "shell.preset.timing": {
     "locations": [
       "src/shell/dock-workspaces.mjs:68",
-      "src/shell/layout-schema.mjs:196"
+      "src/shell/layout-schema.mjs:197"
     ],
     "context": "{id: 'timing', titleKey: 'shell.preset.timing', modes: ['animate'], shares: {g3: 0.4},"
   },

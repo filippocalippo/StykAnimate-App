@@ -117,8 +117,15 @@ export function solveDock(layout, env = {}) {
   walk(layout.root, node => { if (node.type === 'group' && shown(node).length) groups.push(node); });
   for (const group of groups) if (group.collapsed) fold.set(group.id, 'strip');
 
-  /** A node's limits along `axis` given the current folds; null when it takes no room. */
+  /** A node's limits along `axis` given the current folds; null when it takes no room. Memoized per placement. */
+  let memo = new Map();
   function limits(node, axis) {
+    let entry = memo.get(node);
+    if (!entry) memo.set(node, entry = {});
+    if (!(axis in entry)) entry[axis] = computeLimits(node, axis);
+    return entry[axis];
+  }
+  function computeLimits(node, axis) {
     if (node.type === STAGE) {
       const min = axis === 'row' ? stageMin.width : stageMin.height + head;
       return {min, pref: min, max: Infinity, flex: 1};
@@ -214,16 +221,17 @@ export function solveDock(layout, env = {}) {
   let placed;
   function place() {
     placed = {groups: new Map(), stage: null, dividers: [], overflow: {row: false, column: false}};
-    const visit = (node, box, path) => {
+    memo = new Map();
+    const visit = (node, box, path, axis = null) => {
       if (node.type === STAGE) { placed.stage = box; return; }
-      if (node.type === 'group') { placed.groups.set(node.id, {node, box}); return; }
+      if (node.type === 'group') { placed.groups.set(node.id, {node, box, axis}); return; }
       const items = distribute(node, node.axis === 'row' ? box.width : box.height);
       const gap = node.axis === 'row' ? gapX : gapY;
       let offset = node.axis === 'row' ? box.x : box.y;
       items.forEach((item, at) => {
         const child = node.axis === 'row' ? rect(offset, box.y, item.extent, box.height) : rect(box.x, offset, box.width, item.extent);
         item.box = child;
-        visit(item.child, child, [...path, item.index]);
+        visit(item.child, child, [...path, item.index], node.axis);
         offset += item.extent + gap;
         const next = items[at + 1];
         if (next && !item.info.strip && !next.info.strip) {
@@ -244,6 +252,16 @@ export function solveDock(layout, env = {}) {
     return 'top';
   };
 
+  const stageHolders = new Set();
+  (function mark(node) {
+    if (node.type === STAGE) return true;
+    if (node.type !== 'split') return false;
+    let holds = false;
+    for (const child of node.children) if (mark(child)) holds = true;
+    if (holds) stageHolders.add(node);
+    return holds;
+  })(layout.root);
+  const holdsStage = node => node.type === STAGE || stageHolders.has(node);
   place();
   // Tier and touch folds, decided on the unfolded arrangement so a fold never moves another group's side.
   const tierFold = {...(across.fold ?? {}), ...(down.fold ?? {}), ...(touch?.fold ?? {})};
@@ -322,7 +340,7 @@ export function solveDock(layout, env = {}) {
     if (state === 'sheet') { sheet.push(...ids); present(ids, 'sheet', group.id, active); continue; }
     const {box} = placed.groups.get(group.id) ?? {};
     if (!box) continue;
-    const parent = parentAxis(layout.root, group);
+    const parent = placed.groups.get(group.id)?.axis ?? null;
     const strip = state === 'strip';
     const shape = strip ? (box.width <= STRIP + 0.5 && parent === 'row' ? 'strip' : 'header') : 'docked';
     outGroups.push({id: group.id, state: shape, rect: box, tabs: ids, active, axis: parent, side: sides.get(group.id),
@@ -346,7 +364,8 @@ export function solveDock(layout, env = {}) {
       : rect(divider.box.x, divider.at + divider.gap / 2 - thickness / 2, divider.box.width, thickness);
     return {key: `${divider.path.join('.')}:${divider.a}`, path: divider.path, a: divider.a, b: divider.b, axis: divider.axis, rect: box,
       control, now: Math.round(now), min, max: Math.max(min, max), kinds: [kind(a), kind(b)], extents: [Math.round(extent(a)), Math.round(extent(b))],
-      tabs: [...collectTabs(a.child), ...collectTabs(b.child)].filter(id => known.has(id))};
+      tabs: [...collectTabs(a.child), ...collectTabs(b.child)].filter(id => known.has(id)),
+      controlTabs: collectTabs(mine.child).filter(id => known.has(id)), controlGroup: firstGroup(mine.child)};
   });
   const floatSheet = (touch?.fold ?? across.fold ?? {}).float === 'sheet';
   const floats = [];
@@ -390,10 +409,10 @@ export function solveDock(layout, env = {}) {
   return solution;
 }
 
-function holdsStage(node) {
-  let found = false;
-  walk(node, child => { if (child.type === STAGE) found = true; });
-  return found;
+function firstGroup(node) {
+  let id = null;
+  walk(node, child => { if (!id && child.type === 'group') id = child.id; });
+  return id;
 }
 
 function collectTabs(node) {
@@ -402,11 +421,6 @@ function collectTabs(node) {
   return ids;
 }
 
-function parentAxis(root, target) {
-  let axis = null;
-  walk(root, (node, parent) => { if (node === target) axis = parent?.axis ?? null; });
-  return axis;
-}
 
 /** The divider's new sizes for its split's children when it is dragged to `value` px on its controlled side. */
 export function dividerChanges(divider, value) {

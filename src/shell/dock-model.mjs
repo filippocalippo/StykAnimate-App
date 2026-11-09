@@ -151,7 +151,7 @@ export function pathOf(root, target) {
 export const nodeAt = (root, path) => path.reduce((node, index) => node?.children?.[index] ?? null, root);
 
 /** A deep copy of an arrangement (JSON data), so operations can edit it freely. */
-const copyLayout = layout => cloneJSON(layout);
+const copyLayout = layout => structuredClone(layout);
 
 // ---------------------------------------------------------------------------
 // Ids
@@ -291,8 +291,10 @@ export function repairLayout(input, mode, {catalog = PANEL_CATALOG, fallback = n
   for (const item of Array.isArray(raw.floats) ? raw.floats : []) {
     if (!isObject(item) || floats.length >= MAX_FLOATS) continue;
     const rect = normalizeRect(item.rect);
+    // A float without a place is dropped before its panels count as placed: they go home instead.
+    if (!rect) continue;
     const group = readGroup(item.group, state);
-    if (!rect || !group?.tabs.length) continue;
+    if (!group?.tabs.length) continue;
     delete group.size; delete group.flex;
     const id = typeof item.id === 'string' && GROUP_ID.test(item.id) && !state.groups.has(item.id) ? item.id : null;
     floats.push({...extras(item, NODE_KEYS), id: id ?? `f${floats.length + 1}x`, rect, group});
@@ -334,7 +336,7 @@ const HOME_SIDE = Object.freeze({properties: 'right', vfx: 'right', library: 'ri
  * group with in `fallback` (the workspace default), else in a new group at
  * the window edge it belongs to. Collapsed when its default group is.
  */
-function placeHome(layout, id, mode, {catalog, fallback}) {
+function placeHome(layout, id, mode, {catalog, fallback, open = false}) {
   const home = fallback ? findPanel(fallback, id) : null;
   if (home?.group) {
     for (const mate of home.group.tabs) {
@@ -348,7 +350,8 @@ function placeHome(layout, id, mode, {catalog, fallback}) {
       }
     }
   }
-  if (home?.where === 'closed') return {...layout, closed: [...layout.closed, {id}]};
+  // A panel the default keeps closed stays closed when it was missing, but opens when a person asks for it.
+  if (home?.where === 'closed' && !open) return {...layout, closed: [...layout.closed, {id}]};
   const descriptor = catalog.find(panel => panel.id === id);
   const side = HOME_SIDE[id] ?? (descriptor?.docks?.[0] === 'left' ? 'left' : descriptor?.docks?.[0] === 'bottom' ? 'bottom' : 'right');
   const group = makeGroup(layout, [id]);
@@ -388,10 +391,29 @@ function detach(layout, id) {
     group.tabs.splice(place.index, 1);
     if (group.active === id) group.active = group.tabs[Math.min(place.index, group.tabs.length - 1)] ?? group.tabs[0];
     from = {where: place.where, group: group.id, index: place.index, empty: !group.tabs.length};
+    if (!group.tabs.length && place.where === 'tree') Object.assign(from, anchorOf(next.root, group));
     if (place.where === 'float' && !group.tabs.length) next.floats = next.floats.filter(item => item !== place.float);
   }
   next.root = simplify(next.root, null, true);
   return {layout: next, from};
+}
+
+/**
+ * Where an emptied group stood, so its panel can return there: the
+ * neighbour it was beside (a group, or the stage when the neighbour holds
+ * it), the side of that neighbour, and whether it was collapsed.
+ */
+function anchorOf(root, group) {
+  const owner = parentOf(root, group);
+  if (!owner) return {};
+  const {parent, index} = owner;
+  const after = parent.children[index + 1], before = parent.children[index - 1];
+  const neighbour = after ?? before;
+  if (!neighbour) return {};
+  let target = null, stage = false;
+  walk(neighbour, node => { if (node.type === STAGE) stage = true; if (!target && node.type === 'group' && node.tabs.length) target = node.id; });
+  const side = parent.axis === 'row' ? (after ? 'left' : 'right') : (after ? 'top' : 'bottom');
+  return {beside: stage ? STAGE : target, side, collapsed: Boolean(group.collapsed)};
 }
 
 /**
@@ -418,7 +440,7 @@ export function movePanel(layout, id, zone, {mode, catalog = PANEL_CATALOG} = {}
   if (zone.kind === 'tab' && !target) return layout;
   if (zone.kind === 'split' && zone.target !== STAGE && !findGroup(layout, zone.target)) return layout;
   const {layout: next, from} = detach(layout, id);
-  const ret = from?.group ? {group: from.group, index: from.index} : null;
+  const ret = from?.group ? {group: from.group, index: from.index, ...(from.beside ? {beside: from.beside, side: from.side, collapsed: from.collapsed} : {})} : null;
   return insert(next, [id], zone, {mode, catalog, ret}) ?? layout;
 }
 
@@ -550,7 +572,7 @@ export function reopenPanel(layout, id, {mode, catalog = PANEL_CATALOG, fallback
     const result = insert(next, [id], {kind: 'tab', group, index}, {mode, catalog});
     if (result) return result;
   }
-  return finish(placeHome(next, id, mode, {catalog, fallback}), mode, catalog);
+  return finish(placeHome(next, id, mode, {catalog, fallback, open: true}), mode, catalog);
 }
 
 /**
@@ -567,6 +589,15 @@ export function dockFloat(layout, floatId, {mode, catalog = PANEL_CATALOG, fallb
   if (ret?.group && findGroup(next, ret.group)) {
     const result = insert(next, tabs, {kind: 'tab', group: ret.group, index: ret.index}, {mode, catalog, active});
     if (result) return result;
+  }
+  // Its group is gone: beside the neighbour it had, on the same side, collapsed again if it was.
+  if (ret?.beside && SIDES.includes(ret.side) && (ret.beside === STAGE || findGroup(next, ret.beside))) {
+    let result = insert(next, tabs, {kind: 'split', target: ret.beside, side: ret.side}, {mode, catalog, active});
+    if (result) {
+      const group = findPanel(result, tabs[0])?.group;
+      if (ret.collapsed && group) result = setCollapsed(result, group.id, true);
+      return result;
+    }
   }
   // Each panel goes home; the first one's group takes the rest as tabs.
   let result = repairLayout(next, mode, {catalog, fallback});

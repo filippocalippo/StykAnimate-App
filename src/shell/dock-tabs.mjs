@@ -257,7 +257,7 @@ export function installDockTabs({host, document: doc = globalThis.document, wind
     // Floats, topmost first.
     for (const float of [...s.floats].reverse()) {
       if (!inside(float.rect, x, y)) continue;
-      if (float.group === own) return {kind: 'float'};
+      if (float.group === own || float.group === alone) return {kind: 'float'};
       return {kind: 'tab', group: float.group, index: y <= float.rect.y + 40 ? insertion(float.group, cx).index : undefined, bar: y <= float.rect.y + 40};
     }
     for (const group of s.groups) {
@@ -279,9 +279,11 @@ export function installDockTabs({host, document: doc = globalThis.document, wind
       return {kind: 'tab', group: group.id};
     }
     if (inside(s.stage, x, y)) {
-      const fx = (x - s.stage.x) / s.stage.width, fy = (y - s.stage.y) / s.stage.height;
-      const edges = [['left', fx], ['right', 1 - fx], ['top', fy], ['bottom', 1 - fy]].sort((a, b) => a[1] - b[1]);
-      if (edges[0][1] < 0.2) return {kind: 'split', target: STAGE, side: edges[0][0]};
+      // The stage's edges (a fifth of it, at most 96px) dock beside it; its middle floats.
+      const band = axis => Math.min(96, (axis === 'x' ? s.stage.width : s.stage.height) * 0.2);
+      const edges = [['left', x - s.stage.x, band('x')], ['right', s.stage.x + s.stage.width - x, band('x')],
+        ['top', y - s.stage.y, band('y')], ['bottom', s.stage.y + s.stage.height - y, band('y')]].filter(([, d, limit]) => d < limit).sort((a, b) => a[1] - b[1]);
+      if (edges.length) return {kind: 'split', target: STAGE, side: edges[0][0]};
     }
     return {kind: 'float'};
   }
@@ -425,7 +427,7 @@ export function installDockTabs({host, document: doc = globalThis.document, wind
     if (handle) {
       const panel = handle.dataset.panel;
       if (panel !== 'tools' && !host.registry.has(panel)) return;
-      if (handle.closest('.shell-sheet')) return;
+      if (handle.closest('.shell-sheet:not(.shell-flyout)')) return;
       press = {handle, source: {panel}, pointerId: event.pointerId, x: event.clientX, y: event.clientY};
       return;
     }

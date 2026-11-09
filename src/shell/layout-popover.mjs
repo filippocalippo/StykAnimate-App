@@ -20,6 +20,9 @@ import {STAGE} from './dock-model.mjs';
 import {presetsFor} from './dock-workspaces.mjs';
 import {bandBottom} from './topbar.mjs';
 
+/** Each workspace's layouts, its default first. */
+const ORDER = Object.freeze({animate: ['animate', 'timing', 'focus', 'review'], draw: ['draw', 'focus'], rig: ['build', 'build-timeline', 'focus']});
+
 /**
  * The map of an arrangement: its tree as nested rows and columns, the stage
  * lighter and collapsed groups thin. Sizes are proportional, not exact.
@@ -128,7 +131,8 @@ export function createLayoutPopover({host, document: doc = globalThis.document, 
 
   function cards() {
     const current = workspace.preset, modified = workspace.modified, focus = workspace.focusMode;
-    const list = presetsFor(host.mode).map(preset => ({id: preset.id, titleKey: preset.titleKey,
+    const rank = id => { const index = (ORDER[host.mode] ?? []).indexOf(id); return index < 0 ? Infinity : index; };
+    const list = [...presetsFor(host.mode)].sort((a, b) => rank(a.id) - rank(b.id)).map(preset => ({id: preset.id, titleKey: preset.titleKey,
       layout: preset.toggle ? null : workspace.presetLayout(preset.id), focus: Boolean(preset.toggle),
       checked: preset.toggle ? focus : !focus && current === preset.id, modified: !preset.toggle && current === preset.id && modified && !focus}));
     for (const item of savedLayouts()) {

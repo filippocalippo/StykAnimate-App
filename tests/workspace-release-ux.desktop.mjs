@@ -19,7 +19,7 @@ const sourceFiles = [
   "src/app.mjs",
   "src/shell/dock-host.mjs",
   "src/shell/layout-solver.mjs",
-  "src/shell/layout-store.mjs",
+  "src/shell/dock-store.mjs",
   "src/settings.mjs",
   "src/inspector-view.mjs",
   "src/property-controls.mjs",
