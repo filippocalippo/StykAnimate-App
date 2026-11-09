@@ -69,11 +69,19 @@ pub struct ScrubLabel<'a, Message> {
     on_scrub: Arc<dyn Fn(Scrub) -> Message + 'a>,
     slop: f32,
     held: Option<fn() -> bool>,
+    /// The dotted underline's colour (`text-decoration: underline dotted 1px var(--line-3)`).
+    underline: Option<crate::Rgba>,
 }
 
 impl<'a, Message: 'a> ScrubLabel<'a, Message> {
     pub fn new(content: Element<'a, Message>, on_scrub: Arc<dyn Fn(Scrub) -> Message + 'a>) -> Self {
-        ScrubLabel { content, on_scrub, slop: DRAG_SLOP, held: None }
+        ScrubLabel { content, on_scrub, slop: DRAG_SLOP, held: None, underline: None }
+    }
+
+    /// Says at rest that the label scrubs: a 1 px dotted line along the foot of its line box.
+    pub fn underline(mut self, color: crate::Rgba) -> Self {
+        self.underline = Some(color);
+        self
     }
 
     /// Asks the system whether the primary button is still down. winit captures the mouse while a button is held, but
@@ -236,6 +244,16 @@ impl<'a, Message: 'a> Widget<Message, Theme, Renderer> for ScrubLabel<'a, Messag
         viewport: &Rectangle,
     ) {
         self.content.draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
+        if let Some(color) = self.underline {
+            use iced::advanced::Renderer as _;
+            let bounds = layout.bounds();
+            let (left, row) = (bounds.x.round(), (bounds.y + bounds.height).round() - 1.0);
+            let dots = (bounds.width / 2.0).ceil() as u32;
+            for dot in 0..dots {
+                let at = Rectangle { x: left + 2.0 * dot as f32, y: row, width: 1.0, height: 1.0 };
+                renderer.fill_quad(renderer::Quad { bounds: at, snap: true, ..renderer::Quad::default() }, iced::Color::from(color));
+            }
+        }
     }
 
     fn overlay<'b>(
@@ -458,7 +476,7 @@ impl<'a, Message: Clone + 'a> NumberField<'a, Message> {
         let mut label_element: Element<'a, Message> = words(label.into_owned(), TextStyle::from_role(&tokens::scale::TYPE_SMALL), fade(palette.text_3));
         let mut keys: Keys<'a, Message> = Keys::Button;
         if let Some(on_scrub) = on_scrub {
-            label_element = ScrubLabel::new(label_element, on_scrub.clone()).held(button_probe).boxed();
+            label_element = ScrubLabel::new(label_element, on_scrub.clone()).held(button_probe).underline(fade(palette.line_3)).boxed();
             let on_scrub_keys = on_scrub.clone();
             keys = Keys::Custom(Box::new(move |event| match event {
                 // Ctrl and Meta arrows pass through, as today.

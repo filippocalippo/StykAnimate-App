@@ -171,6 +171,11 @@ impl Kit<'_> {
     /// glyph before them), ghost or outline (white with a `--line-2` ring). Both are the design system's buttons
     /// (`styk_design::widgets::button`); a text button in a field grid fills its cell.
     fn button(&self, item: &m::Button, size: ButtonSize) -> Element<'static, Message> {
+        self.button_inked(item, size, false)
+    }
+
+    /// [`Kit::button`], quiet (`--text-3` at rest) when it is one of a list row's actions.
+    fn button_inked(&self, item: &m::Button, size: ButtonSize, quiet: bool) -> Element<'static, Message> {
         let message = match item.action {
             Action::Command(command) => Message::Command(Command::Run(command)),
             Action::Panel(action) => send(Event::Act(action)),
@@ -188,7 +193,7 @@ impl Kit<'_> {
             return button.into_element();
         }
         let size = if size == ButtonSize::Small { IconSize::Sm } else { IconSize::Md };
-        IconButton::new(self.id(), FocusArea::Panels, self.palette, item.icon.unwrap_or("file"), message).size(size).toggled(pressed).disabled(item.disabled).into_element()
+        IconButton::new(self.id(), FocusArea::Panels, self.palette, item.icon.unwrap_or("file"), message).size(size).quiet(quiet).toggled(pressed).disabled(item.disabled).into_element()
     }
 
     /// A section title's action: an icon button, or words (Join…, Rotate 15°) in `--type-small-strong` on a 28 px pill
@@ -383,7 +388,7 @@ impl Kit<'_> {
             // `margin-inline: var(--space-1)`.
             actions.push(container(self.swatch_button(self.id(), chip, SwatchSize::Chip).into_element()).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_1 }).boxed());
         }
-        actions.extend(head.actions.iter().map(|item| self.button(item, ButtonSize::Small)));
+        actions.extend(head.actions.iter().map(|item| self.button_inked(item, ButtonSize::Small, true)));
         let name = self.text(self.say(&head.label), &tokens::scale::TYPE_UI, self.palette.text_1);
         let line = row![self.icon(head.glyph, tokens::scale::ICON_SM, self.palette.text_3), name, Space::new().width(Length::Fill), Row::with_children(actions).align_y(Alignment::Center)].spacing(tokens::scale::SPACE_2).align_y(Alignment::Center);
         let mut parts: Vec<Element<'static, Message>> = vec![container(line).padding(Padding { top: 0.0, right: tokens::scale::SPACE_1, bottom: 0.0, left: tokens::scale::SPACE_2_5 }).center_y(Length::Fixed(tokens::scale::CONTROL_MD)).width(Length::Fill).boxed()];
@@ -489,7 +494,9 @@ impl Kit<'_> {
         badge(self.palette, icon, tint)
     }
 
-    fn section(&self, section: &m::Section, first: bool) -> Option<Element<'static, Message>> {
+    /// `under_quick`: the quick actions' row sits above the first section, so its hairline shows (`.ui-section +
+    /// .ui-section`).
+    fn section(&self, section: &m::Section, first: bool, under_quick: bool) -> Option<Element<'static, Message>> {
         let palette = self.palette;
         let titled = section.place == Place::Titled;
         let mut head: Vec<Element<'static, Message>> = Vec::new();
@@ -542,7 +549,7 @@ impl Kit<'_> {
         let bottom = if titled && !section.open { tokens::scale::SPACE_1_5 } else { tokens::scale::SPACE_4 };
         let element = container(Column::with_children(parts)).padding(Padding { top, bottom, left: 0.0, right: 0.0 }).width(Length::Fill).boxed();
         // `.ui-section + .ui-section { box-shadow: inset 0 1px 0 var(--line-1) }`: the hairline takes no room.
-        Some(if first { element } else { hairline(palette, element) })
+        Some(if first && !under_quick { element } else { hairline(palette, element) })
     }
 
     fn header(&self, model: &Inspector, rename: Option<RenameView>) -> Element<'static, Message> {
@@ -662,7 +669,7 @@ pub fn view(view: View<'_>) -> Element<'static, Message> {
     let kit = Kit { palette, presentation: view.presentation, field: view.field, probe: view.button_probe, text: view.text, composing: view.composing, next: Cell::new(0), in_grid: Cell::new(false) };
     let mut sections: Vec<Element<'static, Message>> = Vec::new();
     for section in &view.model.sections {
-        if let Some(element) = kit.section(section, sections.is_empty()) {
+        if let Some(element) = kit.section(section, sections.is_empty(), view.model.quick.is_some()) {
             sections.push(element);
         }
     }

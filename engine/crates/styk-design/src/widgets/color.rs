@@ -14,8 +14,8 @@ use super::surface::{Look, Surface};
 use crate::tokens::scale;
 use crate::typography::TextStyle;
 use crate::{BoxShadow, Palette, Rgba};
-use iced::widget::{Row, Space, container};
-use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Rectangle, Renderer, Size, Theme, mouse};
+use iced::widget::{Row, container};
+use iced::{Alignment, Border, Color, Element, Length, Padding, Rectangle, Renderer, Size, Theme, mouse};
 use styk_core::focus::{FocusArea, FocusId, InputRole};
 
 /// A swatch's sizes (`data-size`): 16, 20 (the default), 24 (in a grid) and 28 px; `Chip` is the 16 px swatch of a list
@@ -49,17 +49,9 @@ impl SwatchSize {
     }
 }
 
-/// A colour in a rounded square with its hairline (`--swatch-ring`).
+/// A colour in a rounded square with its hairline (`--swatch-ring`): the same face a swatch button draws.
 pub fn swatch<'a, Message: 'a>(palette: &'static Palette, rgb: [u8; 3], size: SwatchSize, opacity: f32) -> Element<'a, Message> {
-    let side = size.side();
-    let ring = palette.swatch_ring;
-    container(Space::new().width(side).height(side))
-        .style(move |_| container::Style {
-            background: Some(Background::Color(Color { a: opacity, ..Color::from_rgb8(rgb[0], rgb[1], rgb[2]) })),
-            border: Border { color: ring.faded(opacity).into(), width: 1.0, radius: size.radius().into() },
-            ..container::Style::default()
-        })
-        .boxed()
+    face(palette, Fill::Solid(rgb), size, opacity, false)
 }
 
 /// How a gradient paint runs across a swatch (`paintCSS`): a diamond paints as a radial one.
@@ -171,9 +163,10 @@ impl<Message> iced::advanced::Widget<Message, Theme, Renderer> for Face {
         }
         match &self.fill {
             Fill::Solid(rgb) => {
-                let ring = palette.swatch_ring.faded(self.opacity);
+                // `box-shadow: inset 0 0 0 1px var(--swatch-ring)`: the translucent ring over the colour, not instead of it.
                 let color = Color { a: self.opacity, ..Color::from_rgb8(rgb[0], rgb[1], rgb[2]) };
-                renderer.fill_quad(renderer::Quad { bounds, border: Border { color: ring.into(), width: 1.0, radius: radius.into() }, ..renderer::Quad::default() }, color);
+                renderer.fill_quad(renderer::Quad { bounds, border: Border { radius: radius.into(), ..Border::default() }, ..renderer::Quad::default() }, color);
+                paint_ring(renderer, bounds, radius, 1.0, palette.swatch_ring.faded(self.opacity));
             }
             Fill::Gradient(paint) => self.draw_gradient(renderer, bounds, paint),
         }

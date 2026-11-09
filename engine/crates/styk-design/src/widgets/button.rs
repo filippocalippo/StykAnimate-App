@@ -326,6 +326,7 @@ pub struct IconButton<'a, Message> {
     soft: bool,
     danger: bool,
     round: bool,
+    quiet: bool,
     toggled: bool,
     expanded: bool,
     disabled: bool,
@@ -338,7 +339,7 @@ pub struct IconButton<'a, Message> {
 
 impl<'a, Message: Clone + 'a> IconButton<'a, Message> {
     pub fn new(id: FocusId, area: FocusArea, palette: &'static Palette, icon: &'static str, on_press: Message) -> Self {
-        IconButton { id, area, palette, icon, size: IconSize::Md, soft: false, danger: false, round: false, toggled: false, expanded: false, disabled: false, on_press: Some(on_press), preview: None, tooltip: None, input_role: styk_core::focus::InputRole::None, _marker: std::marker::PhantomData }
+        IconButton { id, area, palette, icon, size: IconSize::Md, soft: false, danger: false, round: false, quiet: false, toggled: false, expanded: false, disabled: false, on_press: Some(on_press), preview: None, tooltip: None, input_role: styk_core::focus::InputRole::None, _marker: std::marker::PhantomData }
     }
 
     /// The button has a tooltip (`Focusable::tooltip`).
@@ -376,6 +377,12 @@ impl<'a, Message: Clone + 'a> IconButton<'a, Message> {
         self
     }
 
+    /// The quiet ink of a list row's actions (`.ui-list-row-actions > .ui-icon-button { color: var(--text-3) }`): `--text-3` at rest.
+    pub fn quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
+        self
+    }
+
     /// `aria-pressed="true"`: a toggle that is on turns Styk blue on its soft tint.
     pub fn toggled(mut self, toggled: bool) -> Self {
         self.toggled = toggled;
@@ -399,14 +406,14 @@ impl<'a, Message: Clone + 'a> IconButton<'a, Message> {
     }
 
     pub fn into_element(self) -> Element<'a, Message> {
-        let IconButton { id, area, palette, icon, size, soft, danger, round, toggled, expanded, disabled, on_press, preview, tooltip, input_role, .. } = self;
+        let IconButton { id, area, palette, icon, size, soft, danger, round, quiet, toggled, expanded, disabled, on_press, preview, tooltip, input_role, .. } = self;
         let side = size.side();
         let radius = if round { pill(side) } else { size.radius() };
         let opacity = if disabled { DISABLED } else { 1.0 };
         let (mut fill, mut ink, mut hover_ink) = if soft {
             ([None, Some(palette.control_soft_hover), Some(palette.control_soft_pressed)], palette.text_1, palette.text_1)
         } else {
-            ([None, Some(palette.surface_hover), Some(palette.surface_pressed)], palette.text_2, palette.text_1)
+            ([None, Some(palette.surface_hover), Some(palette.surface_pressed)], if quiet { palette.text_3 } else { palette.text_2 }, palette.text_1)
         };
         let rest = if soft { Some(palette.control_soft) } else { None };
         let mut rest = rest;

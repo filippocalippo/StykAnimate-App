@@ -523,6 +523,18 @@ fn choosing_a_layer_in_the_select_moves_the_figure_through_to_the_core() {
     window.key(Named::Enter);
     assert!(window.core.overlays().menus().is_empty(), "choosing closes the list");
     assert!(window.effects.contains(&Message::OverlayChoice { invoker: select, index: to }), "the host reported the choice: {:?}", window.effects);
+    // The move runs on the session's worker: the documents host answers through the app's adapter until the panel's move has ended.
+    let mut ended = false;
+    for _ in 0..15_000 {
+        while window.core.poll_document().is_some() {}
+        window.core.refresh();
+        if window.core.inspector().layer_move().is_none() {
+            ended = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(ended, "the layer move did not end");
     styk_core::testing::settle_facts(&mut window.core).unwrap();
     let core = &window.core;
     assert_eq!(layer_select(core).value.as_deref(), Some(chosen.as_str()), "the panel shows the figure on the chosen layer");

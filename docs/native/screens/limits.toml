@@ -277,7 +277,7 @@ masks = [
 ["inspector-joint-gradient"]
 # mostly text: the labels, values and names, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
 reference = "docs/native/screens/inspector/inspector-joint-gradient.png"
-max_difference = 0.024
+max_difference = 0.017
 width = 320
 height = 640
 masks = [
@@ -291,7 +291,7 @@ masks = [
 ["inspector-joint-gradient-dark"]
 # mostly text: the labels, values and names, whose glyph edges the native renderer and Chromium rasterise differently by more than 24 levels; nothing visibly differs at 100 % or 200 %.
 reference = "docs/native/screens/inspector/inspector-joint-gradient-dark.png"
-max_difference = 0.023
+max_difference = 0.016
 width = 320
 height = 640
 masks = [
