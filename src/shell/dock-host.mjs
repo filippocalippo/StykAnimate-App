@@ -316,16 +316,20 @@ export function createDockHost({document: doc = globalThis.document, window: win
     });
   }
 
-  /** Fills an island: its tabs in order, the active one selected, then the panel roots (`roots` false: tabs only). */
-  function fill(island, ids, active, {roots = true} = {}) {
+  /**
+   * Fills an island: its tabs in order, the active one selected, then the
+   * panel roots (`roots` false: tabs only; `tabs` false: roots only, as in the
+   * flyout of a header, whose tabs stay in the header).
+   */
+  function fill(island, ids, active, {roots = true, tabs: withTabs = true} = {}) {
     const tablist = island.querySelector(':scope > .shell-tabs');
-    const tabs = ids.map(tabOf);
+    const tabs = withTabs ? ids.map(tabOf) : [];
     order(tablist, tabs);
     for (const tab of [...tablist.children]) if (!tabs.includes(tab)) parking.append(tab);
-    tablist.hidden = !ids.length;
+    tablist.hidden = !tabs.length;
     tablist.setAttribute('aria-label', ids.map(title).join(', '));
     island.setAttribute('aria-label', ids.map(title).join(', '));
-    for (const id of ids) {
+    for (const id of withTabs ? ids : []) {
       const tab = tabOf(id), selected = id === active;
       tab.hidden = false;
       setAttr(tab, 'aria-selected', String(selected));
@@ -509,7 +513,9 @@ export function createDockHost({document: doc = globalThis.document, window: win
     if (flyout) {
       const group = s.groups.find(item => item.id === flyout.group);
       const element = flyoutIsland();
-      fill(element, group.tabs, flyout.panel, {roots: true});
+      fill(element, group.tabs, flyout.panel, {roots: true, tabs: group.state === 'strip'});
+      // A header keeps its tabs and shows which one is open.
+      if (group.state === 'header') fill(islands.get(group.id), group.tabs, flyout.panel, {roots: false});
       for (const id of group.tabs) { parked.delete(id); prepare(id, element); }
       element.dataset.group = group.id;
       element.dataset.side = group.side;

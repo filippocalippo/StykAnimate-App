@@ -17,6 +17,8 @@ What's new in each version of StykAnimate.
 - A new Home page to start an animation in landscape, vertical or square, reopen your projects and organize them with pins and folders.
 - Five short interactive tutorials that guide you step by step through the canvas, posing, the timeline and the panels.
 - Right-click a joint and choose Disconnect segment to turn that part of a figure into a figure of its own.
+- Arrange panels freely: drag any panel beside the stage or another panel, group panels as tabs, float them, or collapse them to icon strips, with a preview of where each one will land.
+- Save your own panel layouts for each workspace, and export or import them to share.
 
 ### Changed
 
