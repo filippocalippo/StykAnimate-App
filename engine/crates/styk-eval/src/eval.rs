@@ -480,7 +480,7 @@ pub(crate) fn evaluate_native_exact_only(doc: &Document, seq: &Seq, index: usize
 fn evaluate_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>) -> Frame {
     evaluate_interval_checked(doc, seq, index, t, exact, only, &|| false)
 }
-fn evaluate_interval_checked(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>, cancelled: &dyn Fn() -> bool) -> Frame {
+fn evaluate_interval_checked(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
     if cancelled() { return Frame::default(); }
     let mut frame = tween_interval(doc, seq, index, t, exact, only, cancelled);
     if !cancelled() { correct_origins_checked(doc, &mut frame, cancelled); }
@@ -490,7 +490,7 @@ fn evaluate_interval_checked(doc: &Document, seq: &Seq, index: usize, t: f64, ex
 /// `correctAnimationOrigins`: every unjoined figure with an animation origin is placed so
 /// that its pivot lands where its pose says, as each native interval leaves it.
 pub(crate) fn correct_origins(doc: &Document, frame: &mut Frame) { correct_origins_checked(doc, frame, &|| false); }
-fn correct_origins_checked(doc: &Document, frame: &mut Frame, cancelled: &dyn Fn() -> bool) {
+fn correct_origins_checked(doc: &Document, frame: &mut Frame, cancelled: &(dyn Fn() -> bool + Sync)) {
     if !doc.origins {
         return;
     }
@@ -503,7 +503,7 @@ fn correct_origins_checked(doc: &Document, frame: &mut Frame, cancelled: &dyn Fn
     }
 }
 
-fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>, cancelled: &dyn Fn() -> bool) -> Frame {
+fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, only: Option<&[u32]>, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
     let keys = &seq.keys;
     let Some(a) = keys.get(index) else { return Frame::default() };
     let Some(b) = keys.get(index + 1) else { return frame_of(a) };
@@ -600,7 +600,7 @@ fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, 
     }
 }
 
-fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Option<&Object>; 4], auto: bool, cancelled: &dyn Fn() -> bool) -> Object {
+fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Option<&Object>; 4], auto: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Object {
     let t = s.t;
     let read = |f: &dyn Fn(&Object) -> f64| recs.map(|r| r.map(f));
     let mut out = o.clone();
@@ -947,7 +947,7 @@ impl Prepared {
     }
 
     fn apply_movieclips(&self, frame: &mut Frame, tick: f64) { self.apply_movieclips_checked(frame, tick, &|| false); }
-    fn apply_movieclips_checked(&self, frame: &mut Frame, tick: f64, cancelled: &dyn Fn() -> bool) {
+    fn apply_movieclips_checked(&self, frame: &mut Frame, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) {
         if !self.has_clips() {
             return;
         }
@@ -1010,7 +1010,7 @@ impl Prepared {
     }
 
     /// A cancellable worker query. Partial frames are discarded before any caller can adopt them.
-    pub fn evaluate_cancellable(&self, tick: f64, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+    pub fn evaluate_cancellable(&self, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Frame> {
         if cancelled() { return None; }
         let frame = self.evaluate_raw_checked(tick, false, cancelled);
         if cancelled() { return None; }
@@ -1022,6 +1022,11 @@ impl Prepared {
         self.evaluate_with(tick, true)
     }
 
+    pub(crate) fn evaluate_clip_cancellable(&self, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Frame> {
+        let frame = self.evaluate_raw_checked(tick, true, cancelled);
+        self.finish_frame_checked(frame, tick, true, cancelled)
+    }
+
     fn evaluate_with(&self, tick: f64, fractional: bool) -> Frame {
         self.finish_frame(self.evaluate_raw(tick, fractional), tick, fractional)
     }
@@ -1029,7 +1034,7 @@ impl Prepared {
     fn finish_frame(&self, frame: Frame, tick: f64, fractional: bool) -> Frame {
         self.finish_frame_checked(frame, tick, fractional, &|| false).expect("uncancelled frame")
     }
-    fn finish_frame_checked(&self, mut frame: Frame, tick: f64, fractional: bool, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+    fn finish_frame_checked(&self, mut frame: Frame, tick: f64, fractional: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Frame> {
         if cancelled() { return None; }
         self.apply_movieclips_checked(&mut frame, tick, cancelled);
         if cancelled() { return None; }
@@ -1103,7 +1108,7 @@ impl Prepared {
     }
 
     fn evaluate_raw(&self, tick: f64, fractional: bool) -> Frame { self.evaluate_raw_checked(tick, fractional, &|| false) }
-    fn evaluate_raw_checked(&self, tick: f64, fractional: bool, cancelled: &dyn Fn() -> bool) -> Frame {
+    fn evaluate_raw_checked(&self, tick: f64, fractional: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
         if cancelled() { return Frame::default(); }
         let mut frame = if self.doc.sheet.is_some() {
             self.sample_sheet_checked(tick, cancelled).unwrap_or_default()
@@ -1128,7 +1133,7 @@ impl Prepared {
     // Imported sheet keys call sampleLegacy with an explicit interval ratio even
     // inside one-tick rows. Ordinary paused native playback keeps row_at's rule.
     fn native_at_fraction(&self, tick: f64) -> Frame { self.native_at_fraction_checked(tick, &|| false) }
-    fn native_at_fraction_checked(&self, tick: f64, cancelled: &dyn Fn() -> bool) -> Frame {
+    fn native_at_fraction_checked(&self, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
         let (index, ratio) = row_at_fraction(&self.rows, tick);
         self.native_interval_checked(index, ratio, tick, cancelled)
     }
@@ -1136,10 +1141,10 @@ impl Prepared {
     fn native_interval(&self, index: usize, ratio: f64, tick: f64) -> Frame {
         self.native_interval_checked(index, ratio, tick, &|| false)
     }
-    fn native_interval_checked(&self, index: usize, ratio: f64, tick: f64, cancelled: &dyn Fn() -> bool) -> Frame {
+    fn native_interval_checked(&self, index: usize, ratio: f64, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
         let frame = self.native_frame_checked(index, ratio, cancelled);
         if cancelled() { return Frame::default(); }
-        self.with_channels(frame, tick)
+        self.with_channels(frame, tick, cancelled)
     }
 
     /// The absolute source time corresponding to a local native key interval.
@@ -1163,7 +1168,7 @@ impl Prepared {
         self.retained_source_time(index, t)
     }
 
-    fn native_frame_checked(&self, index: usize, t: f64, cancelled: &dyn Fn() -> bool) -> Frame {
+    fn native_frame_checked(&self, index: usize, t: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
         let (Some(source), Some(source_tick)) = (&self.source, self.retained_source_time(index, t))
         else {
             return evaluate_interval_checked(&self.doc, &self.native, index, t, false, None, cancelled);
@@ -1194,9 +1199,9 @@ impl Prepared {
     }
 
     /// `composePoseChannels` then `composeAnimationChannels` at `tick`.
-    fn with_channels(&self, frame: Frame, tick: f64) -> Frame {
+    fn with_channels(&self, frame: Frame, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Frame {
         match &self.channels {
-            Some(channels) => channels.compose(&self.doc, frame, tick),
+            Some(channels) => channels.compose_checked(&self.doc, frame, tick, cancelled),
             None => frame,
         }
     }
@@ -1220,7 +1225,7 @@ impl Prepared {
     /// `sample(id)` in `sampleLayerSheet`: the layer's own pose, then the movieclip
     /// frames its key replaces; with what the editor's frame object is (see [`Sampled`]).
     fn sample_track(&self, id: &str, tick: f64) -> Option<(Frame, Sampled)> { self.sample_track_checked(id, tick, &|| false) }
-    fn sample_track_checked(&self, id: &str, tick: f64, cancelled: &dyn Fn() -> bool) -> Option<(Frame, Sampled)> {
+    fn sample_track_checked(&self, id: &str, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<(Frame, Sampled)> {
         if cancelled() { return None; }
         let track = self.doc.sheet.as_ref()?.tracks.get(id)?;
         let sampled = self.sample_base_checked(id, track, tick, cancelled);
@@ -1338,7 +1343,7 @@ impl Prepared {
     }
 
     /// `baseSample`: the layer's pose from its keys, without movieclip replacements.
-    fn sample_base_checked(&self, id: &str, track: &SheetTrack, tick: f64, cancelled: &dyn Fn() -> bool) -> Option<(Frame, Sampled)> {
+    fn sample_base_checked(&self, id: &str, track: &SheetTrack, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<(Frame, Sampled)> {
         if tick >= track.end as f64 && !FIXED.contains(&id) {
             return None;
         }
@@ -1472,7 +1477,7 @@ impl Prepared {
     }
 
     /// `sampleLayerSheet`: compose each layer's own pose track.
-    fn sample_sheet_checked(&self, tick: f64, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+    fn sample_sheet_checked(&self, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Frame> {
         let doc = &self.doc;
         let scene = self.sample_track_checked("scene", tick, cancelled);
         let camera = self.sample_track_checked("camera", tick, cancelled);
@@ -1705,8 +1710,7 @@ fn virtual_track(doc: &Document, fixed: bool, mut keys: Vec<(&SheetKey, Option<&
 
 /// `samplePoseTrack`: the interval around `tick`, tweening only the figures
 /// `uids` (and their ancestors) when supplied.
-pub(crate) fn sample_pose_track_only(doc: &Document, seq: &Seq, tick: f64, uids: Option<&[u32]>) -> Option<Frame> { sample_pose_track_checked(doc, seq, tick, uids, &|| false) }
-fn sample_pose_track_checked(doc: &Document, seq: &Seq, tick: f64, uids: Option<&[u32]>, cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+pub(crate) fn sample_pose_track_checked(doc: &Document, seq: &Seq, tick: f64, uids: Option<&[u32]>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Frame> {
     if cancelled() { return None; }
     let ticks = &seq.ticks;
     if ticks.is_empty() || tick < ticks[0] {

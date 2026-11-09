@@ -267,3 +267,10 @@ checked evaluation, geometry, image-decoding and raster APIs discard incomplete 
 Cancellation never mutates an already published generation. Teardown cancels before
 handing retained payloads to `Worker::shutdown`, which disposes them on the worker;
 the interface neither frees those payloads nor joins the worker.
+
+The same query cancellation reaches movieclip source evaluation (including fractional
+local time), nested scene construction and attached-mesh vertex/face loops, and pose
+channels' source-track sampling and detached-parent geometry. Cancelled clip scenes
+are never inserted into the shared clip cache. Non-cancelled calls retain the same
+arithmetic and traversal order; `styk-eval` tests compare geometry and draw-list bits
+from independent cold loaders as well as the frozen engine fixture suites.

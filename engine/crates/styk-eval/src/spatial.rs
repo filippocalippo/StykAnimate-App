@@ -908,6 +908,11 @@ pub struct ClipPose<'a> {
 /// frame (or placed flat by its own angle), with the same face and depth
 /// contract as native surfaces.
 pub fn evaluate_clip_mesh(mesh: &ClipMesh, pose: ClipPose<'_>) -> MeshGeometry {
+    evaluate_clip_mesh_cancellable(mesh, pose, &|| false).expect("uncancelled clip mesh")
+}
+
+pub(crate) fn evaluate_clip_mesh_cancellable(mesh: &ClipMesh, pose: ClipPose<'_>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<MeshGeometry> {
+    if cancelled() { return None; }
     let attachment = pose.attachment.as_ref();
     let frame = attachment.map(|a| a.frame);
     let angle = attachment.map_or(pose.angle, |a| a.figure_angle);
@@ -952,6 +957,7 @@ pub fn evaluate_clip_mesh(mesh: &ClipMesh, pose: ClipPose<'_>) -> MeshGeometry {
     let mut depth = vec![0f32; n];
     let mut raw = vec![0f64; n * 3];
     for i in 0..n {
+        if cancelled() { return None; }
         let at = i * 3;
         let (mut vx, vy, mut vz) = (authored(at), authored(at + 1), authored(at + 2));
         if turn != 0.0 && !turn.is_nan() {
@@ -1008,6 +1014,7 @@ pub fn evaluate_clip_mesh(mesh: &ClipMesh, pose: ClipPose<'_>) -> MeshGeometry {
     let count = mesh.materials.len();
     let mut faces = Faces::new(positions, depth, count);
     for t in 0..count {
+        if cancelled() { return None; }
         let (a, b, c) = (mesh.indices[t * 3] as usize, mesh.indices[t * 3 + 1] as usize, mesh.indices[t * 3 + 2] as usize);
         if raw[a * 3 + 2] <= near && raw[b * 3 + 2] <= near && raw[c * 3 + 2] <= near {
             // Closed meshes wind outward; screen coordinates have Y down.
@@ -1045,7 +1052,7 @@ pub fn evaluate_clip_mesh(mesh: &ClipMesh, pose: ClipPose<'_>) -> MeshGeometry {
             faces.push(ids[0], ids[i], ids[i + 1], mesh.materials[t], value);
         }
     }
-    faces.finish(pose.colors)
+    if cancelled() { None } else { Some(faces.finish(pose.colors)) }
 }
 
 /// Shares one evaluated mesh between the scene and its items.
