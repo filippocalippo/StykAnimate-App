@@ -108,11 +108,13 @@ pub struct Params<'a> {
     pub ready: Ready,
     /// How the band's words are written in the selected language.
     pub presentation: &'a Presentation,
+    /// Whether the mark's menu is open (the core's overlay host holds it): the mark shows pressed.
+    pub mark_open: bool,
     /// How the maximize button looks (it is the window's, in the non-client area).
     pub maximize: MaxButtonState,
 }
 
-/// The window: the band over `content`, with the Ctrl+Tab board and the open menu's placeholder on top.
+/// The window: the band over `content`, with the Ctrl+Tab board and a tab menu's placeholder on top.
 pub fn window<'a>(params: Params<'a>, content: Element<'a, Message>) -> Element<'a, Message> {
     let band = bar::view(&params);
     let height = params.shell.layout().height;
@@ -157,7 +159,7 @@ mod tests {
             let shell = shell(width, session, tabs);
             let ready = styk_design::warm_up::install_bundled(styk_platform::font_smoothing::current());
             let english = Presentation::english();
-            let element = window(Params { shell: &shell, theme: Theme::Light, ready, presentation: &english, maximize: MaxButtonState::Idle }, container(space()).width(Fill).height(Fill).boxed());
+            let element = window(Params { shell: &shell, theme: Theme::Light, ready, presentation: &english, mark_open: false, maximize: MaxButtonState::Idle }, container(space()).width(Fill).height(Fill).boxed());
             let mut driver = Driver::new(element, Size::new(width, 900.0), &styk_design::fonts::ALL);
             let snapshot = driver.snapshot();
             for placed in &shell.layout().items {

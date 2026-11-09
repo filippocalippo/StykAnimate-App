@@ -11,6 +11,7 @@ use styk_core::shell::workspace::{Report, Workspace};
 use styk_core::shell::{Shell, TabView, Window};
 use styk_core::screens::InspectorScreen;
 use styk_design::Theme;
+use styk_core::menus::AppMenu;
 use crate::overlay_sheet::OverlayScreen;
 use crate::recovery_sheet::RecoveryScreen;
 
@@ -54,7 +55,7 @@ pub enum DockScreen {
 
 impl Screen {
     /// Every screen.
-    pub const ALL: [Screen; 63] = [
+    pub const ALL: [Screen; 77] = [
         Screen::ComponentSheet,
         Screen::Band,
         Screen::BandDark,
@@ -102,6 +103,20 @@ impl Screen {
         Screen::Overlay(OverlayScreen::Dialog, true),
         Screen::Overlay(OverlayScreen::Parts, false),
         Screen::Overlay(OverlayScreen::Parts, true),
+        Screen::Overlay(OverlayScreen::AppMenu(None), false),
+        Screen::Overlay(OverlayScreen::AppMenu(None), true),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::File)), false),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::File)), true),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Edit)), false),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Edit)), true),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::View)), false),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::View)), true),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Joint)), false),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Joint)), true),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Animation)), false),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Animation)), true),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Help)), false),
+        Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Help)), true),
         Screen::Recovery(RecoveryScreen::Offer, false),
         Screen::Recovery(RecoveryScreen::Offer, true),
         Screen::Recovery(RecoveryScreen::Chooser, false),
@@ -146,6 +161,20 @@ impl Screen {
             Screen::Overlay(OverlayScreen::Dialog, true) => "dialog-dark",
             Screen::Overlay(OverlayScreen::Parts, false) => "parts",
             Screen::Overlay(OverlayScreen::Parts, true) => "parts-dark",
+            Screen::Overlay(OverlayScreen::AppMenu(None), false) => "app-menu",
+            Screen::Overlay(OverlayScreen::AppMenu(None), true) => "app-menu-dark",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::File)), false) => "app-menu-file",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::File)), true) => "app-menu-file-dark",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Edit)), false) => "app-menu-edit",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Edit)), true) => "app-menu-edit-dark",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::View)), false) => "app-menu-view",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::View)), true) => "app-menu-view-dark",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Joint)), false) => "app-menu-joint",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Joint)), true) => "app-menu-joint-dark",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Animation)), false) => "app-menu-animation",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Animation)), true) => "app-menu-animation-dark",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Help)), false) => "app-menu-help",
+            Screen::Overlay(OverlayScreen::AppMenu(Some(AppMenu::Help)), true) => "app-menu-help-dark",
             Screen::Recovery(RecoveryScreen::Offer, false) => "recovery-offer",
             Screen::Recovery(RecoveryScreen::Offer, true) => "recovery-offer-dark",
             Screen::Recovery(RecoveryScreen::Chooser, false) => "recovery-chooser",

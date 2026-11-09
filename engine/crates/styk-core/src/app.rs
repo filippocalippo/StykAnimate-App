@@ -433,6 +433,7 @@ impl Core {
         effects.extend(update.effects.into_iter().map(Effect::Overlay));
         if let Some(id) = update.dismissed { effects.push(Effect::MessageDismissed(id)); }
         if let Some(command) = update.run { effects.extend(self.dispatch(Command::Run(command))); }
+        if let Some(document) = update.activate { effects.extend(self.dispatch(Command::Activate(document))); }
         if let Some(event) = update.act { effects.extend(self.dispatch(Command::Recovery(event))); }
         if let Some(command) = command { effects.extend(self.dispatch(command)); }
         effects
@@ -561,19 +562,6 @@ impl Core {
             Err(message) => effects.push(warn(message)),
         }
         effects.extend(self.refresh()); effects
-    }
-
-    fn file_menu(&mut self) -> Vec<Effect> {
-        use crate::overlay::{host::Event, menu::{Anchor, Entry, Item}};
-        let entries = [CommandId::New, CommandId::Open, CommandId::Save, CommandId::SaveAs, CommandId::SaveAll, CommandId::CloseProject].into_iter().map(|id| {
-            let mut item = Item::new(id, self.presentation.text(&Msg::new(id.info().label)));
-            item.icon = id.info().icon.map(str::to_owned);
-            item.disabled = self.pickers.pending() || (self.documents.active().is_none() && !matches!(id, CommandId::New | CommandId::Open));
-            Entry::Item(item)
-        }).collect();
-        let invoker = crate::shell::ids::MARK;
-        let anchor = self.overlays.bound_of(invoker).map(Anchor::Root).unwrap_or(Anchor::Point { x: 8., y: 40. });
-        self.overlay_event(Event::OpenMenu { entries, anchor, invoker: Some(invoker), keyboard: false }, self.now)
     }
 
     fn show_notices(&mut self, effects: &[Effect]) {
@@ -853,6 +841,19 @@ impl Core {
         effects
     }
 
+    /// Opens the mark's StykAnimate menu under the mark button (the band's walk measured it) with the rows of the state now.
+    /// Pressed while it is open, the mark closes it: a pointer press has closed it already, and the host ignores the click that
+    /// follows that press.
+    fn open_mark_menu(&mut self) -> Vec<Effect> {
+        if let Some(open) = self.overlays.menu_of(crate::shell::ids::MARK) {
+            return self.overlay_event(crate::overlay::host::Event::CloseOverlay(open), self.now);
+        }
+        let entries = crate::menus::mark(&self.menu_facts(), &self.presentation);
+        let anchor = self.overlays.bound_of(crate::shell::ids::MARK).unwrap_or_default();
+        let event = crate::overlay::host::Event::OpenMenu { entries, anchor: crate::overlay::menu::Anchor::Root(anchor), invoker: Some(crate::shell::ids::MARK), keyboard: self.focus.focus_visible() };
+        self.overlay_event(event, self.now)
+    }
+
     #[cfg(feature = "devtools")]
     fn dev_extension_dispatch(&mut self,event:crate::dev_extension::Event)->Vec<Effect>{
         let mut effects=Vec::new();
@@ -865,6 +866,8 @@ impl Core {
 
     /// Routes a registry command to its owner, after the panels finish what they have open.
     fn run(&mut self, id: CommandId) -> Vec<Effect> {
+        // The mark opens its menu at once, as today's `showMenu`: it finishes nothing, the command a row runs does.
+        if id.info().owner == Owner::Menu { return self.open_mark_menu(); }
         if id.info().owner == Owner::Timeline || (id == CommandId::Cancel && self.timeline.playing()) || (matches!(id, CommandId::SelectAll | CommandId::Cancel) && self.focus.area() == Some(crate::focus::FocusArea::Timeline) && self.focus.text_entry().is_none()) {
             let payload = if matches!(id, CommandId::FirstFrame | CommandId::PreviousFrame | CommandId::NextFrame | CommandId::LastFrame) { crate::timeline::Payload::GlobalNavigation } else { crate::timeline::Payload::None };
             return self.timeline_event(crate::timeline::Event::Action { id, payload, now: self.now });
@@ -873,7 +876,6 @@ impl Core {
         if !self.finish_panels(&mut effects) { effects.extend(self.defer(Command::Run(id))); return effects; }
         match id.info().owner {
             Owner::Files => {
-                if id == CommandId::Menu { return self.file_menu(); }
                 if self.pickers.pending() || self.file_waiting.is_some() { return vec![warn(Msg::new("errors.editorSessions.finishTheCurrentOperationFirst"))]; }
                 if let Some(request) = crate::file_actions::request(id, &self.documents) { effects.extend(self.file_request(request)); }
                 return effects;
@@ -911,7 +913,7 @@ impl Core {
                 effects.push(Effect::NotAvailable(id));
                 return effects;
             }
-            Owner::Dock | Owner::Focus | Owner::Files => return effects,
+            Owner::Dock | Owner::Focus | Owner::Files | Owner::Menu => return effects,
         };
         match result {
             Ok(()) => effects.push(Effect::RequestFrame),

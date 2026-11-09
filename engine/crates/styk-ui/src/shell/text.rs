@@ -22,8 +22,6 @@ pub(crate) const EDITED: Label = key("app.edited");
 pub(crate) const SAVED: Label = key("app.saved");
 /// The board's hint (`projectTabs.switcherHint`).
 pub(crate) const SWITCHER_HINT: Label = key("projectTabs.switcherHint");
-/// The StykAnimate menu's leading rows: the six application menus (`chrome.file` and the others).
-pub(crate) const APPLICATION_MENUS: [Label; 6] = [key("chrome.file"), key("chrome.edit"), key("chrome.view"), key("chrome.joint"), key("chrome.animation"), key("chrome.help")];
 /// A project tab's menu: the one in front, and a resting one (`projectMenuItems` in `src/app.mjs`).
 pub(crate) const TAB_MENU_FRONT: [Label; 5] = [key("common.save"), key("common.saveAs"), key("commands.rename"), key("commands.closeProject"), key("commands.closeSavedProjects")];
 pub(crate) const TAB_MENU_RESTING: [Label; 2] = [key("projectTabs.switchToThisProject"), key("commands.closeProject")];
@@ -43,8 +41,6 @@ mod tests {
         for (label, expected) in words {
             assert_eq!(english.label(&label), expected);
         }
-        let menus: Vec<String> = APPLICATION_MENUS.iter().map(|label| english.label(label)).collect();
-        assert_eq!(menus, ["File", "Edit", "View", "Joint", "Animation", "Help"]);
         let front: Vec<String> = TAB_MENU_FRONT.iter().map(|label| english.label(label)).collect();
         assert_eq!(front, ["Save", "Save as\u{2026}", "Rename project\u{2026}", "Close project", "Close saved projects"]);
         let resting: Vec<String> = TAB_MENU_RESTING.iter().map(|label| english.label(label)).collect();

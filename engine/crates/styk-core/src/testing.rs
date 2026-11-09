@@ -232,3 +232,9 @@ pub fn hold_facts(core: &mut Core) -> Result<FactsGate, String> {
     core.set_source(id, Arc::new(Held { source, state: state.clone(), entered }));
     Ok(FactsGate { state, entered: receiver })
 }
+
+/// How many whole-frame object scans this thread has made (a counter, never a clock): a read on the interface thread that
+/// must not walk the frame shows no change.
+pub fn frame_scans() -> usize {
+    crate::inspector::facts::SCANS.with(|scans| scans.get())
+}

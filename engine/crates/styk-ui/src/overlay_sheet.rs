@@ -12,6 +12,8 @@ use iced::{Alignment, Element, Length, Padding, Rectangle, Size, Widget as _};
 use styk_core::commands::CommandId;
 use styk_core::focus::{FocusArea, FocusId, FocusState, ScopeId};
 use styk_core::overlay::host::{Hints, Host, Purpose, option_rows};
+use styk_core::i18n::Presentation;
+use styk_core::menus::{self, AppMenu, Facts, Panel};
 use styk_core::overlay::menu::{Anchor, Entry, Item};
 use styk_core::overlay::messages::{Action, Message as Toast, Priority, Tone};
 use styk_core::overlay::placement::Rect;
@@ -49,10 +51,12 @@ pub enum OverlayScreen {
     Dialog,
     /// The panel's small parts.
     Parts,
+    /// The mark's StykAnimate menu (`None`) or one of the application menus it leads with, open beside its row (`styk_core::menus`).
+    AppMenu(Option<AppMenu>),
 }
 
 impl OverlayScreen {
-    pub const ALL: [OverlayScreen; 8] = [OverlayScreen::MenuRoot, OverlayScreen::MenuSubmenu, OverlayScreen::MenuContext, OverlayScreen::SelectOpen, OverlayScreen::Tooltip, OverlayScreen::Toasts, OverlayScreen::Dialog, OverlayScreen::Parts];
+    pub const ALL: [OverlayScreen; 15] = [OverlayScreen::MenuRoot, OverlayScreen::MenuSubmenu, OverlayScreen::MenuContext, OverlayScreen::SelectOpen, OverlayScreen::Tooltip, OverlayScreen::Toasts, OverlayScreen::Dialog, OverlayScreen::Parts, OverlayScreen::AppMenu(None), OverlayScreen::AppMenu(Some(AppMenu::File)), OverlayScreen::AppMenu(Some(AppMenu::Edit)), OverlayScreen::AppMenu(Some(AppMenu::View)), OverlayScreen::AppMenu(Some(AppMenu::Joint)), OverlayScreen::AppMenu(Some(AppMenu::Animation)), OverlayScreen::AppMenu(Some(AppMenu::Help))];
 
     /// The ID of the light screen (the dark one adds `-dark`; the catalogue lists both as strings, `screens::Screen::id`).
     pub const fn id(self) -> &'static str {
@@ -65,6 +69,13 @@ impl OverlayScreen {
             OverlayScreen::Toasts => "toasts",
             OverlayScreen::Dialog => "dialog",
             OverlayScreen::Parts => "parts",
+            OverlayScreen::AppMenu(None) => "app-menu",
+            OverlayScreen::AppMenu(Some(AppMenu::File)) => "app-menu-file",
+            OverlayScreen::AppMenu(Some(AppMenu::Edit)) => "app-menu-edit",
+            OverlayScreen::AppMenu(Some(AppMenu::View)) => "app-menu-view",
+            OverlayScreen::AppMenu(Some(AppMenu::Joint)) => "app-menu-joint",
+            OverlayScreen::AppMenu(Some(AppMenu::Animation)) => "app-menu-animation",
+            OverlayScreen::AppMenu(Some(AppMenu::Help)) => "app-menu-help",
         }
     }
 
@@ -79,6 +90,8 @@ impl OverlayScreen {
             OverlayScreen::Toasts => (520, 430),
             OverlayScreen::Dialog => (520, 400),
             OverlayScreen::Parts => (938, 1270),
+            OverlayScreen::AppMenu(None) => (360, 900),
+            OverlayScreen::AppMenu(Some(_)) => (640, 900),
         }
     }
 }
@@ -159,6 +172,9 @@ fn entry_height(entry: &Entry, first: bool) -> f32 {
     }
 }
 
+/// The width the mark's menu takes (its widest row: a label, a gap and the longest key; `the_mark_menu_is_as_wide_as_the_screen_says` measures it).
+const MARK_MENU_WIDTH: f32 = 268.0;
+
 /// A menu's padding and border on each side.
 const EDGE: f32 = tokens::scale::SPACE_1_5 + 1.0;
 
@@ -167,14 +183,14 @@ fn menu_height(entries: &[Entry]) -> f32 {
 }
 
 /// Where the `index`th item of a menu placed at `(x, y)` is, for anchoring its submenu.
-fn row_rect(x: f32, y: f32, entries: &[Entry], index: usize) -> Rect {
+fn row_rect(x: f32, y: f32, width: f32, entries: &[Entry], index: usize) -> Rect {
     let mut top = y + EDGE;
     let mut seen = 0;
     for (at, entry) in entries.iter().enumerate() {
         let height = entry_height(entry, at == 0);
         if let Entry::Item(_) = entry {
             if seen == index {
-                return Rect { x: f64::from(x + EDGE), y: f64::from(top), width: f64::from(240.0 - 2.0 * EDGE), height: f64::from(height) };
+                return Rect { x: f64::from(x + EDGE), y: f64::from(top), width: f64::from(width - 2.0 * EDGE), height: f64::from(height) };
             }
             seen += 1;
         }
@@ -217,7 +233,7 @@ impl Page {
                 let id = host.menus()[0].id();
                 // The root menu sits under the trigger, left edges aligned, 6 px below it.
                 let placed = styk_core::overlay::menu::Menu::place(Anchor::Root(rect(TRIGGER)), styk_core::overlay::placement::Size { width: 240.0, height: f64::from(menu_height(&root)) }, styk_core::overlay::placement::Size { width: f64::from(OverlayScreen::MenuSubmenu.size().0), height: f64::from(OverlayScreen::MenuSubmenu.size().1) }, 0.0, false);
-                let row = row_rect(placed.rect.x as f32, placed.rect.y as f32, &root, 2);
+                let row = row_rect(placed.rect.x as f32, placed.rect.y as f32, 240.0, &root, 2);
                 host.hover(id, 2, &mut focus, 1000);
                 host.tick(1150, &move |_| Some(row), &mut focus);
             }
@@ -232,6 +248,21 @@ impl Page {
                 let id = host.menus()[0].id();
                 host.hover(id, 1, &mut focus, 0);
             }
+            OverlayScreen::AppMenu(which) => {
+                // A window with nothing selected on the packaged desktop, every panel showing.
+                let facts = Facts { panels: vec![Panel::Properties, Panel::Vfx, Panel::Library, Panel::Structure, Panel::Timeline], ..Facts::default() };
+                let root = menus::mark(&facts, &Presentation::english());
+                host.open(root.clone(), Anchor::Root(rect(TRIGGER)), Purpose::Commands, Some(INVOKER), false, None, &mut focus);
+                if let Some(menu) = which {
+                    let id = host.menus()[0].id();
+                    let index = AppMenu::ALL.iter().position(|each| *each == menu).unwrap_or(0);
+                    let window = OverlayScreen::AppMenu(which).size();
+                    let placed = styk_core::overlay::menu::Menu::place(Anchor::Root(rect(TRIGGER)), styk_core::overlay::placement::Size { width: f64::from(MARK_MENU_WIDTH), height: f64::from(menu_height(&root)) }, styk_core::overlay::placement::Size { width: f64::from(window.0), height: f64::from(window.1) }, 0.0, false);
+                    let row = row_rect(placed.rect.x as f32, placed.rect.y as f32, MARK_MENU_WIDTH, &root, index);
+                    host.hover(id, index, &mut focus, 1000);
+                    host.tick(1150, &move |_| Some(row), &mut focus);
+                }
+            }
             OverlayScreen::Tooltip | OverlayScreen::Toasts | OverlayScreen::Dialog | OverlayScreen::Parts => {}
         }
         Page { screen, theme, host, focus }
@@ -242,7 +273,7 @@ impl Page {
         let size = self.screen.size();
         let window = Size::new(size.0 as f32, size.1 as f32);
         match self.screen {
-            OverlayScreen::MenuRoot | OverlayScreen::MenuSubmenu => self.over(palette, trigger(palette, true), Vec::new()),
+            OverlayScreen::MenuRoot | OverlayScreen::MenuSubmenu | OverlayScreen::AppMenu(_) => self.over(palette, trigger(palette, true), Vec::new()),
             OverlayScreen::MenuContext => self.over(palette, Space::new().boxed(), Vec::new()),
             OverlayScreen::SelectOpen => {
                 let options = vec![Choice { label: "Linear".into(), disabled: false }, Choice { label: "Hold".into(), disabled: false }, Choice { label: "Ease in".into(), disabled: false }, Choice { label: "Bounce".into(), disabled: true }];
@@ -445,6 +476,31 @@ mod tests {
     use iced::Size as WindowSize;
     use styk_design::widgets::testing::Driver;
 
+
+    /// `MARK_MENU_WIDTH` is where the screens put the submenu's anchor: the mark's menu must be that wide as drawn (today's
+    /// `.ui-menu`, 267.86 px in Chromium), and every glyph a menu names must exist in the icon set.
+    #[test]
+    fn the_mark_menu_is_as_wide_as_the_screen_says_and_every_glyph_resolves() {
+        let page = Page::new(OverlayScreen::AppMenu(None), Theme::Light);
+        let (width, height) = OverlayScreen::AppMenu(None).size();
+        let mut driver = Driver::new(page.view(), WindowSize::new(width as f32, height as f32), &styk_design::fonts::ALL);
+        let open = &page.host.menus()[0];
+        let row = driver.snapshot().bounds_of(styk_core::overlay::host::row_id(open.id(), 0)).expect("the first row is mounted");
+        assert!((row.width + 2.0 * EDGE - MARK_MENU_WIDTH).abs() < 1.0, "the menu is {} px wide, the screen says {MARK_MENU_WIDTH}", row.width + 2.0 * EDGE);
+        fn glyphs(entries: &[Entry], out: &mut Vec<String>) {
+            for entry in entries {
+                if let Entry::Item(item) = entry {
+                    out.extend(item.icon.clone());
+                    if let Some(children) = &item.submenu { glyphs(children, out); }
+                }
+            }
+        }
+        let mut names = Vec::new();
+        let facts = Facts { figure: true, joint: true, ..Facts::default() };
+        glyphs(&menus::mark(&facts, &Presentation::english()), &mut names);
+        let missing: Vec<&String> = names.iter().filter(|name| styk_design::icons::lookup(name).is_none()).collect();
+        assert!(missing.is_empty(), "icons today's menus use that the set lacks: {missing:?}");
+    }
     #[test]
     fn every_scene_draws_in_both_themes() {
         for screen in OverlayScreen::ALL {

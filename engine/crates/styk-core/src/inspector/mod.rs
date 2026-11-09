@@ -441,6 +441,17 @@ impl Panel {
         self.model.as_ref()
     }
 
+    /// The evaluated instance (style overlays included) of the selected figure `uid`, from the facts the worker made for
+    /// exactly this document, lineage, revision, playhead and selection (the reconciled facts lane); `None` while they are
+    /// pending or were made for another state. Reading it is a key comparison: nothing is evaluated or scanned.
+    pub fn instance_of(&self, document: &crate::documents::Document, uid: u32) -> Option<&Arc<crate::engine::doc::Figure>> {
+        let shown = self.shown.key.as_ref()?;
+        if shown.document != document.id().get() || shown.lineage != document.lineage()
+            || shown.revision != document.revision() || shown.tick != facts::tick(document).to_bits()
+            || shown.uids.as_ref() != facts::subjects(document) { return None; }
+        self.shown.figures.get(&uid)
+    }
+
     /// The facts the model shows.
     pub fn shown(&self) -> &Shown {
         &self.shown
@@ -478,7 +489,7 @@ impl Panel {
 
     /// What the facts lane made of the one selected figure, when it is for the state now.
     fn subject(&self, document: &crate::documents::Document) -> Option<&crate::facts::Subject> {
-        let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), &facts::subjects(document));
+        let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), facts::subjects(document));
         (self.shown.key.as_ref() == Some(&key)).then_some(self.shown.subject.as_deref()).flatten()
     }
 
@@ -701,7 +712,7 @@ impl Panel {
             return;
         };
         self.retire_picker(facts);
-        let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), &subjects);
+        let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), subjects);
         // Take what landed first. An unpublished key waits for its publication receipt.
         if let Some(landed) = facts.latest()
             && landed.key.document == key.document && landed.key.lineage == key.lineage
@@ -1451,8 +1462,43 @@ impl Panel {
 }
 
 #[cfg(all(test, feature = "engine"))]
-mod retirement_tests {
+mod facts_tests {
     use super::*;
+
+    #[test]
+    fn menu_instances_require_every_part_of_the_prepared_key_without_scanning() {
+        struct Threads;
+        impl styk_services::Spawner for Threads {
+            fn spawn(&self, name: &str, job: styk_services::Job) -> Result<(), styk_services::SpawnError> {
+                std::thread::Builder::new().name(name.to_owned()).spawn(job).map(|_| ()).map_err(|error| styk_services::SpawnError(error.to_string()))
+            }
+        }
+        let mut core = crate::testing::core_with_document(
+            include_bytes!("../../../../tests/edit/startup.document.json"), "Menus.styk",
+            Arc::new(Threads),
+        ).unwrap();
+        crate::testing::call(&mut core, "select", "[1,0]").unwrap();
+        let document = core.documents.active().unwrap();
+        let key = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), facts::subjects(document));
+        let mut panel = Panel::default();
+        panel.shown.figures = core.inspector().shown.figures.clone();
+        panel.shown.key = Some(key.clone());
+        let before = crate::testing::frame_scans();
+        assert!(panel.instance_of(document, 1).is_some());
+        assert!(panel.instance_of(document, u32::MAX).is_none());
+        for stale in [
+            FactsKey { document: key.document + 1, ..key.clone() },
+            FactsKey { lineage: key.lineage + 1, ..key.clone() },
+            FactsKey { revision: key.revision + 1, ..key.clone() },
+            FactsKey { tick: (facts::tick(document) + 0.5).to_bits(), ..key.clone() },
+            FactsKey { uids: Arc::from([u32::MAX]), ..key.clone() },
+        ] {
+            panel.shown.key = Some(stale);
+            assert!(panel.instance_of(document, 1).is_none());
+        }
+        assert_eq!(crate::testing::frame_scans(), before);
+    }
+
     use std::sync::{Mutex, mpsc};
     struct Held(Mutex<Option<Box<dyn FnOnce() + Send>>>);
     impl styk_services::Spawner for Held {

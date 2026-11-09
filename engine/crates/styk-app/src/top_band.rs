@@ -491,7 +491,7 @@ impl TopBand {
     }
 
     pub fn view<'a>(&'a self, theme: Theme, ready: warm_up::Ready, maximize: MaxButtonState, content: iced::Element<'a, view::Message>) -> iced::Element<'a, Message> {
-        view::window(view::Params { shell: &self.shell, theme, ready, presentation: self.core.presentation(), maximize }, content).map(Message::Ui).boxed()
+        view::window(view::Params { shell: &self.shell, theme, ready, presentation: self.core.presentation(), mark_open: self.core.overlays().menu_of(shell::ids::MARK).is_some(), maximize }, content).map(Message::Ui).boxed()
     }
 
     /// The overlay layer over the band and dock: menus, lists, the stage's message,
@@ -1019,6 +1019,7 @@ impl TopBand {
                     (Vec::new(), Task::none())
                 }
                 Step::Dock(step) => (Vec::new(), self.dock_step(step)?),
+                Step::Menu(step) => (Vec::new(), self.menu_step(step)?),
                 Step::Screenshot(path) => {
                     if let Some(run) = &mut self.run {
                         run.capturing = true;
@@ -1129,9 +1130,26 @@ impl TopBand {
                 });
                 same("Export", look.clone(), found.unwrap_or("hidden").to_string())
             }
+            Expect::Menus(count) => same("the open menus", count.to_string(), self.core.overlays().menus().len().to_string()),
             Expect::Dock(expectation) => self.check_dock(expectation),
             other => Err(format!("this build cannot check {other:?}")),
         }
+    }
+
+    /// A step in an open menu: the overlay host's own hover or press on the row `label` names in the menu opened last.
+    fn menu_step(&mut self, step: automation::MenuStep) -> Result<Task<Message>, String> {
+        use styk_core::overlay::{host::Event as Overlay, menu::Entry};
+        let now = self.now();
+        let (label, press) = match &step {
+            automation::MenuStep::Hover(label) => (label.clone(), false),
+            automation::MenuStep::Press(label) => (label.clone(), true),
+            _ => return Err("this build cannot run that menu step".to_string()),
+        };
+        let open = self.core.overlays().menus().last().ok_or("no menu is open")?;
+        let index = open.entries().iter().filter_map(|entry| if let Entry::Item(item) = entry { Some(item) } else { None }).position(|item| item.label == label).ok_or_else(|| format!("the open menu has no row {label}"))?;
+        let menu = open.id();
+        let event = if press { Overlay::Press { menu, index } } else { Overlay::Hover { menu, index } };
+        Ok(styk_ui::message::update_at(&mut self.core, styk_ui::Message::Command(styk_core::commands::Command::Overlay { event, now }), now).map(Message::Editor))
     }
 
     /// A step in the docked window: the presses, moves and releases a person's pointer makes, sent through the same handler
@@ -1375,6 +1393,127 @@ mod tests {
             match step {
                 Step::Resize(width, height) => top.resized(Size::new(width as f32, height as f32), 1.0),
                 Step::Wait(_) | Step::Screenshot(_) => {}
+                step => drop(top.execute(line, step)),
+            }
+        }
+        let failures = top.run.as_ref().unwrap().failures.clone();
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// Mounts the window as `window.rs` stacks it (the band, then the overlay layer) and lets `act` drive it; every message that
+    /// came out goes through the production update, then the walk of the tree reaches the core as the runtime's task does.
+    fn drive(top: &mut TopBand, act: impl FnOnce(&mut styk_design::widgets::testing::Driver<'_, Message>)) {
+        fn mount(top: &TopBand) -> iced::Element<'_, Message> {
+            let ready = warm_up::install_bundled(Default::default());
+            iced::widget::stack![top.view(Theme::Light, ready, MaxButtonState::Idle, iced::widget::Space::new().boxed()), top.overlay_layer(Theme::Light)].boxed()
+        }
+        let messages = {
+            let mut driver = styk_design::widgets::testing::Driver::new(mount(top), Size::new(1560.0, 900.0), &styk_design::fonts::ALL);
+            act(&mut driver);
+            let mut messages = driver.messages();
+            messages.extend(driver.run(TopBand::snapshot()));
+            messages
+        };
+        // The tasks the updates ask for (focus moves) run on the tree the new state mounts, as the runtime does.
+        let tasks: Vec<Task<Message>> = messages.into_iter().map(|message| top.update(message).1).collect();
+        let messages = {
+            let mut driver = styk_design::widgets::testing::Driver::new(mount(top), Size::new(1560.0, 900.0), &styk_design::fonts::ALL);
+            let mut messages = Vec::new();
+            for task in tasks { messages.extend(driver.run(task)); }
+            messages.extend(driver.run(TopBand::snapshot()));
+            messages
+        };
+        for message in messages {
+            let _ = top.update(message);
+        }
+    }
+
+    fn click_focus(top: &mut TopBand, id: styk_core::focus::FocusId) {
+        drive(top, |driver| {
+            let at = driver.snapshot().bounds_of(id).unwrap_or_else(|| panic!("{id:?} is mounted")).center();
+            driver.click(at);
+        });
+    }
+
+    /// Clicks the row `label` of the menu opened last, where the mounted layer drew it.
+    fn click_row(top: &mut TopBand, label: &str) {
+        use styk_core::overlay::menu::Entry;
+        let open = top.core.overlays().menus().last().expect("a menu is open");
+        let index = open.entries().iter().filter_map(|entry| if let Entry::Item(item) = entry { Some(item) } else { None }).position(|item| item.label == label).unwrap_or_else(|| panic!("a row {label}"));
+        let id = styk_core::overlay::host::row_id(open.id(), index);
+        // The rows are measured by a walk before they can be pointed at.
+        drive(top, |_| {});
+        click_focus(top, id);
+    }
+
+    /// The press that closes the mark's menu leaves nothing behind when its release lands elsewhere (no click follows): the next
+    /// click opens the menu. The window's raw release (`Message::Raw`) follows each release the layer saw, as the subscription sends.
+    #[test]
+    fn a_press_on_the_mark_that_is_released_elsewhere_does_not_swallow_the_next_click() {
+        let raw_release = |top: &mut TopBand| drop(top.update(Message::Raw(Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)), true)));
+        let (mut top, _) = band();
+        open(&mut top, 1);
+        drive(&mut top, |_| {});
+        click_focus(&mut top, ids::MARK);
+        raw_release(&mut top);
+        assert!(top.core.overlays().menu_of(ids::MARK).is_some(), "the click opened the menu");
+        // Press the mark (its menu closes), move off the button and release over the empty stage.
+        drive(&mut top, |driver| {
+            let at = driver.snapshot().bounds_of(ids::MARK).expect("the mounted mark").center();
+            driver.point_at(at);
+            driver.events(&[Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))]);
+            driver.point_at((700.0, 500.0));
+            driver.events(&[Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))]);
+        });
+        raw_release(&mut top);
+        assert!(top.core.overlays().menus().is_empty(), "the press closed the menu and no click opened it again");
+        click_focus(&mut top, ids::MARK);
+        raw_release(&mut top);
+        assert!(top.core.overlays().menu_of(ids::MARK).is_some(), "the next click on the mark opens the menu");
+        click_focus(&mut top, ids::MARK);
+        raw_release(&mut top);
+        assert!(top.core.overlays().menus().is_empty(), "and the one after closes it");
+    }
+
+    #[test]
+    fn the_mounted_mark_opens_its_menu_a_clicked_row_runs_its_command_and_a_second_press_closes_it() {
+        let (mut top, _) = band();
+        open(&mut top, 1);
+        let _ = top.execute(1, Step::Edit(30));
+        settle_from_workers(&mut top);
+        assert_eq!(styk_core::testing::undo_depth(&top.core), 1);
+        drive(&mut top, |_| {});
+        click_focus(&mut top, ids::MARK);
+        assert!(top.core.overlays().menu_of(ids::MARK).is_some(), "a click on the mounted mark opened the menu");
+        click_row(&mut top, "Edit");
+        assert_eq!(top.core.overlays().menus().len(), 2, "a click on a submenu row opened its menu");
+        click_row(&mut top, "Undo");
+        assert_eq!(styk_core::testing::undo_depth(&top.core), 0, "a click on Undo ran it on the project in front, through Core::dispatch");
+        assert!(top.core.overlays().menus().is_empty(), "choosing a command closed the tree");
+        // The second press of the mark closes the menu, and the release that follows does not open it again.
+        click_focus(&mut top, ids::MARK);
+        assert_eq!(top.core.overlays().menus().len(), 1);
+        click_focus(&mut top, ids::MARK);
+        assert!(top.core.overlays().menus().is_empty(), "the mark's second click closes its menu");
+    }
+
+    /// The application menus' interaction script, run step by step through the handlers the widgets reach: the mark opens its
+    /// menu, a hover opens a submenu, rows run Undo and Redo on the project in front, an unported row closes the menu, and the
+    /// mark's second press closes it.
+    #[test]
+    fn the_menu_interaction_script_runs_through_the_one_handler() {
+        let (mut top, _) = band();
+        top.run = Some(Run { steps: Vec::new(), next: 0, settle: 0, base: PathBuf::new(), failures: Vec::new(), capturing: false, choices: VecDeque::new() });
+        let script = Script::parse(include_str!("../automation/menu-interaction.script")).unwrap();
+        for (line, step) in script.steps {
+            match step {
+                Step::Open(_) => open(&mut top, 1),
+                Step::Resize(width, height) => top.resized(Size::new(width as f32, height as f32), 1.0),
+                Step::Wait(_) | Step::Screenshot(_) => {}
+                step @ Step::Edit(_) => {
+                    drop(top.execute(line, step));
+                    settle_from_workers(&mut top);
+                }
                 step => drop(top.execute(line, step)),
             }
         }

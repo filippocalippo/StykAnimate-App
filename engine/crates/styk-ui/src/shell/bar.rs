@@ -13,7 +13,7 @@ use styk_core::shell::band::{ButtonShape, Fold, Frame, Item, SegmentContent};
 use styk_core::shell::session::ExportLook;
 use styk_core::shell::strip::Side;
 use styk_core::shell::workspace::Workspace;
-use styk_core::shell::{Event, Hover, Menu, ids};
+use styk_core::shell::{Event, Hover, ids};
 use styk_design::widgets::icon;
 use styk_design::tokens;
 
@@ -99,7 +99,7 @@ pub(crate) fn view(params: &Params<'_>) -> Element<'static, Message> {
         let item = &placed.item;
         let (start, element, right): (f32, Element<'static, Message>, f32) = match *item {
             Item::Mark => {
-                let expanded = shell.menu() == Some(Menu::Mark);
+                let expanded = params.mark_open;
                 let hot = hovered(Hover::Mark) || expanded;
                 let tile = color(palette.surface_hover);
                 let surface = controls::Surface { rest: expanded.then_some(tile), hot: Some(tile), active: Some(tile), border: None, shadow: iced::Shadow::default(), radius: md };
