@@ -337,3 +337,19 @@ fn a_cels_revision_and_bounds_follow_the_stores_without_its_definition() {
     assert_eq!(json(figure(&session).path(&["_styk", "drawing", "bounds"]).unwrap()), r#"{"x":3,"y":4,"width":5,"height":6}"#);
     assert_eq!(ok(&call(&mut session, "@celState", r#"["cel-gone",{"revision":1}]"#)).get("result"), Some(&Value::Bool(false)));
 }
+
+#[test]
+fn a_published_cel_is_the_sessions_and_the_answer_does_not_repeat_it() {
+    let mut session = session(48 * 1024 * 1024);
+    let (layer, key) = drawing_layer(&mut session);
+    ok(&call(&mut session, "commitDrawingPixels", &first_stroke(&layer, &key)));
+    let figure = |session: &Session| session.editor.report().get("figure_types").unwrap().elements().unwrap().iter().find(|f| f.path(&["_styk", "drawing", "celId"]).and_then(Value::as_str) == Some("cel-test")).unwrap();
+    let mut definition = figure(&session);
+    let tiles = format!("data:application/octet-stream;base64,{}", "A".repeat(4000));
+    definition.make_obj().unwrap().get_mut("image_assets").unwrap().make_arr().unwrap()[0].make_obj().unwrap().set("styk_tiles", Value::str(&tiles));
+    let answer = call(&mut session, "@publishCel", &format!("[\"cel-test\",{}]", json(&definition)));
+    assert_eq!(ok(&answer).get("result"), Some(&Value::Bool(true)));
+    assert_eq!(figure(&session).path(&["image_assets"]).unwrap().item(0).unwrap().get("styk_tiles").and_then(Value::as_str), Some(tiles.as_str()), "the session holds the payload");
+    assert!(json(&answer).len() < 4000, "and the answer does not carry it again");
+    assert_eq!(answer.get("patch").map(json), Some("[]".to_string()));
+}

@@ -4,10 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use styk_eval::doc::Camera;
-use styk_eval::drawlist::{DrawList, Overrides, encode_with};
-use styk_eval::geometry::build;
+use styk_eval::drawlist::DrawList;
 
-use crate::{Clock, Engine, Generation};
+use crate::{Engine, Generation};
 
 /// A prepared frame: everything the renderer needs for one tick.
 pub struct FrameData {
@@ -57,37 +56,10 @@ pub(crate) fn hidden_slots(generation: &Generation, frame: &styk_eval::eval::Fra
 
 /// A frame's draw list. `cull`: the frame is for the screen, where it is drawn clipped to the artboard, so what lies outside the artboard
 /// is left out ([`styk_eval::drawlist::cull_outside`]); an export keeps the whole list (its bytes do not change).
-pub(crate) fn produce(generation: &Generation, tick: f64, hidden_uids: &[u32], effects: bool, cull: bool, clock: Clock) -> FrameData {
-    let started = clock();
-    let prepared = &generation.prepared;
-    let frame = prepared.evaluate(tick);
-    let scene = build(&prepared.doc, &frame);
-    let hidden = hidden_slots(generation, &frame, hidden_uids);
-    // Prepared frames are shown through the scene camera, which moves parallax layers,
-    // and the generated effects beside a figure with it (`offsetGeneratorBatch`).
-    let translations = frame.parallax.as_ref().map(|p| p.translations(&[])).unwrap_or_default();
-    // Generated effects, with their targets' earlier positions from the generation's cache.
-    let mut batch = generation.anchors.as_ref().filter(|_| effects).and_then(|anchors| {
-        let sampler = anchors.sampler(clock, f64::INFINITY);
-        styk_eval::vfx::generated::build(prepared, &frame, &scene, Some(tick), Some(&sampler), 1.0)
-    });
-    if let (Some(batch), Some(parallax), Some(layers)) = (batch.as_mut(), frame.parallax.as_ref(), prepared.doc.layers.as_deref()) {
-        batch.offset(|uid| Some(parallax.of_uid(layers, uid)));
-    }
-    let overrides = Overrides { hidden: &hidden, translations: &translations, bypass_effects: !effects, generators: batch.as_ref(), ..Default::default() };
-    let mut list = encode_with(&prepared.doc, &generation.assets, &scene, &overrides);
-    if cull {
-        styk_eval::drawlist::cull_outside(&mut list, &prepared.doc, scene.camera.as_ref());
-    }
-    let list = Arc::new(list);
-    FrameData {
-        generation: generation.id,
-        tick,
-        list,
-        camera: scene.camera,
-        background: scene.background,
-        ms: (clock() - started) as f32,
-    }
+pub(crate) fn produce(generation: &Generation, tick: f64, hidden_uids: &[u32], effects: bool, cull: bool, clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>) -> FrameData {
+    crate::frame_builder::FrameBuilder::prepare_fresh(generation, tick, &crate::frame_builder::Options {
+        hidden_uids: hidden_uids.to_vec(), effects, clip_to_canvas: cull, ..Default::default()
+    }, clock)
 }
 
 /// A finite, nonnegative sample in the existing frame cache. Integer and fractional
@@ -375,3 +347,6 @@ mod tests {
 #[cfg(test)]
 #[path = "frames/d7_tests.rs"]
 mod d7_tests;
+
+#[cfg(feature = "inspect")]
+impl Cache { pub(crate) fn inspection_stats(&self)->FrameStats { self.summary } }

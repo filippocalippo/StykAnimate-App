@@ -40,6 +40,15 @@ fn main() {
     commands.dedup();
     let commands: &'static [&'static str] =
         Box::leak(commands.into_iter().map(|c| &*Box::leak(c.into_boxed_str())).collect::<Vec<_>>().into_boxed_slice());
+    // `generate_context!` needs `frontendDist` (build/tauri-web) to exist. A development or test build serves the
+    // source tree and never reads it, so a fresh checkout (and `npm run engine:test`) gets an empty folder. The packaged
+    // app embeds it, so a packaged build refuses to start without the staged page (scripts/tauri-build.mjs stages it).
+    let web = std::path::Path::new("../../../build/tauri-web");
+    if std::env::var_os("CARGO_FEATURE_CUSTOM_PROTOCOL").is_some() {
+        assert!(web.join("index.html").is_file(), "build/tauri-web is not staged: package with scripts/tauri-build.mjs");
+    } else if !web.exists() {
+        std::fs::create_dir_all(web).expect("create build/tauri-web");
+    }
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(commands))

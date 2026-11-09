@@ -4002,6 +4002,7 @@ dependencies = [
  "pollster",
  "rayon",
  "sha2",
+ "styk-alloc",
  "styk-doc",
  "styk-edit",
  "styk-engine",
@@ -4108,6 +4109,7 @@ dependencies = [
  "styk-eval",
  "styk-formats",
  "styk-piv",
+ "zstd",
 ]
 
 [[package]]
@@ -4137,6 +4139,7 @@ dependencies = [
  "base64 0.22.1",
  "image",
  "pollster",
+ "styk-alloc",
  "styk-doc",
  "styk-draw",
  "styk-engine",
@@ -4177,6 +4180,7 @@ dependencies = [
 name = "styk-raster"
 version = "0.1.0"
 dependencies = [
+ "image",
  "pollster",
  "styk-alloc",
  "styk-draw",

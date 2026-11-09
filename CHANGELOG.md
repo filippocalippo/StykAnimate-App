@@ -17,6 +17,8 @@ What's new in each version of StykAnimate.
 - A new Home page to start an animation in landscape, vertical or square, reopen your projects and organize them with pins and folders.
 - Five short interactive tutorials that guide you step by step through the canvas, posing, the timeline and the panels.
 - Right-click a joint and choose Disconnect segment to turn that part of a figure into a figure of its own.
+- Arrange panels freely: drag any panel beside the stage or another panel, group panels as tabs, float them, or collapse them to icon strips, with a preview of where each one will land.
+- Save your own panel layouts for each workspace, and export or import them to share.
 
 ### Changed
 
@@ -43,6 +45,8 @@ What's new in each version of StykAnimate.
 - Fixed editing an existing text figure, which opened with the default text instead of its own.
 - Fixed Auto key, builder snapping and camera follow missing from the command palette.
 - Saving no longer fails when Windows is still scanning the file you just saved over, and a save that runs out of memory now says your project is still open.
+- Fixed projects that would not open again after you made a movieclip in a project that already had another movieclip on its timeline. Projects already saved that way now open, and StykAnimate tells you it repaired them.
+- Saving now repairs damage it finds in a project, so the saved file opens again.
 - Exporting the same animation twice no longer occasionally leaves a frame with garbled pixels.
 
 ### Performance
@@ -58,6 +62,7 @@ What's new in each version of StykAnimate.
 - Timeline and asset library previews appear almost instantly, and large projects use less memory, while they are shown and once opened.
 - Smoother playback for animations with parallax layers, a following camera, moved figure origins, Stick Nodes sprites, turning 3D drawings or animated properties.
 - Undoing and redoing big movieclip edits is much faster.
+- Drawing for a long time no longer keeps growing the memory StykAnimate uses.
 - Stepping through frames with the keyboard shows the next frame sooner on large animations.
 
 ### Removed

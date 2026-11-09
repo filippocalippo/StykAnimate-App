@@ -5,6 +5,7 @@
 use styk_doc::Value;
 
 use super::js::*;
+use super::{child_mut, Step};
 use crate::EditError;
 
 /// `movieclipAsset(figure)`: the clip a figure definition holds.
@@ -222,7 +223,7 @@ pub(super) fn graph(report: &Value) -> Result<(), EditError> {
             return fail("errors.movieclips.invalidMovieclipDocument");
         }
         if depth > 8 {
-            return fail("errors.movieclips.movieclipsContainACycleOrExceedEightNested");
+            return fail("errors.movieclips.movieclipsNestAtMostEightLevelsDeep");
         }
         let source = path(document, &["_styk", "movieclipSource", "document"]);
         if truthy(source) {
@@ -257,4 +258,98 @@ pub(super) fn graph(report: &Value) -> Result<(), EditError> {
     }
     let mut assets = 0;
     visit(Some(report), 0, &mut assets)
+}
+
+/// The deepest a movieclip graph may run (`graph`): the root is level 0, and a clip's document and a retained scene each add one.
+pub(super) const MAX_DEPTH: usize = 8;
+
+fn retained_scene(document: &Value) -> Option<&Value> {
+    path(Some(document), &["_styk", "movieclipSource", "document"]).filter(|source| source.truthy())
+}
+
+/// The deepest level of the graph below `document`, which is at `depth`.
+pub(super) fn deepest(document: &Value, depth: usize) -> usize {
+    let mut deepest_level = depth;
+    if let Some(source) = retained_scene(document) {
+        deepest_level = deepest_level.max(deepest(source, depth + 1));
+    }
+    for figure in items(document.get("figure_types")) {
+        if let Some(clip) = get(asset(&figure), "document").filter(|clip| clip.truthy()) {
+            deepest_level = deepest_level.max(deepest(clip, depth + 1));
+        }
+    }
+    deepest_level
+}
+
+/// A project whose movieclips run deeper than the graph allows (a clip made of a clip again and again retains a scene at every level) is
+/// brought within it by letting go of the retained scenes, deepest first, only as many as it takes. A retained scene is what a clip was made
+/// from; the clip's own frames, which are what shows, are not touched. Returns how many scenes it let go of, none when the graph is
+/// as deep as it can be without them.
+pub(super) fn shallow(report: &mut Value) -> usize {
+    cut(report, 0)
+}
+
+fn cut(document: &mut Value, depth: usize) -> usize {
+    if deepest(document, depth) <= MAX_DEPTH {
+        return 0;
+    }
+    let mut dropped = 0;
+    if retained_scene(document).is_some_and(|source| deepest(source, depth + 1) > MAX_DEPTH) {
+        let steps = [Step::Key("_styk"), Step::Key("movieclipSource"), Step::Key("document")];
+        if let Some(source) = child_mut(document, &steps) {
+            dropped += cut(source, depth + 1);
+        }
+        if retained_scene(document).is_some_and(|source| deepest(source, depth + 1) > MAX_DEPTH) {
+            if let Some(styk) = child_mut(document, &[Step::Key("_styk")]).and_then(Value::make_obj) {
+                styk.remove("movieclipSource");
+                dropped += 1;
+            }
+        }
+    }
+    for index in 0..items(document.get("figure_types")).len() {
+        let steps = [Step::Key("figure_types"), Step::Slot(index), Step::Key("_styk"), Step::Key("movieclip"), Step::Key("document")];
+        if let Some(clip) = child_mut(document, &steps) {
+            dropped += cut(clip, depth + 1);
+        }
+    }
+    dropped
+}
+
+/// A frame's movieclip placements whose end is not after their start (older builds left such an end when a clip was placed in a frame that
+/// ended before it started), each given the shortest valid end, the frame after its start. Says how many frames it mended.
+fn repair_placements_in(frame: &mut Value) -> bool {
+    let Some(objects) = frame.make_obj().and_then(|frame| frame.get_mut("objects")).and_then(Value::make_arr) else { return false };
+    let mut mended = false;
+    for object in objects {
+        let Some(playback) = object.make_obj().and_then(|object| object.get_mut("_stykMovieclip")) else { continue };
+        let (start, end) = (playback.get("start").and_then(Value::as_f64), playback.get("end").and_then(Value::as_f64));
+        let presence = playback.get("clock").and_then(Value::as_str) == Some("presence");
+        if let (false, Some(start), Some(end)) = (presence, start, end) {
+            if start.fract() == 0.0 && end.fract() == 0.0 && (0.0..10_000_000.0).contains(&start) && end <= start {
+                if let Some(playback) = playback.make_obj() {
+                    playback.set("end", Value::Num(start + 1.0));
+                    mended = true;
+                }
+            }
+        }
+    }
+    mended
+}
+
+/// [`repair_placements_in`] for the keyframes and the retained poses of `report`.
+pub(super) fn repair_placements(report: &mut Value) -> usize {
+    let mut mended = 0;
+    if let Some(frames) = report.make_obj().and_then(|r| r.get_mut("keyframes")).and_then(Value::make_arr) {
+        mended += frames.iter_mut().filter_map(|frame| repair_placements_in(frame).then_some(())).count();
+    }
+    let sources = report.make_obj().and_then(|r| r.get_mut("_styk")).and_then(Value::make_obj).and_then(|s| s.get_mut("frameSources")).and_then(Value::make_obj);
+    if let Some(sources) = sources {
+        let ids: Vec<String> = sources.keys().map(|id| id.to_string()).collect();
+        for id in ids {
+            if sources.get_mut(&id).is_some_and(repair_placements_in) {
+                mended += 1;
+            }
+        }
+    }
+    mended
 }

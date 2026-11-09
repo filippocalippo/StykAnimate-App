@@ -694,6 +694,72 @@ pub fn to_string(value: &Value) -> String {
     unsafe { String::from_utf8_unchecked(out) }
 }
 
+/// Nodes looked at between two questions to `check` in [`read_back`].
+const READ_BACK_STRIDE: usize = 4096;
+
+/// What `parse(to_string(value))` makes of `value`, built without the text. Text is what a document crosses to the codec as in the browser,
+/// and it is not the same document: JSON has no negative zero (it is written, and read, as `0`), and no NaN or infinity (`null`, so a number
+/// that was not finite is no longer a number, and an array that held one is an ordinary array). Every other number is written with the digits
+/// that read back as the same double, strings and keys keep their text and objects their order, so nothing else changes. Nodes that hold
+/// none of those are shared with `value`; only the path to the ones that do is built again.
+///
+/// `check` is asked every few thousand nodes and ends the walk with its error.
+pub fn read_back<E>(value: &Value, mut check: impl FnMut() -> Result<(), E>) -> Result<Value, E> {
+    let mut seen = 0usize;
+    Ok(read_back_node(value, &mut check, &mut seen)?.unwrap_or_else(|| value.clone()))
+}
+
+/// `None` when the node reads back as itself.
+fn read_back_node<E>(value: &Value, check: &mut impl FnMut() -> Result<(), E>, seen: &mut usize) -> Result<Option<Value>, E> {
+    *seen += 1;
+    if *seen % READ_BACK_STRIDE == 0 {
+        check()?;
+    }
+    Ok(match value {
+        Value::Num(n) if !n.is_finite() => Some(Value::Null),
+        Value::Num(n) if *n == 0.0 && n.is_sign_negative() => Some(Value::Num(0.0)),
+        Value::Nums(numbers) => {
+            if numbers.iter().all(|n| n.is_finite() && !(n == 0.0 && n.is_sign_negative())) {
+                None
+            } else {
+                *seen += numbers.len();
+                check()?;
+                let items: Vec<Value> = numbers.iter().map(|n| if n.is_finite() { Value::Num(if n == 0.0 { 0.0 } else { n }) } else { Value::Null }).collect();
+                Some(Value::array(items))
+            }
+        }
+        Value::Arr(items) => {
+            let mut changed: Option<Vec<Value>> = None;
+            for (at, item) in items.iter().enumerate() {
+                match read_back_node(item, check, seen)? {
+                    Some(new) => changed.get_or_insert_with(|| items[..at].to_vec()).push(new),
+                    None => {
+                        if let Some(list) = &mut changed {
+                            list.push(item.clone());
+                        }
+                    }
+                }
+            }
+            changed.map(Value::array)
+        }
+        Value::Obj(object) => {
+            let mut changed: Option<Vec<Value>> = None;
+            for (at, item) in object.values().iter().enumerate() {
+                match read_back_node(item, check, seen)? {
+                    Some(new) => changed.get_or_insert_with(|| object.values()[..at].to_vec()).push(new),
+                    None => {
+                        if let Some(list) = &mut changed {
+                            list.push(item.clone());
+                        }
+                    }
+                }
+            }
+            changed.map(|values| Value::Obj(Arc::new(Obj::from_shape(object.shape().clone(), values))))
+        }
+        _ => None,
+    })
+}
+
 /// Writes a packed array as `[a,b,…]`.
 pub fn write_numbers(numbers: &Nums, out: &mut Vec<u8>) {
     out.push(b'[');
@@ -889,6 +955,18 @@ pub fn base64_into(bytes: &[u8], out: &mut Vec<u8>) {
     base64::engine::general_purpose::STANDARD.encode_slice(bytes, &mut out[start..]).expect("the output was sized for the input");
 }
 
+/// Decodes standard, padded base64 and appends the bytes to `out`, which should have room for them (the decoded size is at most
+/// three quarters of the text): nothing else is allocated. `false` if `text` is not valid base64; `out` is left as it was then.
+pub fn base64_append(text: &str, out: &mut Vec<u8>) -> bool {
+    let before = out.len();
+    if base64::engine::general_purpose::STANDARD.decode_vec(text, out).is_ok() {
+        true
+    } else {
+        out.truncate(before);
+        false
+    }
+}
+
 /// Decodes standard, padded base64 as the app does: `None` unless `text` is
 /// exactly the canonical encoding of the returned bytes.
 pub fn base64_strict(text: &str) -> Option<Vec<u8>> {
@@ -1049,6 +1127,58 @@ mod tests {
         }
         let value=Value::Blob(Arc::new(crate::value::Blob { prefix:Arc::from("data:🦊;base64,\n"),bytes:Arc::from([0,1,2,3,4]) }));
         assert_eq!(utf16_units(&value),to_string(&value).encode_utf16().count());
+    }
+
+    #[test]
+    fn a_document_reads_back_from_its_text_as_it_does_without_the_text() {
+        let edge = [-0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 1.5, -2.5e-300, 9007199254740993.0];
+        let packed = |numbers: &[f64]| Value::Nums(Arc::new(Nums::F64(numbers.to_vec().into())));
+        let mut object = Obj::new();
+        object.set("zero", Value::Num(-0.0));
+        object.set("nan", Value::Num(f64::NAN));
+        object.set("inf", Value::Num(f64::INFINITY));
+        object.set("fine", Value::Num(1.25));
+        object.set("negative", Value::Num(-3.0));
+        object.set("all", packed(&edge));
+        object.set("only_zero", packed(&[-0.0, 1.0, -0.0]));
+        object.set("plain", packed(&[1.0, 2.5, -0.5]));
+        object.set("unpacked", Value::Arr(Arc::new(edge.iter().map(|n| Value::Num(*n)).collect())));
+        object.set("mixed", Value::Arr(Arc::new(vec![Value::Num(-0.0), Value::str("a"), Value::Null, Value::Num(f64::NAN)])));
+        object.set("nested", Value::array(vec![Value::object({
+            let mut inner = Obj::new();
+            inner.set("x", Value::Num(-0.0));
+            inner.set("y", Value::Bool(true));
+            inner
+        })]));
+        let document = Value::object(object);
+        let read = read_back(&document, || Ok::<(), ()>(())).unwrap();
+        let through_text = parse(to_string(&document).as_bytes()).unwrap();
+        assert_eq!(to_string(&read), to_string(&through_text));
+        assert_eq!(read, through_text);
+        for (key, value) in read.as_obj().unwrap().iter() {
+            let expected = through_text.get(key).unwrap();
+            assert_eq!(value, expected, "{key}");
+            if let (Value::Num(a), Value::Num(b)) = (value, expected) {
+                assert_eq!(a.to_bits(), b.to_bits(), "{key}");
+            }
+        }
+        let zero = read.get("zero").and_then(Value::as_f64).unwrap();
+        assert_eq!(zero.to_bits(), 0.0f64.to_bits(), "negative zero reads back as zero");
+        assert!(read.get("nan").unwrap().is_null() && read.get("inf").unwrap().is_null());
+        assert!(matches!(read.get("only_zero").and_then(Value::as_nums), Some(Nums::F32(_))), "an array of numbers stays packed");
+        assert!(read.get("all").and_then(Value::as_nums).is_none(), "an array that held a non-finite number is an ordinary array");
+    }
+
+    #[test]
+    fn what_reads_back_as_itself_is_shared_and_the_walk_can_be_stopped() {
+        let plain = parse(br#"{"a":[1,2,3],"b":{"c":[true,null,"x"],"d":1.5}}"#).unwrap();
+        let read = read_back(&plain, || Ok::<(), ()>(())).unwrap();
+        assert!(read.same_node(&plain), "a document with nothing to change is the document");
+        let wide = Value::array((0..20_000).map(|n| Value::Num(n as f64)).chain([Value::Num(-0.0)]).map(|v| Value::array(vec![Value::Num(1.0), v])).collect());
+        let mut asked = 0;
+        let stopped = read_back(&wide, || { asked += 1; if asked == 3 { Err("stop") } else { Ok(()) } });
+        assert_eq!(stopped, Err("stop"));
+        assert_eq!(asked, 3);
     }
 
     #[test]

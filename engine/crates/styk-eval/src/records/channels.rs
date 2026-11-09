@@ -40,6 +40,7 @@ pub struct RecordChannels<'records, 'doc> {
 }
 impl RecordChannels<'_, '_> {
     pub fn compose(&self, frame: Value, tick: f64) -> Result<Value, Error> {
+        self.records.check()?;
         self.records.compose(frame, &self.channels, tick)
     }
 }
@@ -51,36 +52,43 @@ const NATIVE_FIELDS: [&str; 6] = ["scale", "field28", "color_override_raw", "col
 const OUTLINE_FIELDS: [&str; 3] = ["outlineColor", "outlineWidth", "outlineOpacity"];
 
 /// Channel records read into typed channels, with each pose channel's track.
-pub(super) fn bind(prepared: &Prepared, records: &[Value]) -> Result<Vec<Bound>, Error> {
-    bind_with(prepared, records, false)
+pub(super) fn bind(prepared: &Prepared, records: &[Value], cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<Bound>, Error> {
+    bind_with(prepared, records, false, cancelled)
 }
 
 pub(super) fn bind_draft(prepared: &Prepared, records: &[Value]) -> Result<Vec<Bound>, Error> {
-    bind_with(prepared, records, true)
+    bind_with(prepared, records, true, &|| false)
 }
 
-fn bind_with(prepared: &Prepared, records: &[Value], draft: bool) -> Result<Vec<Bound>, Error> {
+fn bind_with(prepared: &Prepared, records: &[Value], draft: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<Bound>, Error> {
     let mut notes = Vec::new();
     records
         .iter()
         .map(|record| {
-            let read = if draft { crate::channels::draft_channel } else { crate::channels::channel };
-            let channel = read(record, &mut notes).map_err(|why| Error::Unported(format!("a property channel the engine does not read ({why})")))?;
-            let track = (channel.property == Property::Pose).then(|| crate::channels::pose::track(&prepared.doc, &channel));
+            if cancelled() { return Err(Error::Invalid("evaluation cancelled".into())); }
+            let read = if draft { crate::channels::draft_channel(record, &mut notes) } else { crate::channels::channel_cancellable(record, &mut notes, cancelled) };
+            let channel = read.map_err(|why| Error::Unported(format!("a property channel the engine does not read ({why})")))?;
+            let track = if channel.property == Property::Pose { Some(crate::channels::pose::track_cancellable(&prepared.doc, &channel, cancelled).ok_or_else(|| Error::Invalid("evaluation cancelled".into()))?) } else { None };
             Ok(Bound { record: record.clone(), channel, track })
         })
         .collect()
 }
 
 /// [`bind`], reusing the channels `prepared` compiled from the same records.
-pub(super) fn bind_compiled(prepared: &Prepared, records: &[Value]) -> Result<Vec<Bound>, Error> {
+pub(super) fn bind_compiled_cancellable(prepared: &Prepared, records: &[Value], cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<Bound>, Error> {
     match prepared.channels() {
-        Some(compiled) if compiled.animation.channels.len() == records.len() => Ok(records
+        Some(compiled) if compiled.animation.channels.len() == records.len() => records
             .iter()
             .zip(compiled.animation.channels.iter().zip(&compiled.tracks))
-            .map(|(record, (channel, track))| Bound { record: record.clone(), channel: channel.clone(), track: track.clone() })
-            .collect()),
-        _ => bind(prepared, records),
+            .map(|(record, (channel, track))| {
+                if cancelled() { return Err(Error::Invalid("evaluation cancelled".into())); }
+                Ok(Bound { record: record.clone(), channel: channel.clone(), track: track.clone() })
+            })
+            .collect(),
+        _ => records.iter().map(|record| {
+            if cancelled() { return Err(Error::Invalid("evaluation cancelled".into())); }
+            Ok(bind(prepared, std::slice::from_ref(record), cancelled)?.remove(0))
+        }).collect(),
     }
 }
 
@@ -468,9 +476,10 @@ impl Records<'_> {
 
     /// `buildGeometry(report, frame)` of a frame record, read into a typed frame.
     pub(super) fn geometry_of(&self, frame: &Value) -> Result<crate::geometry::Scene, Error> {
+        self.check()?;
         let doc = &self.prepared.doc;
-        let typed = crate::load::Loader::new().edit_frame(frame, None, doc).map_err(|error| Error::Invalid(error.to_string()))?;
-        Ok(crate::geometry::build(doc, &typed))
+        let typed = crate::load::Loader::new().edit_frame_cancellable(frame, doc, self.cancelled).map_err(|error| Error::Invalid(error.to_string()))?;
+        crate::geometry::build_cancellable(doc, &typed, self.cancelled).ok_or_else(|| Error::Invalid("evaluation cancelled".into()))
     }
 
     /// `handleOrientation(object, handle)`: the direction of joint `handle` of `object`.
@@ -504,6 +513,7 @@ impl Records<'_> {
 
     /// `composePoseChannels(report, frame, tick)` then `composeAnimationChannels(report, frame, tick)`.
     pub(super) fn compose(&self, frame: Value, channels: &[Bound], tick: f64) -> Result<Value, Error> {
+        self.check()?;
         if channels.is_empty() {
             return Ok(frame);
         }
@@ -515,17 +525,20 @@ impl Records<'_> {
     /// (`at(report, tick)`) with the one-key channels it builds composed at `tick`, pose
     /// channels first.
     pub fn compose_channels(&self, frame: Value, channels: &[Value], tick: f64) -> Result<Value, Error> {
+        self.check()?;
         self.bind_channels(channels)?.compose(frame, tick)
     }
 
     /// Reuse the owning channel binding across a worker's sequence of samples.
     pub fn bind_channels(&self, channels: &[Value]) -> Result<RecordChannels<'_, '_>, Error> {
-        Ok(RecordChannels { records: self, channels: bind(self.prepared, channels)? })
+        self.check()?;
+        Ok(RecordChannels { records: self, channels: bind(self.prepared, channels, self.cancelled)? })
     }
 
     /// `composePoseChannels`: figures and layers take the pose their own key track samples,
     /// the camera and the scene theirs.
     fn compose_poses(&self, base: Value, channels: &[Bound], tick: f64) -> Result<Value, Error> {
+        self.check()?;
         let poses: Vec<&Bound> = channels.iter().filter(|b| b.channel.property == Property::Pose).collect();
         if poses.is_empty() {
             return Ok(base);
@@ -548,6 +561,7 @@ impl Records<'_> {
             })
             .collect();
         for bound in &poses {
+            self.check()?;
             let channel = &bound.channel;
             let fixed = matches!(channel.target, Target::Camera | Target::Scene);
             let source = if crate::channels::pose::masked_at(&channel.masked, tick) {
@@ -581,6 +595,7 @@ impl Records<'_> {
                 Target::Camera => result.set("camera", frame.get("camera").filter(|c| c.truthy()).cloned().unwrap_or_else(default_camera)),
                 Target::Scene => {
                     for field in SCENE_FIELDS {
+                        self.check()?;
                         match frame.get(field) {
                             Some(value) => result.set(field, value.clone()),
                             None => {
@@ -607,6 +622,7 @@ impl Records<'_> {
         let mut brought: Vec<Vec<(usize, Value)>> = vec![Vec::new(); replacements.len()];
         let mut visited: Vec<Source> = Vec::new();
         for &(_, source) in &replacements {
+            self.check()?;
             if visited.contains(&source) {
                 continue;
             }
@@ -614,6 +630,7 @@ impl Records<'_> {
             let frame = frame_of(source);
             let objects = items(frame.get("objects"));
             for slot in ordered_slots(frame) {
+                self.check()?;
                 let object = &objects[slot];
                 let Some(r) = replacement_of(&owner(uid(object).unwrap_or(f64::NAN))) else { continue };
                 if replacements[r].1 == source {
@@ -626,13 +643,16 @@ impl Records<'_> {
         let mut included: HashSet<u64> = HashSet::new();
         // Unchanged figures keep their native slots; new appearances follow in source order.
         for (slot, object) in base_objects.iter().enumerate() {
+            self.check()?;
             if replacement_of(&owner(uid(object).unwrap_or(f64::NAN))).is_none() {
                 placed.push(Placed { object: object.clone(), source: Source::Base, slot });
                 included.insert(uid_bits(object));
             }
         }
         for (r, (id, source)) in replacements.iter().enumerate() {
+            self.check()?;
             for (slot, object) in &brought[r] {
+                self.check()?;
                 if owner(uid(object).unwrap_or(f64::NAN)) != *id || included.contains(&uid_bits(object)) {
                     continue;
                 }
@@ -646,6 +666,7 @@ impl Records<'_> {
         let mut geometry: HashMap<Source, crate::geometry::Scene> = HashMap::new();
         let mut objects: Vec<Obj> = Vec::with_capacity(placed.len());
         for (slot, record) in placed.iter().enumerate() {
+            self.check()?;
             let id = owner(uid(&record.object).unwrap_or(f64::NAN));
             let mut object = if native_owners.contains(&id) { native_appearance(&record.object, natives.get(&uid_bits(&record.object))) } else { record.object.as_obj().cloned().unwrap_or_default() };
             let Some(join) = object.get("join").filter(|j| j.truthy()).cloned() else {
@@ -667,6 +688,7 @@ impl Records<'_> {
                 let root = scene.objects.get(record.slot).filter(|g| g.resolved).map(|g| g.root);
                 object.set("object_slot", Value::Num(slot as f64));
                 for (axis, key) in ["root_x", "root_y"].into_iter().enumerate() {
+                    self.check()?;
                     match root.map(|r| Value::Num(r[axis])).or_else(|| record.object.get(key).cloned()) {
                         Some(value) => object.set(key, value),
                         None => {
@@ -690,6 +712,7 @@ impl Records<'_> {
         let parent_of = |object: &Obj| object.get("join").filter(|j| j.truthy()).and_then(|j| num(j, "target_object_slot")).map(|s| s as usize);
         let mut done = vec![false; count];
         for start in 0..count {
+            self.check()?;
             if done[start] {
                 continue;
             }
@@ -710,6 +733,7 @@ impl Records<'_> {
                 }
             }
             for &child in path.iter().rev() {
+                self.check()?;
                 if let Some(join) = objects[child].get("join").filter(|j| j.truthy()).cloned() {
                     let record = &placed[child];
                     let source_objects = items(frame_of(record.source).get("objects"));
@@ -736,6 +760,7 @@ impl Records<'_> {
         // Each layer keeps its sampled pose's stacking order; anchored figures follow their anchor.
         let mut anchors: Vec<(f64, Vec<f64>)> = Vec::new();
         for bound in &poses {
+            self.check()?;
             if let (Some(anchor), Target::Figure { uid }) = (bound.channel.order_anchor, &bound.channel.target) {
                 match anchors.iter_mut().find(|(a, _)| *a == anchor as f64) {
                     Some((_, list)) => list.push(*uid as f64),
@@ -745,27 +770,31 @@ impl Records<'_> {
         }
         let mut stack = Stacking { slots: &slots, anchors, anchored: HashSet::new(), order: Vec::with_capacity(count), placed: vec![false; count] };
         let mut emitted = vec![false; replacements.len()];
-        let emit = |stack: &mut Stacking, emitted: &mut [bool], r: usize| {
+        let emit = |stack: &mut Stacking, emitted: &mut [bool], r: usize| -> Result<(), Error> {
             if std::mem::replace(&mut emitted[r], true) {
-                return;
+                return Ok(());
             }
             for (_, object) in &brought[r] {
+                self.check()?;
                 let id = uid(object).unwrap_or(f64::NAN);
                 if owner(id) == replacements[r].0 {
                     stack.append(id);
                 }
             }
+            Ok(())
         };
         for slot in ordered_slots(&base) {
+            self.check()?;
             let id = uid(&base_objects[slot]).unwrap_or(f64::NAN);
             match replacement_of(&owner(id)) {
-                Some(r) => emit(&mut stack, &mut emitted, r),
+                Some(r) => emit(&mut stack, &mut emitted, r)?,
                 None => stack.append(id),
             }
             stack.append_anchors(id);
         }
         for r in 0..replacements.len() {
-            emit(&mut stack, &mut emitted, r);
+            self.check()?;
+            emit(&mut stack, &mut emitted, r)?;
         }
         let mut order = std::mem::take(&mut stack.order);
         order.extend((0..count).filter(|&slot| !stack.placed[slot]));
@@ -792,8 +821,10 @@ impl Records<'_> {
     /// `composeAnimationChannels`: every other channel that controls its property at the tick
     /// sets it on the frame.
     fn compose_scalars(&self, frame: Value, channels: &[Bound], tick: f64) -> Result<Value, Error> {
+        self.check()?;
         let mut active: Vec<(&Bound, Value)> = Vec::new();
         for bound in channels.iter().filter(|b| b.channel.property != Property::Pose) {
+            self.check()?;
             let Some(sampled) = bound.channel.sample_at(tick) else { continue };
             if let Some(value) = Records::sampled_value(bound, sampled) {
                 active.push((bound, value));
@@ -816,6 +847,7 @@ impl Records<'_> {
         let mut camera_copied = false;
         let mut scoped: HashSet<String> = HashSet::new();
         for (bound, value) in &active {
+            self.check()?;
             let (target, property) = (&bound.channel.target, &bound.channel.property);
             let name = bound.record.get("property").and_then(Value::as_str).unwrap_or("");
             if property.is_vfx() {
@@ -844,10 +876,12 @@ impl Records<'_> {
                         // `{x: 0, y: 0, scale: 1, angle_rad: 0, ...frame.camera, is_default: false}`.
                         let mut camera = Obj::new();
                         for (key, fallback) in [("x", 0.0), ("y", 0.0), ("scale", 1.0), ("angle_rad", 0.0)] {
+                            self.check()?;
                             camera.set(key, Value::Num(fallback));
                         }
                         if let Some(own) = frame.get("camera").and_then(Value::as_obj) {
                             for (key, value) in own.iter() {
+                                self.check()?;
                                 camera.set(key, value.clone());
                             }
                         }
@@ -959,6 +993,7 @@ impl Records<'_> {
     /// roots down (a rotation turns the figures joined below it too), then positions, where a
     /// joined figure's position moves its root figure.
     fn transform(&self, source: &[Value], objects: &mut [Obj], values: &[(usize, Vec<(&'static str, f64)>)], definitions: &HashMap<u64, Value>, frame: &Obj) -> Result<(), Error> {
+        self.check()?;
         let count = source.len();
         let value_of = |slot: usize, key: &str| values.iter().find(|(s, _)| *s == slot).and_then(|(_, v)| v.iter().find(|(k, _)| *k == key)).map(|(_, v)| *v);
         let mut parents: Vec<Option<usize>> = vec![None; count];
@@ -966,6 +1001,7 @@ impl Records<'_> {
         let mut roots: Vec<usize> = (0..count).collect();
         let mut ordered: Vec<usize> = Vec::with_capacity(count);
         for (slot, object) in source.iter().enumerate() {
+            self.check()?;
             let parent = object.get("join").filter(|j| !j.is_null()).and_then(|j| j.get("target_object_slot"));
             match parent {
                 None => ordered.push(slot),
@@ -981,6 +1017,7 @@ impl Records<'_> {
         while i < ordered.len() {
             let slot = ordered[i];
             for &child in &children[slot] {
+                self.check()?;
                 roots[child] = roots[slot];
                 ordered.push(child);
             }
@@ -991,6 +1028,7 @@ impl Records<'_> {
         }
         let mut deltas = vec![0.0f64; count];
         for &slot in &ordered {
+            self.check()?;
             let object = &source[slot];
             if let Some(scale) = value_of(slot, "scale") {
                 objects[slot].set("scale", Value::Num(scale));
@@ -1016,6 +1054,7 @@ impl Records<'_> {
             composed.set("objects", Value::array(objects.iter().cloned().map(Value::object).collect()));
             let corrected = self.correct_origins(Value::object(composed))?;
             for (object, record) in objects.iter_mut().zip(items(corrected.get("objects"))) {
+                self.check()?;
                 *object = record.as_obj().cloned().unwrap_or_default();
             }
         }
@@ -1029,6 +1068,7 @@ impl Records<'_> {
         };
         let mut shifts = [vec![0.0f64; count], vec![0.0f64; count]];
         for &slot in &ordered {
+            self.check()?;
             let (x, y) = (value_of(slot, "x"), value_of(slot, "y"));
             if x.is_none() && y.is_none() {
                 continue;
@@ -1045,6 +1085,7 @@ impl Records<'_> {
                 }
             }
             for (axis, field, value) in [(0usize, "root_x", x), (1usize, "root_y", y)] {
+                self.check()?;
                 let Some(value) = value else { continue };
                 let delta = value - (base.map_or_else(|| num(&object, field).unwrap_or(f64::NAN), |b| b[axis]) + shifts[axis][root]);
                 if delta != 0.0 {
@@ -1087,6 +1128,7 @@ impl Records<'_> {
     /// other joined figure's channel changes its displayed world coordinates.
     /// Reuses this Records view's already bound channel and exact sampler.
     pub fn sample_channel_value(&self, target: &Value, property: &str, tick: f64) -> Result<Option<Value>, Error> {
+        self.check()?;
         let mut record = Obj::new();
         record.set("target", target.clone());
         record.set("property", Value::str(property));
@@ -1103,6 +1145,7 @@ impl Records<'_> {
     /// property on a frame record. `None` where it is undefined. `target` and `property` as a
     /// channel names them (the record of a channel's `target` and its `property`).
     pub fn property_value(&self, frame: &Value, target: &Value, property: &str) -> Result<Option<Value>, Error> {
+        self.check()?;
         let mut channel = Obj::new();
         channel.set("target", target.clone());
         channel.set("property", Value::str(property));
@@ -1271,6 +1314,28 @@ impl Stacking<'_> {
             } else {
                 self.append_anchors(child);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod binding_cancellation_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[test]
+    fn cancellation_reaches_dense_pose_key_parsing_and_track_binding() {
+        let tree = styk_doc::json::parse(include_bytes!("../../tests/fixtures/channels/channels-figure.sheet.json")).unwrap();
+        let prepared = crate::prepare(crate::from_value(&tree, "").unwrap());
+        let mut channel = tree.path(&["_styk", "layerSheet", "legacyAnimation", "channels"]).unwrap().item(0).unwrap();
+        let key = channel.get("keys").unwrap().item(0).unwrap();
+        channel.make_obj().unwrap().set("keys", Value::array((0..512).map(|tick| { let mut key = key.clone(); key.make_obj().unwrap().set("tick", Value::Num(f64::from(tick))); key }).collect()));
+        let channels = [channel];
+        let complete = bind(&prepared, &channels, &|| false).unwrap();
+        assert_eq!(complete[0].track.as_ref().unwrap().keys.len(), 512);
+        for after in [256, 768] {
+            let visits = AtomicUsize::new(0);
+            assert!(bind(&prepared, &channels, &|| visits.fetch_add(1, Ordering::SeqCst) >= after).is_err());
+            assert!(visits.load(Ordering::SeqCst) <= after + 2);
         }
     }
 }

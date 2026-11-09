@@ -425,19 +425,19 @@ impl<'a> Ctx<'a> {
         }
         if let Some(tiles) = &a.tiles {
             // Every level's tiles; the shader keeps the level the view calls for (`crate::drawing`).
-            let Some(starts) = self.assets.cel_levels(tiles) else { return };
+            let Some(slots) = self.assets.cel_slots(tiles) else { return };
             for (level, drawn) in tiles.levels.iter().enumerate() {
                 let span = (crate::drawing::TILE << level) as f64;
-                let parents = tiles.levels.get(level + 1).zip(starts.get(level + 1));
+                let parents = tiles.levels.get(level + 1).zip(slots.get(level + 1));
                 for (i, &(tx, ty)) in drawn.iter().enumerate() {
-                    let Some(e) = self.assets.drawing.get((starts[level] + i as u32) as usize).filter(|e| e.valid) else { continue };
+                    let Some(e) = self.assets.drawing.get(slots[level][i] as usize).filter(|e| e.valid) else { continue };
                     // The tile one level up that covers this one (`F_DRAWING`): what Canvas 2D's
                     // smoothing blends in where the editor paints the cel into a raster.
                     let (px, py) = (tx.div_euclid(2), ty.div_euclid(2));
-                    let parent = parents.and_then(|(above, &start)| {
+                    let parent = parents.and_then(|(above, above_slots)| {
                         // Levels are sorted by row, then column (`crate::drawing::level_tiles`).
                         let j = above.binary_search_by_key(&(py, px), |&(x, y)| (y, x)).ok()?;
-                        self.assets.drawing.get((start + j as u32) as usize).filter(|e| e.valid)
+                        self.assets.drawing.get(above_slots[j] as usize).filter(|e| e.valid)
                     });
                     let paint = match parent {
                         Some(p) => {
@@ -911,8 +911,9 @@ pub enum Layer {
 }
 
 /// What encoding keeps of each object for the next frame of the same document: an object whose build the scene's memory kept
-/// ([`Scene::built_in`]) is encoded as it was. Only a plain frame is kept: nothing in it draws effects, 3D faces or text, no drawing
-/// cel is live and the object is not being dragged, so what an object is encoded as depends on its items alone.
+/// ([`Scene::built_in`]) is encoded as it was. Only a plain frame is kept: nothing in it draws effects, 3D faces or text and the object is not
+/// being dragged, so what an object is encoded as depends on its items alone. While drawing cels are held live, an object that draws
+/// a cel is encoded every frame (its tiles are the live slots, which change between frames) and the others are kept.
 #[derive(Default)]
 pub struct EncodeMemory {
     /// What the kept objects were encoded under: the atlas their pictures are placed in, whether effects are bypassed.
@@ -921,6 +922,13 @@ pub struct EncodeMemory {
     objects: std::collections::HashMap<u32, (u64, usize, Arc<ObjectOut>)>,
     /// The onion skins the last frame was drawn with, encoded: a ghost is the same scene every step of a gesture.
     ghosts: Vec<(GhostKey, Arc<Encoded>)>,
+}
+
+impl EncodeMemory {
+    /// How many objects are kept for the next frame.
+    pub fn kept(&self) -> usize {
+        self.objects.len()
+    }
 }
 
 /// What a ghost is encoded from: the scene (by its stamp), the assets its pictures are placed in, and the settings that change how it is encoded.
@@ -1032,19 +1040,30 @@ pub fn app_bounds(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes) -
 /// [`app_bounds`] of the objects in `slots` only (the others are `None`): what a read of some of a scene's objects needs, measured
 /// without the others.
 pub fn app_bounds_of(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, slots: &[usize]) -> Vec<Option<[f64; 4]>> {
+    app_bounds_of_cancellable(scene, images, slots, &|| false).expect("uncancelled bounds")
+}
+
+pub fn app_bounds_of_cancellable(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, slots: &[usize], cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Vec<Option<[f64; 4]>>> {
     let mut wanted = vec![false; scene.objects.len()];
     for &slot in slots {
+        if cancelled() { return None; }
         if let Some(flag) = wanted.get_mut(slot) {
             *flag = true;
         }
     }
-    bounds_of(scene, images, Some(&wanted))
+    bounds_of_checked(scene, images, Some(&wanted), cancelled)
 }
 
 fn bounds_of(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, wanted: Option<&[bool]>) -> Vec<Option<[f64; 4]>> {
+    bounds_of_checked(scene, images, wanted, &|| false).expect("uncancelled bounds")
+}
+
+fn bounds_of_checked(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, wanted: Option<&[bool]>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Vec<Option<[f64; 4]>>> {
+    if cancelled() { return None; }
     let mut acc = vec![EMPTY; scene.objects.len()];
     let fx = has_effects(scene);
     for it in &scene.measured {
+        if cancelled() { return None; }
         if wanted.is_some_and(|wanted| !wanted.get(it.slot as usize).copied().unwrap_or(false)) {
             continue;
         }
@@ -1053,12 +1072,13 @@ fn bounds_of(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes, wanted
             extent.include(acc, if fx { item_padding(scene, it) } else { 0.0 });
         }
     }
-    scene.objects.iter().enumerate().zip(acc).map(|((slot, object), acc)| {
+    let bounds = scene.objects.iter().enumerate().zip(acc).map(|((slot, object), acc)| {
         (object.resolved && wanted.is_none_or(|wanted| wanted[slot])).then(|| {
             let [x, y, width, height] = rounded(acc);
             [x, y, x + width, y + height]
         })
-    }).collect()
+    }).collect();
+    (!cancelled()).then_some(bounds)
 }
 
 /// A node's own stack (`segmentVfx`): segments have node stacks, polygons do not.
@@ -1189,7 +1209,7 @@ fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidd
         Some(ObjectOut { opacity, outline_alpha, outline, items, nodes, figure, extents, has_fx, raster, single_drawing, bounds })
     };
     // Objects kept from the last frame are not encoded again; the others are, and are kept.
-    let plain = !measured && live.is_none() && tint.is_none() && scene.vfx.is_none() && scene.clip_vfx.iter().all(Option::is_none) && scene.built_in.len() == scene.objects.len();
+    let plain = !measured && tint.is_none() && scene.vfx.is_none() && scene.clip_vfx.iter().all(Option::is_none) && scene.built_in.len() == scene.objects.len();
     let Some(memory) = memory.filter(|_| plain) else {
         let objects = crate::par::map(&runs, 16, encode_run).into_iter().map(|out| out.map(Arc::new)).collect();
         return Encoded { runs, objects, of_slot, fx };
@@ -1204,7 +1224,13 @@ fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidd
         let first = &scene.items[a];
         let moved = moved.get(first.slot as usize).copied().flatten().is_some();
         let build = scene.built_in[first.slot as usize];
-        (first.chain == crate::geometry::NO_CHAIN && !moved && build != 0 && !hidden.get(first.slot as usize).copied().unwrap_or(false)).then_some((first.slot, build, b - a))
+        // A cel the interface holds live is drawn from slots that change between frames: its object is never kept.
+        let live_cel = live.is_some()
+            && scene.items[a..b].iter().any(|it| {
+                let fig = &scene.figures[it.figure as usize];
+                it.kind == ItemKind::Image && fig.image(fig.segments[it.index as usize].asset).is_some_and(|asset| asset.cel.is_some())
+            });
+        (first.chain == crate::geometry::NO_CHAIN && !moved && build != 0 && !live_cel && !hidden.get(first.slot as usize).copied().unwrap_or(false)).then_some((first.slot, build, b - a))
     };
     let mut objects: Vec<Option<Arc<ObjectOut>>> = vec![None; runs.len()];
     let mut missing: Vec<usize> = Vec::new();

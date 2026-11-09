@@ -349,9 +349,13 @@ pub fn log(x: f64) -> f64 {
 /// `Math.log1p(x)`: fdlibm's `log1p` as V8 has it in `ieee754::log1p` (FreeBSD's msun). The
 /// `libm` crate's is musl's rewrite, which differed from Node for about 1 in 1,000 inputs.
 pub fn log1p(x: f64) -> f64 {
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const LN2_HI: f64 = 6.93147180369123816490e-01;
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const LN2_LO: f64 = 1.90821492927058770002e-10;
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const TWO54: f64 = 1.80143985094819840000e+16;
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const LP: [f64; 7] = [6.666666666666735130e-01, 3.999999999940941908e-01, 2.857142874366239149e-01, 2.222219843214978396e-01, 1.818357216161805012e-01, 1.531383769920937332e-01, 1.479819860511658591e-01];
     let hx = high(x) as i32;
     let ax = hx & 0x7fffffff;
@@ -361,6 +365,7 @@ pub fn log1p(x: f64) -> f64 {
         // 1 + x < √2
         if ax >= 0x3ff00000 {
             // x <= -1
+            #[allow(clippy::eq_op, reason = "Preserve V8 fdlibm NaN-producing arithmetic; rewriting can change reference semantics or codegen.")]
             return if x == -1.0 { f64::NEG_INFINITY } else { (x - x) / (x - x) };
         }
         if ax < 0x3e200000 {
@@ -416,6 +421,7 @@ pub fn log1p(x: f64) -> f64 {
             c += k * LN2_LO;
             return k * LN2_HI + c;
         }
+        #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
         let r = hfsq * (1.0 - 0.66666666666666666 * f);
         return if k == 0.0 { f - r } else { k * LN2_HI - ((r - (k * LN2_LO + c)) - f) };
     }

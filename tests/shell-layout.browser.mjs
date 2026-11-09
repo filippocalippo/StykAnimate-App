@@ -74,6 +74,17 @@ async function leaveBuild() {
   await page.waitForFunction(() => !styk.builder.active);
   await settle();
 }
+/** The timeline group's stored height (undefined: the window's default). */
+const timelineSize = () => page.evaluate(() => {
+  const find = node => (node.type === 'group' && node.tabs.includes('timeline') ? node : node.children?.map(find).find(Boolean));
+  return find(styk.workspace.layout.root)?.size;
+});
+/** Where a panel is: its presentation and the side of the stage its group is on. */
+const placeOf = id => page.evaluate(id => {
+  const s = styk.shell.solution, panel = s.panels[id];
+  const group = s.groups.find(item => item.tabs.includes(id));
+  return panel.presentation + '/' + (group?.side ?? (panel.presentation === 'float' ? 'float' : 'none'));
+}, id);
 const rect = selector => page.evaluate(selector => {
   const element = document.querySelector(selector);
   if (!element) return null;
@@ -181,7 +192,7 @@ try {
         const inset = styk.workspace.stageInsets, report = styk.editor.report;
         const footer = document.querySelector('.statusbar').offsetHeight;
         // The painter's 32px Camera, Scene and short-tier rows (until M5) cost this much over the spec's default.
-        const rows = Math.max(0, styk.workspace.solution.regions.bottom.size - specTimeline);
+        const rows = Math.max(0, styk.workspace.sizes.timeline - specTimeline);
         // Nothing floats inside #viewport (the stage header holds the view controls): the solver's insets alone.
         const zoom = extra => Math.min((viewport.width - inset.left - inset.right) / report.canvas_width,
           (viewport.height + extra - inset.top - inset.bottom) / report.canvas_height, 2);
@@ -349,7 +360,7 @@ try {
   await step('the stage header row and the inspector tabs share one line', async () => {
     for (const [width, height] of [[1440, 900], [1024, 700], [900, 700]]) {
       await resize(width, height);
-      const head = await rect('.shell-stage > .stage-head'), tabs = await rect('.shell-right .shell-tabs'), timeline = await rect('.timeline-toolbar');
+      const head = await rect('.shell-stage > .stage-head'), tabs = await rect('.shell-island[data-side="right"] .shell-tabs'), timeline = await rect('.timeline-toolbar');
       // The tabs' pill track sits centred on the stage header's row.
       assert.ok(Math.abs(head.y + head.height / 2 - tabs.y - tabs.height / 2) <= 1 && tabs.y >= head.y && tabs.y + tabs.height <= head.y + head.height,
         `${width}x${height}: ${JSON.stringify({head, tabs})}`);
@@ -494,10 +505,10 @@ try {
     };
     await expand(true);
     assert.equal((await rect('.timeline-panel')).height, 540);
-    assert.equal(await page.evaluate(() => styk.workspace.layout.shared.sizes.bottom), 540);
+    assert.equal(await timelineSize(), 540);
     await expand(false);
     assert.equal((await rect('.timeline-panel')).height, 280, 'the default comes back');
-    assert.equal(await page.evaluate(() => styk.workspace.layout.shared.sizes.bottom), undefined, 'still the default, not a stored size');
+    assert.equal(await timelineSize(), undefined, 'still the default, not a stored size');
     // A height of the user's own survives Expand and back.
     await page.getByRole('separator', {name: 'Resize timeline'}).focus();
     for (let i = 0; i < 9; i++) await page.keyboard.press('ArrowUp');
@@ -507,7 +518,7 @@ try {
     assert.equal((await rect('.timeline-panel')).height, 540);
     await expand(false);
     assert.equal((await rect('.timeline-panel')).height, 388, 'the custom height comes back');
-    assert.equal(await page.evaluate(() => styk.workspace.layout.shared.sizes.bottom), 388);
+    assert.equal(await timelineSize(), 388);
     await page.evaluate(() => styk.workspace.reset());
     await settle();
   });
@@ -529,14 +540,14 @@ try {
     const floating = await page.evaluate(() => ({
       vfx: document.getElementById('vfx-panel').checkVisibility(),
       properties: document.getElementById('properties-panel').checkVisibility(),
-      inStage: Boolean(document.getElementById('vfx-panel').closest('.shell-stage .shell-floats')),
+      inStage: Boolean(document.getElementById('vfx-panel').closest('.shell-island[data-floating]')),
       list: styk.workspace.floating.map(item => item.panel),
       timelineRows: styk.editor._vfxTimelineVisible,
       // The tab moved with its panel: the same element, never a new one.
-      tab: document.querySelectorAll('[data-vfx-tab="vfx"]').length === 1 && Boolean(document.querySelector('[data-vfx-tab="vfx"]').closest('.shell-floats')),
+      tab: document.querySelectorAll('[data-vfx-tab="vfx"]').length === 1 && Boolean(document.querySelector('[data-vfx-tab="vfx"]').closest('.shell-island[data-floating]')),
     }));
     assert.deepEqual(floating, {vfx: true, properties: true, inStage: true, list: ['vfx'], timelineRows: true, tab: true});
-    const island = await rect('.shell-floats > .shell-island'), viewport = await rect('#viewport');
+    const island = await rect('.shell-island[data-floating]'), viewport = await rect('#viewport');
     assert.ok(island.x >= viewport.x && island.y >= viewport.y && island.x + island.width <= viewport.x + viewport.width
       && island.y + island.height <= viewport.y + viewport.height, 'the floating island stays over #viewport');
     await page.evaluate(() => styk.workspace.dock('library', 'left'));
@@ -544,14 +555,14 @@ try {
     const docked = await page.evaluate(() => ({
       library: document.getElementById('user-library').checkVisibility(),
       properties: document.getElementById('properties-panel').checkVisibility(),
-      left: Boolean(document.getElementById('user-library').closest('.shell-left')),
+      left: Boolean(document.getElementById('user-library').closest('.shell-island[data-side="left"]')),
     }));
     assert.deepEqual(docked, {library: true, properties: true, left: true});
     assert.ok((await rect('#viewport')).width >= 360);
     await page.evaluate(() => styk.workspace.reset());
     await settle();
-    assert.equal(await page.evaluate(() => Boolean(document.getElementById('user-library').closest('.shell-right'))), true, 'reset docks Library back');
-    assert.equal(await page.evaluate(() => Boolean(document.querySelector('.shell-right [role="tablist"] [data-vfx-tab="vfx"]'))), true, 'and the VFX tab');
+    assert.equal(await page.evaluate(() => Boolean(document.getElementById('user-library').closest('.shell-island[data-side="right"]'))), true, 'reset docks Library back');
+    assert.equal(await page.evaluate(() => Boolean(document.querySelector('.shell-island[data-side="right"] [role="tablist"] [data-vfx-tab="vfx"]'))), true, 'and the VFX tab');
   });
 
   await step('at compact width the band opens the inspector as a sheet with its tabs; Escape returns focus', async () => {
@@ -627,30 +638,30 @@ try {
     await resize(800, 600);
     assert.equal(await page.evaluate(() => document.documentElement.dataset.left), 'strip');
     // Structure's own actions stay one click away on the strip, under its icon.
-    const actions = await page.evaluate(() => [...document.querySelectorAll('.shell-left .shell-strip > .shell-strip-action')].map(button => button.getAttribute('aria-label')));
+    const actions = await page.evaluate(() => [...document.querySelectorAll('.shell-strip[data-side="left"] > .shell-strip-action')].map(button => button.getAttribute('aria-label')));
     assert.deepEqual(actions, ['Fit figure', 'Timeline', 'Smart snapping']);
-    for (const name of actions) assert.equal(await reachable(`.shell-left .shell-strip-action[aria-label="${name}"]`), true, name);
-    const timelineAction = page.locator('.shell-left .shell-strip-action[aria-label="Timeline"]');
+    for (const name of actions) assert.equal(await reachable(`.shell-strip[data-side="left"] .shell-strip-action[aria-label="${name}"]`), true, name);
+    const timelineAction = page.locator('.shell-strip[data-side="left"] .shell-strip-action[aria-label="Timeline"]');
     await timelineAction.click();
     await settle();
     assert.deepEqual([await page.locator('.timeline-panel').isVisible(), await timelineAction.getAttribute('aria-expanded')], [true, 'true'], 'the strip’s Timeline shows the timeline');
     await timelineAction.click();
     await settle();
     assert.deepEqual([await page.locator('.timeline-panel').isVisible(), await timelineAction.getAttribute('aria-expanded')], [false, 'false']);
-    const snapping = page.locator('.shell-left .shell-strip-action[aria-label="Smart snapping"]');
+    const snapping = page.locator('.shell-strip[data-side="left"] .shell-strip-action[aria-label="Smart snapping"]');
     const snapped = await page.locator('#builder-snap').getAttribute('aria-pressed');
     await snapping.click();
     assert.notEqual(await page.locator('#builder-snap').getAttribute('aria-pressed'), snapped, 'Snapping toggles from the strip');
     assert.equal(await snapping.getAttribute('aria-pressed'), await page.locator('#builder-snap').getAttribute('aria-pressed'));
     await snapping.click();
-    const strip = page.locator('.shell-left .shell-strip-button');
+    const strip = page.locator('.shell-strip[data-side="left"] .shell-strip-button');
     await strip.click();
     await settle();
-    assert.equal(await page.locator('#left-sheet').evaluate(sheet => sheet.matches(':popover-open')), true);
+    assert.equal(await page.locator('.shell-flyout').evaluate(sheet => sheet.matches(':popover-open')), true);
     assert.ok((await rect('.builder-tree')).height > 200, 'the tree fills the sheet');
     await page.keyboard.press('Escape');
     await settle();
-    assert.equal(await page.locator('#left-sheet').evaluate(sheet => sheet.matches(':popover-open')), false);
+    assert.equal(await page.locator('.shell-flyout').evaluate(sheet => sheet.matches(':popover-open')), false);
     await resize(1440, 900);
   });
 
@@ -718,12 +729,12 @@ try {
   await step('F6 moves focus from region to region', async () => {
     await page.locator('#viewport').focus();
     await page.keyboard.press('F6');
-    const first = await page.evaluate(() => document.activeElement.closest('.shell-right, .timeline-panel')?.className ?? document.activeElement.id);
-    assert.match(first, /shell-right/);
+    const first = await page.evaluate(() => document.activeElement.closest('.shell-island[data-side="right"], .timeline-panel')?.dataset.side ?? document.activeElement.id);
+    assert.equal(first, 'right');
     await page.keyboard.press('F6');
     assert.equal(await page.evaluate(() => Boolean(document.activeElement.closest('.timeline-panel'))), true);
     await page.keyboard.press('Control+F6');
-    assert.equal(await page.evaluate(() => Boolean(document.activeElement.closest('.shell-right'))), true);
+    assert.equal(await page.evaluate(() => Boolean(document.activeElement.closest('.shell-island[data-side="right"]'))), true);
   });
 
   await step('F6 lands on a named place that shows its focus, and works from fields', async () => {
@@ -732,7 +743,7 @@ try {
       return {id: element.id || element.getAttribute('aria-label') || element.className, visible: element.matches(':focus-visible'),
         ring: getComputedStyle(element).outlineStyle !== 'none', role: element.getAttribute('role'), tag: element.localName};
     });
-    await page.locator('.shell-right [role="tab"][aria-selected="true"]').focus();
+    await page.locator('.shell-island[data-side="right"] [role="tab"][aria-selected="true"]').focus();
     await page.keyboard.press('F6');
     const timeline = await focused();
     assert.deepEqual([timeline.id, timeline.role, timeline.visible, timeline.ring], ['Layer frames', 'grid', true, true], 'the timeline takes focus at its named grid, with a ring');
@@ -748,7 +759,7 @@ try {
     }
     await page.locator('#inspector input').first().focus();
     await page.keyboard.press('Control+F6');
-    assert.equal(await page.evaluate(() => !document.activeElement.closest('.shell-right')), true, 'Ctrl+F6 leaves the inspector from its field');
+    assert.equal(await page.evaluate(() => !document.activeElement.closest('.shell-island[data-side="right"]')), true, 'Ctrl+F6 leaves the inspector from its field');
   });
 
   await step('the keyboard move says how it works once, takes every key and starts from a field', async () => {
@@ -765,7 +776,7 @@ try {
     await page.keyboard.press('Control+Alt+KeyM');
     await settle();
     assert.equal(await page.locator('.shell-drop').isVisible(), true, 'Ctrl+Alt+M works from a Properties field');
-    assert.match(said.at(-1) ?? '', /^Move Properties: Float here. Arrow keys choose a place, Enter moves it, Escape cancels$/);
+    assert.match(said.at(-1) ?? '', /^Move Properties: Dock left\. Arrow keys choose a place, Enter moves it, Escape cancels$/);
     await page.keyboard.press('h');
     assert.equal(await page.evaluate(() => styk.state.tool), tool, 'H does not pick the Hand tool while moving');
     await page.keyboard.press('Escape');
@@ -796,9 +807,9 @@ try {
     assert.deepEqual(aria, {controls: 'vfx-panel', expanded: null, label: 'VFX panel'}, 'the menu writes no ARIA on the tab and is named');
     assert.equal(await active(), 'vfx-tab', 'Dock left: focus stays on the moved tab');
     assert.deepEqual(await page.evaluate(() => [document.getElementById('vfx-tab').getAttribute('aria-controls'), document.getElementById('vfx-tab').hasAttribute('aria-expanded')]), ['vfx-panel', false]);
-    await tabMenu('#vfx-tab', 'Fold to strip');
+    await tabMenu('#vfx-tab', 'Collapse');
     assert.equal(await active(), 'ui-icon-button shell-strip-button:vfx', 'Fold: its strip button');
-    await tabMenu('#library-tab', 'Hide');
+    await tabMenu('#library-tab', 'Close');
     assert.equal(await active(), 'viewport', 'Hide: the stage');
     await page.evaluate(() => styk.workspace.reset());
     await settle();
@@ -816,9 +827,10 @@ try {
   await step('splitters sit beside what they resize in the tab order, and End takes the largest size', async () => {
     const right = page.getByRole('separator', {name: 'Resize properties panel'});
     assert.deepEqual(await page.evaluate(() => {
-      const splitter = document.querySelector('.shell-splitter[data-splitter="right"]'), timeline = document.querySelector('.shell-splitter[data-splitter="bottom"]');
-      return [splitter.nextElementSibling?.id, timeline.nextElementSibling?.id, splitter.hasAttribute('aria-keyshortcuts')];
-    }), ['right-dock', 'animation-timeline', false]);
+      const named = name => [...document.querySelectorAll('.shell-splitter')].find(element => element.getAttribute('aria-label') === name);
+      const splitter = named('Resize properties panel'), timeline = named('Resize timeline');
+      return [Boolean(splitter.nextElementSibling?.querySelector('#properties-tab')), timeline.nextElementSibling?.id, splitter.hasAttribute('aria-keyshortcuts')];
+    }), [true, 'animation-timeline', false]);
     await right.focus();
     await page.keyboard.press('End');
     assert.equal(await right.getAttribute('aria-valuenow'), await right.getAttribute('aria-valuemax'));
@@ -833,14 +845,15 @@ try {
     await page.keyboard.press('Control+Alt+KeyM');
     const zone = page.locator('.shell-drop');
     assert.equal(await zone.isVisible(), true, 'one drop target previews the place');
-    assert.equal(await zone.textContent(), 'Float here');
-    await page.keyboard.press('ArrowRight');
     assert.equal(await zone.textContent(), 'Dock left');
+    await page.keyboard.press('ArrowLeft');
+    assert.equal(await zone.textContent(), 'Float here', 'the arrows step through every place, floating last');
     await page.keyboard.press('Escape');
     assert.equal(await zone.isVisible(), false);
     assert.deepEqual(await page.evaluate(() => styk.workspace.floating), []);
     await page.click('#vfx-tab');
     await page.keyboard.press('Control+Alt+KeyM');
+    await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('Enter');
     await settle();
     assert.deepEqual(await page.evaluate(() => styk.workspace.floating.map(item => item.panel)), ['vfx']);
@@ -849,7 +862,7 @@ try {
     await settle();
   });
 
-  const panelsOf = () => page.evaluate(() => Object.fromEntries(styk.workspace.layout.modes[styk.shell.mode].panels.map(record => [record.id, `${record.dock}/${record.side}`])));
+  const panelsOf = async () => Object.fromEntries(await Promise.all(['properties', 'vfx', 'library', 'timeline'].map(async id => [id, await placeOf(id)])));
   const cards = () => page.locator('#layout-popover [role="radio"]').evaluateAll(list => list.map(card => `${card.dataset.preset}${card.getAttribute('aria-checked') === 'true' ? '*' : ''}`));
   const layoutOpen = () => page.locator('#layout-popover').evaluate(element => element.matches(':popover-open'));
   const openLayout = async () => {
@@ -877,7 +890,7 @@ try {
     assert.deepEqual([(await panelsOf()).vfx, (await panelsOf()).library], ['strip/right', 'strip/right'], 'Timing shows Properties only');
     await page.click('#layout-popover [data-preset="review"]');
     await settle();
-    assert.equal((await panelsOf()).properties, 'hidden/right');
+    assert.equal((await panelsOf()).properties, 'hidden/none');
     assert.equal(await page.evaluate(() => document.getElementById('animation-timeline').dataset.state), 'strip');
     await page.click('#layout-popover [data-preset="focus"]');
     await settle();
@@ -888,26 +901,15 @@ try {
     await page.click('#layout-popover .ui-popover-foot .ui-button[data-variant="ghost"]');
     await settle();
     assert.deepEqual(await cards(), ['animate*', 'timing', 'focus', 'review'], 'Reset');
-    const choose = async (name, value) => { await page.selectOption(`#layout-popover select[aria-label="${name}"]`, value); await settle(); };
-    await choose('Properties position', 'left');
-    assert.equal(await page.evaluate(() => Boolean(document.getElementById('properties-panel').closest('.shell-left'))), true, 'Properties docks left');
-    assert.ok((await rect('#viewport')).width >= 360);
-    await choose('Properties position', 'right');
-    await choose('VFX position', 'float');
-    assert.deepEqual(await page.evaluate(() => styk.workspace.floating.map(item => item.panel)), ['vfx']);
-    assert.equal(await page.locator('#properties-panel').isVisible(), true, 'Properties stays visible');
-    await choose('Library position', 'left');
-    assert.equal(await page.evaluate(() => Boolean(document.getElementById('user-library').closest('.shell-left'))), true);
-    await choose('Timeline width', 'stage');
-    await choose('Tools side', 'right');
-    const placed = await page.evaluate(() => {
-      const box = selector => document.querySelector(selector).getBoundingClientRect();
-      return {span: document.querySelector('.workspace').dataset.bottomSpan, rail: document.querySelector('.workspace').dataset.rail,
-        railRight: box('.shell-rail').left > box('.shell-stage').left + box('.shell-stage').width / 2, timeline: box('.timeline-panel').right <= box('.shell-stage').right + 1};
-    });
-    assert.deepEqual(placed, {span: 'stage', rail: 'right', railRight: true, timeline: true});
-    assert.deepEqual(await page.locator('#layout-popover select').evaluateAll(list => list.map(select => select.value)), ['right', 'float', 'left', 'stage', 'right'],
-      'the selects show where each panel is');
+    // Every panel of the workspace is listed with whether it is open: closing and opening one from here.
+    assert.deepEqual(await page.locator('#layout-popover .shell-layout-panel').evaluateAll(list => list.map(row => [row.textContent, row.getAttribute('aria-checked')])),
+      [['Properties', 'true'], ['VFX', 'true'], ['Library', 'true'], ['Timeline', 'true']]);
+    await page.click('#layout-popover .shell-layout-panel[data-panel="vfx"]');
+    await settle();
+    assert.equal((await panelsOf()).vfx, 'hidden/none');
+    await page.click('#layout-popover .shell-layout-panel[data-panel="vfx"]');
+    await settle();
+    assert.equal((await panelsOf()).vfx, 'docked/right', 'a closed panel comes back where it was');
     await page.keyboard.press('Escape');
     await settle();
     assert.equal(await layoutOpen(), false);
@@ -932,7 +934,7 @@ try {
     await page.waitForFunction(() => document.getElementById('layout-popover')?.matches(':popover-open'));
     await settle();
     const savedId = await page.evaluate(() => `user:${styk.workspace.layouts[0].id}`);
-    assert.deepEqual(await cards(), ['animate', 'timing*', 'focus', 'review', `${savedId}*`]);
+    assert.deepEqual(await cards(), ['animate', 'timing', 'focus', 'review', `${savedId}*`], 'the saved layout is the one in use');
     const saved = page.locator('#layout-popover [data-preset^="user:"]');
     assert.equal(await saved.textContent(), 'Fight setup');
     await page.click('#layout-popover [data-preset="animate"]');
@@ -952,7 +954,8 @@ try {
     await page.locator('#layout-popover [data-preset^="user:"]').click({button: 'right'});
     await page.getByRole('menuitem', {name: 'Update'}).click();
     await settle();
-    assert.deepEqual(await cards(), ['animate*', 'timing', 'focus', 'review', `${savedId}*`], 'Update takes the current arrangement');
+    assert.deepEqual(await cards(), ['animate*', 'timing', 'focus', 'review', savedId]);
+    assert.equal(await page.evaluate(() => JSON.stringify(styk.workspace.state.saved[0].layout.root) === JSON.stringify(styk.workspace.layout.root)), true, 'Update takes the current arrangement');
     await page.locator('#layout-popover [data-preset^="user:"]').click({button: 'right'});
     await page.getByRole('menuitem', {name: 'Delete'}).click();
     await settle();
@@ -976,23 +979,21 @@ try {
   await step('a tab menu and a dragged tab dock, float and fold panels where they may go', async () => {
     await page.click('#vfx-tab', {button: 'right'});
     assert.deepEqual((await page.locator('#menu [role^="menuitem"]').allTextContents()).map(text => text.trim()),
-      ['Dock left', 'Float', 'Fold to strip', 'Hide']);
+      ['Dock left', 'Dock below', 'Float', 'Collapse', 'Close']);
     await page.getByRole('menuitem', {name: 'Dock left'}).click();
     await settle();
     const viaMenu = (await panelsOf()).vfx;
-    assert.equal(viaMenu, 'left/left');
+    assert.equal(viaMenu, 'docked/left');
     await page.evaluate(() => styk.workspace.reset());
-    await openLayout();
-    await page.selectOption('#layout-popover select[aria-label="VFX position"]', 'left');
+    await page.evaluate(() => styk.workspace.dock('vfx', 'left'));
     await settle();
-    assert.equal((await panelsOf()).vfx, viaMenu, 'the tab menu and the Layout popover agree');
-    await page.keyboard.press('Escape');
+    assert.equal((await panelsOf()).vfx, viaMenu, 'the tab menu and the workspace API agree');
     await page.evaluate(() => styk.workspace.reset());
     await settle();
     await page.locator('#library-tab').focus();
     await page.keyboard.press('Shift+F10');
-    assert.equal(await page.getByRole('menuitem', {name: 'Fold to strip'}).isVisible(), true, 'Shift+F10 opens the tab menu');
-    await page.getByRole('menuitem', {name: 'Fold to strip'}).click();
+    assert.equal(await page.getByRole('menuitem', {name: 'Collapse'}).isVisible(), true, 'Shift+F10 opens the tab menu');
+    await page.getByRole('menuitem', {name: 'Collapse'}).click();
     await settle();
     assert.equal((await panelsOf()).library, 'strip/right');
     await page.evaluate(() => styk.workspace.reset());
@@ -1008,17 +1009,17 @@ try {
     assert.equal(await page.locator('#library-tab').getAttribute('data-dragging'), 'true', 'the origin tab dims');
     await page.mouse.up();
     await settle();
-    assert.equal((await panelsOf()).library, 'left/left');
+    assert.equal((await panelsOf()).library, 'docked/left');
     assert.equal(await zone(), null);
     // Back into the right island as a tab.
-    const head = await rect('.shell-right .shell-tabs');
+    const head = await rect('.shell-island[data-side="right"] .shell-tabs');
     await page.mouse.move(...await center('#library-tab'));
     await page.mouse.down();
     await page.mouse.move(head.x + head.width - 24, head.y + head.height / 2, {steps: 10});
     assert.equal(await zone(), 'Add as a tab');
     await page.mouse.up();
     await settle();
-    assert.equal((await panelsOf()).library, 'right/right');
+    assert.equal((await panelsOf()).library, 'docked/right');
     // Shift floats; dragging a floating panel's tab moves it; Escape cancels.
     await page.mouse.move(...await center('#vfx-tab'));
     await page.mouse.down();
@@ -1058,17 +1059,17 @@ try {
     await right.focus();
     await page.keyboard.press('ArrowLeft');
     await page.evaluate(() => styk.workspace.flushPreferences());
-    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('stykanimate.workspace-layout.v2')));
-    assert.equal(stored.shared.sizes.right, 332);
-    assert.equal(stored.right, 332, 'the v1 mirror a 1.1 app reads');
-    assert.equal(stored.studioVersion, 1);
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('stykanimate.dock-layout.v3')));
+    assert.equal(stored.version, 3);
+    const storedRight = value => value.workspaces.animate.layout.nodes.find(node => node.tabs?.includes('properties'))?.size;
+    assert.equal(storedRight(stored), 332);
     await page.reload();
     await page.waitForFunction(() => window.styk?.ready);
     await settle();
     assert.equal(await page.evaluate(() => styk.workspace.sizes.right), 332);
     await resize(800, 600);
     await resize(1440, 900);
-    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('stykanimate.workspace-layout.v2')).shared.sizes.right), 332);
+    assert.equal(storedRight(await page.evaluate(() => JSON.parse(localStorage.getItem('stykanimate.dock-layout.v3')))), 332, 'fitting never rewrote it');
     assert.equal(await page.evaluate(() => styk.workspace.sizes.right), 332);
     await page.evaluate(async () => { styk.workspace.reset(); await styk.workspace.flushPreferences(); });
   });
@@ -1105,7 +1106,7 @@ try {
     await page.mouse.move(stage.x + 40, stage.y + stage.height / 2, {steps: 20});
     await page.mouse.up();
     await settle();
-    assert.equal(await page.evaluate(() => styk.shell.solution.panels.vfx.side), 'left', 'the drop docked VFX left');
+    assert.equal(await placeOf('vfx'), 'docked/left', 'the drop docked VFX left');
     await page.waitForTimeout(500);
     const frames = await page.evaluate(() => window.denseFrames);
     console.log(`  dense scene: ${frames.length} long animation frames, longest ${Math.max(0, ...frames)} ms`);

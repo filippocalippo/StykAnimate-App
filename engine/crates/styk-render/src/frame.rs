@@ -4,7 +4,8 @@ use styk_draw::K_COMPOSITE;
 use styk_eval::drawlist::layer_effects;
 
 use crate::effects::executor::{Executor, Frame, Run};
-use crate::effects::{self, plan, Slot};
+use crate::effects::{self, plan, recipe, Slot};
+use std::sync::Arc;
 use crate::isolation::{page_size, plan_rounds};
 use crate::resources::{buffer, GpuGroup, GpuView};
 use crate::{Renderer, Stats, ViewParams, FORMAT, UNIFORM_STRIDE};
@@ -18,6 +19,21 @@ struct Work {
     at: [u32; 2],
     size: [u32; 2],
     run: Run,
+}
+
+/// A single, owned rendering plan. Admission observes this plan; rendering consumes
+/// it without repeating placement, isolation or effect planning. Keep renderer
+/// configuration unchanged until consumption (sprite uploads may run meanwhile).
+pub struct FramePlan {
+    pub(crate) list: Arc<styk_draw::DrawList>,
+    pub(crate) view: ViewParams,
+    pub(crate) size: [u32; 2],
+    pub(crate) planned: Vec<plan::Placement>,
+    pub(crate) page: [u32; 2],
+    pub(crate) rounds: Vec<crate::isolation::Round>,
+    work: Vec<Work>,
+    pub(crate) records: Vec<recipe::Uniform>,
+    pub(crate) biggest: [u32; 2],
 }
 
 /// Receipt of the composite operations just encoded for one owning target.
@@ -131,8 +147,9 @@ fn draw_painted(pass: &mut wgpu::RenderPass<'_>, base: &wgpu::RenderPipeline, de
 
 impl Renderer {
     /// A depth buffer of `size` with `samples` per pixel for passes with depth runs.
-    fn depth_buffer(device: &wgpu::Device, slot: &mut Option<(wgpu::Texture, [u32; 2])>, size: [u32; 2], samples: u32) -> wgpu::TextureView {
+    fn depth_buffer(device: &wgpu::Device, slot: &mut Option<(wgpu::Texture, [u32; 2])>, size: [u32; 2], samples: u32, exact: bool) -> wgpu::TextureView {
         if slot.as_ref().is_none_or(|s| s.1 != size) {
+            Self::let_go(slot, exact);
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("styk depth"),
                 size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
@@ -146,6 +163,16 @@ impl Renderer {
             *slot = Some((texture, size));
         }
         slot.as_ref().unwrap().0.create_view(&Default::default())
+    }
+
+    /// A target a new size replaces. A browser frees a texture that was only dropped when it collects it, not when the last use
+    /// ends, so a renderer that changes sizes often (an export that sizes its targets by each frame) would hold every one it
+    /// made: its textures are destroyed instead. The stage's are not: one encoder may still hold the old texture when the next
+    /// size is asked for, and the stage's sizes only grow.
+    fn let_go(slot: &mut Option<(wgpu::Texture, [u32; 2])>, exact: bool) {
+        if exact && let Some((old, _)) = slot.take() {
+            old.destroy();
+        }
     }
 
     pub(crate) fn ensure_output(&mut self, size: [u32; 2]) {
@@ -175,8 +202,9 @@ impl Renderer {
     }
 
     /// The multisampled target of passes with `samples` per pixel (more than one).
-    pub(crate) fn msaa(device: &wgpu::Device, slot: &mut Option<(wgpu::Texture, [u32; 2])>, size: [u32; 2], samples: u32) -> wgpu::TextureView {
+    pub(crate) fn msaa(device: &wgpu::Device, slot: &mut Option<(wgpu::Texture, [u32; 2])>, size: [u32; 2], samples: u32, exact: bool) -> wgpu::TextureView {
         if slot.as_ref().is_none_or(|s| s.1 != size) {
+            Self::let_go(slot, exact);
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("styk msaa"),
                 size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
@@ -199,27 +227,11 @@ impl Renderer {
         output + msaa
     }
 
-    /// Renders the current draw list into the offscreen frame.
-    pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &ViewParams, size: [u32; 2]) {
-        self.root_gpu_source = false;
-        let foreground = matches!(self.paint_context, crate::paint::PaintContext::CanvasForeground { .. });
-        let size = [size[0].max(1), size[1].max(1)];
-        self.ensure_output(size);
-        let Some(list) = self.list.clone() else {
-            self.clear_only(encoder, view);
-            return;
-        };
-        if self.bind0.is_none() {
-            self.rebind();
-        }
-        // Lone glyphs: the masks this view calls for (filled now when no frame has yet).
-        self.prepare_glyphs(encoder, &list, plan::raster_resolution(view.matrix[0].hypot(view.matrix[1])));
-        let n = list.groups.len();
-        // Local execution receipt, never a second retained scene or cache.
-        let mut gpu_sources = foreground.then(|| vec![false; n]);
-        let max_depth = list.groups.iter().map(|g| g.depth).max().unwrap_or(0);
+    /// Plans world-space input for one presentation without allocating GPU resources.
+    pub fn plan_frame(&self, list: &Arc<styk_draw::DrawList>, view: &ViewParams, size: [u32; 2]) -> FramePlan {
+        let size = size.map(|n| n.max(1));
         // Where every group is drawn for this view (effects::plan), then where it lands in the atlas.
-        let planned = plan::plan_with_grid(&list, &plan::View {
+        let planned = plan::plan_with_grid(list, &plan::View {
             matrix: view.matrix,
             size,
             zoom: view.zoom,
@@ -232,18 +244,69 @@ impl Renderer {
         }, self.drawing_grid);
         let sizes: Vec<[u32; 2]> = planned.iter().map(plan::Placement::size).collect();
         let largest = sizes.iter().skip(1).fold([0u32, 0u32], |a, s| [a[0].max(s[0]), a[1].max(s[1])]);
-        // Pages hold the frame and grow for larger layers (effect layers at the editor's density, the
-        // camera image); after 240 frames that all fit the frame they shrink back to it.
+        // Keep stage capacity until the view size changes or the document closes.
+        // Frame counts are not an injected-clock idle deadline.
         let wanted = page_size(size, largest);
-        self.page_small = if wanted == size { self.page_small + 1 } else { 0 };
-        if self.page_frame != size || self.page_small > 240 {
-            self.page_frame = size;
-            self.page = size;
-            self.page_small = 0;
+        let mut page = self.page;
+        if self.page_frame != size {
+            page = size;
         }
-        self.page = [self.page[0].max(wanted[0]), self.page[1].max(wanted[1])];
-        let page = self.page;
-        let rounds = plan_rounds(&list, &sizes, page);
+        // An export sizes its pages by the frame alone (a frame must not depend on the frames drawn before it); the stage grows them.
+        page = if self.exact_sizes { wanted } else { [page[0].max(wanted[0]), page[1].max(wanted[1])] };
+        let rounds = plan_rounds(list, &sizes, page);
+        let mut records = Vec::new();
+        let mut work = Vec::new();
+        let mut biggest = [0u32; 2];
+            for (r, round) in rounds.iter().enumerate() {
+                for &(g, slot) in &round.placed {
+                    let Some(filter) = planned[g].filter else { continue };
+                    let stack = list.layers.get(list.groups[g].layer as usize).map_or(&[][..], layer_effects);
+                    if stack.is_empty() {
+                        continue;
+                    }
+                    let s = sizes[g];
+                    let at = [(s[0] as f64 * slot.scale).ceil().max(1.0) as u32, (s[1] as f64 * slot.scale).ceil().max(1.0) as u32];
+                    let f = effects::scaled(filter, slot.scale);
+                    let run = recipe::record(&mut records, stack, Frame { scale: f.scale, origin: f.origin, output_size: f.output_size }, at);
+                    biggest = [biggest[0].max(at[0]), biggest[1].max(at[1])];
+                    work.push(Work { group: g, round: r, depth: list.groups[g].depth, page: slot.page, at: [slot.offset[0] as u32, slot.offset[1] as u32], size: at, run });
+                }
+            }
+        FramePlan { list: list.clone(), view: *view, size, planned, page, rounds, work, records, biggest }
+    }
+
+    /// Renders the current draw list into the offscreen frame.
+    pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &ViewParams, size: [u32; 2]) {
+        let Some(list) = self.list.clone() else {
+            self.root_gpu_source = false;
+            self.ensure_output(size.map(|n| n.max(1)));
+            self.clear_only(encoder, view);
+            return;
+        };
+        let plan = self.plan_frame(&list, view, size);
+        self.render_planned(encoder, plan);
+    }
+
+    /// Consumes precisely the plan admitted by the caller. The same Arc reaches
+    /// set_list, preserving pointer-based geometry upload reuse during navigation.
+    pub fn render_planned(&mut self, encoder: &mut wgpu::CommandEncoder, plan: FramePlan) {
+        let FramePlan { list, view, size, planned, page, rounds, work, records, biggest } = plan;
+        let view = &view;
+        self.set_list(&list);
+        self.page = page;
+        self.page_frame = size;
+        self.root_gpu_source = false;
+        let foreground = matches!(self.paint_context, crate::paint::PaintContext::CanvasForeground { .. });
+        self.ensure_output(size);
+        if self.bind0.is_none() {
+            self.rebind();
+        }
+        // Lone glyphs: the masks this view calls for (filled now when no frame has yet).
+        self.prepare_glyphs(encoder, &list, plan::raster_resolution(view.matrix[0].hypot(view.matrix[1])));
+        let n = list.groups.len();
+        // Local execution receipt, never a second retained scene or cache.
+        let mut gpu_sources = foreground.then(|| vec![false; n]);
+        let max_depth = list.groups.iter().map(|g| g.depth).max().unwrap_or(0);
         let mut slots: Vec<Option<Slot>> = vec![None; n];
         for round in &rounds {
             for &(g, slot) in &round.placed {
@@ -261,27 +324,10 @@ impl Renderer {
         if self.groups.write(&self.device, &self.queue, bytemuck::cast_slice(&placed)) {
             self.rebind();
         }
-        // Effect runs: recorded now (their uniforms are written once), encoded after their depth's layer pass.
-        let mut work: Vec<Work> = Vec::new();
         if list.layers.iter().any(|layer| layer.effects.is_some()) {
-            let executor = self.executor.get_or_insert_with(|| Executor::new(&self.device));
-            executor.begin();
-            let mut biggest = [0u32, 0u32];
-            for (r, round) in rounds.iter().enumerate() {
-                for &(g, slot) in &round.placed {
-                    let Some(filter) = planned[g].filter else { continue };
-                    let stack = list.layers.get(list.groups[g].layer as usize).map_or(&[][..], layer_effects);
-                    if stack.is_empty() {
-                        continue;
-                    }
-                    let s = sizes[g];
-                    let at = [(s[0] as f64 * slot.scale).ceil().max(1.0) as u32, (s[1] as f64 * slot.scale).ceil().max(1.0) as u32];
-                    let f = effects::scaled(filter, slot.scale);
-                    let run = executor.record(stack, Frame { scale: f.scale, origin: f.origin, output_size: f.output_size }, at);
-                    biggest = [biggest[0].max(at[0]), biggest[1].max(at[1])];
-                    work.push(Work { group: g, round: r, depth: list.groups[g].depth, page: slot.page, at: [slot.offset[0] as u32, slot.offset[1] as u32], size: at, run });
-                }
-            }
+            let exact = self.exact_sizes;
+            let executor = self.executor.get_or_insert_with(|| { let mut e = Executor::new(&self.device); e.set_exact(exact); e });
+            executor.begin_recorded(records, work.len() as u32);
             executor.prepare(&self.device, &self.queue, biggest);
         } else if let Some(executor) = &mut self.executor {
             executor.begin();
@@ -357,12 +403,20 @@ impl Renderer {
         uniform_data[o..o + std::mem::size_of::<GpuView>()].copy_from_slice(bytemuck::bytes_of(&v));
         self.queue.write_buffer(&self.uniforms, 0, &uniform_data);
 
+        // An atlas is shared by every depth of its parity. Size it once for
+        // this frame, not once per depth (which would discard earlier capacity).
+        let mut layer_pages = [0; 2];
         for depth in 1..=max_depth {
-            let pages = rounds.iter().map(|round| round.pages_per_depth[depth as usize]).max().unwrap_or(0);
+            let parity = depth as usize % 2;
+            layer_pages[parity] = layer_pages[parity].max(rounds.iter().map(|round| round.pages_per_depth[depth as usize]).max().unwrap_or(0));
+        }
+        for (parity, pages) in layer_pages.into_iter().enumerate() {
             if pages > 0 {
-                self.ensure_layers(depth as usize % 2, page, pages);
+                self.ensure_layers(parity, page, pages);
             }
         }
+        // An unused frame is not the end of the document/export. Keep its
+        // isolation arrays and MSAA for the next frame; the owner releases them.
         // Where the frame stops for the next round: before the first composite of a group the next round draws.
         let mut round_of = vec![usize::MAX; n];
         for (r, round) in rounds.iter().enumerate() {
@@ -406,9 +460,9 @@ impl Renderer {
                         ..Default::default()
                     });
                     // With one sample a pixel the pass draws straight into its atlas page.
-                    let msaa = (self.samples > 1).then(|| Self::msaa(&self.device, &mut self.msaa_layer, page, self.samples));
+                    let msaa = (self.samples > 1).then(|| Self::msaa(&self.device, &mut self.msaa_layer, page, self.samples, self.exact_sizes));
                     let face_runs = depth_runs.as_ref().filter(|r| r.within(start..end));
-                    let depth_view = face_runs.map(|_| Self::depth_buffer(&self.device, &mut self.depth_layer, page, self.samples));
+                    let depth_view = face_runs.map(|_| Self::depth_buffer(&self.device, &mut self.depth_layer, page, self.samples, self.exact_sizes));
                     layer_depth |= depth_view.is_some();
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("styk layer pass"),
@@ -451,10 +505,10 @@ impl Renderer {
             let last = r + 1 == rounds.len();
             let until = if last { root.1 } else { stops[r] };
             // With one sample a pixel the frame is drawn straight into the output, kept between rounds.
-            let msaa = (self.samples > 1).then(|| Self::msaa(&self.device, &mut self.msaa_main, size, self.samples));
+            let msaa = (self.samples > 1).then(|| Self::msaa(&self.device, &mut self.msaa_main, size, self.samples, self.exact_sizes));
             // Faces sit in raster entries, so a frame pass seldom holds any.
             let face_runs = depth_runs.as_ref().filter(|r| r.within(root.0..root.1));
-            let depth_view = face_runs.map(|_| Self::depth_buffer(&self.device, &mut self.depth_main, size, self.samples));
+            let depth_view = face_runs.map(|_| Self::depth_buffer(&self.device, &mut self.depth_main, size, self.samples, self.exact_sizes));
             frame_depth |= depth_view.is_some();
             let output = &self.output.as_ref().unwrap().1;
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

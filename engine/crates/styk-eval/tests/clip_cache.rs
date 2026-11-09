@@ -160,3 +160,36 @@ fn repeated_derived_arcs_are_charged_once_inside_a_scene() {
     scene.account_buffers();
     assert!(scene.retained_bytes > shared + 100 * std::mem::size_of::<u32>());
 }
+
+/// The interface thread builds frames beside the workers that prepare them, so the clip's cache is asked for by threads at once, and the interface
+/// thread may not wait for it: a blocking lock throws on a browser's page thread (`Atomics.wait cannot be called in this context`) and leaves the
+/// stage and the sessions marked as borrowed for good (`styk_doc::lock`). Where the cache is held a scene is made again and not stored.
+#[test]
+fn a_scene_is_made_again_where_the_cache_is_held_and_nothing_waits_for_it() {
+    let clip = Arc::new(clip("picking/native-order-static.json", ClipSceneCache::DEFAULT_BUDGET));
+    let held = clip.cache.lock().unwrap();
+    let (sent, received) = std::sync::mpsc::channel();
+    let asking = {
+        let clip = clip.clone();
+        std::thread::spawn(move || { sent.send(geometry::clip_scene(&clip, 1.0).retained_bytes).ok(); })
+    };
+    let answer = received.recv_timeout(std::time::Duration::from_secs(30));
+    drop(held);
+    assert!(answer.is_ok_and(|bytes| bytes > 0), "the scene came while another thread held the cache");
+    asking.join().unwrap();
+    assert_eq!(clip.cache.lock().unwrap().len(), 0, "a scene made while the cache was held is not stored");
+    let kept = geometry::clip_scene(&clip, 1.0);
+    assert!(Arc::ptr_eq(&kept, &geometry::clip_scene(&clip, 1.0)), "with the cache free it is stored and shared again");
+}
+
+#[test]
+fn threads_building_scenes_at_once_all_get_them() {
+    let clip = Arc::new(clip("picking/native-order-static.json", ClipSceneCache::DEFAULT_BUDGET));
+    let threads: Vec<_> = (0..4).map(|n| {
+        let clip = clip.clone();
+        std::thread::spawn(move || (0..40).map(|tick| geometry::clip_scene(&clip, ((tick + n) % 3) as f64).retained_bytes).sum::<usize>())
+    }).collect();
+    let totals: Vec<usize> = threads.into_iter().map(|thread| thread.join().unwrap()).collect();
+    assert!(totals.iter().all(|total| *total > 0), "{totals:?}");
+    assert!(clip.cache.lock().unwrap().len() <= 3, "three distinct ticks were asked for");
+}

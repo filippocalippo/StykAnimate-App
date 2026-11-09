@@ -75,7 +75,7 @@ fn worker_rejection_preserves_live_editor_atomically() {
                 },
                 check: &mut check,
                 progress: &mut progress,
-                clock: || 0.0,
+                clock: &|| 0.0,
             },
         );
         assert!(result.is_err(), "{mode}: {result:?}");
@@ -216,7 +216,7 @@ fn timed_sheet_commands_match_every_editor_step() {
                         max_source_bytes: 128 * 1024 * 1024,
                         check: &mut || Ok(()),
                         progress: &mut |_| {},
-                        clock: || 0.0,
+                        clock: &|| 0.0,
                     },
                 )
             } else {

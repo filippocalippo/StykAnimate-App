@@ -1,23 +1,22 @@
-/* Docks: the left and right regions hold islands (a tab row and the shown
- * panel), stacked when a side has two; a folded side is a 40px strip whose
- * icons open a sheet; the right side at compact width is a sheet opened from
- * the band. Panel roots keep their DOM home while a sheet shows them (the
- * sheet is a popover in place). Splitters sit over the gaps; floating
- * islands (VFX, Library) sit inside the stage island, over #viewport. */
+/* Docking (docs/DOCKING.md): the dock host (src/shell/dock-host.mjs) places
+ * every group as an island inside the workspace by its solved rectangle
+ * (position, left, top and size inline, so the island component's own
+ * position never moves it). A collapsed group is a 40px strip of icons
+ * beside the stage, or its header above or below it; its panels open in a
+ * flyout. The band's Properties button opens the sheet the window folds
+ * panels into. Floats are raised islands over the workspace. Dividers sit
+ * over the gaps between islands. Panel roots keep their DOM home while a
+ * flyout or the sheet shows them (popovers in place). */
 @layer layout {
-  /* A dock is only a place on the field: its islands are the surfaces. */
-  .shell-dock {
-    position: relative; display: flex; flex-direction: column; gap: var(--gutter); min-inline-size: 0; min-block-size: 0;
-    border: 0; background: transparent;
-  }
-  /* A side off the grid (a sheet at compact width, or only hidden panels) keeps its sheet reachable. */
-  .shell-dock:where([data-state="sheet"], [data-state="hidden"]) {
-    position: absolute; inset-block-start: 0; inset-inline-start: 0; inline-size: 0; block-size: 0; overflow: visible;
-  }
+  /* Panels that are nowhere on screen wait here. */
+  .shell-parking { display: none; }
 
-  .shell-island:where(:not(.shell-sheet, [data-floating])) { flex: 1 1 0; overflow: hidden; }
+  .shell-island { overflow: hidden; }
   /* The tab track sits centred on the stage header's row: 6px above and below it (4 under the compact chrome's 40px header). */
-  .shell-island > .shell-tabs { align-self: flex-start; flex: none; margin: 6px var(--space-2); max-inline-size: calc(100% - 2 * var(--space-2)); }
+  .shell-island > .shell-tabs {
+    align-self: flex-start; flex: none; margin: 6px var(--space-2); max-inline-size: calc(100% - 2 * var(--space-2));
+    overflow-x: auto; scrollbar-width: none;
+  }
   :where(:root[data-chrome="compact"]) .shell-island > .shell-tabs { margin-block: var(--space-1); }
   .shell-island > .shell-panel {
     flex: 1 1 auto; min-block-size: 0; min-inline-size: 0; display: flex; flex-direction: column;
@@ -27,63 +26,66 @@
   .shell-island > .shell-panel > :where(#inspector) { flex: 1 1 auto; }
   /* The tab names the panel; the inspector header keeps its context and its menu. */
   .shell-island .panel-tab-title { display: none; }
+  /* A collapsed group above or below the stage: its tab row alone. */
+  .shell-island[data-state="header"] { justify-content: center; }
+  .shell-island:where([data-state="header"]) > .shell-tabs { margin-block: 0; }
+  /* The timeline as a tab of a group: the group's island is its surface. */
+  .shell-island > .shell-bottom { flex: 1 1 auto; border-radius: 0; box-shadow: inset 0 1px 0 var(--line-1); background: transparent; }
 
-  /* A folded side: the strip at the outer edge, the docked islands beside it. */
-  .shell-strip { position: absolute; inset-block: 0; border-radius: var(--radius-xl); background: var(--surface); }
-  .shell-left > .shell-strip { inset-inline-start: 0; }
-  .shell-right > .shell-strip { inset-inline-end: 0; }
-  .shell-left[data-strip] > :where(.shell-island:not(.shell-sheet)) { margin-inline-start: calc(40px + var(--shell-gap, var(--gutter))); }
-  .shell-right[data-strip] > :where(.shell-island:not(.shell-sheet)) { margin-inline-end: calc(40px + var(--shell-gap, var(--gutter))); }
+  /* A strip: icons for a collapsed group's panels. */
+  .shell-strip { border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--elevation-island); overflow: hidden auto; scrollbar-width: none; }
 
-  /* Sheets: raised islands over the stage, placed by the dock host: as tall as
-   * their content, down to the stage island's bottom at most (the dock host
-   * writes that cap inline), so the timeline's header (Play, Add frame, Onion)
-   * stays in view. */
+  /* Floats: raised islands over the workspace; the empty part of their tab row moves them, the corner grip resizes them. */
+  .shell-island[data-floating] { z-index: var(--z-floating); }
+  .shell-island:where([data-floating]) > .shell-tabs { align-self: stretch; max-inline-size: none; cursor: grab; }
+  .shell-float-grip {
+    position: absolute; inset-block-end: 0; inset-inline-end: 0; inline-size: 16px; block-size: 16px; cursor: nwse-resize; touch-action: none;
+    background: linear-gradient(135deg, transparent 50%, var(--line-2) 50%, var(--line-2) 58%, transparent 58%, transparent 70%, var(--line-2) 70%, var(--line-2) 78%, transparent 78%);
+    border-end-end-radius: var(--radius-xl);
+  }
+
+  /* Sheets: raised islands over the stage, placed by the dock host. */
   .shell-sheet:where([popover]) {
     inset: var(--sheet-top, var(--topbar-h)) var(--space-2) auto auto;
     block-size: auto; overflow: hidden;
   }
-  /* In a sheet, Properties scrolls as one column: its "Add to library" foot follows the content instead of
-   * holding the sheet's last rows. */
   .shell-sheet :where(#properties-panel) { overflow-y: auto; }
   .shell-sheet > .shell-panel > :where(#inspector) { flex: none; overflow: visible; }
+  /* A flyout opens beside its strip or header, as wide as the panel's own column. */
+  .shell-flyout > .shell-panel > :where(#inspector) { flex: 1 1 auto; overflow: auto; }
 
   /* Structure's head is an island head: one 40px line with the stage's and the inspector's heads. */
   .shell-island .builder-outliner-head { block-size: var(--control-2xl); min-block-size: var(--control-2xl); box-sizing: border-box; }
-  .shell-sheet[data-side="left"]:where([popover]) { inset: var(--sheet-top, var(--topbar-h)) auto auto var(--sheet-start, calc(var(--rail-w) + 8px)); }
 
-  /* Floating islands: inside the stage island, over #viewport; the transform is on the island only. */
-  .shell-floats { position: absolute; inset: 0; z-index: var(--z-floating); pointer-events: none; }
-  .shell-floats > .shell-island { position: absolute; inset-block-start: 0; inset-inline-start: 0; overflow: hidden; pointer-events: auto; }
+  /* Dividers over the gaps between islands. */
+  .shell-splitter { z-index: 3; margin: 0; }
+  .shell-splitter[aria-orientation="vertical"]::before { inset-inline-start: calc(50% - 1px); }
+  .shell-splitter[aria-orientation="horizontal"]::before { inset-block-start: calc(50% - 1px); }
 
-  /* Splitters over the gaps between the stage and its neighbours. */
-  .shell-splitter { z-index: 3; }
-  .shell-island-splitter { position: absolute; inset-inline: 0; }
-  .shell-splitter[data-splitter="right"] { grid-area: right; justify-self: start; margin-inline: calc(-4px - var(--shell-gap, var(--gutter)) / 2) 0; }
-  .shell-splitter[data-splitter="left"] { grid-area: left; justify-self: end; margin-inline: 0 calc(-4px - var(--shell-gap, var(--gutter)) / 2); }
-  .shell-splitter[data-splitter="bottom"] { grid-area: bottom; align-self: start; margin-block: calc(-4px - var(--shell-row-gap, var(--gutter)) / 2) 0; }
-
-  /* A dragged tab: its origin dims, a small pill follows the pointer, and one
-   * target shows where the release puts the panel (placed by dock-tabs.mjs). */
+  /* A dragged tab: its origin dims, a small pill follows the pointer, and the
+   * place the release gives the panel shows as a soft area with its name. */
   :where(.shell-tabs [role="tab"], .shell-strip-button)[data-dragging] { opacity: 0.4; }
-  .shell-drag-zone { position: fixed; inset: auto; z-index: var(--z-floating); border-radius: var(--radius-xl); }
+  .shell-drag-zone, .shell-drop {
+    position: fixed; inset: auto; z-index: var(--z-floating); border-radius: var(--radius-xl); pointer-events: none;
+    transition: left var(--dur-fast) var(--ease-out), top var(--dur-fast) var(--ease-out), width var(--dur-fast) var(--ease-out), height var(--dur-fast) var(--ease-out);
+  }
+  .shell-drag-zone[data-kind="tab"]::after {
+    content: ""; position: absolute; inset-block: 6px; inset-inline-start: var(--insert-at, 8px); inline-size: 2px; border-radius: 1px; background: var(--accent-line);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .shell-drag-zone, .shell-drop { transition: none; }
+  }
   .shell-drag-ghost {
     position: fixed; inset-block-start: 0; inset-inline-start: 0; z-index: var(--z-floating); pointer-events: none;
     padding: var(--space-1) var(--space-2-5); border-radius: var(--radius-pill);
     background: var(--surface-raised); color: var(--text-1); box-shadow: var(--elevation-2); font: var(--type-small-strong);
   }
 
-  /* The Layout popover: preset cards in a row of four, the position rows, the foot. */
-  .shell-layout { inline-size: min(340px, calc(100vw - var(--space-4))); }
+  /* The Layout popover: preset cards, saved layouts, the foot. */
+  .shell-layout { inline-size: min(360px, calc(100vw - var(--space-4))); }
   .shell-layout-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-1-5); margin-block-end: var(--space-2); }
   .shell-layout-rows { display: grid; gap: var(--space-1); }
   .shell-layout-note { margin: 0; font: var(--type-small); color: var(--text-2); }
   .shell-layout-spacer { flex: 1; }
   .shell-layout :where(.ui-button[aria-disabled="true"]) { opacity: 0.5; }
-
-  /* The keyboard move's one drop target. */
-  .shell-drop { position: relative; inset: auto; z-index: 3; grid-area: stage; border-radius: var(--radius-xl); }
-  .shell-drop[data-target="left"] { justify-self: start; inline-size: min(232px, 40%); }
-  .shell-drop[data-target="right"] { justify-self: end; inline-size: min(288px, 40%); }
-  .shell-drop[data-target="float"] { place-self: center; inline-size: min(288px, 60%); block-size: min(320px, 70%); }
 }

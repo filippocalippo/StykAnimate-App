@@ -31,5 +31,10 @@ export default Object.freeze({
   "layoutPopover.timelineWidth": "Timeline width",
   "layoutPopover.tools": "Tools",
   "layoutPopover.toolsSide": "Tools side",
-  "layoutPopover.delete": "Delete"
+  "layoutPopover.delete": "Delete",
+  "layoutPopover.panels": "Panels",
+  "layoutPopover.moreLayoutActions": "More layout actions",
+  "layoutPopover.importLayout": "Import layout…",
+  "layoutPopover.exportLayout": "Export layout…",
+  "layoutPopover.modified": "Changed since it was applied"
 });

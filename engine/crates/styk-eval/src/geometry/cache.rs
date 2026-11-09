@@ -169,12 +169,16 @@ impl Scene {
     /// memory measurement or limit.
     pub fn account_buffers(&mut self) {
         let mut bytes = [arc::<Scene>(), buffer(&self.objects), buffer(&self.items), buffer(&self.points), buffer(&self.figures), buffer(&self.figure_of), strings(&self.warnings),
-            buffer(&self.owners), buffer(&self.owner_scales), buffer(&self.chains), buffer(&self.clip_vfx), buffer(&self.meshes), buffer(&self.depths), buffer(&self.transitions), buffer(&self.measured)]
+            buffer(&self.owners), buffer(&self.owner_scales), buffer(&self.chains), buffer(&self.clip_vfx), buffer(&self.meshes), buffer(&self.depths), buffer(&self.transitions), buffer(&self.measured), buffer(&self.built_in)]
             .into_iter().fold(0usize, usize::saturating_add);
         let mut spaces = HashSet::new();
         let mut rigs = HashSet::new();
+        let mut solutions = HashSet::new();
         for object in &self.objects {
-            bytes = bytes.saturating_add(buffer(&object.ends)).saturating_add(buffer(&object.starts)).saturating_add(buffer(&object.lengths)).saturating_add(buffer(&object.raw_segments));
+            bytes = bytes.saturating_add(buffer(&object.ends)).saturating_add(buffer(&object.starts)).saturating_add(buffer(&object.lengths)).saturating_add(buffer(&object.raw_segments)).saturating_add(buffer(&object.angles));
+            if let Some(value) = &object.solution && solutions.insert(Arc::as_ptr(value)) {
+                bytes = bytes.saturating_add(arc::<crate::ik::Solution>()).saturating_add(solution(value));
+            }
             if let Some(value) = &object.spatial
                 && spaces.insert(Arc::as_ptr(value))
             {
@@ -204,6 +208,45 @@ impl Scene {
         }
         self.retained_bytes = bytes.saturating_add(resolved.bytes);
     }
+}
+
+impl super::BuildMemory {
+    /// Retained derived buffers of the object reuse owner. As for Scene,
+    /// shared authored figures/documents and allocator overhead are separate.
+    pub fn retained_bytes(&self) -> usize {
+        let mut bytes = size_of::<Self>().saturating_add(buffer(&self.slots));
+        if let Some(spliced) = &self.spliced {
+            bytes = bytes.saturating_add(buffer(&spliced.draw_order)).saturating_add(buffer(&spliced.export_vfx));
+        }
+        let mut seen = HashSet::new();
+        let mut objects = HashSet::new();
+        let mut figures = HashSet::new();
+        let mut resolved = Resolved::default();
+        for kept in self.slots.iter().flatten() {
+            if objects.insert(kept.object.as_ptr()) { bytes=bytes.saturating_add(arc::<crate::doc::Object>()); }
+            if figures.insert(kept.figure.as_ptr()) { bytes=bytes.saturating_add(arc::<crate::doc::Figure>()); }
+            if let Some(ik) = &kept.ik {
+                bytes = bytes.saturating_add(solution(ik));
+            }
+            let b = &kept.built;
+            if !seen.insert(Arc::as_ptr(b)) { continue; }
+            let g = &b.geometry;
+            for n in [arc::<super::Built>(), buffer(&b.items), buffer(&b.points), buffer(&b.figures), buffer(&b.owners),
+                buffer(&b.owner_scales), buffer(&b.chains), buffer(&b.clip_vfx), buffer(&b.meshes), buffer(&b.depths),
+                buffer(&b.transitions), buffer(&b.measured), buffer(&g.ends), buffer(&g.starts), buffer(&g.lengths),
+                buffer(&g.raw_segments), buffer(&g.angles)] { bytes = bytes.saturating_add(n); }
+            if let Some(v) = &g.spatial { bytes = bytes.saturating_add(spatial(v)); }
+            if let Some(v) = &g.rig { bytes = bytes.saturating_add(arc_allocation::<RigJoint>(v.len()).unwrap_or(usize::MAX)); }
+            if let Some(v) = &g.solution { bytes = bytes.saturating_add(arc::<crate::ik::Solution>()).saturating_add(solution(v)); }
+            for v in &b.chains { bytes = bytes.saturating_add(buffer(v)); }
+            for v in &b.meshes { bytes = bytes.saturating_add(mesh(v)); }
+            for v in b.clip_vfx.iter().flatten() { bytes = bytes.saturating_add(vfx(v, &mut resolved)); }
+        }
+        bytes.saturating_add(resolved.checked_bytes().unwrap_or(usize::MAX))
+    }
+}
+fn solution(v: &crate::ik::Solution) -> usize {
+    buffer(&v.angles).saturating_add(v.lengths.as_ref().map_or(0, buffer)).saturating_add(buffer(&v.results))
 }
 
 #[cfg(test)]
