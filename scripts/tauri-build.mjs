@@ -46,7 +46,8 @@ const tauriArgs = ['--yes', '@tauri-apps/cli@2.12.4', 'build', '--ci'];
 if (developer) tauriArgs.push('--features', 'devtools');
 if (exeOnly) tauriArgs.push('--no-bundle');
 else tauriArgs.push('--bundles', 'nsis');
-// The installer carries the encoder and the codec helpers (area 3); only packaging needs them staged.
+// The installer carries the encoder and the codec helpers (area 3), listed in tauri.bundle.json and merged only here:
+// tauri-build checks that resources exist on every compile, and development and test builds have none staged.
 if (!exeOnly) tauriArgs.push('--config', path.join(crate, 'tauri.bundle.json'));
 if (!signed) {
   // A file, not inline JSON: npx runs through cmd.exe, which strips the quotes of an inline value.
@@ -77,7 +78,11 @@ const makensis = [process.env.STYK_MAKENSIS, path.join(process.env.LOCALAPPDATA 
 const portableName = `StykAnimate-${version}-Portable-x64.exe`;
 if (makensis) {
   const script = path.join(out, 'portable.nsi');
-  const resources = path.join(target, 'resources');
+  // The installer's resources sit beside the executable (Tauri's resource folder on Windows): the portable copy carries
+  // the same ones, by the first folder of each destination in tauri.bundle.json.
+  const bundle = JSON.parse(readFileSync(path.join(crate, 'tauri.bundle.json'), 'utf8'));
+  const resources = [...new Set(Object.values(bundle.bundle.resources).map(destination => destination.split('/')[0]))]
+    .map(folder => path.join(target, folder)).filter(folder => existsSync(folder));
   writeFileSync(script, [
     'Unicode true', 'SetCompressor /SOLID lzma', 'SilentInstall silent', 'RequestExecutionLevel user',
     `Name "StykAnimate"`, `OutFile "${path.join(out, portableName)}"`, `Icon "${path.join(crate, 'icons', 'icon.ico')}"`,
@@ -88,7 +93,7 @@ if (makensis) {
     '  InitPluginsDir',
     '  SetOutPath "$PLUGINSDIR\\app"',
     `  File "${exe}"`,
-    ...(existsSync(resources) ? [`  File /r "${resources}"`] : []),
+    ...resources.map(folder => `  File /r "${folder}"`),
     '  System::Call \'Kernel32::SetEnvironmentVariable(t "STYK_PORTABLE_DIR", t "$EXEDIR")i\'',
     '  ${GetParameters} $0',
     '  ExecWait \'"$PLUGINSDIR\\app\\StykAnimate.exe" $0\' $1',

@@ -365,7 +365,9 @@ pub fn register(desktop: &mut Desktop) {
         });
         if claim.primary {
             instance::serve(&handle, claim);
-            if packaged {
+            // Only an installed copy on its real data folder takes over stykanimate:// for the user: a portable copy,
+            // a test run (scratch STYK_USER_DATA_DIR) or a build in the source tree leaves the registered app alone.
+            if packaged && updates::installed() && std::env::var_os("STYK_USER_DATA_DIR").is_none() {
                 links::register_scheme();
             }
         }
