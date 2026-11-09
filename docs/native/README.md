@@ -13,7 +13,7 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
-**Updated 2026-11-09 (V0 merged).** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
+**Updated 2026-11-09 (V0 and M1 merged).** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
 tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had only merged N0). Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
 The orchestrator's briefs and tools live outside the repository in `perf/` (`perf/briefs/native-common.md` for every
@@ -107,7 +107,7 @@ high-risk or unclear one reverts its chunk); no catch-up merges into branches wi
 | K-timeline views 1 | Sonnet | built at `6a591305` (the header, the Advanced sheet, the Simple strip; six screens within limits, identical in the preview; 14 mounted tests with mutations); waits for the core gaps, then drops its stopgap view arithmetic; one Sol review of the whole |
 | K-dev panels | Astra, then Sonnet | ready at `600ac90d` (core: Sol high, three majors fixed; views: Sol high, five majors fixed in two steps): the developer mark, the profiler, logs, live parameters and the pass-through overlay, release build clean; merging native-app into its branch (conflicts with the timeline's registry and routing), then merges alone |
 
-**Step 3 in flight** (`perf/briefs/native/step3-plan.md`; unmerged unless marked; `origin/native-app` at `3d55fb73`):
+**Step 3 in flight** (`perf/briefs/native/step3-plan.md`; unmerged unless marked; `origin/native-app` at `d8f7eefe`):
 
 | Chunk | Who | State |
 | --- | --- | --- |
@@ -121,7 +121,7 @@ high-risk or unclear one reverts its chunk); no catch-up merges into branches wi
 | T5 onion, navigation, scopes | Opus core | interface `33fd32e6` (onion preferences in Settings' view memory, the header model, zoom and pan); logic in progress; views start once the timeline branch's fixes land (same header files) |
 | L1 Library panel (My library) | Opus core, Sonnet views | plan checked by Sol (three blockers fixed); interface `ac1e3bd9`; read paths in progress; views building |
 | B2 VFX panel | Astra xhigh | plan `ba9373f8` checked by Sol (randomness through the session, preset migration fixed); interface next. Lanes go with T4 |
-| M1 menus | Sonnet | building |
+| M1 menus | Sonnet | **merged `d8f7eefe`** (pass green, pushed; Sol high: two majors and a minor, fixed): the mark's StykAnimate menu and File, Edit, View, Joint, Animation and Help row for row as today (Node parity of every row in three states), menu content and facts in `styk_core::menus` reading the prepared Inspector facts, a closing press's cover ended by its own release (`Event::Lifted`), menus sized to their widest row; the drag-away-then-click order is confirmed by reading iced's loop, not by a real-window run |
 
 The automation mode is one language, `styk_core::automation` (merged with K-shell, header `styk-auto/1`); K-dev's runners,
 K-stage's steps and R-slice's panel test move onto it. Then the skeleton gate (full suites, parity, the native smokes, screenshots, the benchmark, `cargo xtask check --wasm`, and
