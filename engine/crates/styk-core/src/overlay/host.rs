@@ -135,6 +135,8 @@ pub struct Update {
     pub act: Option<crate::recovery::model::Event>,
     /// A select's option was chosen (its index among the select's options).
     pub chose: Option<usize>,
+    /// A project was chosen in the open-projects list: it comes to the front.
+    pub activate: Option<crate::identity::DocumentId>,
     /// The event belonged to the menus and nothing else may act on it.
     pub consumed: bool,
     pub dismissed: Option<u64>,
@@ -155,6 +157,7 @@ impl Update {
         self.run = self.run.or(other.run);
         self.act = self.act.take().or(other.act);
         self.chose = self.chose.or(other.chose);
+        self.activate = self.activate.or(other.activate);
         self.consumed |= other.consumed;
     }
 }
@@ -172,6 +175,9 @@ pub struct Host {
     now: u64,
     message_hovered: bool,
     last_activation: Option<(FocusId, u64)>,
+    /// The control whose open menu the last pointer press closed (a click opens on its release, after this press): that release
+    /// must not open the menu again.
+    closed_by_press: Option<FocusId>,
     press_sequence: u64,
     animations: Vec<(u64, Animation, u64)>,
     animation_deadline: Option<u64>,
@@ -398,6 +404,7 @@ impl Host {
                 match action {
                     RowAction::Choice(chosen) => update.chose = Some(chosen),
                     RowAction::Command(command) => update.run = Some(command),
+                    RowAction::Document(document) => update.activate = Some(document),
                 }
                 if close {
                     let root = self.root_of(id);
@@ -586,7 +593,10 @@ impl Host {
         let bounds = self.bounds.clone();
         let lookup = |id| bounds.iter().find(|(key, _)| *key == id).map(|(_, rect)| *rect);
         let mut out = Update::default();
+        let released_open = matches!(&event, Event::OpenMenu { invoker: Some(invoker), keyboard: false, .. } if self.closed_by_press == Some(*invoker));
+        if matches!(&event, Event::OpenMenu { .. }) { self.closed_by_press = None; }
         match event {
+            Event::OpenMenu { .. } if released_open => return out,
             // The press that closed this opener's menu (outside-press toggle) does not open it again on its release.
             Event::OpenMenu { invoker: Some(invoker), keyboard: false, .. } if self.last_activation == Some((invoker, self.press_sequence)) => return out,
             Event::OpenMenu { entries, anchor, invoker, keyboard } => out = self.open(entries, anchor, Purpose::Commands, invoker, keyboard, None, focus),
@@ -609,7 +619,9 @@ impl Host {
                     if self.last_activation == Some((invoker, press)) { return out; }
                     self.last_activation = Some((invoker, press));
                 }
+                let was_open = anchor.and_then(|control| self.menu_of(control)).is_some();
                 out = self.pointer(pressed, inside, anchor, focus);
+                if pressed { self.closed_by_press = anchor.filter(|control| was_open && self.menu_of(*control).is_none()); }
             }
             Event::Key { key, ctrl, meta, alt } => { if key == "Escape" { self.tooltip.hide(now); } out = self.key(menu::Key { key: &key, ctrl, meta, alt, composing: focus.composing() }, &lookup, focus, now); }
             Event::Hover { menu, index } => { self.leave(); out = self.hover(menu, index, focus, now); }
@@ -690,5 +702,12 @@ impl Host {
     pub fn tooltip_anchor(&self) -> Option<(&super::tooltip::Tip, Rect)> {
         let tip = self.tooltip.visible()?;
         Some((tip, self.bound_of(FocusId(tip.target))?))
+    }
+}
+
+impl Host {
+    /// The root menu opened from the control `invoker`, if one is open (the mark shows pressed while its menu does).
+    pub fn menu_of(&self, invoker: FocusId) -> Option<u64> {
+        self.stack.entries().iter().find(|entry| entry.kind == Kind::Menu && entry.parent.is_none() && entry.anchor == Some(invoker)).map(|entry| entry.id)
     }
 }

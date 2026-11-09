@@ -74,12 +74,10 @@ pub mod ids {
     }
 }
 
-/// A menu the band opened. Their contents come with the menu widget and the command registry; until then the
-/// interface shows a placeholder.
+/// A menu the band opened that the overlay host does not hold yet: a project tab's, which the interface shows as a
+/// placeholder until its rows come (`SH-071`). The mark's menu is the host's (`Core::menu_facts`, `menus::mark`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Menu {
-    /// The StykAnimate menu behind the mark.
-    Mark,
     /// A project tab's menu.
     Tab(DocumentId),
 }
@@ -491,13 +489,13 @@ impl Shell {
         if let Some(command) = command_id(&event) {
             self.before_command(command);
         }
-        let keeps_menu = matches!(event, Event::Hover(_) | Event::Mark | Event::TabMenu(_) | Event::Tick(_) | Event::Resized(_) | Event::Labels(_) | Event::PointerMoved(..) | Event::SaveStarted(_) | Event::SaveLanded(..) | Event::SaveEnded(_) | Event::Report(_) | Event::Session(_));
+        let keeps_menu = matches!(event, Event::Hover(_) | Event::TabMenu(_) | Event::Tick(_) | Event::Resized(_) | Event::Labels(_) | Event::PointerMoved(..) | Event::SaveStarted(_) | Event::SaveLanded(..) | Event::SaveEnded(_) | Event::Report(_) | Event::Session(_));
         if !keeps_menu {
             self.menu = None;
         }
         match event {
             Event::Hover(hover) => self.hover = hover,
-            Event::Mark => self.menu = if self.menu == Some(Menu::Mark) { None } else { Some(Menu::Mark) },
+            Event::Mark => effects.push(Effect::Command(Command::Run(CommandId::Menu))),
             Event::Home => self.home = !self.home,
             Event::New => {
                 effects.push(Effect::Command(Command::Run(CommandId::New)));
@@ -751,18 +749,17 @@ mod tests {
     }
 
     #[test]
-    fn the_mark_opens_its_menu_and_a_second_press_closes_it() {
+    fn the_mark_asks_for_its_menu_and_holds_none_itself() {
         let mut documents = Documents::new();
         let mut shell = shell(1560.0);
-        shell.handle(&mut documents, Event::Mark);
-        assert_eq!(shell.menu(), Some(Menu::Mark));
-        shell.handle(&mut documents, Event::Mark);
+        let effects = shell.handle(&mut documents, Event::Mark);
+        assert_eq!(effects, vec![Effect::Command(Command::Run(CommandId::Menu))], "the overlay host owns the open menu and its second press");
         assert_eq!(shell.menu(), None);
+        shell.handle(&mut documents, Event::TabMenu(DocumentId::preview(1)));
+        assert_eq!(shell.menu(), Some(Menu::Tab(DocumentId::preview(1))));
         shell.handle(&mut documents, Event::Mark);
-        shell.handle(&mut documents, Event::CloseMenu);
-        assert_eq!(shell.menu(), None, "a press elsewhere dismisses it");
+        assert_eq!(shell.menu(), None, "pressing the mark dismisses a tab's menu");
     }
-
     #[test]
     fn a_session_changes_what_the_band_places_and_export_turns_quiet() {
         let mut documents = Documents::new();

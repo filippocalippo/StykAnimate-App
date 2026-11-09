@@ -736,3 +736,33 @@ fn nothing_is_asked_of_the_runtime_while_nothing_animates_or_waits() {
     app.advance(400);
     assert_eq!(app.core.overlay_deadline(), None, "a settled menu is quiet: no frames are asked for");
 }
+
+#[test]
+fn the_marks_menu_is_walked_with_the_keys_the_overlay_host_owns_and_enter_runs_the_row_through_dispatch() {
+    let mut app = App::new(Page::Controls, Size::new(640.0, 900.0));
+    app.entries = styk_core::menus::mark(&styk_core::menus::Facts::default(), &styk_core::i18n::Presentation::english());
+    app.rebuild();
+    app.open();
+    let label = |app: &App, at: usize| {
+        let menu = app.menu(at);
+        let items: Vec<&Item> = menu.entries().iter().filter_map(|entry| if let Entry::Item(item) = entry { Some(item) } else { None }).collect();
+        menu.current().map(|index| items[index].label.clone())
+    };
+    assert_eq!(label(&app, 0).as_deref(), Some("File"), "the first row holds focus");
+    // Right opens the focused row's submenu and focuses its first row.
+    app.key(Named::ArrowRight);
+    assert_eq!(app.core.overlays().menus().len(), 2);
+    assert_eq!(label(&app, 1).as_deref(), Some("Home"));
+    // Five steps down reach Save; the typeahead finds Open project by its letters; Left closes the submenu.
+    for _ in 0..5 { app.key(Named::ArrowDown); }
+    assert_eq!(label(&app, 1).as_deref(), Some("Save"));
+    app.key(Named::ArrowLeft);
+    assert_eq!(app.core.overlays().menus().len(), 1, "Left closes the submenu and focus returns to its row");
+    assert_eq!(label(&app, 0).as_deref(), Some("File"));
+    // Enter on a row of the root dispatches its command: New animation is not ported, so the core answers NotAvailable.
+    app.typed("n", 5000);
+    assert_eq!(label(&app, 0).as_deref(), Some("New animation"));
+    app.key(Named::Enter);
+    assert!(app.effects.contains(&Message::NotAvailable(CommandId::New)), "{:?}", app.effects);
+    assert!(app.core.overlays().menus().is_empty());
+}

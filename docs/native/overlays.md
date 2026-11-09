@@ -58,7 +58,7 @@ The review tests first reproduced lost parent focus, blocked ancestor navigation
   `message::raw_at` takes (a key no widget took while a dialog is open, a button release that numbers the presses). The tasks run
   on the tree rebuilt from the new state, as the runtime does. Until a panel or button sends `Event::OpenMenu`, the dock mounts
   the Inspector, or something shows a message, the layer is mounted and answering but has nothing to draw: the opener of each
-  menu belongs to the feature that has one (K-cmd, the band, the panels). The hotkey gate (`Effect::Blocking`) has no consumer
+  menu belongs to the feature that has one (the mark's menu: `Core::run(Menu)`, [menus.md](menus.md); the panels). The hotkey gate (`Effect::Blocking`) has no consumer
   until the application's hotkeys are routed through `Core::shortcuts`.
 - **Animation is the core's.** `Host::phase(id)` is 0 to 1 through a menu's, a popover's (160 ms), a dialog's, sheet's or message's
   (240 ms) entry, and through a loop (a task message's bar 1.3 s, a spinner 0.8 s; `Event::Animate`). `widgets::enter::Enter` draws

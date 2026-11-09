@@ -472,3 +472,18 @@ fn the_press_that_closed_an_openers_menu_does_not_open_it_again_on_release() {
     host.event(open(), &mut focus, 40);
     assert_eq!(host.menus().len(), 1, "a new press opens it again");
 }
+
+#[test]
+fn a_click_that_opens_on_release_does_not_reopen_the_menu_its_press_closed() {
+    let (mut host, mut focus) = (Host::default(), page());
+    let open = || Event::OpenMenu { entries: vec![row(CommandId::Undo, "Undo")], anchor: anchor(), invoker: Some(INVOKER), keyboard: false };
+    host.event(open(), &mut focus, 0);
+    host.event(Event::Pointer { pressed: true, inside: false, anchor: Some(INVOKER), press: host.press_sequence() }, &mut focus, 10);
+    assert!(host.menus().is_empty());
+    // The button's click arrives after the layer saw the release: the press is no longer the current one.
+    host.event(Event::Pointer { pressed: false, inside: false, anchor: Some(INVOKER), press: 0 }, &mut focus, 20);
+    host.event(open(), &mut focus, 21);
+    assert!(host.menus().is_empty(), "the click of the closing press did not reopen the menu");
+    host.event(open(), &mut focus, 40);
+    assert_eq!(host.menus().len(), 1, "the next click opens it");
+}
