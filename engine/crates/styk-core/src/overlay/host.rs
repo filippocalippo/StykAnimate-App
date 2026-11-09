@@ -135,6 +135,8 @@ pub struct Update {
     pub act: Option<crate::recovery::model::Event>,
     /// A select's option was chosen (its index among the select's options).
     pub chose: Option<usize>,
+    /// A project was chosen in the open-projects list: it comes to the front.
+    pub activate: Option<crate::identity::DocumentId>,
     /// The event belonged to the menus and nothing else may act on it.
     pub consumed: bool,
     pub dismissed: Option<u64>,
@@ -155,6 +157,7 @@ impl Update {
         self.run = self.run.or(other.run);
         self.act = self.act.take().or(other.act);
         self.chose = self.chose.or(other.chose);
+        self.activate = self.activate.or(other.activate);
         self.consumed |= other.consumed;
     }
 }
@@ -172,6 +175,11 @@ pub struct Host {
     now: u64,
     message_hovered: bool,
     last_activation: Option<(FocusId, u64)>,
+    /// The control whose open menu the last press closed. A click opens on its release, after that press, and must not open the
+    /// menu again. The cover belongs to that press alone: a new press, a release over another control, a key, a window change and
+    /// the window's own release of the press (`Event::Lifted`, which comes after the click) all end it. The overlay layer reports
+    /// nothing while no overlay is mounted, so only that release can be relied on to end it.
+    closed_by_press: Option<FocusId>,
     press_sequence: u64,
     animations: Vec<(u64, Animation, u64)>,
     animation_deadline: Option<u64>,
@@ -398,6 +406,7 @@ impl Host {
                 match action {
                     RowAction::Choice(chosen) => update.chose = Some(chosen),
                     RowAction::Command(command) => update.run = Some(command),
+                    RowAction::Document(document) => update.activate = Some(document),
                 }
                 if close {
                     let root = self.root_of(id);
@@ -529,6 +538,9 @@ pub enum Event {
     Leave { menu: Option<u64>, row: Option<usize> },
     Press { menu: u64, index: usize },
     Pointer { pressed: bool, inside: bool, anchor: Option<FocusId>, press: u64 },
+    /// The window saw a mouse button come up, whether or not an overlay layer was mounted to report it. It follows the widgets' own
+    /// handling of the same release (a click has been sent by then), so it ends the cover of the press that came down with it.
+    Lifted,
     Bounds(Vec<(FocusId, Rect)>),
     FocusChanged,
     MessageHover(bool),
@@ -586,7 +598,10 @@ impl Host {
         let bounds = self.bounds.clone();
         let lookup = |id| bounds.iter().find(|(key, _)| *key == id).map(|(_, rect)| *rect);
         let mut out = Update::default();
+        let released_open = matches!(&event, Event::OpenMenu { invoker: Some(invoker), keyboard: false, .. } if self.closed_by_press == Some(*invoker));
+        if matches!(&event, Event::OpenMenu { .. } | Event::Key { .. } | Event::Environment(_) | Event::Escape | Event::Lifted) { self.closed_by_press = None; }
         match event {
+            Event::OpenMenu { .. } if released_open => return out,
             // The press that closed this opener's menu (outside-press toggle) does not open it again on its release.
             Event::OpenMenu { invoker: Some(invoker), keyboard: false, .. } if self.last_activation == Some((invoker, self.press_sequence)) => return out,
             Event::OpenMenu { entries, anchor, invoker, keyboard } => out = self.open(entries, anchor, Purpose::Commands, invoker, keyboard, None, focus),
@@ -602,6 +617,7 @@ impl Host {
                     out = self.open(option_rows(options.iter().map(|(s, d)| (s.as_str(), *d))), Anchor::Root(anchor), Purpose::Select { invoker }, Some(invoker), keyboard, chosen, focus);
                 }
             }
+            Event::Lifted => return self.event(Event::Pointer { pressed: false, inside: false, anchor: None, press: 0 }, focus, now),
             Event::Pointer { pressed, inside, anchor, press } => {
                 if pressed { self.tooltip.hide(now); }
                 if !pressed { self.press_sequence = self.press_sequence.wrapping_add(1); self.last_activation = None; }
@@ -609,7 +625,11 @@ impl Host {
                     if self.last_activation == Some((invoker, press)) { return out; }
                     self.last_activation = Some((invoker, press));
                 }
+                // A new press retires the last one's cover, and a release over another control says its click will not come.
+                if pressed || self.closed_by_press.is_some_and(|control| anchor.is_some_and(|over| over != control)) { self.closed_by_press = None; }
+                let was_open = anchor.and_then(|control| self.menu_of(control)).is_some();
                 out = self.pointer(pressed, inside, anchor, focus);
+                if pressed { self.closed_by_press = anchor.filter(|control| was_open && self.menu_of(*control).is_none()); }
             }
             Event::Key { key, ctrl, meta, alt } => { if key == "Escape" { self.tooltip.hide(now); } out = self.key(menu::Key { key: &key, ctrl, meta, alt, composing: focus.composing() }, &lookup, focus, now); }
             Event::Hover { menu, index } => { self.leave(); out = self.hover(menu, index, focus, now); }
@@ -690,5 +710,12 @@ impl Host {
     pub fn tooltip_anchor(&self) -> Option<(&super::tooltip::Tip, Rect)> {
         let tip = self.tooltip.visible()?;
         Some((tip, self.bound_of(FocusId(tip.target))?))
+    }
+}
+
+impl Host {
+    /// The root menu opened from the control `invoker`, if one is open (the mark shows pressed while its menu does).
+    pub fn menu_of(&self, invoker: FocusId) -> Option<u64> {
+        self.stack.entries().iter().find(|entry| entry.kind == Kind::Menu && entry.parent.is_none() && entry.anchor == Some(invoker)).map(|entry| entry.id)
     }
 }

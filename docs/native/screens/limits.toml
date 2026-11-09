@@ -649,3 +649,92 @@ reference = "docs/native/screens/devtools/dev-overlay-dark.png"
 max_difference = 0.001
 width = 520
 height = 400
+
+# The application menus (M1): the mark's StykAnimate menu and the six menus it leads with, each open beside the row that opens it,
+# drawn by today's own `applicationMenuItems`, `showMenu` conversion and `openMenu` (engine/crates/styk-app/automation/menus-reference/screens.mjs,
+# bundled Chromium, LCD text on, opaque surfaces, device scale 1) in a window with nothing selected on the packaged desktop. The limits sit
+# above 0.02 because a menu is all text: what differs at 100 % and 200 % is Chromium's LCD glyphs against the native renderer's.
+
+["app-menu"]
+reference = "docs/native/screens/menus/app-menu.png"
+max_difference = 0.029
+width = 360
+height = 900
+
+["app-menu-dark"]
+reference = "docs/native/screens/menus/app-menu-dark.png"
+max_difference = 0.029
+width = 360
+height = 900
+
+["app-menu-file"]
+reference = "docs/native/screens/menus/app-menu-file.png"
+max_difference = 0.025
+width = 640
+height = 900
+
+["app-menu-file-dark"]
+reference = "docs/native/screens/menus/app-menu-file-dark.png"
+max_difference = 0.025
+width = 640
+height = 900
+
+["app-menu-edit"]
+reference = "docs/native/screens/menus/app-menu-edit.png"
+max_difference = 0.025
+width = 640
+height = 900
+
+["app-menu-edit-dark"]
+reference = "docs/native/screens/menus/app-menu-edit-dark.png"
+max_difference = 0.024
+width = 640
+height = 900
+
+["app-menu-view"]
+reference = "docs/native/screens/menus/app-menu-view.png"
+max_difference = 0.025
+width = 640
+height = 900
+
+["app-menu-view-dark"]
+reference = "docs/native/screens/menus/app-menu-view-dark.png"
+max_difference = 0.025
+width = 640
+height = 900
+
+["app-menu-joint"]
+reference = "docs/native/screens/menus/app-menu-joint.png"
+max_difference = 0.022
+width = 640
+height = 900
+
+["app-menu-joint-dark"]
+reference = "docs/native/screens/menus/app-menu-joint-dark.png"
+max_difference = 0.021
+width = 640
+height = 900
+
+["app-menu-animation"]
+reference = "docs/native/screens/menus/app-menu-animation.png"
+max_difference = 0.023
+width = 640
+height = 900
+
+["app-menu-animation-dark"]
+reference = "docs/native/screens/menus/app-menu-animation-dark.png"
+max_difference = 0.023
+width = 640
+height = 900
+
+["app-menu-help"]
+reference = "docs/native/screens/menus/app-menu-help.png"
+max_difference = 0.026
+width = 640
+height = 900
+
+["app-menu-help-dark"]
+reference = "docs/native/screens/menus/app-menu-help-dark.png"
+max_difference = 0.026
+width = 640
+height = 900

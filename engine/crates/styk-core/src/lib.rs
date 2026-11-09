@@ -48,6 +48,7 @@ pub mod inspector;
 pub mod launch;
 pub mod layout;
 pub mod limits;
+pub mod menus;
 pub mod number;
 pub mod overlay;
 pub mod recovery;

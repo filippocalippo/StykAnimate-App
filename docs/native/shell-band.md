@@ -72,8 +72,8 @@ Each is marked in the code and goes when its chunk does.
   `Effect::Command` with the slice's `Command::Run(CommandId)`, or `Effect::DocumentCommand` with a document ID for tab
   actions; the app drops them until their feature handlers exist. Build's Done remains a workspace operation. Undo and Redo run on
   the project in front through `Documents`.
-- **The menus** open as placeholders (a popover with the rows set as text): the mark's menu and a tab's menu. Their
-  contents come with the menu widget (K-widgets) and the registry.
+- **A project tab's menu** opens as a placeholder (a popover with the rows set as text); its rows come with `SH-071`. The mark's menu
+  is the overlay host's since M1 ([menus.md](menus.md)): `Event::Mark` is the registry's `Menu` command.
 - **Tab pictures** are the scene glyph until the stage draws them.
 - **Text** is catalogue labels (`styk-ui/src/shell/text.rs`, keyed as today: `chrome.*`, `projectTabs.*`, `app.*`, `common.*`, `commands.*`), formatted through the window's `Presentation` and measured with it, so the folds hold in every language. The tab menu's placeholder reads today's `Rename project…`.
 

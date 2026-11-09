@@ -8,7 +8,14 @@ pub enum Entry {
     Item(Item),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RowAction { Command(CommandId), Choice(usize) }
+pub enum RowAction {
+    /// A registry command.
+    Command(CommandId),
+    /// A stable identity of a select's option.
+    Choice(usize),
+    /// A project in the open-projects list: choosing it brings that project to the front (`Command::Activate`).
+    Document(crate::identity::DocumentId),
+}
 impl From<CommandId> for RowAction { fn from(id: CommandId) -> Self { Self::Command(id) } }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

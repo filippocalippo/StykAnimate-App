@@ -44,7 +44,7 @@ fn opening_a_menu_releases_the_shortcut_owners_held_key() {
     let press = core.shortcuts_mut().press(&FocusState::new(), &Chord::new("ArrowLeft", false, false, false), &[Scope::Canvas], Input::default(), |_| true);
     assert!(matches!(press, Press::Run(_)));
     assert_eq!(core.shortcuts_mut().held().len(), 1);
-    let effects = send(&mut core, Event::OpenMenu { entries: vec![Entry::Item(Item::new(CommandId::Menu, "Menu"))], anchor: Anchor::Root(Rect::default()), invoker: None, keyboard: true }, 0);
+    let effects = send(&mut core, Event::OpenMenu { entries: vec![Entry::Item(Item::new(CommandId::Save, "Menu"))], anchor: Anchor::Root(Rect::default()), invoker: None, keyboard: true }, 0);
     assert!(core.shortcuts_mut().held().is_empty());
     assert!(effects.iter().any(|effect| matches!(effect, Effect::ShortcutReleased(release) if release.cancelled)));
 }

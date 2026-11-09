@@ -472,3 +472,67 @@ fn the_press_that_closed_an_openers_menu_does_not_open_it_again_on_release() {
     host.event(open(), &mut focus, 40);
     assert_eq!(host.menus().len(), 1, "a new press opens it again");
 }
+
+#[test]
+fn a_click_that_opens_on_release_does_not_reopen_the_menu_its_press_closed() {
+    let (mut host, mut focus) = (Host::default(), page());
+    let open = || Event::OpenMenu { entries: vec![row(CommandId::Undo, "Undo")], anchor: anchor(), invoker: Some(INVOKER), keyboard: false };
+    host.event(open(), &mut focus, 0);
+    host.event(Event::Pointer { pressed: true, inside: false, anchor: Some(INVOKER), press: host.press_sequence() }, &mut focus, 10);
+    assert!(host.menus().is_empty());
+    // The button's click arrives after the layer saw the release: the press is no longer the current one.
+    host.event(Event::Pointer { pressed: false, inside: false, anchor: Some(INVOKER), press: 0 }, &mut focus, 20);
+    host.event(open(), &mut focus, 21);
+    assert!(host.menus().is_empty(), "the click of the closing press did not reopen the menu");
+    host.event(open(), &mut focus, 40);
+    assert_eq!(host.menus().len(), 1, "the next click opens it");
+}
+
+#[test]
+fn the_cover_of_a_closing_press_ends_with_that_press() {
+    let open = || Event::OpenMenu { entries: vec![row(CommandId::Undo, "Undo")], anchor: anchor(), invoker: Some(INVOKER), keyboard: false };
+    let close = |host: &mut Host, focus: &mut FocusState| {
+        host.event(open(), focus, 0);
+        let press = host.press_sequence();
+        host.event(Event::Pointer { pressed: true, inside: false, anchor: Some(INVOKER), press }, focus, 10);
+        assert!(host.menus().is_empty());
+    };
+    // Released over another control: its click will not come, so the next open is a real one.
+    let (mut host, mut focus) = (Host::default(), page());
+    close(&mut host, &mut focus);
+    host.event(Event::Pointer { pressed: false, inside: false, anchor: Some(FocusId(99)), press: 0 }, &mut focus, 20);
+    host.event(open(), &mut focus, 21);
+    assert_eq!(host.menus().len(), 1, "a release elsewhere retired the cover");
+    // A key or the window changing retires it too.
+    for retire in [Event::Key { key: "x".into(), ctrl: false, meta: false, alt: false }, Event::Environment(Reason::Resize)] {
+        let (mut host, mut focus) = (Host::default(), page());
+        close(&mut host, &mut focus);
+        // The release over the opener leaves its click to come; the key or the window change says it will not matter.
+        host.event(Event::Pointer { pressed: false, inside: false, anchor: Some(INVOKER), press: 0 }, &mut focus, 15);
+        host.event(retire, &mut focus, 20);
+        host.event(open(), &mut focus, 21);
+        assert_eq!(host.menus().len(), 1);
+    }
+    // The window's own release of the press (nothing else is reported while no overlay is mounted) ends the cover: with no click
+    // after a drag away, the next click opens the menu.
+    let (mut host, mut focus) = (Host::default(), page());
+    close(&mut host, &mut focus);
+    host.event(Event::Lifted, &mut focus, 20);
+    host.event(open(), &mut focus, 30);
+    assert_eq!(host.menus().len(), 1, "the cover ended with its press");
+    // And the click that comes before that release is covered, whatever the layer reported.
+    let (mut host, mut focus) = (Host::default(), page());
+    close(&mut host, &mut focus);
+    host.event(open(), &mut focus, 20);
+    assert!(host.menus().is_empty());
+    host.event(Event::Lifted, &mut focus, 21);
+    host.event(open(), &mut focus, 30);
+    assert_eq!(host.menus().len(), 1);
+    // A new press retires it.
+    let (mut host, mut focus) = (Host::default(), page());
+    close(&mut host, &mut focus);
+    host.event(Event::Pointer { pressed: false, inside: false, anchor: Some(INVOKER), press: 0 }, &mut focus, 15);
+    host.event(Event::Pointer { pressed: true, inside: false, anchor: None, press: host.press_sequence() }, &mut focus, 20);
+    host.event(open(), &mut focus, 21);
+    assert_eq!(host.menus().len(), 1);
+}

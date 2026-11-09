@@ -296,6 +296,16 @@ impl Panel {
         self.model.as_ref()
     }
 
+    /// The evaluated instance (style overlays included) of the selected figure `uid`, from the facts the worker made for
+    /// exactly this document, lineage, revision, playhead and selection (V0's resolved instance facts); `None` while they are
+    /// pending or were made for another state. Reading it is a key comparison: nothing is evaluated or scanned.
+    pub fn instance_of(&self, document: &crate::documents::Document, uid: u32) -> Option<&Arc<crate::engine::doc::Figure>> {
+        let shown = self.shown.key.as_ref()?;
+        let selection = facts::selection(document);
+        let current = FactsKey::new(document.id().get(), document.lineage(), document.revision(), facts::tick(document), &selection.uids);
+        (shown == &current).then(|| self.shown.figures.get(&uid)).flatten()
+    }
+
     /// The facts the model shows.
     pub fn shown(&self) -> &Shown {
         &self.shown

@@ -103,6 +103,8 @@ pub enum Expect {
     Selection { uid: Option<u32>, joint: i64 },
     /// What the recovery views show.
     Recovery(RecoveryExpect),
+    /// How many menus are open (the mark's menu and the submenu beside it count two; none is `0`).
+    Menus(usize),
     /// Something about the docked window.
     Dock(DockExpect),
 }
@@ -174,6 +176,17 @@ pub enum DockStep {
     Collapse(String),
     /// Undo the last layout change.
     Undo,
+}
+
+/// What a script does in an open menu, through the overlay host's own events: the pointer arriving on a row and a press on it.
+/// A row is named by its English label in the menu that opened last (a submenu while one is open).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MenuStep {
+    /// Move the pointer onto the row; a submenu row opens after its hover intent (`advance` moves the clock).
+    Hover(String),
+    /// Press the row: a command runs and the menus close, a submenu opens.
+    Press(String),
 }
 
 /// What a script does in the Properties panel, through its widgets.
@@ -257,6 +270,8 @@ pub enum Step {
     Recovery(RecoveryStep),
     /// A step in the docked window.
     Dock(DockStep),
+    /// A step in an open menu.
+    Menu(MenuStep),
     /// Check something.
     Expect(Expect),
     /// Write the window to a PNG (relative to the script).
@@ -419,6 +434,7 @@ fn expectation(words: &[&str], line: usize) -> Result<Expect, ScriptError> {
         ["selection", "none"] => Expect::Selection { uid: None, joint: -1 },
         ["selection", uid, joint] => Expect::Selection { uid: Some(uid.parse().map_err(|_| bad("selection wants a figure ID"))?), joint: joint.parse().map_err(|_| bad("selection wants a joint index"))? },
         ["history", n] => Expect::History(n.parse().map_err(|_| bad("history wants a count"))?),
+        ["menus", n] => Expect::Menus(n.parse().map_err(|_| bad("menus wants a count"))?),
         ["recovery", "offer", state @ ("shown" | "hidden")] => Expect::Recovery(RecoveryExpect::Offer(*state == "shown")),
         ["recovery", "chooser", state @ ("open" | "closed")] => Expect::Recovery(RecoveryExpect::Chooser(*state == "open")),
         ["recovery", "prompt", state @ ("open" | "closed")] => Expect::Recovery(RecoveryExpect::Prompt(*state == "open")),
@@ -654,6 +670,11 @@ impl Script {
                     ["settle"] => RecoveryStep::Settle,
                     _ => return Err(wants("offer <not-now|manage|restore>, chooser <pick <n>|restore|discard|cancel>, prompt <save|dont-save|cancel|retry> or settle")),
                 }),
+                "menu" => match rest.split_once(char::is_whitespace).map(|(sub, label)| (sub, label.trim())) {
+                    Some(("hover", label)) if !label.is_empty() => Step::Menu(MenuStep::Hover(label.to_string())),
+                    Some(("press", label)) if !label.is_empty() => Step::Menu(MenuStep::Press(label.to_string())),
+                    _ => return Err(wants("hover <row> or press <row>")),
+                },
                 "dock" => Step::Dock(match words.as_slice() {
                     ["drag", panel, to] => DockStep::Drag { panel: (*panel).to_string(), to: (*to).to_string() },
                     ["resize", delta] => DockStep::Resize(delta.parse().ok().filter(|n: &f64| n.is_finite()).ok_or_else(|| wants("resize <pixels>"))?),
@@ -689,6 +710,17 @@ fn finite(text: &str, line: usize) -> Result<f64, ScriptError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_steps_name_a_row_by_its_label() {
+        let script = Script::parse("click mark\nmenu hover Edit\nmenu press Open recent…\nexpect menus 2\n").unwrap();
+        assert_eq!(script.steps[1], (2, Step::Menu(MenuStep::Hover("Edit".into()))));
+        assert_eq!(script.steps[2], (3, Step::Menu(MenuStep::Press("Open recent…".into()))));
+        assert_eq!(script.steps[3], (4, Step::Expect(Expect::Menus(2))));
+        for bad in ["menu", "menu hover", "menu tap Edit", "expect menus many"] {
+            assert!(Script::parse(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn named_controls_parse_to_the_registry_identity() {

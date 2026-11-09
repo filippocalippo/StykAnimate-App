@@ -12,6 +12,7 @@
 use iced::Widget as _;
 use super::card::Card;
 use super::control::words;
+use iced::widget::text::Wrapping;
 use super::focus::{Focusable, Keys, Ring, Scope};
 use super::enter::Enter;
 use super::layer::{Layer, Placed, Position};
@@ -201,11 +202,12 @@ fn lead<'a, Message: 'a>(item: &Item, palette: &'static Palette, glyph: Rgba, di
             container(dot).center_x(side).center_y(side).boxed()
         }
         (Some(on), false) => {
-            let mark: Element<'a, Message> = if on { super::icon_stroked("check", scale::ICON_SM, palette.accent, 2.5).boxed() } else { nothing() };
+            // Today's check is the icon's own grey (`.ui-icon`), not the accent its container is set to; only the radio dot is blue.
+            let mark: Element<'a, Message> = if on { super::icon_stroked("check", scale::ICON_SM, palette.text_2, 2.5).boxed() } else { nothing() };
             container(mark).center_x(side).center_y(side).boxed()
         }
         (None, _) => match item.icon.as_deref().filter(|name| super::super::icons::lookup(name).is_some()) {
-            Some(name) => super::icon(name, scale::ICON_MD, if disabled { palette.text_disabled } else { glyph }).boxed(),
+            Some(name) => super::icon(name, scale::ICON_MD, if disabled && !item.danger { palette.text_disabled } else { glyph }).boxed(),
             None => Space::new().width(side).height(Length::Fixed(0.0)).boxed(),
         },
     }
@@ -215,8 +217,8 @@ fn lead<'a, Message: 'a>(item: &Item, palette: &'static Palette, glyph: Rgba, di
 pub fn menu_box<'a, Message: Clone + 'a>(palette: &'static Palette, open: &'a OpenMenu, child_from: Option<usize>, ring: bool, send: &Rc<dyn Fn(Event) -> Message + 'a>) -> Element<'a, Message> {
     let id = open.id();
     let mut rows: Vec<Element<'a, Message>> = Vec::new();
-    // `min-inline-size: 240px` over a 1 px border and 6 px of padding: the rows' share is 226 px.
-    rows.push(Space::new().width(Length::Fixed(240.0 - 14.0)).height(Length::Fixed(0.0)).boxed());
+    // The rows' share: 226 px at least (`min-inline-size: 240px`), else the widest row.
+    rows.push(Space::new().width(Length::Fixed(share(open))).height(Length::Fixed(0.0)).boxed());
     let mut index = 0;
     for (position, entry) in open.entries().iter().enumerate() {
         match entry {
@@ -239,14 +241,15 @@ pub fn menu_box<'a, Message: Clone + 'a>(palette: &'static Palette, open: &'a Op
                 let disabled = item.disabled;
                 let hovered = open.hovered() == Some(index);
                 let lit = (current && ring) || ((hovered || expanded) && !disabled);
-                let ink = if disabled { palette.text_disabled } else if item.danger { palette.danger_text } else { palette.text_1 };
+                // `[data-tone="danger"]` follows `[aria-disabled]` in menu.css: a disabled delete row stays red.
+                let ink = if item.danger { palette.danger_text } else if disabled { palette.text_disabled } else { palette.text_1 };
                 let glyph = if item.danger { palette.danger_text } else if lit { palette.text_1 } else { palette.text_2 };
-                let label = words(item.label.clone(), TextStyle::from_role(&scale::TYPE_UI), ink);
+                let label = line_of(item.label.clone(), TextStyle::from_role(&scale::TYPE_UI), ink);
                 let hint = open.hint(index);
                 let shortcut: Element<'a, Message> = if hint.text.is_empty() {
                     nothing()
                 } else {
-                    container(words(hint.text.clone(), TextStyle::from_role(&scale::TYPE_SMALL), palette.text_3)).padding(Padding { left: scale::SPACE_6, ..Padding::ZERO }).boxed()
+                    container(line_of(hint.text.clone(), TextStyle::from_role(&scale::TYPE_SMALL), palette.text_3)).padding(Padding { left: scale::SPACE_6, ..Padding::ZERO }).boxed()
                 };
                 let chevron: Element<'a, Message> = if item.submenu.is_some() {
                     container(super::icon("chevron-right", scale::ICON_SM, if disabled { palette.text_disabled } else { palette.text_3 })).padding(Padding { left: scale::SPACE_3, ..Padding::ZERO }).boxed()
@@ -321,4 +324,51 @@ pub fn layer_over<'a, Message: Clone + 'a>(palette: &'static Palette, host: &'a 
 /// The rectangle the core uses for a measured widget.
 pub fn rect_of(bounds: Rectangle) -> Rect {
     rect(bounds)
+}
+
+/// A row's label or key: one line (`white-space: nowrap`), so a menu is as wide as its widest row and never wraps a label.
+fn line_of<'a, Message: 'a>(value: String, style: TextStyle, color: Rgba) -> Element<'a, Message> {
+    iced::widget::text(value).font(style.font).size(style.size).line_height(style.line()).color(Color::from(color)).wrapping(Wrapping::None).boxed()
+}
+
+/// One line's width in `style`, measured with the font system (what the text widget lays out).
+fn measured(value: &str, style: &TextStyle) -> f32 {
+    use iced::advanced::text::{Alignment as TextAlignment, Ellipsis, Paragraph as _, Shaping, Text};
+    iced::advanced::graphics::text::Paragraph::with_text(Text {
+        content: value,
+        bounds: Size::new(f32::INFINITY, f32::INFINITY),
+        size: style.pixels(),
+        line_height: style.line(),
+        font: style.font,
+        align_x: TextAlignment::Default,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: Shaping::Advanced,
+        wrapping: Wrapping::None,
+        ellipsis: Ellipsis::None,
+        hint_factor: None,
+    })
+    .min_width()
+}
+
+/// The widest a menu's rows may be (`.ui-menu`: `max-inline-size: 340px` over its 1 px border and 6 px of padding).
+const MOST: f32 = 340.0 - 14.0;
+
+/// The width the rows of `open` share: `min-inline-size: 240px` over the menu's 1 px border and 6 px of padding, or the widest
+/// row (`width: max-content`): the lead column, the label, the key behind a 24 px gap, the submenu's chevron behind a 12 px
+/// gap, three 10 px gaps and a 10 px edge on each side.
+fn share(open: &OpenMenu) -> f32 {
+    let (ui, small) = (TextStyle::from_role(&scale::TYPE_UI), TextStyle::from_role(&scale::TYPE_SMALL));
+    let widest = open
+        .entries()
+        .iter()
+        .filter_map(|entry| if let Entry::Item(item) = entry { Some(item) } else { None })
+        .enumerate()
+        .map(|(index, item)| {
+            let hint = &open.hint(index).text;
+            let key = if hint.is_empty() { 0.0 } else { scale::SPACE_6 + measured(hint, &small) };
+            let chevron = if item.submenu.is_some() { scale::SPACE_3 + scale::ICON_SM } else { 0.0 };
+            2.0 * scale::SPACE_2_5 + scale::ICON_MD + 3.0 * scale::SPACE_2_5 + measured(&item.label, &ui) + key + chevron
+        })
+        .fold(0.0_f32, f32::max);
+    widest.clamp(240.0 - 14.0, MOST)
 }

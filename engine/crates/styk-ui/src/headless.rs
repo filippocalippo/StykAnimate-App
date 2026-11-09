@@ -40,12 +40,12 @@ pub async fn screenshot(theme: Theme, size: (u32, u32), scale: f32, sheet: Optio
             (Some(dock), Some(model)) => {
                 let params = crate::dock::Params { dock, theme, presentation: &presentation, top: shell.layout().height };
                 let docked = crate::dock::window(&params, Some(crate::inspector::View::model(model, &presentation, theme)), None);
-                let band = crate::shell::window(crate::shell::Params { shell, theme, ready, presentation: &presentation, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed());
+                let band = crate::shell::window(crate::shell::Params { shell, theme, ready, presentation: &presentation, mark_open: false, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, iced::widget::space().width(iced::Length::Fill).height(iced::Length::Fill).boxed());
                 iced::widget::stack![docked.map(|_| ()), band.map(|_| ())].boxed()
             }
             _ => crate::loading(theme),
         },
-        (None, Some(shell)) => crate::shell::window(crate::shell::Params { shell, theme, ready, presentation: &presentation, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, crate::loading(theme)).map(|_| ()).boxed(),
+        (None, Some(shell)) => crate::shell::window(crate::shell::Params { shell, theme, ready, presentation: &presentation, mark_open: false, maximize: styk_core::services::shell::chrome::MaxButtonState::Idle }, crate::loading(theme)).map(|_| ()).boxed(),
         (None, None) => crate::view(theme, ready),
     };
     let mut interface: UserInterface<'_, (), iced::Theme, iced::Renderer> = UserInterface::build(view, bounds, Cache::default(), &mut renderer);
