@@ -423,6 +423,7 @@ fn a_restyled_instance_waits_for_its_resolution_from_the_facts_lane() {
     testing::call(&mut core, "select", "[1,0]").unwrap();
     let id = open(&mut core, ColorTarget::Segment);
     core.dispatch(Command::Inspector(Event::Paint(PaintEvent::Commit { request: id, paint: gradient() })));
+    testing::settle_session(&mut core).unwrap();
     testing::publish(&mut core).unwrap();
     core.refresh();
     assert!(core.inspector().pending() || core.inspector().shown().subject.is_some(), "never built before the lane's facts for this state");
@@ -793,4 +794,54 @@ fn a_replaced_facts_request_stops_and_its_results_are_retired_on_the_lane() {
     core.refresh();
     assert_eq!(core.facts().unwrap().retiring(), 0, "replaced facts went to the lane to be dropped");
     drop(core);
+}
+
+#[test]
+fn a_picker_cannot_retarget_a_replaced_handle_after_undo() {
+    {
+        let target = ColorTarget::Segment;
+        let mut core = core_with(STARTUP);
+        testing::call(&mut core, "select", "[1,1]").unwrap();
+        let mut figure = core.documents.active().unwrap().records().unwrap().get("figure_types").unwrap().item(0).unwrap();
+        let type_id = figure.get("figure_type_id").unwrap().clone();
+        let segments = figure.make_obj().unwrap().get_mut("segments").unwrap().make_arr().unwrap();
+        assert_eq!(segments[1].get("segment_id").and_then(Value::as_f64), Some(2.0));
+        segments[1].make_obj().unwrap().set("segment_id", Value::Num(500.0));
+        let args = json::to_string(&Value::array(vec![type_id, figure]));
+        testing::call(&mut core, "replaceFigureDefinition", &args).unwrap();
+        testing::call(&mut core, "select", "[1,1]").unwrap();
+        let request = open(&mut core, target);
+        core.dispatch(Command::Run(CommandId::Undo));
+        testing::settle_facts(&mut core).unwrap();
+        let before = records(&core);
+        let undo = testing::undo_depth(&core);
+        commit(&mut core, request, PaintSpec::solid([1, 2, 3], 1.0));
+        assert!(core.inspector().picker().unwrap().error.is_some());
+        same(&records(&core), &before, "a stale segment picker changes no replacement handle");
+        assert_eq!(testing::undo_depth(&core), undo);
+    }
+}
+
+#[test]
+fn queued_paint_releases_keep_order_history_and_the_picker_identity() {
+    let (spawner, gate) = Gated::new();
+    let mut core = testing::core_with_document(STARTUP, "Paint.styk", spawner).unwrap();
+    testing::call(&mut core, "select", "[1,1]").unwrap();
+    let request = open(&mut core, ColorTarget::Segment);
+    let before = testing::undo_depth(&core);
+    for rgb in [[255, 0, 0], [0, 255, 0], [0, 0, 255]] {
+        core.dispatch(Command::Inspector(Event::Paint(PaintEvent::Commit { request, paint: PaintSpec::solid(rgb, 1.0) })));
+    }
+    assert!(core.inspector().painting());
+    release(&gate);
+    testing::settle_facts(&mut core).unwrap();
+    assert!(core.inspector().picker().unwrap().error.is_none());
+    assert_eq!(testing::undo_depth(&core), before + 3);
+    let after = records(&core);
+    core.dispatch(Command::Run(CommandId::Undo));
+    testing::settle_facts(&mut core).unwrap();
+    assert_ne!(records(&core), after);
+    core.dispatch(Command::Run(CommandId::Redo));
+    testing::settle_facts(&mut core).unwrap();
+    same(&records(&core), &after, "ordered paint redo");
 }

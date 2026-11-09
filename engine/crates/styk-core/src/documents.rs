@@ -192,6 +192,8 @@ impl Document {
     pub fn frame_records_ready(&self) -> Option<Value> { self.prepared.session.get().ok()?.frame_records_ready() }
     /// The typed document, when the session holds views of it as it is now.
     pub fn with_document_ready<T>(&self, read: impl FnOnce(&TypedDocument) -> T) -> Option<T> { self.prepared.session.get().ok()?.with_document_ready(read) }
+    pub fn figure_ready(&self, id: u32) -> Option<std::sync::Arc<styk_eval::doc::Figure>> { self.prepared.session.get().ok()?.figure_ready(id) }
+
     /// `animationValue(target, property)` at the playhead, when the frame on show and the views are ready.
     pub fn animation_value_ready(&self, target: &Value, property: &str) -> Option<Result<Option<Value>, EditError>> { self.prepared.session.get().ok()?.animation_value_ready(target, property) }
     /// Takes the views and frame a worker made of revision `revision` at `tick`; a document that changed since keeps

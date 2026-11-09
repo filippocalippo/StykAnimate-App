@@ -33,7 +33,15 @@ pub(crate) struct Inputs<'a> {
 /// A selected figure as the facts lane's evaluation drew it for exactly this state, its style overlay resolved there
 /// (`resolveInstanceFigure`); the definition until those facts land (the panel's controls are pending meanwhile).
 fn instance_figure(document: &Document, object: &Value, shown: &super::Shown) -> Option<Arc<Figure>> {
-    facts::uid_of(object).and_then(|uid| shown.figures.get(&uid).cloned()).or_else(|| facts::figure_of(document, object))
+    let definition = facts::figure_of(document, object)?;
+    let resolved = facts::uid_of(object).and_then(|uid| shown.figures.get(&uid)).filter(|figure| {
+        let base = figure.base.as_ref().unwrap_or(figure);
+        Arc::ptr_eq(base, &definition) && (!shown.awaiting || shown.subject.as_ref().is_some_and(|subject| {
+            let handle = usize::try_from(facts::selection(document).joint).ok().and_then(|index| definition.segments.get(index)).map(|segment| segment.id);
+            facts::same_appearance(&subject.object, object, handle)
+        }))
+    });
+    resolved.cloned().or(Some(definition))
 }
 
 const STEP_DOWN: &str = "step-down";
@@ -910,7 +918,9 @@ fn joint_context(document: &Document, records: &Value, figure: &Figure, object: 
     let opacity_value = override_of("opacity").map_or(segment.alpha * 100.0, |opacity| opacity * 100.0);
     let alpha = number(PropertyKey::SegmentOpacity, msg(if secondary { "inspectorView.primaryOpacity" } else { "inspectorView.opacity" }), opacity_value, "%")
         .range(0.0, 100.0)
-        .described(msg("inspectorView.primaryColorOpacity"));
+        .described(msg("inspectorView.primaryColorOpacity"))
+        .pending(inputs.shown.awaiting && !inputs.shown.subject.as_ref().is_some_and(|subject| facts::same_appearance(&subject.object, object, Some(segment.id)))
+            && override_of("opacity").is_none() && style.as_ref().is_some_and(|style| style.get("paint").is_some()));
     let shapes = [
         ("line", "inspectorView.roundLine"),
         ("squareLine", "inspectorView.squareLine"),
@@ -1167,5 +1177,27 @@ pub(crate) fn pending(model: &Inspector) -> Inspector {
         }
         disable(&mut section.rows);
     }
+    model
+}
+
+/// Only instance-derived appearance waits for resolution. Pose, layer and project values
+/// come directly from the authoritative record and keep their value and enabled state.
+pub(crate) fn pending_derived(model: &Inspector) -> Inspector {
+    fn rows(items: &mut [Row]) {
+        for row in items {
+            match row {
+                Row::Grid { rows: inner, .. } => rows(inner),
+                Row::Group { head, rows: inner, .. } => {
+                    if let Some(swatch) = &mut head.swatch { swatch.disabled = true; }
+                    rows(inner);
+                }
+                Row::Swatches { items, .. } => items.iter_mut().for_each(|item| item.disabled = true),
+                Row::Color(color) if color.target != ColorTarget::Background => color.disabled = true,
+                _ => {}
+            }
+        }
+    }
+    let mut model = model.clone();
+    for section in &mut model.sections { rows(&mut section.rows); }
     model
 }

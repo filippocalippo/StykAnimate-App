@@ -88,7 +88,7 @@ pub(crate) fn selected_objects(document: &Document, frame: &Value) -> Vec<Value>
 /// never a conversion on the interface thread).
 pub(crate) fn figure_of(document: &Document, object: &Value) -> Option<Arc<Figure>> {
     let id = object.get("figure_type_id").and_then(Value::as_f64)? as u32;
-    document.with_document_ready(|typed| typed.figure(id).cloned()).flatten()
+    document.figure_ready(id)
 }
 
 /// The selected figure's definition and pose, for a gesture: it runs inside a dispatch, where the session's calls
@@ -182,4 +182,23 @@ pub(crate) fn camera(frame: &Value) -> [f64; 4] {
 /// `#rrggbb` of three bytes, as the Inspector's `hex`.
 pub(crate) fn hex(rgb: [u8; 3]) -> String {
     format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
+}
+
+pub(crate) fn same_optional(a: Option<&Value>, b: Option<&Value>) -> bool {
+    match (a, b) { (Some(a), Some(b)) => a.same_node(b), (None, None) => true, _ => false }
+}
+
+/// A joint's paint does not depend on its width or stacking order. Inspect only that
+/// handle's paint operands; a figure/palette still requires the whole style identity.
+pub(super) fn same_appearance(previous: &Value, current: &Value, handle: Option<u32>) -> bool {
+    if !same_optional(previous.path(&["_styk", "colorMode"]), current.path(&["_styk", "colorMode"]))
+        || !same_optional(previous.path(&["_stykStyle", "colorMode"]), current.path(&["_stykStyle", "colorMode"]))
+        || !same_optional(previous.get("color_override_raw"), current.get("color_override_raw")) { return false; }
+    if same_optional(previous.get("_stykStyle"), current.get("_stykStyle")) { return true; }
+    let Some(handle) = handle else { return false; };
+    let handle = handle.to_string();
+    let before = previous.path(&["_stykStyle", "segments", &handle]);
+    let after = current.path(&["_stykStyle", "segments", &handle]);
+    ["paint", "color", "opacity", "gradientColor", "gradientOpacity"].iter()
+        .all(|key| same_optional(before.and_then(|value| value.get(key)), after.and_then(|value| value.get(key))))
 }

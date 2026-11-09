@@ -653,6 +653,11 @@ impl Editor {
 
     /// `updateBuilderSegmentStyle(patch, {branch})`: the selected segment's (or branch's) style.
     fn update_builder_segment_style(&mut self, patch: Option<&Value>, options: Option<&Value>) -> Result<Value, EditError> {
+        self.update_builder_segment_style_checked(patch, options, &mut || Ok(()))
+    }
+
+    pub(crate) fn update_builder_segment_style_checked(&mut self, patch: Option<&Value>, options: Option<&Value>, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
+        check()?;
         let Some(selected) = self.builder_selection()? else { return Ok(Value::Bool(false)) };
         let whole = match options {
             None => false,
@@ -711,7 +716,7 @@ impl Editor {
                 operation.set("targets", Value::object(targets_value));
                 let mut range = Obj::new();
                 range.set("uids", Value::array(vec![uid.clone()]));
-                let result = self.edit_figure_colors(&Value::object(operation), &Value::object(range))?;
+                let result = self.edit_figure_colors_checked(&Value::object(operation), &Value::object(range), check)?;
                 return Ok(Value::Bool(result.get("changedFrames").and_then(Value::as_f64).is_some_and(|n| n > 0.0)));
             }
         }

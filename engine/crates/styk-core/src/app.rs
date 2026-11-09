@@ -196,11 +196,14 @@ impl Core {
         }
     }
     pub fn new(documents: Documents) -> Core {
-        Core { documents, ..Core::default() }
+        let mut core = Core::default();
+        core.documents = documents;
+        core
     }
 
     /// The derived-facts worker. Without one, a fact that needs geometry stays pending.
     pub fn set_facts(&mut self, facts: Facts) {
+        if let Some(old) = &mut self.facts { self.inspector.retire_final(old); }
         self.facts = Some(facts);
     }
 
@@ -496,6 +499,11 @@ impl Core {
             // The layer move's Cancel is a terminal action: it reaches the move while the session is out on the worker
             // (an ordinary edit waits for it instead).
             Command::Inspector(event @ crate::inspector::Event::CancelLayerMove) => {
+                self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event)
+            }
+            // Releases of the already-open picker join its ordered queue while its session
+            // is on the worker. The quit fence above still rejects all edits.
+            Command::Inspector(event @ crate::inspector::Event::Paint(_)) if self.inspector.painting() => {
                 self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event)
             }
             Command::Inspector(event) => {
@@ -929,6 +937,13 @@ impl Core {
             crate::shortcuts::Press::Consumed => Some(Vec::new()),
             _ => None,
         }
+    }
+}
+
+#[cfg(feature = "engine")]
+impl Drop for Core {
+    fn drop(&mut self) {
+        if let Some(facts) = &mut self.facts { self.inspector.retire_final(facts); }
     }
 }
 

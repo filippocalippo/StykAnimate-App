@@ -175,6 +175,7 @@ fn a_joint_shows_joint_style_and_its_figure_s_layer() {
 #[test]
 fn several_figures_show_their_bounds_align_and_mixed_values() {
     let mut core = core_with(SHEET);
+    let gate = testing::hold_facts(&mut core).unwrap();
     testing::call_unsettled(&mut core, "selectMany", "[[1,2,3]]").unwrap();
     let figures = model(&core);
     assert_eq!(figures.kind, Kind::Figures);
@@ -183,6 +184,8 @@ fn several_figures_show_their_bounds_align_and_mixed_values() {
     assert!(figures.section("connection").is_some(), "a joined figure among them offers Combine");
     // The bounds are made on the worker: pending until it has run, never computed by the refresh itself.
     assert!(figures.number(PropertyKey::GroupX).unwrap().pending, "no geometry on the interface thread");
+    gate.entered();
+    gate.release();
     testing::settle_facts(&mut core).unwrap();
     // Today's app on the same document and selection: the union of `boundsOf` over the three figures
     // (`window.styk.boundsOf`, headless Chromium, captured with the screen references).
@@ -511,8 +514,14 @@ fn the_model_is_rebuilt_only_when_its_inputs_change_and_held_during_a_gesture() 
     field(&mut core, PropertyKey::RootX, FieldEvent::Scrub(Scrub::Delta { dx: 10.0, keys: plain() }));
     field(&mut core, PropertyKey::RootX, FieldEvent::Scrub(Scrub::Delta { dx: 10.0, keys: plain() }));
     assert_eq!(core.inspector().builds, builds, "held while the gesture is open");
-    field(&mut core, PropertyKey::RootX, FieldEvent::Scrub(Scrub::End));
-    assert_eq!(core.inspector().builds, builds + 1, "rebuilt once it ends");
+    core.dispatch(Command::Inspector(Event::Field(PropertyKey::RootX, FieldEvent::Scrub(Scrub::End))));
+    assert_eq!(core.inspector().builds, builds + 1, "the committed value is published before derived facts land");
+    let committed = model(&core);
+    testing::settle_facts(&mut core).unwrap();
+    assert_eq!(model(&core), committed, "derived facts preserve the authoritative committed model");
+    let builds = core.inspector().builds;
+    core.refresh();
+    assert_eq!(core.inspector().builds, builds, "unchanged inputs still build nothing");
 }
 
 #[test]
@@ -587,4 +596,79 @@ fn join_follows_the_selection_and_the_library_footer_shows_under_one() {
     assert_eq!(join.label.key, "inspectorView.join");
     assert!(!join.disabled, "one figure selected: Join… is offered");
     assert!(figure.library, "a selection shows the Library's footer");
+}
+
+#[test]
+fn bounds_are_prepared_on_the_facts_thread() {
+    let mut core = core_with(SHEET);
+    let interface = std::thread::current().id();
+    let gate = testing::hold_facts(&mut core).unwrap();
+    testing::call_unsettled(&mut core, "selectMany", "[[1,2,3]]").unwrap();
+    assert_ne!(gate.entered(), interface);
+    assert!(model(&core).number(PropertyKey::GroupWidth).unwrap().pending);
+    gate.release();
+    testing::settle_facts(&mut core).unwrap();
+    assert!(value(&core, PropertyKey::GroupWidth) > 0.0);
+}
+
+#[test]
+fn a_committed_number_and_unaffected_rows_stay_authoritative_while_facts_wait() {
+    let mut core = core_with(STARTUP);
+    let gate = testing::hold_facts(&mut core).unwrap();
+    core.dispatch(Command::Inspector(Event::Field(PropertyKey::RootX, FieldEvent::Scrub(Scrub::Begin))));
+    core.dispatch(Command::Inspector(Event::Field(PropertyKey::RootX, FieldEvent::Scrub(Scrub::Delta { dx: 4.0, keys: plain() }))));
+    core.dispatch(Command::Inspector(Event::Field(PropertyKey::RootX, FieldEvent::Scrub(Scrub::End))));
+    core.refresh();
+    let shown = model(&core);
+    for (key, expected) in [(PropertyKey::RootX, 484.0), (PropertyKey::RootY, 280.0), (PropertyKey::Scale, 100.0), (PropertyKey::FigureOpacity, 100.0)] {
+        let row = shown.number(key).unwrap();
+        assert_eq!(row.value, expected, "{key:?}");
+        assert!(!row.pending && !row.disabled, "{key:?} remains editable: {row:?}");
+    }
+    gate.release();
+    testing::settle_facts(&mut core).unwrap();
+    assert_eq!(model(&core).number(PropertyKey::RootX).unwrap().value, 484.0);
+}
+
+#[test]
+fn clearing_selection_with_ready_records_withdraws_older_facts() {
+    let mut core = core_with(SHEET);
+    let gate = testing::hold_facts(&mut core).unwrap();
+    testing::call_unsettled(&mut core, "selectMany", "[[1,2,3]]").unwrap();
+    gate.entered();
+    testing::call_unsettled(&mut core, "selectMany", "[[]]").unwrap();
+    gate.release();
+    testing::settle_facts(&mut core).unwrap();
+    assert!(core.facts().unwrap().cancelled > 0);
+    assert!(!core.facts().unwrap().in_flight());
+}
+
+#[test]
+fn a_committed_segment_value_stays_enabled_while_appearance_facts_wait() {
+    let mut core = core_with(STARTUP);
+    session(&mut core, "select", "[1,1]");
+    let gate = testing::hold_facts(&mut core).unwrap();
+    core.dispatch(Command::Inspector(Event::Field(PropertyKey::Thickness, FieldEvent::Scrub(Scrub::Begin))));
+    core.dispatch(Command::Inspector(Event::Field(PropertyKey::Thickness, FieldEvent::Scrub(Scrub::Delta { dx: 4.0, keys: plain() }))));
+    core.dispatch(Command::Inspector(Event::Field(PropertyKey::Thickness, FieldEvent::Scrub(Scrub::End))));
+    core.refresh();
+    for key in [PropertyKey::Thickness, PropertyKey::JointLength, PropertyKey::JointAngle] {
+        let shown = model(&core);
+        let row = shown.number(key).unwrap();
+        assert!(!row.disabled && !row.pending, "{key:?}: {row:?}");
+    }
+    assert_eq!(value(&core, PropertyKey::Thickness), 4.0);
+    fn colours(rows: &[Row]) {
+        for row in rows {
+            match row {
+                Row::Grid { rows, .. } | Row::Group { rows, .. } => colours(rows),
+                Row::Color(row) => assert!(!row.disabled, "an unchanged colour remains editable"),
+                _ => {}
+            }
+        }
+    }
+    for section in &model(&core).sections { colours(&section.rows); }
+    gate.release();
+    testing::settle_facts(&mut core).unwrap();
+    assert_eq!(value(&core, PropertyKey::Thickness), 4.0);
 }

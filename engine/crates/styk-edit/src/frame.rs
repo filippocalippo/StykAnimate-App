@@ -24,8 +24,12 @@ fn evaluate(records: &Records, tick: f64, clips: bool, editor_native: bool) -> R
 /// The frame on show at `tick` of `report`, from views made of it (`prepared`): exactly what the editor evaluates and
 /// caches for its playhead, made elsewhere (the facts lane, from a published generation).
 pub fn editor_frame(report: &Value, prepared: &Prepared, tick: f64) -> Result<Value, EditError> {
+    editor_frame_cancellable(report, prepared, tick, &|| false)
+}
+
+pub fn editor_frame_cancellable(report: &Value, prepared: &Prepared, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Value, EditError> {
     let sheet = report.path(&["_styk", "layerSheet"]).is_some();
-    evaluate(&Records::new(report, prepared)?, tick, true, !sheet)
+    evaluate(&Records::new_cancellable(report, prepared, cancelled)?, tick, true, !sheet)
 }
 
 /// What evaluation keeps between calls, for as long as the document does not change.
@@ -41,6 +45,7 @@ pub(crate) struct Cache {
     /// Only the latest successfully converted shown frame. Object nodes may be
     /// reused within this Prepared lineage; geometry is always built afresh.
     latest_typed: Option<Arc<EditFramePair>>,
+    committed_preview: Option<(Value, u64, Value)>,
 }
 
 struct EditFramePair {
@@ -140,6 +145,19 @@ impl Editor {
         cache.latest_typed = None;
     }
 
+    pub(crate) fn publish_property_preview(&self, frame: Option<Value>) {
+        self.eval.borrow_mut().committed_preview = frame.map(|frame| (self.report.clone(), self.tick.to_bits(), frame));
+    }
+
+    /// Figure definitions are independent of timeline edits. The old conversion is reusable
+    /// only when the immutable definition table is still exactly the session's table.
+    pub(crate) fn figure_ready(&self, id: u32) -> Option<Arc<styk_eval::doc::Figure>> {
+        let cache = self.eval.borrow();
+        let held = cache.report.as_ref()?;
+        if !held.get("figure_types").zip(self.report.get("figure_types")).is_some_and(|(a, b)| a.same_node(b)) { return None; }
+        cache.prepared.as_ref()?.doc.figure(id).cloned()
+    }
+
     /// The typed views the editor holds of `report` (the document as it is now), when it has made them.
     pub fn views(&self) -> Option<Arc<Prepared>> {
         let cache = self.eval.borrow();
@@ -220,6 +238,8 @@ impl Editor {
         if let Some(preview) = self.property_preview() {
             return Some(preview);
         }
+        if let Some((report, tick, frame)) = &self.eval.borrow().committed_preview
+            && report.same_node(&self.report) && *tick == self.tick.to_bits() { return Some(frame.clone()); }
         match (&self.authored, &self.retained) {
             (Some(edit), _) => Some(edit.frame.clone()),
             (None, Some(frame)) => Some(frame.clone()),

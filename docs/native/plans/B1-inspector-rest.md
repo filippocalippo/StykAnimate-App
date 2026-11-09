@@ -57,3 +57,48 @@ A message whose `request` is not the open picker's id changes nothing (a stale p
 commit after the selection, the playhead or the figure changed is refused with today's message
 (`errors.app.selectionChangedReopenThePalette` / `…TheColorPicker`); a segment one after the joint changed. The
 picker closes when another document becomes active.
+
+
+## Review follow-up: session and facts ownership
+
+Segment pickers capture the immutable definition, stable handle, selected UID/index and playhead.
+The exclusive session validates these operands before applying a release, and returns the next
+expected definition after its own commit. Undo or definition replacement cannot redirect an open picker.
+`updateBuilderSegmentStyle` and `replaceFigureColor` require the session worker; the native picker
+uses the guarded `@inspectorPaint` envelope over those same commands and transaction/history owners.
+Accepted releases stay ordered (one active job, at most 32 queued releases); excess admission is refused.
+
+Facts are keyed by document, lineage, revision, playhead and selection. A successful key is independent
+of publication receipts. Receipts permit retries only for unpublished misses. While the lane is busy,
+only the newest key/receipt waits; document handles are acquired on admission. Retirement has two
+interface-side slots and one bounded exchange batch. A blocked retirement prevents further heavy
+admission. Replaced panel payloads, including captured picker operands, go back to this lane; teardown
+hands over the remaining owners before the lane shuts down. A ready frame with no selection withdraws
+obsolete work even though it needs no replacement request.
+
+The same cancellation reaches record composition (including pose-key parsing and track binding), typed evaluation, bounds geometry/measurement and
+palette preparation. Palette target metadata reads the evaluated instances (including attached figures)
+instead of resolving their styles again. A committed property preview is a session-stamped read of the
+validated pose; unchanged definition views remain usable by identity. Ordinary numeric edits therefore
+publish their authoritative values immediately. Instance-derived paint and unavailable bounds can wait
+without blanking unrelated pose, layer or project controls.
+
+Remaining synchronous walks reserved for G2: `contexts::build` per rebuild and
+`figure_of_selection`/rotation reads per numeric gesture. The existing palette, draw-order and layer projections inside `contexts::build` still walk their inputs. Other existing Inspector routes still walk
+synchronously: `setFigureColor`, scene colour/background range edits, `updatePolygon`, definition-name
+edits (`updateFigureStyle`) and layer-name edits (`renameLayer`). This round moves the two reviewed
+paint routes; it does not silently reclassify the rest of the slice.
+
+Regression coverage for this follow-up:
+
+| Finding | Behavioral test |
+| --- | --- |
+| 1 | `a_picker_cannot_retarget_a_replaced_handle_after_undo` reproduces handle 500 reverting to handle 2; `queued_paint_releases_keep_order_history_and_the_picker_identity` advances the guard after accepted commits. |
+| 2 | `paint_range_walks_run_on_the_worker_and_cancellation_keeps_history_atomic` counts 64 frame plans off the interface thread and verifies cancellation, undo and redo. |
+| 3 | `record_evaluation_observes_cancellation_inside_composition`, `inspector_bounds_cancel_inside_measurement_and_keep_exact_uncancelled_values`, palette cancellation, and `clearing_selection_with_ready_records_withdraws_older_facts`. |
+| 4 | `shown_last_owner_retires_on_the_lane_after_ready_has_gone` holds reclamation after the ready owner has gone, then replaces the actual panel's Shown. |
+| 5 | `admission_keeps_only_one_lightweight_intent_while_reclamation_is_held` makes 9,999 superseding requests with the lane held and checks retained owners. |
+| 6 | `a_committed_number_and_unaffected_rows_stay_authoritative_while_facts_wait` and `a_committed_segment_value_stays_enabled_while_appearance_facts_wait` hold facts through commits; the latter checks unchanged colour controls too. |
+| 7 | `successful_keys_ignore_receipts_and_discard_a_same_key_retry` counts one snapshot despite receipt changes. |
+| 8 | `resolved_palettes_preserve_gradient_style_and_mesh_targets` compares the resolved route to the existing record owner, including fractional sampling. |
+| 9 | `several_figures_show_their_bounds_align_and_mixed_values` now gates its pending assertion; `bounds_are_prepared_on_the_facts_thread` checks the separate lane and completed geometry. |
