@@ -13,6 +13,8 @@ everything gets faster. The owner decided this on 2026-11-05.
 
 ## Handoff (keep current; read this first to resume)
 
+**PAUSED 2026-11-09 evening (owner decision): the native iced interface stops here; the app ships on Tauri 2 with today's web interface and engine (`perf/tauri-prompt.md`, branch `tauri` from `engine-rust`).** Nothing on `native-app` is deleted, rebased or merged. Paused work stays on its branches, committed: the timeline branch `t3/timeline-views-1` (aa985a06; its merge into this branch, f988477f, passed its pass but is kept unpushed on local branch `t3/timeline-merge-unpushed`), U1 `t3/u1-usability-blockers` (6f81ad8c: the stage painter no longer abandons paints on a newer view, pan and zoom now show about one picture per 144 Hz frame; the timeline never-blank fix on local `u1-trial-merge` 920d01f0), A1 `t3/stage-tools`, T3 `t3/timeline-part-3-views` (f2c52484), T5 `t3/timeline-part-5`, B2 `t3/native-vfx-panel`, B3 `t3/b3-views`, B3p `t3/palette-persistence` (1a0df920), L1 `t3/bfbb595e` and `t3/l1-views`, G1 `t3/skeleton-gate-tooling`. Engine-crate fixes made here are carried to `tauri`.
+
 **Updated 2026-11-09 (gate 2 first; owner test findings).** The Claude API rate limit stopped every Sonnet task on 2026-11-06 at about 19:20; T3 re-arms limited
 tasks and they resumed on 2026-11-07 12:37 (none had lost work: the spikes had only merged N0). Branch `native-app` from `engine-rust` `99c62189`, pushed. The main checkout is on
 `native-app`; merges into `engine-rust` happen in `wt/int-engine-rust` ([N3](decisions/0003-branches-and-integration.md)).
