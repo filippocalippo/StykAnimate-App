@@ -14,7 +14,7 @@ const SOURCE_BYTES: usize = 128 * 1024 * 1024;
 impl Editor {
     /// Plans a membership change against the document and publishes it. Nothing is planned on a document without
     /// a layer sheet (the app gives every document one).
-    fn publish_sheet_layers(&mut self, method: &str, uids: &[u32], target: &str, deleted: Option<&str>) -> Result<bool, EditError> {
+    fn publish_sheet_layers(&mut self, method: &str, uids: &[u32], target: &str, deleted: Option<&str>, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<bool, EditError> {
         if !self.sheet() {
             return Err(EditError::Unported(format!("{method} on a native timeline")));
         }
@@ -23,7 +23,7 @@ impl Editor {
         let request = Request { uids, target_layer: target, deleted_layer: deleted, next_frame_identity: self.next_frame_identity, max_source_bytes: SOURCE_BYTES, focus: self.focus_lock.as_ref() };
         let plan = {
             let mut cache = self.eval.borrow_mut();
-            sheet_layer_plan(&self.report, &prepared, &mut cache.loader, request, || Ok(()), |_| {}, || 0.0)?
+            sheet_layer_plan(&self.report, &prepared, &mut cache.loader, request, &mut *check, |_| {}, || 0.0)?
         };
         match plan {
             Some(plan) => self.publish_sheet_migration(plan),
@@ -33,6 +33,12 @@ impl Editor {
 
     /// `assignFiguresToLayer(uids, id)`: the figures belong to the layer from now on and keep every pose they had.
     pub(crate) fn assign_figures_to_layer(&mut self, uids: &Value, id: &Value) -> Result<bool, EditError> {
+        self.assign_figures_to_layer_checked(uids, id, &mut || Ok(()))
+    }
+
+    /// [`Editor::assign_figures_to_layer`] on a worker: `check` is asked between the planner's steps and its refusal
+    /// (a cancel) ends the move with nothing changed.
+    pub(crate) fn assign_figures_to_layer_checked(&mut self, uids: &Value, id: &Value, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<bool, EditError> {
         let mut figures = Vec::new();
         for uid in uids.elements().map(|e| e.iter().collect::<Vec<_>>()).unwrap_or_default() {
             match uid.as_f64() {
@@ -40,7 +46,7 @@ impl Editor {
                 _ => return Err(EditError::Invalid("errors.editorLayerAsync.chooseFiguresPresentInThisAnimation".into())),
             }
         }
-        self.publish_sheet_layers("assignFiguresToLayer", &figures, id.as_str().unwrap_or(""), None)
+        self.publish_sheet_layers("assignFiguresToLayer", &figures, id.as_str().unwrap_or(""), None, check)
     }
 
     /// `deleteLayer(id)`: the layer's figures move to the first other layer, with their poses, and the layer goes.
@@ -48,6 +54,6 @@ impl Editor {
         if options.get("targetLayerId").is_some_and(|target| !target.is_null()) {
             return Err(EditError::Unported("deleting a layer into a layer of your choice".into()));
         }
-        self.publish_sheet_layers("deleteLayer", &[], "", Some(id.as_str().unwrap_or("")))
+        self.publish_sheet_layers("deleteLayer", &[], "", Some(id.as_str().unwrap_or("")), &mut || Ok(()))
     }
 }

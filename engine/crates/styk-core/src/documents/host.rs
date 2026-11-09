@@ -85,7 +85,8 @@ pub enum Effect {
     None, OpenDialog, Started(JobId), Cancelled(JobId),
     Opened(DocumentId), Closed(DocumentId), ClosedSaved(Vec<DocumentId>), Renamed(DocumentId), SavedAll, QuitReady,
     Published { document: DocumentId, revision: u64, generation: u64 },
-    Called { document: DocumentId, answer: CallAnswer },
+    /// A worker-session command answered; `job` is its `Started` identity.
+    Called { document: DocumentId, job: JobId, answer: CallAnswer },
     Saved { document: DocumentId, current: bool, repairs: usize, warning: Option<String> },
     SaveDialog { prompt: PromptId, document: DocumentId, name: String },
     ConfirmClose { prompt: PromptId, document: DocumentId, name: String, recovery_error: Option<String> },
@@ -528,7 +529,7 @@ impl Documents {
                         if pending.cancel.is_cancelled() {
                             if let Some(host) = self.host.as_mut() { host.retire(answer); }
                             Effect::Cancelled(id)
-                        } else { match answer { Ok(answer) => Effect::Called { document: stamp.id, answer }, Err(error) => Effect::Failed { job: id, error: error.into() } } }
+                        } else { match answer { Ok(answer) => Effect::Called { document: stamp.id, job: id, answer }, Err(error) => Effect::Failed { job: id, error: error.into() } } }
                     } else { if let Some(host) = self.host.as_mut() { host.retire((session, answer)); } Effect::Stale(id) }
                 }
                 Err(error) => Effect::Failed { job: id, error },
