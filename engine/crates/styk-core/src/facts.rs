@@ -43,6 +43,25 @@ pub struct Ready {
     /// The frame on show at the key's tick and the views it was made from, for the session to adopt
     /// ([`crate::documents::Document::adopt_evaluation`]); `None` when the evaluation failed.
     pub evaluation: Option<(Arc<crate::engine::Prepared>, crate::engine::Value)>,
+    /// With one figure selected whose pose carries a style overlay (`_stykStyle`), its figure as that overlay resolves
+    /// it at the key's tick (`resolveInstanceFigure`): what the Properties panel shows of a restyled instance.
+    pub instance: Option<Arc<styk_eval::doc::Figure>>,
+}
+
+/// Whether a pose restyles its figure (`_stykStyle` or a segment colour mode): only then does its figure need
+/// resolving.
+pub fn restyled(object: &crate::engine::Value) -> bool {
+    object.get("_stykStyle").is_some_and(crate::engine::Value::truthy) || object.path(&["_styk", "colorMode"]).is_some_and(crate::engine::Value::truthy)
+}
+
+/// The selected figure of `frame` (the frame on show) as its pose's style overlay resolves it, by the evaluator's own
+/// resolution. Lane-only: it walks the whole figure.
+fn instance(prepared: &crate::engine::Prepared, frame: &crate::engine::Value, uid: u32) -> Option<Arc<styk_eval::doc::Figure>> {
+    let object = frame.get("objects")?.elements()?.iter().find(|object| object.get("unique_id").and_then(crate::engine::Value::as_f64) == Some(f64::from(uid)))?;
+    let id = object.get("figure_type_id").and_then(crate::engine::Value::as_f64)? as u32;
+    let figure = prepared.doc.figure(id)?.clone();
+    let style = styk_eval::style::parse(object.get("_stykStyle"), object.path(&["_styk", "colorMode"]))?;
+    Some(Arc::new(styk_eval::style::resolve(&figure, &style)))
 }
 
 /// What the lane answers: facts, or that the revision's generation is not published yet (K-doc publishes after the
@@ -78,7 +97,11 @@ fn make(request: Request) -> Answer {
             Some(union.map_or(b, |u| [u[0].min(b[0]), u[1].min(b[1]), u[2].max(b[2]), u[3].max(b[3])]))
         })
     };
-    Answer::Ready(Ready { key, bounds, evaluation })
+    let instance = match (&evaluation, key.uids.as_ref()) {
+        (Some((prepared, frame)), [uid]) => instance(prepared, frame, *uid),
+        _ => None,
+    };
+    Answer::Ready(Ready { key, bounds, evaluation, instance })
 }
 
 /// The interface's handle on the facts lane.
@@ -95,7 +118,7 @@ pub struct Facts {
 
 impl std::fmt::Debug for Ready {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Ready").field("key", &self.key).field("bounds", &self.bounds).field("evaluated", &self.evaluation.is_some()).finish()
+        f.debug_struct("Ready").field("key", &self.key).field("bounds", &self.bounds).field("evaluated", &self.evaluation.is_some()).field("instance", &self.instance.is_some()).finish()
     }
 }
 

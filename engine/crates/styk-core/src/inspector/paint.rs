@@ -16,6 +16,8 @@
 //! Colours are kept as numbers, not bytes, while a draft is edited: a sampled stop holds the interpolated colour until
 //! the paint is normalised, as today.
 
+use styk_doc::{Obj, Value};
+
 use crate::i18n::Msg;
 
 /// A paint's kind (`type`).
@@ -77,10 +79,9 @@ pub struct PaintSpec {
     pub stops: Vec<Stop>,
 }
 
-/// `Math.round`: halves round up, toward positive infinity.
+/// `Math.round`: halves round up, toward positive infinity (the document's own, `styk_doc::paint`).
 pub fn js_round(value: f64) -> f64 {
-    let floor = value.floor();
-    if value - floor >= 0.5 { floor + 1.0 } else { floor }
+    styk_doc::paint::js_round(value)
 }
 
 fn clamp01(value: f64) -> f64 {
@@ -89,10 +90,6 @@ fn clamp01(value: f64) -> f64 {
 
 fn invalid_value() -> Msg {
     Msg::new("errors.paint.invalidPaintValue")
-}
-
-fn finite(value: f64, min: f64, max: f64) -> Result<f64, Msg> {
-    if value.is_finite() && value >= min && value <= max { Ok(value) } else { Err(invalid_value()) }
 }
 
 impl PaintSpec {
@@ -106,26 +103,38 @@ impl PaintSpec {
     }
 
     /// `normalizePaint`: 1 stop for a solid, 2..32 for a gradient; finite offsets 0..1, colours 0..255 (rounded) and
-    /// opacities 0..1; the stops sorted by offset (stable, as `Array.prototype.sort`); an angle within ±36000.
+    /// opacities 0..1; the stops sorted by offset (stable, as `Array.prototype.sort`); an angle within ±36000. The
+    /// document's one normaliser (`styk_doc::paint::normalize_paint`) does it; this is its typed adapter.
     pub fn normalize(&self) -> Result<PaintSpec, Msg> {
-        let least = if self.kind == PaintType::Solid { 1 } else { 2 };
-        if self.stops.len() < least || self.stops.len() > 32 {
-            return Err(Msg::new("errors.paint.useBetween2And32GradientStops"));
-        }
-        let mut stops = self
+        PaintSpec::from_value(&self.to_value())
+    }
+
+    /// The paint as the session takes it (`{type, angle, stops: [{offset, color: [r, g, b], opacity}]}`).
+    pub fn to_value(&self) -> Value {
+        let stops = self
             .stops
             .iter()
             .map(|stop| {
-                let offset = finite(stop.offset, 0.0, 1.0)?;
-                let mut color = [0.0; 3];
-                for (out, channel) in color.iter_mut().zip(stop.color) {
-                    *out = js_round(finite(channel, 0.0, 255.0)?);
-                }
-                Ok(Stop { offset, color, opacity: finite(stop.opacity, 0.0, 1.0)? })
+                let mut item = Obj::new();
+                item.set("offset", Value::Num(stop.offset));
+                item.set("color", Value::array(stop.color.iter().map(|channel| Value::Num(*channel)).collect()));
+                item.set("opacity", Value::Num(stop.opacity));
+                Value::object(item)
             })
-            .collect::<Result<Vec<Stop>, Msg>>()?;
-        stops.sort_by(|a, b| a.offset.partial_cmp(&b.offset).unwrap_or(std::cmp::Ordering::Equal));
-        Ok(PaintSpec { kind: self.kind, angle: finite(self.angle, -36000.0, 36000.0)?, stops })
+            .collect();
+        let mut paint = Obj::new();
+        paint.set("type", Value::str(self.kind.id()));
+        paint.set("angle", Value::Num(self.angle));
+        paint.set("stops", Value::array(stops));
+        Value::object(paint)
+    }
+
+    /// A stored paint, normalised (`normalizePaint(value)`): refused with today's message when it is not one.
+    pub fn from_value(value: &Value) -> Result<PaintSpec, Msg> {
+        let paint = styk_doc::paint::normalize_paint(value).map_err(Msg::owned)?;
+        let kind = PaintType::from_id(&paint.kind).ok_or_else(|| Msg::new("errors.paint.invalidPaintType"))?;
+        let stops = paint.stops.iter().map(|stop| Stop { offset: stop.offset, color: stop.rgb(), opacity: stop.opacity }).collect();
+        Ok(PaintSpec { kind, angle: paint.angle, stops })
     }
 
     /// `samplePaint(p, t)`: the colour and opacity at `t`, interpolated linearly between the stops around it (a
@@ -369,38 +378,6 @@ mod document {
     }
 
     impl PaintSpec {
-        /// The paint as the session takes it (`{type, angle, stops: [{offset, color: [r, g, b], opacity}]}`).
-        pub fn to_value(&self) -> Value {
-            let stops = self
-                .stops
-                .iter()
-                .map(|stop| {
-                    let mut item = Obj::new();
-                    item.set("offset", Value::Num(stop.offset));
-                    item.set("color", Value::array(stop.color.iter().map(|channel| Value::Num(*channel)).collect()));
-                    item.set("opacity", Value::Num(stop.opacity));
-                    Value::object(item)
-                })
-                .collect();
-            let mut paint = Obj::new();
-            paint.set("type", Value::str(self.kind.id()));
-            paint.set("angle", Value::Num(self.angle));
-            paint.set("stops", Value::array(stops));
-            Value::object(paint)
-        }
-
-        /// A stored paint, normalised (`normalizePaint(value)`, read by the evaluator's own port): refused as today
-        /// when it is not one.
-        pub fn from_value(value: &Value) -> Result<PaintSpec, Msg> {
-            let paint = styk_eval::records::paint::normalize_paint(value).map_err(|error| match error {
-                styk_eval::records::Error::Invalid(key) => Msg::owned(key),
-                _ => super::invalid_value(),
-            })?;
-            let kind = PaintType::from_id(&paint.kind).ok_or_else(|| Msg::new("errors.paint.invalidPaintType"))?;
-            let stops = paint.stops.iter().map(|stop| Stop { offset: stop.offset, color: stop.rgb(), opacity: stop.opacity }).collect();
-            Ok(PaintSpec { kind, angle: paint.angle, stops })
-        }
-
         /// `backgroundPaint(bg)`: a background's own paint, or the paint its kind and colours describe (kind 3 linear,
         /// 4 radial, anything else solid; no background is opaque white).
         pub fn of_background(background: Option<&Value>) -> Result<PaintSpec, Msg> {

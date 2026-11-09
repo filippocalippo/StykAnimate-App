@@ -56,6 +56,8 @@ impl Session {
     pub fn requires_worker(&self, method: &str, args: &[Value]) -> bool {
         match method {
             "@timeline" => true,
+            // Today's `assignFiguresToLayerAsync`: the sheet planner samples the whole animation, with a Cancel.
+            "assignFiguresToLayer" => true,
             "bakeMovieclip" | "bakeMovieclipBegin" | "bakeMovieclipSample" | "bakeMovieclipPublish" | "bakeMovieclipCancel"
             | "restartMovieclip" | "removeMovieclipRestart" | "breakApartMovieclip"
             | "addMovieclipToNextKeyframes" | "placeMovieclip" | "splitMovieclip" => true,
@@ -219,6 +221,10 @@ impl super::WorkerSession {
                     return Ok(result);
                 }
                 snapshot_view_boundary(editor, &mut snapshot_active, method);
+                if method == "assignFiguresToLayer" {
+                    let arg = |at: usize| args.get(at).cloned().unwrap_or(Value::Null);
+                    return editor.assign_figures_to_layer_checked(&arg(0), &arg(1), &mut checked).map(Value::Bool);
+                }
                 if editor.sheet() || method == "bakeMovieclip" {
                     let clock = editor.clock.unwrap_or(|| 0.0);
                     let mut worker = crate::movieclip_planning::TimelineWorker { max_source_bytes: usize::MAX, check: &mut checked, progress: &mut |_| {}, clock };

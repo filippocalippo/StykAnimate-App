@@ -40,6 +40,34 @@ const cases = [
   ['background-range', NATIVE, editor => () => editor.setSceneColor(paintBackground({type: 'solid', angle: 0, stops: [{offset: 0, color: [9, 8, 7], opacity: 0.5}]}).color, {indices: range(editor, [0, 6])})],
   ['background-gradient', NATIVE, editor => () => editor.importSceneBackground({...paintBackground(gradient), name: 'linear gradient'}, {indices: undefined})],
   ['segment-paint', NATIVE, editor => { editor.select(1, 0); return () => editor.updateBuilderSegmentStyle({paint: gradient}, {branch: false}); }],
+  // The second colour switched on (`#segment-gradient-enabled`), on the two-tone segment 33.
+  ['second-colour', NATIVE, editor => { editor.select(1, 2); return () => editor.updateBuilderSegmentStyle({gradient: {color: '#ffffff'}}, {branch: false}); }],
+  // The second colour's own picker (`#segment-gradient-color`), once the segment has one.
+  ['segment-gradient', NATIVE, editor => {
+    editor.select(1, 2);
+    editor.updateBuilderSegmentStyle({gradient: {color: '#ffffff'}}, {branch: false});
+    return () => editor.updateBuilderSegmentStyle({gradient: {color: '#123456'}}, {branch: false});
+  }],
+  // One opening of a palette swatch's picker, two commits: both reach the targets captured when it opened.
+  ['palette-repeat', NATIVE, (editor, side) => {
+    editor.select(1, -1);
+    const entry = editor.figurePalette()[0];
+    side.from = entry.color;
+    return () => {
+      editor.replaceFigureColor(entry.color, [0, 128, 0], {targets: entry, indices: undefined});
+      editor.replaceFigureColor(entry.color, [0, 0, 255], {targets: entry, indices: undefined});
+    };
+  }],
+  // The figure starts the second chosen frame in another colour; the swatch's picker reaches both frames.
+  ['palette-range', NATIVE, (editor, side) => {
+    editor.select(1, -1);
+    editor.seek(6);
+    editor.setFigureColor('#ff0000', {opacity: 1});
+    editor.seek(0);
+    const entry = editor.figurePalette()[0];
+    side.from = entry.color;
+    return () => editor.replaceFigureColor(entry.color, [0, 128, 0], {targets: entry, indices: range(editor, [0, 6])});
+  }],
   ['layer', SHEET, editor => {
     editor.select(1, -1);
     return () => { const changed = editor.assignFiguresToLayer([1], 'layer-2'); if (changed) editor.setActiveLayer('layer-2'); return changed; };

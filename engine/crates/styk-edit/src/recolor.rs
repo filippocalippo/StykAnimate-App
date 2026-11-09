@@ -907,6 +907,15 @@ impl Editor {
     }
 }
 
+/// `editor.figurePalette()`'s row of `color` while the figure `uid` is selected without a joint
+/// (`attachedFigurePalette` over `objects`, the frame on show): what a palette swatch's picker captures when it
+/// opens and hands to every `replaceFigureColor` of that opening as its `targets`. `None` when no row has that colour.
+pub fn attached_palette_row(report: &Value, objects: &[Value], uid: u32, color: &str) -> Result<Option<Value>, EditError> {
+    let figures: Vec<Value> = report.get("figure_types").and_then(Value::elements).map(|e| e.iter().collect()).unwrap_or_default();
+    let version = num(report, "version").unwrap_or(f64::NAN);
+    Ok(attached_palette(version, &figures, objects, uid)?.into_iter().find(|row| row.color == color).map(|row| row_value(&row)))
+}
+
 /// A palette row as `attachedFigurePalette` returns it (`{color, segments, polygons, meshColors?, instances}`).
 fn row_value(row: &Row) -> Value {
     let targets_value = |targets: &Targets, extra: Option<(&str, &Value)>| {

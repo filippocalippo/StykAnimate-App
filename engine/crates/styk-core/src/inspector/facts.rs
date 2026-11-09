@@ -74,15 +74,6 @@ pub(crate) fn figure_of(document: &Document, object: &Value) -> Option<Arc<Figur
     document.with_document_ready(|typed| typed.figure(id).cloned()).flatten()
 }
 
-/// `resolveInstanceFigure(figure, object)`: the figure as this instance's style overlay (`_stykStyle`) shows it, by the
-/// evaluator's own resolution.
-pub(crate) fn instance_figure(figure: Arc<Figure>, object: &Value) -> Arc<Figure> {
-    match styk_eval::style::parse(object.get("_stykStyle"), object.path(&["_styk", "colorMode"])) {
-        Some(style) => Arc::new(styk_eval::style::resolve(&figure, &style)),
-        None => figure,
-    }
-}
-
 /// The selected figure's definition and pose, for a gesture: it runs inside a dispatch, where the session's calls
 /// evaluate anyway, so these reads may too.
 pub(crate) fn figure_of_selection(document: &Document) -> Option<(Arc<Figure>, Value)> {

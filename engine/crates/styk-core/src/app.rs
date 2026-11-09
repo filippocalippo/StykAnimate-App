@@ -140,7 +140,7 @@ impl Core {
     fn input_fenced(&self) -> bool { self.documents.edits_locked() || self.session_end_expired() }
     pub fn next_deadline(&self) -> Option<u64> {
         if self.input_fenced() { return self.overlay_deadline().into_iter().chain(self.settings_store.as_ref().and_then(|s| s.deadline())).min(); }
-        [self.overlay_deadline(), self.timeline.deadline(), self.settings_store.as_ref().and_then(|s| s.deadline()),
+        [self.overlay_deadline(), self.timeline.deadline(), self.inspector.deadline(), self.settings_store.as_ref().and_then(|s| s.deadline()),
             ((!self.command_queue.is_empty() || self.settings_mode_pending) && !self.activity().operation).then_some(self.now)].into_iter().flatten().min()
     }
     /// Shared barrier used by the document host before save, scope changes, close, quit and session end.
@@ -159,7 +159,24 @@ impl Core {
         use crate::documents::Effect as DocumentEffect;
         let effect = self.documents.poll()?;
         match effect {
-            DocumentEffect::Called { document: _, answer } => {
+            DocumentEffect::Called { job, answer, .. } if self.inspector.owns(job) => {
+                let result = self.session.take(answer);
+                let effects = self.inspector.layer_moved(&mut self.documents, &mut self.view, &mut self.session, job, crate::inspector::MoveOutcome::Called(result));
+                self.show_notices(&effects);
+                Some(DocumentEffect::None)
+            }
+            DocumentEffect::Failed { job, error } if self.inspector.owns(job) => {
+                let effects = self.inspector.layer_moved(&mut self.documents, &mut self.view, &mut self.session, job, crate::inspector::MoveOutcome::Failed(crate::inspector::host_refusal(&error)));
+                self.show_notices(&effects);
+                Some(DocumentEffect::None)
+            }
+            DocumentEffect::Cancelled(job) | DocumentEffect::Stale(job) if self.inspector.owns(job) => {
+                let outcome = if matches!(effect, DocumentEffect::Cancelled(_)) { crate::inspector::MoveOutcome::Cancelled } else { crate::inspector::MoveOutcome::Stale };
+                let effects = self.inspector.layer_moved(&mut self.documents, &mut self.view, &mut self.session, job, outcome);
+                self.show_notices(&effects);
+                Some(DocumentEffect::None)
+            }
+            DocumentEffect::Called { answer, .. } => {
                 let result = self.session.take(answer);
                 let stage = self.stage();
                 self.timeline.completed(&self.documents, stage.as_deref(), result.is_ok());
@@ -444,7 +461,12 @@ impl Core {
                 let stage = self.stage();
                 if self.timeline.finish(&mut self.documents, &mut self.session, stage.as_deref()).is_err() {
                     self.defer(Command::Inspector(event))
-                } else { self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event) }
+                } else {
+                    let effects = self.inspector.update(&mut self.documents, &mut self.view, &mut self.session, &self.presentation, event);
+                    // A layer move that began now is timed from now (its dialog shows after 150 ms).
+                    self.inspector.stamp(self.now);
+                    effects
+                }
             }
             Command::Run(id) => self.run(id),
             Command::Recovery(event) => self.recovery.event(event, &mut self.documents, &mut self.overlays, &mut self.focus),
@@ -472,6 +494,7 @@ impl Core {
     fn active_identity(&self) -> Option<(DocumentId, u64)> { self.documents.active().map(|d| (d.id(), d.lineage())) }
     fn wake(&mut self, now: u64) -> Vec<Effect> {
         self.now = now;
+        self.inspector.tick(now);
         let mut effects = self.refresh();
         if let Some(answer) = self.audio_open.as_ref().and_then(|worker| worker.take()) { self.audio_open = None; self.set_audio(answer); }
         if let Some(stage) = self.stage() { drop(stage.event(crate::stage::Event::Progress)); }

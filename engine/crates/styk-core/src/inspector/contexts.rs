@@ -218,8 +218,9 @@ pub(crate) fn build(document: &Document, frame: &Value, inputs: &Inputs<'_>) -> 
             Some(_) if count > 1 => figures(document, records, &frame, inputs, count),
             Some(figure) if spatial_origin(records, figure.id) => spatial_rig(&figure, &object),
             Some(figure) => {
-                // `inspectorDescriptor` shows the instance as its style overlay resolves it.
-                let figure = facts::instance_figure(figure, &object);
+                // `inspectorDescriptor` shows the instance as its style overlay resolves it (made on the facts lane).
+                // Refresh waits for the lane before it builds; a resolution for another figure shows nothing as current.
+                let Some(figure) = instance(inputs.shown, figure, &object) else { return pending(&scene(records, &frame)) };
                 let joint = facts::selection(document).joint;
                 match usize::try_from(joint).ok().and_then(|joint| figure.segments.get(joint)) {
                     Some(segment) => joint_context(document, records, &figure, &object, segment, inputs),
@@ -1031,6 +1032,15 @@ fn drawing(tool: &'static str) -> Inspector {
     }
 }
 
+/// The figure as its pose's style overlay resolves it: the definition when the pose restyles nothing, else the
+/// resolution the facts lane made for exactly this state (`None` until it lands).
+fn instance(shown: &super::Shown, figure: Arc<Figure>, object: &Value) -> Option<Arc<Figure>> {
+    if !crate::facts::restyled(object) {
+        return Some(figure);
+    }
+    shown.instance.clone().filter(|instance| instance.id == figure.id)
+}
+
 /// What a colour row's picker opens with (`installColorPickers`' resolver in `src/app.mjs`).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Picked {
@@ -1039,16 +1049,19 @@ pub(crate) struct Picked {
     pub alpha: bool,
     /// The palette colour a swatch replaces (`entry.color`).
     pub from: Option<String>,
+    /// The palette row it replaces (`targets: entry`): the segments and stops, the fills and the instances the colour
+    /// had when the picker opened, which every commit of this opening reaches.
+    pub targets: Option<Value>,
 }
 
 /// The paint a colour row's picker starts from, read as the row was built: the background's paint (its own colour
 /// override first), the figure's colour and opacity, the segment's displayed paint, a two-tone's secondary colour, a
 /// fill's colour and opacity, a palette colour. `shown` is the colour the row shows (the figure's, or several
 /// figures' shared one), as today's picker starts from the field's value. `None` when the row's target is gone.
-pub(crate) fn picker(document: &Document, frame: &Value, target: ColorTarget, shown: Option<[u8; 3]>) -> Option<Picked> {
+pub(crate) fn picker(document: &Document, frame: &Value, target: ColorTarget, shown: Option<[u8; 3]>, lane: &super::Shown) -> Option<Picked> {
     let records = facts::records(document);
     let version = num(records.get("version")).unwrap_or(0.0);
-    let solid = |rgb: [u8; 3], opacity: f64, alpha: bool| Picked { paint: Paint2::solid(rgb, opacity), gradients: false, alpha, from: None };
+    let solid = |rgb: [u8; 3], opacity: f64, alpha: bool| Picked { paint: Paint2::solid(rgb, opacity), gradients: false, alpha, from: None, targets: None };
     if target == ColorTarget::Background {
         let background_id = num(frame.get("background_id"));
         let background = records.get("backgrounds").and_then(Value::elements).and_then(|items| items.iter().find(|item| num(item.get("background_id")) == background_id));
@@ -1061,16 +1074,16 @@ pub(crate) fn picker(document: &Document, frame: &Value, target: ColorTarget, sh
             }
             None => Paint2::of_background(background.as_ref()),
         };
-        return paint.ok().map(|paint| Picked { paint, gradients: true, alpha: true, from: None });
+        return paint.ok().map(|paint| Picked { paint, gradients: true, alpha: true, from: None, targets: None });
     }
     let object = facts::selected_object(document, frame)?;
-    let figure = facts::instance_figure(facts::figure_of(document, &object)?, &object);
+    let figure = instance(lane, facts::figure_of(document, &object)?, &object)?;
     match target {
         ColorTarget::Background => None,
         ColorTarget::Figure => Some(solid(shown?, 1.0 - num(object.get("field28")).unwrap_or(0.0) / 255.0, true)),
         ColorTarget::Segment => {
             let segment = usize::try_from(facts::selection(document).joint).ok().and_then(|joint| figure.segments.get(joint))?;
-            Some(Picked { paint: displayed_segment_paint(version, &figure, &object, segment), gradients: true, alpha: true, from: None })
+            Some(Picked { paint: displayed_segment_paint(version, &figure, &object, segment), gradients: true, alpha: true, from: None, targets: None })
         }
         ColorTarget::SegmentGradient => {
             let segment = usize::try_from(facts::selection(document).joint).ok().and_then(|joint| figure.segments.get(joint))?;
@@ -1084,7 +1097,11 @@ pub(crate) fn picker(document: &Document, frame: &Value, target: ColorTarget, sh
         }
         ColorTarget::Palette(index) => {
             let (rgb, ..) = *palette(version, &figure, &object).get(index as usize)?;
-            Some(Picked { from: Some(facts::hex(rgb)), ..solid(rgb, 1.0, false) })
+            // `editor.figurePalette().find(entry => entry.color === swatch)`: the session's own row, captured now.
+            let uid = facts::selection(document).uid?;
+            let from = facts::hex(rgb);
+            let targets = styk_edit::attached_palette_row(records, &facts::frame_objects(frame), uid, &from).ok().flatten()?;
+            Some(Picked { from: Some(from), targets: Some(targets), ..solid(rgb, 1.0, false) })
         }
     }
 }

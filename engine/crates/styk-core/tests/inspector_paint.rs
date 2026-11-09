@@ -72,19 +72,59 @@ fn edit_together(core: &mut Core) {
     inspector(core, Event::Toggle(Toggle::ApplyRange, true));
 }
 
-/// What a case selects before its edit, as `tests/native-inspector-save-reference.test.mjs` does.
+/// Lets the documents host answer through the app's real adapter (`Core::poll_document`) until the panel's layer
+/// move has ended. A hang guard, not a timing bound.
+fn finish_move(core: &mut Core) {
+    for _ in 0..15_000 {
+        while core.poll_document().is_some() {}
+        core.refresh();
+        if core.inspector().layer_move().is_none() {
+            testing::settle_facts(core).unwrap();
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    panic!("the layer move did not end");
+}
+
+/// What a case selects and sets up before its edit, as `tests/native-inspector-save-reference.test.mjs` does.
 fn prepare(core: &mut Core, case: &str) {
     match case {
-        "figure-color" | "figure-opacity" | "figure-range" | "palette" | "polygon" | "layer" => testing::call(core, "select", "[1,-1]").unwrap(),
+        "figure-color" | "figure-opacity" | "figure-range" | "palette" | "palette-repeat" | "polygon" | "layer" => testing::call(core, "select", "[1,-1]").unwrap(),
         "segment-paint" => testing::call(core, "select", "[1,0]").unwrap(),
+        "second-colour" => testing::call(core, "select", "[1,2]").unwrap(),
+        "segment-gradient" => {
+            testing::call(core, "select", "[1,2]").unwrap();
+            testing::call(core, "updateBuilderSegmentStyle", r##"[{"gradient":{"color":"#ffffff"}},{"branch":false}]"##).unwrap();
+        }
+        "palette-range" => {
+            testing::call(core, "select", "[1,-1]").unwrap();
+            testing::call(core, "seek", "[6]").unwrap();
+            testing::call(core, "setFigureColor", r##"["#ff0000",{"opacity":1}]"##).unwrap();
+            testing::call(core, "seek", "[0]").unwrap();
+        }
         _ => {}
     }
+}
+
+/// The history entries a case's edit makes (a picker opened once and committed twice makes two).
+fn entries(case: &str) -> usize {
+    if case == "palette-repeat" { 2 } else { 1 }
+}
+
+/// The swatch of the palette colour `from` (`#rrggbb`).
+fn swatch_of(core: &Core, from: &str) -> ColorTarget {
+    let model = core.inspector().model().unwrap().clone();
+    model.sections.iter().flat_map(|section| section.rows.iter()).find_map(|row| match row {
+        Row::Swatches { items, .. } => items.iter().find(|item| format!("#{:02x}{:02x}{:02x}", item.rgb[0], item.rgb[1], item.rgb[2]) == from).map(|item| item.target),
+        _ => None,
+    }).expect("the swatch of today's first palette colour")
 }
 
 /// The case's edit on the native panel: the same edit as the oracle's, through the panel's events.
 fn apply(core: &mut Core, case: &str, side: &Value) {
     let solid = |rgb, opacity| PaintSpec::solid(rgb, opacity);
-    if matches!(case, "figure-range" | "background-range") {
+    if matches!(case, "figure-range" | "background-range" | "palette-range") {
         edit_together(core);
     }
     let shown = |core: &Core| core.inspector().picker().unwrap().paint.stops[0].rgb();
@@ -102,15 +142,21 @@ fn apply(core: &mut Core, case: &str, side: &Value) {
             let id = open(core, ColorTarget::Figure);
             commit(core, id, solid([0, 255, 0], 1.0));
         }
-        "palette" => {
+        "palette" | "palette-range" | "palette-repeat" => {
             let from = side.get("from").and_then(Value::as_str).unwrap().to_owned();
-            let model = core.inspector().model().unwrap().clone();
-            let swatch = model.sections.iter().flat_map(|section| section.rows.iter()).find_map(|row| match row {
-                Row::Swatches { items, .. } => items.iter().find(|item| format!("#{:02x}{:02x}{:02x}", item.rgb[0], item.rgb[1], item.rgb[2]) == from).cloned(),
-                _ => None,
-            });
-            let id = open(core, swatch.expect("the swatch of today's first palette colour").target);
+            let target = swatch_of(core, &from);
+            let id = open(core, target);
             commit(core, id, solid([0, 128, 0], 1.0));
+            if case == "palette-repeat" {
+                commit(core, id, solid([0, 0, 255], 1.0));
+            }
+        }
+        "second-colour" => {
+            inspector(core, Event::Toggle(Toggle::SecondaryColor, true));
+        }
+        "segment-gradient" => {
+            let id = open(core, ColorTarget::SegmentGradient);
+            commit(core, id, solid([0x12, 0x34, 0x56], 1.0));
         }
         "polygon" => {
             let id = open(core, ColorTarget::Polygon(0));
@@ -130,7 +176,8 @@ fn apply(core: &mut Core, case: &str, side: &Value) {
             commit(core, id, gradient());
         }
         "layer" => {
-            inspector(core, Event::Choose(Choice::FigureLayer, Arc::from("layer-2")));
+            core.dispatch(Command::Inspector(Event::Choose(Choice::FigureLayer, Arc::from("layer-2"))));
+            finish_move(core);
         }
         other => panic!("unknown case {other}"),
     }
@@ -139,7 +186,7 @@ fn apply(core: &mut Core, case: &str, side: &Value) {
     }
 }
 
-const CASES: [(&str, &[u8]); 10] = [
+const CASES: [(&str, &[u8]); 14] = [
     ("figure-color", NATIVE),
     ("figure-opacity", NATIVE),
     ("figure-range", NATIVE),
@@ -149,6 +196,10 @@ const CASES: [(&str, &[u8]); 10] = [
     ("background-range", NATIVE),
     ("background-gradient", NATIVE),
     ("segment-paint", NATIVE),
+    ("second-colour", NATIVE),
+    ("segment-gradient", NATIVE),
+    ("palette-repeat", NATIVE),
+    ("palette-range", NATIVE),
     ("layer", SHEET),
 ];
 
@@ -162,14 +213,18 @@ fn every_colour_row_and_the_layer_select_commit_one_entry_that_undoes_and_redoes
         let before = records(&core);
         let depth = testing::undo_depth(&core);
         apply(&mut core, case, &side);
-        assert_eq!(testing::undo_depth(&core), depth + 1, "{case}: one history entry");
+        assert_eq!(testing::undo_depth(&core), depth + entries(case), "{case}: one history entry per commit");
         let edited = records(&core);
         assert_ne!(edited, before, "{case}: the edit changed the document");
-        core.dispatch(Command::Run(CommandId::Undo));
-        testing::settle_facts(&mut core).unwrap();
+        for _ in 0..entries(case) {
+            core.dispatch(Command::Run(CommandId::Undo));
+            testing::settle_facts(&mut core).unwrap();
+        }
         same(&records(&core), &before, &format!("{case}: undo restores the document exactly"));
-        core.dispatch(Command::Run(CommandId::Redo));
-        testing::settle_facts(&mut core).unwrap();
+        for _ in 0..entries(case) {
+            core.dispatch(Command::Run(CommandId::Redo));
+            testing::settle_facts(&mut core).unwrap();
+        }
         // The active layer is not history (setActiveLayer, as today: the oracle's redo save matches): undo restores the
         // earlier one with the document and redo does not make the moved-to layer active again.
         let redone = records(&core);
@@ -295,11 +350,124 @@ fn the_picker_closes_when_another_document_becomes_active() {
 fn moving_figures_to_a_layer_makes_it_active_and_selects_its_track() {
     let mut core = core_with(SHEET);
     testing::call(&mut core, "select", "[1,-1]").unwrap();
-    inspector(&mut core, Event::Choose(Choice::FigureLayer, Arc::from("layer-2")));
+    core.dispatch(Command::Inspector(Event::Choose(Choice::FigureLayer, Arc::from("layer-2"))));
+    finish_move(&mut core);
     assert_eq!(testing::undo_depth(&core), 1, "one history entry");
     assert_eq!(core.view_state().layers(), &["layer-2"]);
     let records = core.documents.active().unwrap().records().unwrap().clone();
     assert_eq!(records.path(&["_styk", "layers", "activeId"]).and_then(Value::as_str), Some("layer-2"));
+}
+
+#[test]
+fn a_palette_picker_reaches_the_same_targets_on_every_commit() {
+    // Review finding 1: the second commit of one opening found no row of the old colour and changed nothing.
+    let mut core = core_with(NATIVE);
+    testing::call(&mut core, "select", "[1,-1]").unwrap();
+    let target = swatch_of(&core, "#2b2b2b");
+    let id = open(&mut core, target);
+    commit(&mut core, id, PaintSpec::solid([0, 128, 0], 1.0));
+    let green = records(&core);
+    commit(&mut core, id, PaintSpec::solid([0, 0, 255], 1.0));
+    assert!(core.inspector().picker().is_some_and(|picker| picker.error.is_none()));
+    assert_eq!(testing::undo_depth(&core), 2, "each commit is one entry");
+    assert_ne!(records(&core), green, "the second commit recolours what the first did");
+    assert!(records(&core).contains("[0,0,255]"), "the targets now show the second colour");
+}
+
+#[test]
+fn moving_figures_to_a_layer_runs_on_the_session_worker_with_a_timed_dialog() {
+    // Review finding 2: the move never runs on the interface thread; the synchronous seam refuses it.
+    let mut core = core_with(SHEET);
+    testing::call(&mut core, "select", "[1,-1]").unwrap();
+    let id = core.documents.active().unwrap().id();
+    let refused = core.documents.call(id, "assignFiguresToLayer", &[json::parse(b"[1]").unwrap(), Value::str("layer-2")], &Value::Null);
+    assert!(matches!(refused, Err(styk_core::documents::DocumentsError::AsyncRequired { .. })), "{refused:?}");
+    core.dispatch(Command::Wake { now: 1_000 });
+    core.dispatch(Command::Inspector(Event::Choose(Choice::FigureLayer, Arc::from("layer-2"))));
+    let moving = core.inspector().layer_move().expect("the move runs on the worker");
+    assert!(!moving.dialog);
+    assert_eq!(core.inspector().deadline(), Some(1_150), "the dialog is due 150 ms after the move began");
+    assert!(core.next_deadline().is_some_and(|due| due <= 1_150), "the core wakes for it");
+    core.dispatch(Command::Wake { now: 1_149 });
+    assert!(!core.inspector().layer_move().unwrap().dialog);
+    core.dispatch(Command::Wake { now: 1_150 });
+    assert!(core.inspector().layer_move().unwrap().dialog, "today's dialog shows after 150 ms");
+    finish_move(&mut core);
+    assert_eq!(testing::undo_depth(&core), 1);
+    assert_eq!(core.view_state().layers(), &["layer-2"]);
+}
+
+#[test]
+fn a_cancelled_layer_move_leaves_the_document_as_it_was() {
+    let mut core = core_with(SHEET);
+    testing::call(&mut core, "select", "[1,-1]").unwrap();
+    let before = records(&core);
+    core.dispatch(Command::Inspector(Event::Choose(Choice::FigureLayer, Arc::from("layer-2"))));
+    assert!(core.inspector().layer_move().is_some());
+    core.dispatch(Command::Inspector(Event::CancelLayerMove));
+    finish_move(&mut core);
+    // The worker may have committed before the cancel reached it; either way the outcome is whole.
+    if testing::undo_depth(&core) == 0 {
+        same(&records(&core), &before, "a cancelled move changes nothing");
+        assert_ne!(core.view_state().layers(), &["layer-2"]);
+    } else {
+        assert_eq!(testing::undo_depth(&core), 1);
+        assert_eq!(core.view_state().layers(), &["layer-2"]);
+    }
+}
+
+#[test]
+fn a_restyled_instance_waits_for_its_resolution_from_the_facts_lane() {
+    // Review finding 3: refresh never resolves a style overlay; the rows wait for the lane's, made for this state.
+    let mut core = core_with(NATIVE);
+    testing::call(&mut core, "select", "[1,0]").unwrap();
+    let id = open(&mut core, ColorTarget::Segment);
+    core.dispatch(Command::Inspector(Event::Paint(PaintEvent::Commit { request: id, paint: gradient() })));
+    testing::publish(&mut core).unwrap();
+    core.refresh();
+    assert!(core.inspector().pending() || core.inspector().shown().instance.is_some(), "never built from an unresolved restyled figure");
+    testing::settle_facts(&mut core).unwrap();
+    let shown = core.inspector().shown();
+    assert!(shown.restyled && shown.instance.is_some(), "restyled {}, resolved {}, selection {:?}", shown.restyled, shown.instance.is_some(), core.documents.active().unwrap().selection().map(|selection| (selection.uid, selection.uids.clone())));
+    let model = core.inspector().model().unwrap().clone();
+    assert!(matches!(model.color(ColorTarget::Segment).map(|row| &row.paint), Some(Paint::Gradient(_))), "the lane's resolution shows");
+}
+
+#[test]
+fn a_fill_group_heads_with_its_list_row() {
+    // Review finding 4: the core supplies the fill's list row; the view searches for nothing.
+    let mut core = core_with(NATIVE);
+    testing::call(&mut core, "select", "[1,-1]").unwrap();
+    inspector(&mut core, Event::Section { id: "colours", open: true });
+    let model = core.inspector().model().unwrap().clone();
+    let (head, rows) = model.section("colours").unwrap().rows.iter().find_map(|row| match row {
+        Row::Group { head, rows, .. } => Some((head.clone(), rows.clone())),
+        _ => None,
+    }).expect("a fill group");
+    assert_eq!(head.glyph, "polygon");
+    assert_eq!(head.swatch.as_ref().map(|swatch| swatch.target), Some(ColorTarget::Polygon(0)));
+    assert_eq!(head.actions.len(), 1, "its delete");
+    assert!(!rows.iter().any(|row| matches!(row, Row::Color(_))), "the colour is the head's chip, not a row");
+}
+
+#[test]
+fn a_pending_panel_disables_its_swatches_and_opens_no_picker() {
+    // Review finding 6: stale swatches can be neither pressed nor focused while facts are pending.
+    let mut core = core_with(NATIVE);
+    testing::call(&mut core, "select", "[1,-1]").unwrap();
+    inspector(&mut core, Event::Section { id: "colours", open: true });
+    testing::call_unsettled(&mut core, "seek", "[6]").unwrap();
+    assert!(core.inspector().pending(), "the frame on show is being made");
+    let model = core.inspector().model().unwrap().clone();
+    for row in &model.section("colours").unwrap().rows {
+        match row {
+            Row::Swatches { items, .. } => assert!(items.iter().all(|item| item.disabled)),
+            Row::Group { head, .. } => assert!(head.swatch.as_ref().is_some_and(|swatch| swatch.disabled) && head.actions.iter().all(|action| action.disabled)),
+            _ => {}
+        }
+    }
+    let effects = core.dispatch(Command::Inspector(Event::Color(ColorTarget::Palette(0))));
+    assert!(!effects.iter().any(|effect| matches!(effect, Effect::PickColor(_))) && core.inspector().picker().is_none());
 }
 
 /// Native saves after each edit, its undo and its redo equal today's byte for byte: run
@@ -336,8 +504,8 @@ fn saves_equal_today() {
             count += 1;
         }
     }
-    assert_eq!(count, 40);
-    println!("INSPECTOR_SAVE_BYTES: 40 exact comparisons passed");
+    assert_eq!(count, 56);
+    println!("INSPECTOR_SAVE_BYTES: 56 exact comparisons passed");
 }
 
 /// A core whose document saves through the documents host (`Request::Save`) into memory, as the app saves.
