@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-page-listening"
+description = "Enables the page_listening command without any pre-configured scope."
+commands.allow = ["page_listening"]
+
+[[permission]]
+identifier = "deny-page-listening"
+description = "Denies the page_listening command without any pre-configured scope."
+commands.deny = ["page_listening"]

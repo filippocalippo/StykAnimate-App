@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-startup-report"
+description = "Enables the startup_report command without any pre-configured scope."
+commands.allow = ["startup_report"]
+
+[[permission]]
+identifier = "deny-startup-report"
+description = "Denies the startup_report command without any pre-configured scope."
+commands.deny = ["startup_report"]

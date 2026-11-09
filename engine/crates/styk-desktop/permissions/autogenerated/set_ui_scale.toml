@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-ui-scale"
+description = "Enables the set_ui_scale command without any pre-configured scope."
+commands.allow = ["set_ui_scale"]
+
+[[permission]]
+identifier = "deny-set-ui-scale"
+description = "Denies the set_ui_scale command without any pre-configured scope."
+commands.deny = ["set_ui_scale"]

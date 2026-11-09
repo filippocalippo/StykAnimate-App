@@ -42,3 +42,4 @@ native/bin/darwin-*/
 # MSVC linker byproducts; only the DLL is used.
 native/bin/**/*.exp
 native/bin/**/*.lib
+engine/crates/styk-desktop/gen/

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-document-state"
+description = "Enables the document_state command without any pre-configured scope."
+commands.allow = ["document_state"]
+
+[[permission]]
+identifier = "deny-document-state"
+description = "Denies the document_state command without any pre-configured scope."
+commands.deny = ["document_state"]

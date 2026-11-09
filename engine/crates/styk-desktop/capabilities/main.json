@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The editor page: exactly the app's commands, and listening to its events. Each area adds its own commands in its section, nothing else.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+
+    "allow-window",
+    "allow-window-state",
+    "allow-document-state",
+    "allow-set-ui-scale",
+    "allow-new-window",
+    "allow-memory-bytes",
+    "allow-page-listening",
+    "allow-startup-report",
+    "allow-update-state",
+    "allow-update-check",
+    "allow-update-restart",
+    "allow-update-releases",
+    "allow-release-info",
+    "allow-release-history",
+    "allow-donate"
+  ]
+}
