@@ -98,3 +98,5 @@ chunk already has its context (fix rounds on its own diffs). Sonnet 5.5 stays th
 Sol stays the only reviewer with depth by risk. The machine is the ceiling (3 heavy jobs, a saturated 6-core CPU): the
 agent count stays about where it is, implementers batch their final heavy runs into one queued job, and V0 has priority
 in the queue.
+
+**Gate 2 first and real-window usability** (the owner, 2026-11-09 afternoon): the skeleton gate is finished completely before step 3 continues; running step-3 work finishes its round and waits. After the owner found the app unusable in a 3-second test (lag, freeze, flicker, no handles) that no check had caught, the gate gains real-window usability checks on a release build (frame-time budgets beside Electron, a freeze watchdog, no blank or "preparing" frames, handles by screenshot, a recorded manual-style pass), visible content is never blanked for pending work, and the owner gets a release build in `perf/try/` after each gate-relevant merge.
