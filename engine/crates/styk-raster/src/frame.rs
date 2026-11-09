@@ -50,6 +50,7 @@ pub struct Stats {
 }
 
 pub(crate) struct Frame<'a> {
+    pub cancelled: &'a dyn Fn() -> bool,
     pub list: &'a DrawList,
     pub images: &'a Images,
     pub crisp: bool,
@@ -121,7 +122,7 @@ impl<'a> Frame<'a> {
                 *run = (0, 0);
             }
         }
-        Frame { list, images, crisp, samples: if crisp { 1 } else { 4 }, layers, runs, glyphs, view, stats: Stats::default(), held: 0, paint_context }
+        Frame { cancelled: &|| false, list, images, crisp, samples: if crisp { 1 } else { 4 }, layers, runs, glyphs, view, stats: Stats::default(), held: 0, paint_context }
     }
 
     /// Draws the frame: group 0 into a target of the view's size cleared to `clear`.
@@ -162,6 +163,7 @@ impl<'a> Frame<'a> {
         };
         let mut i = start + if g == 0 && matches!(self.paint_context, styk_render::paint::PaintContext::CanvasForeground { .. }) { background.min(end-start) } else { 0 };
         while i < end {
+            if (self.cancelled)() { return; }
             let p = self.list.prims[i];
             let clip = if i - start < background { full } else { scissor };
             if clip[2] <= clip[0] || clip[3] <= clip[1] {
@@ -348,6 +350,7 @@ impl<'a> Frame<'a> {
         let width = target.width;
         let full = target.full();
         for y in y0..y1 {
+            if (self.cancelled)() { return; }
             let cy = y as f64 + 0.5;
             for x in x0..x1 {
                 let d = best[(y - y0) as usize * bw + (x - x0) as usize];
@@ -419,6 +422,7 @@ impl<'a> Frame<'a> {
         let width = target.width;
         let inv = layer.inv;
         for face in &self.list.prims[faces] {
+            if (self.cancelled)() { return; }
             let v = [[face.a[0], face.a[1]], [face.a[2], face.a[3]], [face.b[0], face.b[1]]].map(|c| apply32(&layer.m32, c));
             let Some(t) = Triangle::new(v) else { continue };
             // Each corner's window depth, as the vertex shader computes it.
@@ -597,6 +601,7 @@ impl<'a> Frame<'a> {
             let (ox, oy) = (lp[4] as i64, lp[5] as i64);
             let [x0, y0, x1, y1] = [ox.max(clip[0]), oy.max(clip[1]), (ox + cw as i64).min(clip[2]), (oy + ch as i64).min(clip[3])];
             for y in y0..y1 {
+            if (self.cancelled)() { return; }
                 for x in x0..x1 {
                     let t = pixels[(y - oy) as usize * cw + (x - ox) as usize];
                     if t[3] == 0 && t[0] == 0 && t[1] == 0 && t[2] == 0 {

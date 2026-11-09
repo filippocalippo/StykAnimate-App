@@ -29,6 +29,7 @@ const P5: f64 = f64::from_bits(0x3E66376972BEA4D0);
 const LG2: f64 = f64::from_bits(0x3FE62E42FEFA39EF);
 const LG2_H: f64 = f64::from_bits(0x3FE62E4300000000);
 const LG2_L: f64 = f64::from_bits(0xBE205C610CA86C39);
+#[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
 const OVT: f64 = 8.0085662595372944372e-17;
 const CP: f64 = f64::from_bits(0x3FEEC709DC3A03FD);
 const CP_H: f64 = f64::from_bits(0x3FEEC709E0000000);
@@ -56,7 +57,9 @@ fn with_lo_zero(x: f64) -> f64 {
 /// fdlibm scalbn, used for the subnormal results of pow (`x` in [1/2, 2), `n` negative enough
 /// that the result is below the normal range).
 fn scalbn(mut x: f64, n: i32) -> f64 {
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const TWO54: f64 = 1.80143985094819840000e+16;
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const TWOM54: f64 = 5.55111512312578270212e-17;
     let mut hx = hi(x);
     let lx = lo(x);
@@ -129,6 +132,7 @@ pub(super) fn pow(x: f64, y: f64) -> f64 {
     if ly == 0 {
         if iy == 0x7ff00000 {
             // y is ±infinity.
+            #[allow(clippy::eq_op, reason = "Preserve V8 fdlibm NaN-producing arithmetic; rewriting can change reference semantics or codegen.")]
             return if ((ix - 0x3ff00000) as u32 | lx) == 0 {
                 y - y // (±1) ** ±infinity is NaN
             } else if ix >= 0x3ff00000 {
@@ -158,6 +162,7 @@ pub(super) fn pow(x: f64, y: f64) -> f64 {
             z = 1.0 / z;
         }
         if hx < 0 {
+            #[allow(clippy::eq_op, reason = "Preserve V8 fdlibm NaN-producing arithmetic; rewriting can change reference semantics or codegen.")]
             if ((ix - 0x3ff00000) | yisint) == 0 {
                 z = (z - z) / (z - z); // (-1) ** non-integer is NaN
             } else if yisint == 1 {
@@ -170,6 +175,7 @@ pub(super) fn pow(x: f64, y: f64) -> f64 {
     let n = (hx >> 31) + 1;
     // (x < 0) ** non-integer is NaN.
     if (n | yisint) == 0 {
+        #[allow(clippy::eq_op, reason = "Preserve V8 fdlibm NaN-producing arithmetic; rewriting can change reference semantics or codegen.")]
         return (x - x) / (x - x);
     }
     // The sign of the result: -1 for a negative base to an odd integer.
@@ -196,6 +202,7 @@ pub(super) fn pow(x: f64, y: f64) -> f64 {
         }
         // |1 - x| <= 2^-20: log(x) is x - x^2/2 + x^3/3 - x^4/4.
         let t = ax - 1.0;
+        #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
         let w = (t * t) * (0.5 - t * (0.3333333333333333333333 - t * 0.25));
         let u = IVLN2_H * t;
         let v = t * IVLN2_L - w * IVLN2;
@@ -265,6 +272,7 @@ pub(super) fn pow(x: f64, y: f64) -> f64 {
     let i = lo(z);
     if j >= 0x40900000 {
         // z >= 1024.
+        #[allow(clippy::if_same_then_else, reason = "Preserve V8 fdlibm ordered overflow and underflow branches and their arithmetic.")]
         if ((j - 0x40900000) as u32 | i) != 0 {
             return s * HUGE * HUGE; // overflow
         } else if p_l + OVT > z - p_h {
@@ -272,6 +280,7 @@ pub(super) fn pow(x: f64, y: f64) -> f64 {
         }
     } else if (j & 0x7fffffff) >= 0x4090cc00 {
         // z <= -1075.
+        #[allow(clippy::if_same_then_else, reason = "Preserve V8 fdlibm ordered overflow and underflow branches and their arithmetic.")]
         if ((j as u32).wrapping_sub(0xc090cc00) | i) != 0 {
             return s * TINY * TINY; // underflow
         } else if p_l <= z - p_h {

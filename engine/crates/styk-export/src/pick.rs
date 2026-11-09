@@ -11,7 +11,7 @@ use styk_eval::assets::Assets;
 use styk_eval::doc::Document;
 use styk_eval::drawlist::{Overrides, app_bounds, encode_composed};
 use styk_eval::eval::Frame;
-use styk_eval::geometry::build_shapes;
+use styk_eval::geometry::build_shapes_cancellable;
 use styk_raster::{Edges, Images, Raster, ViewParams};
 
 /// The three-pixel surface a candidate is drawn on, and the pictures that stay decoded between clicks.
@@ -37,11 +37,16 @@ pub struct Hit {
 /// in `hidden` and `locked` (by identity). `scale` is the view's pixels per scene unit: the surface samples
 /// the point at that magnification, so a thin line is hit as it is seen.
 pub fn artwork(picker: &mut Picker, doc: &Document, assets: &Assets, frame: &Frame, point: [f64; 2], scale: f64, hidden: &HashSet<u32>, locked: &HashSet<u32>) -> Result<Option<Hit>, String> {
+    artwork_cancellable(picker, doc, assets, frame, point, scale, hidden, locked, &|| false)
+}
+
+/// A cancelled query returns no hit and never publishes a partly decoded picture.
+pub fn artwork_cancellable(picker: &mut Picker, doc: &Document, assets: &Assets, frame: &Frame, point: [f64; 2], scale: f64, hidden: &HashSet<u32>, locked: &HashSet<u32>, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Option<Hit>, String> {
     if !point[0].is_finite() || !point[1].is_finite() {
         return Ok(None);
     }
     let scale = scale.abs().max(0.01);
-    let scene = build_shapes(doc, frame, None);
+    let Some(scene) = build_shapes_cancellable(doc, frame, None, cancelled) else { return Ok(None); };
     let bounds = app_bounds(&scene, doc);
     // A pixel and a little more around the point: what a stroke's edge or a pixel of antialiasing reaches.
     let reach = 2.0 / scale;
@@ -59,6 +64,7 @@ pub fn artwork(picker: &mut Picker, doc: &Document, assets: &Assets, frame: &Fra
     let drawn: HashSet<usize> = scene.items.iter().map(|item| item.slot as usize).collect();
     let mut flags = vec![true; frame.objects.len()];
     for &slot in frame.draw_order.iter().rev() {
+        if cancelled() { return Ok(None); }
         let slot = slot as usize;
         let Some(object) = frame.objects.get(slot) else { continue };
         if hidden.contains(&object.uid) || locked.contains(&object.uid) || !drawn.contains(&slot) {
@@ -76,8 +82,8 @@ pub fn artwork(picker: &mut Picker, doc: &Document, assets: &Assets, frame: &Fra
         let overrides = Overrides { hidden: &flags, translations: &[], background: Some(0), bypass_effects: true, generators: None, live: None };
         let list = encode_composed(doc, assets, &scene, &overrides, &[], None);
         flags[slot] = true;
-        picker.images.ensure(&list, doc, assets).map_err(|error| error.to_string())?;
-        let picture = picker.raster.render(&list, &picker.images, &view, [3, 3]);
+        picker.images.ensure_cancellable(&list, doc, assets, cancelled).map_err(|error| error.to_string())?;
+        let Some(picture) = picker.raster.render_cancellable(&list, &picker.images, &view, [3, 3], cancelled) else { return Ok(None); };
         if picture.pixels[(3 + 1) * 4 + 3] != 0 {
             return Ok(Some(Hit { slot, uid: object.uid }));
         }

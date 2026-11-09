@@ -431,6 +431,23 @@ impl RetiredPublication {
 }
 
 impl Editor {
+    /// Temporary native handoff of the existing owner. Unlike the persistent browser worker this
+    /// preserves the owner's current history accounting mode. All snapshots and retirement remain
+    /// on the worker. Ordinary command refusals are values; host cancellation restores every head.
+    pub(crate) fn native_worker_transaction<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Editor, &mut dyn FnMut() -> Result<(), EditError>) -> Result<T, EditError>,
+        check: &mut dyn FnMut() -> Result<(), EditError>,
+        commit: impl FnOnce() -> Result<(), EditError>,
+    ) -> Result<T, EditError> {
+        check()?;
+        if !quiet(self) { return Err(EditError::Invalid("errors.editorSessions.finishTheCurrentEditFirst".into())); }
+        let mut heads = Heads::capture(self);
+        let result = operation(self, check).and_then(|answer| { check()?; commit()?; Ok(answer) });
+        if result.is_err() { heads.exchange(self); }
+        result
+    }
+
     /// Runs a recorded publication/history operation on this same owning worker,
     /// builds immutable views, then restores the live owner until guarded commit.
     /// Errors/cancel/stale restore all captured state; no second Editor is built.

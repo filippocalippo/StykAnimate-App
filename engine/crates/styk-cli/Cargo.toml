@@ -24,3 +24,4 @@ styk-export = { path = "../styk-export" }
 pollster = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 sha2 = "0.10"
+styk-alloc = { path = "../styk-alloc" }

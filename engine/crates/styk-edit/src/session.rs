@@ -19,10 +19,15 @@ pub const UNPORTED: &str = "unported: ";
 
 pub struct Session {
     pub(crate) editor: Editor,
+    // Legacy view calls reach the session at the next document command, not at snapshot time.
+    native_snapshot_active: Option<Value>,
 }
 
 mod worker;
 pub use worker::{WorkerFrame, WorkerPrepared, WorkerSession};
+mod native;
+pub use native::{NativeCall, SessionView};
+pub use crate::clipboards::RetiredClipboard;
 
 /// Exact counters supplied by the existing history owner during worker handoff.
 #[derive(Clone, Copy, Debug)]
@@ -378,7 +383,7 @@ impl Session {
         // Which figures the frames hold is counted now, not by the first commit: it scans every pose of the document (tens of milliseconds
         // on a dense one), which the first gesture of a session paid for as a freeze.
         editor.ensure_counts();
-        Ok(Session { editor })
+        Ok(Session { editor, native_snapshot_active: None })
     }
 
     /// Whether the session's own history can undo (it only knows the commands it ran).
@@ -507,10 +512,25 @@ impl Session {
         })
     }
 
+    /// The memory a command that copies much of the document asks for before it begins (`Editor::admit`).
+    pub fn set_memory_gate(&mut self, gate: fn(usize) -> bool) {
+        self.editor.memory_gate = Some(gate);
+    }
+
+    /// Where the history stands: how many entries it can undo and redo, and the revision the newest leads to.
+    pub fn history_marks(&self) -> crate::HistoryMarks {
+        crate::HistoryMarks { undo: self.editor.undo.len(), redo: self.editor.redo.len(), newest: self.editor.undo.last().map(|entry| entry.after_revision) }
+    }
+
     /// The clock reads that are given a time to take are held to (milliseconds).
     pub fn set_clock(&mut self, clock: fn() -> f64) {
+        self.set_clock_source(std::sync::Arc::new(clock));
+    }
+    /// Captured host time; no process-global function-pointer bridge.
+    pub fn set_clock_source(&mut self, clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>) {
         self.editor.clock = Some(clock);
     }
+
 
     /// The frame the stage draws, at `view` (its playhead): the gesture in progress, else the document at the playhead; with `motion`,
     /// the motion-path edit's display where one is shown. The frame is typed and its scene built (the geometry the interface reads
@@ -614,6 +634,7 @@ fn apply_view(editor: &mut Editor, view: &Value) -> Result<(), EditError> {
     editor.sync_selection_metadata(view)?;
     editor.set_auto_key(flag(view, "autoKey"));
     editor.audio_ripple = flag(view, "audioRipple");
+    editor.outer_depth = number(view, "outerDepth").unwrap_or(0.0).max(0.0) as usize;
     // Focus and lock: the layers outside the focus are locked for this call (the focus is the interface's, never the document's).
     editor.set_layer_focus_lock_of(view);
     // Selecting changes the active layer without a new revision of the document.
@@ -707,10 +728,7 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     drop(prelude_scope);
     let command_scope = crate::prof::scope("call::command");
     // What the editor drew at random during its own run of the call (D18).
-    editor.set_draws(view.get("draws").unwrap_or(&Value::Null));
-    editor.draw_pool = view.get("drawPool") == Some(&Value::Bool(true));
-    editor.drawing_forks.clear();
-    editor.drawing_retired = false;
+    prepare_call(editor, view);
     // What JSON cannot say (a member set to `undefined`, a non-finite number) arrives encoded (args.rs).
     let decoded;
     let args = if flag(view, "encoded") { decoded = crate::args::decode(args, crate::args::keeps_undefined(method)); &decoded } else { args };
@@ -977,7 +995,8 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     if view.get("patch") == Some(&Value::Bool(true)) {
         let (ops, named) = {
             let _scope = crate::prof::scope("patch::diff");
-            let mut ops = crate::patch::diff(&before, report);
+            // The owner's `@publishCel` hands the session a payload the read view holds already: its answer repeats nothing.
+            let mut ops = if method == "@publishCel" { Value::array(Vec::new()) } else { crate::patch::diff(&before, report) };
             // A view that fetches the records of its tables on demand holds some of them: the others come whole.
             if let Some(known) = crate::patch::known(&view) {
                 ops = crate::patch::for_lazy(ops, report, &known);
@@ -1040,6 +1059,14 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     }
     answer.push(("drag", editor.drag_value()));
     Ok(response_value(answer))
+}
+
+/// Per-call inputs and effects shared by the JSON host and the native host.
+fn prepare_call(editor: &mut Editor, view: &Value) {
+    editor.set_draws(view.get("draws").unwrap_or(&Value::Null));
+    editor.draw_pool = view.get("drawPool") == Some(&Value::Bool(true));
+    editor.drawing_forks.clear();
+    editor.drawing_retired = false;
 }
 
 #[cfg(test)]

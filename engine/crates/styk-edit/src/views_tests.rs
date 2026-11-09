@@ -71,7 +71,7 @@ fn a_trail_has_a_point_at_every_tick_of_a_short_animation_and_marks_the_keys() {
 #[test]
 fn a_trail_that_is_given_a_budget_takes_it_and_goes_on_over_the_next_reads() {
     let mut editor = editor_at(5.0);
-    editor.clock = Some(ticking);
+    editor.clock = Some(std::sync::Arc::new(ticking));
     let args = format!(r#"{{"targets":[{ORIGIN}],"budgetMs":0}}"#);
     let first = trails(&editor, &args).get("entries").unwrap().item(0).unwrap();
     assert_eq!(first.get("complete"), Some(&Value::Bool(false)));
@@ -154,7 +154,7 @@ fn a_ranged_trail_follows_the_playhead_and_keeps_what_it_sampled() {
 #[test]
 fn a_changed_document_resamples_a_trail_and_keeps_showing_the_old_points_meanwhile() {
     let mut editor = editor_at(0.0);
-    editor.clock = Some(ticking);
+    editor.clock = Some(std::sync::Arc::new(ticking));
     let args = format!(r#"{{"targets":[{ORIGIN}],"budgetMs":0}}"#);
     let mut entry = trails(&editor, &args).get("entries").unwrap().item(0).unwrap();
     for _ in 0..100 {

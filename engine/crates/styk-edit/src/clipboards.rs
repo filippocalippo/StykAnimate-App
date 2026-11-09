@@ -32,7 +32,49 @@ fn invalid() -> EditError {
     EditError::Invalid("errors.sharedClipboard.unsupportedClipboardType".into())
 }
 
+/// Displaced typed clipboard, moved intact to the host's worker reclamation lane.
+#[derive(Debug)]
+pub struct RetiredClipboard(Box<Clipboard>);
+#[derive(Debug)]
+enum Clipboard {
+    Figures(crate::figure_clipboard::FigureClipboard), Sheet(crate::sheet_clipboard::Clipboard),
+    CameraMotion(Value), Camera(Value), SegmentValues(String), Vfx(Value, Option<Value>), Audio(Value, Value),
+}
+impl RetiredClipboard {
+    pub(crate) fn restore(self, editor: &mut Editor) {
+        match *self.0 {
+            Clipboard::Figures(value) => editor.figure_clipboard = Some(value),
+            Clipboard::Sheet(value) => editor.sheet_clipboard = Some(value),
+            Clipboard::CameraMotion(value) => editor.camera_motion_clipboard = Some(value),
+            Clipboard::Camera(value) => editor.camera_clipboard = Some(value),
+            Clipboard::SegmentValues(value) => editor.segment_values_clipboard = Some(value),
+            Clipboard::Vfx(clip, values) => editor.vfx_clip_clipboard = Some((clip, values)),
+            Clipboard::Audio(clip, asset) => editor.audio_clipboard = Some((clip, asset)),
+        }
+    }
+}
+
 impl Editor {
+    pub(crate) fn take_clipboard(&mut self, kind: &str) -> Option<RetiredClipboard> {
+        Some(RetiredClipboard(Box::new(match kind {
+            "figures" => Clipboard::Figures(self.figure_clipboard.take()?),
+            "sheet" => Clipboard::Sheet(self.sheet_clipboard.take()?),
+            "cameraMotion" => Clipboard::CameraMotion(self.camera_motion_clipboard.take()?),
+            "camera" => Clipboard::Camera(self.camera_clipboard.take()?),
+            "segmentValues" => Clipboard::SegmentValues(self.segment_values_clipboard.take()?),
+            "vfxClip" => { let (clip, values) = self.vfx_clip_clipboard.take()?; Clipboard::Vfx(clip, values) }
+            "audio" => { let (clip, asset) = self.audio_clipboard.take()?; Clipboard::Audio(clip, asset) }
+            _ => return None,
+        })))
+    }
+    pub(crate) fn has_clipboard(&self, kind: &str) -> bool {
+        match kind {
+            "figures" => self.figure_clipboard.is_some(), "sheet" => self.sheet_clipboard.is_some(),
+            "cameraMotion" => self.camera_motion_clipboard.is_some(), "camera" => self.camera_clipboard.is_some(),
+            "segmentValues" => self.segment_values_clipboard.is_some(), "vfxClip" => self.vfx_clip_clipboard.is_some(),
+            "audio" => self.audio_clipboard.is_some(), _ => false,
+        }
+    }
     /// The clipboard of `kind` as the interface holds it, `None` where nothing is copied.
     pub(crate) fn clipboard_wire(&self, kind: &str) -> Option<Value> {
         match kind {

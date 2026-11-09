@@ -14,7 +14,7 @@ fn drawing() -> Engine {
     engine
 }
 fn image(index: u32) -> Arc<DecodedImage> {
-    Arc::new(DecodedImage { index, drawing: true, soft: false, width: 512, height: 512, rgba: vec![index as u8; 1024 * 1024] })
+    Arc::new(DecodedImage { index, drawing: true, soft: false, width: 512, height: 512, rgba: vec![index as u8; 1024 * 1024], placement: 0 })
 }
 fn pause_worker(engine: &Engine, nth: usize, work: impl FnOnce(Engine) + Send + 'static) -> (Arc<[Barrier; 2]>, std::thread::JoinHandle<()>) {
     let worker = engine.clone();
@@ -323,4 +323,192 @@ fn live_pages_that_move_keep_what_was_written_to_them() {
     assert_eq!(held, [place(0, 6, 7), place(2, 2, 3), place(3, 4, 5)].into_iter().collect());
     uploaded.move_pages(3, 3, 1);
     assert_eq!(uploaded.len(), 3, "a page that stays is not touched");
+}
+
+#[test]
+fn a_tile_decoded_for_a_placement_given_up_is_dropped_and_one_for_the_placement_held_is_taken() {
+    let engine = drawing();
+    let generation = engine.generation().unwrap();
+    let key = *generation.assets.cels.keys().next().unwrap();
+    let serial = generation.assets.placement(key);
+    assert_ne!(serial, 0);
+    let tile = |placement| Arc::new(DecodedImage { index: 0, drawing: true, soft: false, width: 68, height: 68, rgba: vec![1; 68 * 68 * 4], placement });
+    {
+        let mut state = engine.inner.state.lock();
+        state.images.ready.push_back(tile(serial + 1000));
+        state.images.ready.push_back(tile(serial));
+        state.images.ready.push_back(tile(serial + 1000));
+        state.images.ready_bytes = 3 * 68 * 68 * 4;
+    }
+    let taken = engine.take_images(usize::MAX);
+    assert_eq!(taken.iter().map(|image| image.placement).collect::<Vec<_>>(), vec![serial], "only the placement the document holds");
+    let state = engine.inner.state.lock();
+    assert_eq!((state.images.ready.len(), state.images.ready_bytes), (0, 0), "the stale tiles are gone, and are not counted");
+}
+
+#[test]
+fn a_cel_the_document_replaced_is_not_decoded_and_does_not_hold_the_pictures_pending_back() {
+    let engine = drawing();
+    let generation = engine.generation().unwrap();
+    let key = *generation.assets.cels.keys().next().unwrap();
+    // The document in front places no cel: the one decoded for `generation` was replaced.
+    let replaced = Arc::new(Generation { id: generation.id + 1, lineage: generation.lineage, revision: generation.revision + 1, prepared: generation.prepared.clone(), assets: Arc::new(Assets::default()), open_ms: 0.0, anchors: None });
+    {
+        let mut state = engine.inner.state.lock();
+        state.current = Some(replaced);
+        state.images.remaining = 1;
+    }
+    engine.decode_picture(&generation, Picture::Cel(key));
+    assert_eq!(engine.images_backlog(), (0, 0), "nothing decoded, nothing left to wait for");
+    // The document that still places it has it decoded.
+    engine.inner.state.lock().current = Some(generation.clone());
+    engine.inner.state.lock().images.remaining = 1;
+    engine.decode_picture(&generation, Picture::Cel(key));
+    let (left, decoded) = engine.images_backlog();
+    assert_eq!(left, 0);
+    assert!(decoded > 0, "the cel the document places is decoded");
+}
+
+#[test]
+fn a_frame_that_draws_the_slots_a_replaced_cel_gave_waits_until_the_new_tiles_are_all_in() {
+    use styk_draw::{DrawList, Prim, K_IMAGE};
+    use styk_eval::assets::{decode_cel, Assets};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+    let mut loader = styk_eval::load::Loader::new();
+    let first = loader.document(&styk_doc::json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let cel = |document: &styk_eval::doc::Document| document.figures[0].images.iter().find_map(|image| image.tiles.clone()).unwrap();
+    let assets = Assets::build(&first);
+    let mut uploaded = Uploaded::default();
+    uploaded.observe(&assets);
+    for image in decode_cel(&assets, &cel(&first)) {
+        uploaded.record(&assets, &image);
+    }
+    let sampling = |assets: &Assets, tiles: &Arc<styk_eval::doc::DrawingTiles>| {
+        let entry = assets.drawing[assets.cel_slots(tiles).unwrap()[0][0] as usize];
+        DrawList { prims: vec![Prim { kind: K_IMAGE, group: 0, color: 0, paint: 0, a: [0.0; 4], b: [0.0, 0.0, entry.layer as f32, 0.0], c: entry.uv() }], ..Default::default() }
+    };
+    assert!(!uploaded.lacks(&sampling(&assets, &cel(&first))) && !uploaded.refilling_in(&sampling(&assets, &cel(&first))), "the cel placed first is in");
+    // The same file read again: the next cel, in the slots of the one before.
+    let next = loader.document(&styk_doc::json::parse(&std::fs::read(&path).unwrap()).unwrap(), "p").unwrap();
+    let replaced = assets.extended(&next);
+    uploaded.observe(&replaced);
+    let list = sampling(&replaced, &cel(&next));
+    assert!(uploaded.refilling_in(&list), "its slots hold the old cel's pixels");
+    assert!(uploaded.lacks(&list));
+    let tiles = decode_cel(&replaced, &cel(&next));
+    let sampled = replaced.cel_slots(&cel(&next)).unwrap()[0][0];
+    for image in tiles.iter().filter(|image| image.index != sampled) {
+        uploaded.record(&replaced, image);
+    }
+    assert!(uploaded.refilling_in(&list), "the tile the frame draws is still the old cel's");
+    uploaded.record(&replaced, tiles.iter().find(|image| image.index == sampled).expect("the tile is decoded"));
+    assert!(!uploaded.refilling_in(&list) && !uploaded.lacks(&list), "every tile in: the frame is drawn");
+    // Assets seen again, or a cel that is not new, refill nothing.
+    uploaded.observe(&replaced);
+    assert!(!uploaded.refilling_in(&list));
+}
+
+#[test]
+fn a_cel_that_keeps_the_slots_of_the_tiles_it_shares_marks_only_the_slots_it_writes_as_being_refilled() {
+    use styk_draw::{DrawList, Prim, K_IMAGE};
+    use styk_eval::assets::{decode_cel_changed, Assets};
+    use styk_eval::doc::DrawingTiles;
+    let png = |value: u8| -> Arc<[u8]> {
+        let image = image::RgbaImage::from_pixel(64, 64, image::Rgba([value, 0, 0, 255]));
+        let mut bytes = Vec::new();
+        image.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+        bytes.into()
+    };
+    let cel = |tiles: Vec<(i32, i32, Arc<[u8]>)>| {
+        let levels = styk_eval::drawing::level_tiles(&tiles);
+        Arc::new(DrawingTiles::new([0.0; 2], 1.0, None, tiles, levels))
+    };
+    let document_of = |tiles: &Arc<DrawingTiles>| {
+        let mut doc = styk_eval::open(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json")).unwrap();
+        for image in Arc::make_mut(&mut doc.figures[0]).images.iter_mut().filter(|image| image.tiles.is_some()) {
+            image.tiles = Some(tiles.clone());
+        }
+        doc
+    };
+    // Two tiles far apart (their level-0 neighbourhoods do not touch); the second is painted again by the next cel.
+    let (kept, old_second) = (png(10), png(20));
+    let before = cel(vec![(0, 0, kept.clone()), (50, 50, old_second)]);
+    let after = cel(vec![(0, 0, kept), (50, 50, png(30))]);
+    let (first_doc, next_doc) = (document_of(&before), document_of(&after));
+    let a = Assets::build(&first_doc);
+    let mut uploaded = Uploaded::default();
+    uploaded.observe(&a);
+    for image in decode_cel_changed(&a, &before) {
+        uploaded.record(&a, &image);
+    }
+    // The old cel's decode left its ink for the next.
+    assert!(before.tile_ink.get().is_some());
+    let b = a.extended_inheriting(&next_doc, true);
+    uploaded.observe(&b);
+    let list = |coord: (i32, i32)| {
+        let at = after.levels[0].binary_search_by_key(&(coord.1, coord.0), |&(x, y)| (y, x)).unwrap();
+        let entry = b.drawing[b.cel_slots(&after).unwrap()[0][at] as usize];
+        DrawList { prims: vec![Prim { kind: K_IMAGE, group: 0, color: 0, paint: 0, a: [0.0; 4], b: [0.0, 0.0, entry.layer as f32, 0.0], c: entry.uv() }], ..Default::default() }
+    };
+    assert!(!uploaded.refilling_in(&list((0, 0))) && !uploaded.lacks(&list((0, 0))), "the tile it shares is in its slot: a frame that draws it is drawn");
+    assert!(uploaded.refilling_in(&list((50, 50))) && uploaded.lacks(&list((50, 50))), "the tile it paints again holds the old cel's pixels until it is written");
+    let written = decode_cel_changed(&b, &after);
+    assert!(written.iter().all(|image| image.placement == b.placement(after.key())));
+    for image in &written {
+        uploaded.record(&b, image);
+    }
+    assert!(!uploaded.refilling_in(&list((50, 50))) && !uploaded.lacks(&list((50, 50))));
+}
+
+/// The places a refused decode leaves to write over with nothing are not tiles until the renderer takes them: a large replacement refused
+/// because the memory is short must not allocate a tile for each place at once.
+#[test]
+fn the_places_of_a_refused_cel_become_tiles_only_as_the_renderer_takes_them() {
+    use crate::document::{OpenOptions, OpenSource};
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json");
+    let text = std::fs::read(file).unwrap();
+    let engine = Engine::new(clock, Budgets::for_device(None));
+    let opened = engine.open_document(OpenSource::Json { bytes: &text, name: "refused cel" }, OpenOptions::default(), &|| false).unwrap();
+    engine.activate(&opened.typed, &opened.tree, 1).unwrap();
+    // The first publication is decoded and not taken, so the atlas holds nothing the next may share: it is written whole.
+    while engine.step() {}
+    // The same cel made anew: its slots are the ones of the cel before, and its decode is refused.
+    let mut next = opened.tree.clone();
+    let asset = &mut next.make_obj().unwrap().get_mut("figure_types").unwrap().make_arr().unwrap()[0].make_obj().unwrap().get_mut("image_assets").unwrap().make_arr().unwrap()[0];
+    let payload = asset.get("styk_tiles").and_then(styk_doc::Value::as_str).expect("the cel's tiles").to_string();
+    asset.make_obj().unwrap().set("styk_tiles", styk_doc::Value::str(&payload));
+    engine.publish_tree(opened.lineage(), next, 2).unwrap().expect("the document is the engine's");
+    assert!(engine.take_images(usize::MAX).is_empty(), "what the first publication decoded is for the cel the second replaced: dropped");
+    let tiles: usize = engine.generation().unwrap().assets.cels.values().map(|(_, slots)| slots.iter().map(Vec::len).sum::<usize>()).sum();
+    styk_alloc::with_limit(1 << 20, || while engine.step() {});
+    assert!(engine.pictures_refused() > 0, "the decode was refused");
+    {
+        let state = engine.inner.state.lock();
+        assert!(state.images.ready.is_empty() && state.images.ready_bytes == 0, "no tile is held for the places");
+        assert_eq!(state.images.cleared.len(), tiles, "the places are named");
+    }
+    assert_eq!(engine.images_backlog(), (0, tiles), "and the renderer is to take them");
+    let one = engine.take_images(1);
+    assert_eq!(one.len(), 1, "one at least, no more than the budget leaves room for");
+    let some = engine.take_images(3 * styk_eval::assets::BLANK_TILE_BYTES);
+    assert_eq!(some.len(), 3);
+    let rest = engine.take_images(usize::MAX);
+    assert_eq!(1 + 3 + rest.len(), tiles);
+    assert_eq!(engine.images_backlog(), (0, 0));
+}
+
+#[test]
+fn clearing_tiles_carry_refusal_provenance_to_complete_frame_presenters() {
+    let engine=drawing();
+    let generation=engine.generation().unwrap();
+    let cel=*generation.assets.cels.keys().next().unwrap();
+    let placement=generation.assets.placement(cel);
+    let slot=generation.assets.cels[&cel].1[0][0];
+    engine.inner.state.lock().images.cleared.push((slot,placement));
+    let batch=engine.take_picture_batch(1);
+    assert_eq!(batch.refused,vec![placement]);
+    assert_eq!(batch.images.len(),1);
+    assert_eq!(batch.images[0].placement,placement);
+    assert!(batch.images[0].rgba.iter().all(|&byte| byte==0));
+    assert!(engine.take_picture_batch(1).refused.is_empty());
 }

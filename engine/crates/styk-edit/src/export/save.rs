@@ -15,14 +15,38 @@ fn object(value: Option<&Value>) -> Obj {
 pub struct Projected {
     /// What the project file stores.
     pub document: Value,
-    /// The document before its pose lists are stored once; [`check_scene`] checks it.
+    /// The document before its pose lists are stored once; [`check_openable`] checks it.
     pub scene: Value,
+    /// What was found wrong of the authored channels or the movieclip graph, which [`project_document`] refuses, and a save refuses
+    /// unless [`check_openable`] mends it.
+    pub unmet: Option<EditError>,
 }
 
 /// The scene check of the load (`validateScene`): read-only, the slowest of the checks, and independent of everything that is done with
 /// the prepared document next, so a save runs it beside the lift. Its error is the save's.
 pub fn check_scene(scene: &Value) -> Result<(), EditError> {
     crate::load::validate_scene(scene)
+}
+
+/// What opening the document a save is about to write would make of it. The reader's whole check, on every document the project holds
+/// (the movieclips and the scenes they retain too: `styk_edit::load`), so that a save never writes a file opening refuses.
+pub enum Openable {
+    /// Opening finds nothing to mend: the document is written as it is.
+    Sound,
+    /// Opening would mend it (`repairs` things); `document` is the document as opening holds it, which the save writes instead.
+    Mended { document: Value, repairs: usize },
+    /// Opening would refuse it and nothing can mend what it refuses: the save is refused with this reason.
+    Refused(EditError),
+}
+
+/// [`Openable`] of `scene` (the document before its pose lists are stored once). Read-only: the document it answers with for a mended
+/// project is a new one, and `scene` is not changed.
+pub fn check_openable(scene: &Value) -> Openable {
+    match crate::load::prepare_to_check_openable(scene.clone(), &styk_doc::fanout::Sequential) {
+        Ok(opened) if opened.repairs == 0 => Openable::Sound,
+        Ok(opened) => Openable::Mended { document: opened.report, repairs: opened.repairs },
+        Err(refusal) => Openable::Refused(refusal),
+    }
 }
 
 /// What a project file stores of `tree`: `_styk.format`, `format_version` and the `name` the file is saved under (kept as the
@@ -32,6 +56,9 @@ pub fn check_scene(scene: &Value) -> Result<(), EditError> {
 /// opened and its commands keep them, so this is the net under a document no command could break, not a repair).
 pub fn project_document(tree: &Value, name: Option<&str>, hold: &Hold<'_>) -> Result<Value, EditError> {
     let projected = prepare_project(tree, name, hold)?;
+    if let Some(unmet) = projected.unmet {
+        return Err(unmet);
+    }
     check_scene(&projected.scene)?;
     hold.check()?;
     Ok(projected.document)
@@ -50,11 +77,10 @@ pub fn prepare_project(tree: &Value, name: Option<&str>, hold: &Hold<'_>) -> Res
     set(&mut document, "_styk", Value::object(styk));
     let document = without_runtime_segments(&document);
     hold.check()?;
-    crate::load::validate_animation(&document)?;
-    crate::load::validate_movieclip_graph(&document)?;
+    let unmet = crate::load::validate_animation(&document).and_then(|()| crate::load::validate_movieclip_graph(&document)).err();
     hold.check()?;
     let scene = synchronize_derived(&document)?;
-    Ok(Projected { document: pose_sequences::pack_pose_sequences(&scene), scene })
+    Ok(Projected { document: pose_sequences::pack_pose_sequences(&scene), scene, unmet })
 }
 
 /// `parent` with the definition of the movieclip `type_id` holding `clip` (its document as it stands) and the duration of its

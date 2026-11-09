@@ -37,6 +37,10 @@ pub mod paint;
 #[cfg(feature = "gpu")]
 mod frame;
 #[cfg(feature = "gpu")]
+mod budget;
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+pub mod native_gpu;
+#[cfg(feature = "gpu")]
 mod glyphs;
 #[cfg(feature = "gpu")]
 mod images;
@@ -52,12 +56,16 @@ mod pipeline;
 mod present;
 #[cfg(feature = "gpu")]
 mod resources;
+#[cfg(all(test, feature = "gpu"))]
+mod lifetime_tests;
 mod view;
 
 #[cfg(feature = "gpu")]
 pub use images::{decode_images, DecodedImage, MAX_PAGES};
 #[cfg(feature = "gpu")]
-pub use present::read_frame;
+pub use frame::FramePlan;
+#[cfg(feature = "gpu")]
+pub use present::{read_frame, RenderedFrame};
 pub use view::{ViewParams, CAMERA_PREVIEW_LIMIT};
 pub use effects::plan::DrawingGrid;
 
@@ -119,6 +127,7 @@ pub struct Renderer {
     pub(crate) queue: wgpu::Queue,
     pub(crate) pipeline: wgpu::RenderPipeline,
     pub(crate) blit: wgpu::RenderPipeline,
+    pub(crate) composite: wgpu::RenderPipeline,
     pub(crate) blit_layout: wgpu::BindGroupLayout,
     pub(crate) layout0: wgpu::BindGroupLayout,
     pub(crate) layout1: wgpu::BindGroupLayout,
@@ -157,8 +166,8 @@ pub struct Renderer {
     /// Atlas page size, and the frame size it grew from (pages fit the largest layer).
     pub(crate) page: [u32; 2],
     pub(crate) page_frame: [u32; 2],
-    /// Frames in a row whose layers all fit pages of the frame's size.
-    pub(crate) page_small: u32,
+    /// Sizes that depend on the frame alone ([`Renderer::set_exact_sizes`]).
+    pub(crate) exact_sizes: bool,
     /// Effect passes, created with the first frame that filters.
     pub(crate) executor: Option<effects::executor::Executor>,
     /// Depth runs (docs/engine/spatial.md): the pipelines and multisampled depth
@@ -188,6 +197,22 @@ impl Renderer {
     /// The current draw list, decoded images and raster caches stay shared.
     pub fn set_drawing_grid(&mut self, grid: DrawingGrid) { self.drawing_grid = grid; }
 
+    /// Makes a frame depend on the frame alone, not on the frames drawn before it (an export asks for it; the stage keeps what it
+    /// has, because reallocating and refilling is the cost). It sizes layer-page and effect-slot dimensions by each frame (the effect
+    /// passes address a slot by normalized position, 1 / its size, so one kept from a larger frame moves the last bit of those
+    /// positions and a pixel here and there by one level), brings every particle material row in (the atlas is sampled
+    /// trilinearly, so a texel at a row's edge read a neighbour that was there only when a list before had named it), and places
+    /// the lone glyph masks afresh (a mask is sampled at `(place + position in the mask) / atlas side`, which rounds with the place,
+    /// so a glyph drawn after others, which took the first places, differed by a level at its edges). Textures it replaces are
+    /// destroyed, not dropped: a browser frees a dropped texture only when it collects it, which measured 28 GiB on a 4K video.
+    /// Capacity and unused owners stay until document/export teardown; page count and primitive capacity never shrink per frame.
+    pub fn set_exact_sizes(&mut self, exact: bool) {
+        self.exact_sizes = exact;
+        if let Some(executor) = &mut self.executor {
+            executor.set_exact(exact);
+        }
+    }
+
     /// Rotates and mirrors the workspace view: `orientation` maps the neutral view's screen pixels
     /// to the shown ones (the editor rotates the Draw view about the artboard's centre and mirrors
     /// it, `cameraMatrix` in renderer-geometry.mjs). `ViewParams::matrix` must already include it;
@@ -210,8 +235,11 @@ impl Renderer {
         }
         let prims: &[GpuPrim] = bytemuck::cast_slice(prims_bytes(&list.prims));
         let need = std::mem::size_of_val(prims) as u64;
+        let capacity = need.max(65536).next_power_of_two();
         if need > self.prims.size() {
-            self.prims = buffer(&self.device, "styk prims", need.next_power_of_two(), wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
+            let next = buffer(&self.device, "styk prims", capacity, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
+            let old = std::mem::replace(&mut self.prims, next);
+            if self.exact_sizes { old.destroy(); }
         }
         if !prims.is_empty() {
             self.queue.write_buffer(&self.prims, 0, bytemuck::cast_slice(prims));
@@ -262,3 +290,6 @@ impl Renderer {
         &self.queue
     }
 }
+
+#[cfg(all(feature = "inspect", feature = "gpu"))]
+pub mod inspect;

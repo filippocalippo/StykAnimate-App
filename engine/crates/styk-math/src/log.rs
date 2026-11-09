@@ -7,9 +7,13 @@
 // Copyright 2016 the V8 project authors. All rights reserved.
 
 pub(super) fn log(mut x: f64) -> f64 {
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const LN2_HI: f64 = 6.93147180369123816490e-01;
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const LN2_LO: f64 = 1.90821492927058770002e-10;
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const TWO54: f64 = 1.80143985094819840000e+16;
+    #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
     const LG: [f64; 7] = [6.666666666666735130e-01, 3.999999999940941908e-01, 2.857142874366239149e-01, 2.222219843214978396e-01, 1.818357216161805012e-01, 1.531383769920937332e-01, 1.479819860511658591e-01];
     let mut hx = super::high(x) as i32;
     let lx = x.to_bits() as u32;
@@ -31,6 +35,7 @@ pub(super) fn log(mut x: f64) -> f64 {
     let dk = k as f64;
     if (0x000fffff & (2 + hx)) < 3 {
         if f == 0.0 { return if k == 0 { 0.0 } else { dk * LN2_HI + dk * LN2_LO }; }
+        #[allow(clippy::excessive_precision, reason = "Preserve V8 fdlibm decimal constants verbatim for bit-exact reference arithmetic.")]
         let r = f * f * (0.5 - 0.33333333333333333 * f);
         return if k == 0 { f - r } else { dk * LN2_HI - ((r - dk * LN2_LO) - f) };
     }

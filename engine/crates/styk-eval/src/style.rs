@@ -120,6 +120,11 @@ pub fn parse(style: Option<&Value>, color_mode: Option<&Value>) -> Option<Arc<Ob
 
 /// `resolveInstanceFigure`.
 pub fn resolve(figure: &Figure, style: &ObjectStyle) -> Figure {
+    resolve_cancellable(figure, style, &|| false).expect("uncancelled style")
+}
+
+pub(crate) fn resolve_cancellable(figure: &Figure, style: &ObjectStyle, cancelled: &dyn Fn() -> bool) -> Option<Figure> {
+    if cancelled() { return None; }
     let mut out = figure.clone();
     if style.segment_colors {
         out.segment_colors = true;
@@ -132,6 +137,7 @@ pub fn resolve(figure: &Figure, style: &ObjectStyle) -> Figure {
         out.outline = (width > 0.0 && width.is_finite()).then_some(Outline { width, rgb, alpha });
     }
     for seg in out.segments.iter_mut() {
+        if cancelled() { return None; }
         let Some(o) = style.segments.get(&seg.id) else { continue };
         if let Some(z) = o.z {
             seg.z = z;
@@ -165,6 +171,7 @@ pub fn resolve(figure: &Figure, style: &ObjectStyle) -> Figure {
     if !style.mesh_colors.is_empty() && !out.mesh_colors.is_empty() {
         let mut palette = out.mesh_colors.to_vec();
         for &(index, color) in &style.mesh_colors {
+        if cancelled() { return None; }
             if let Some(entry) = palette.get_mut(index as usize) {
                 *entry = rgb_of(color);
             }
@@ -172,6 +179,7 @@ pub fn resolve(figure: &Figure, style: &ObjectStyle) -> Figure {
         out.mesh_colors = palette.into();
     }
     for poly in out.polyfills.iter_mut() {
+        if cancelled() { return None; }
         let Some(o) = style.polygons.get(&poly.id) else { continue };
         if let Some(c) = o.color {
             poly.rgb = rgb_of(c);
@@ -183,5 +191,5 @@ pub fn resolve(figure: &Figure, style: &ObjectStyle) -> Figure {
             poly.alpha = 1.0 - alpha_byte(op) / 255.0;
         }
     }
-    out
+    (!cancelled()).then_some(out)
 }

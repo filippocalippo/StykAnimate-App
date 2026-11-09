@@ -46,6 +46,7 @@ use styk_eval::assets::Assets;
 use styk_eval::eval::Prepared;
 
 pub use frames::{FrameAdmission, FrameData, FrameMetadata, FrameSnapshot, FrameStats, GenerationHeader};
+pub mod frame_builder;
 pub use images::{drawing_pages, has_place, images_on, on_demand, pictures_of, Acquired, DecodedImage, PlaceIndex, Residency, Uploaded, ATLAS_PAGES};
 use sync::Shared;
 
@@ -156,17 +157,20 @@ struct Inner {
     state: Shared<State>,
     /// The document in front (store.rs).
     store: std::sync::Mutex<store::Store>,
-    clock: Clock,
+    clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     next_generation: AtomicU64,
     stopping: AtomicBool,
     /// [`Budgets::picture_bytes`].
     picture_bytes: usize,
+    /// A headless exporter has no stage picture consumer.
+    preload_stage: bool,
     /// Pages of a document's sprite layout the stage keeps at a time ([`Engine::atlas_pages`]).
     atlas_pages: std::sync::atomic::AtomicU32,
     /// What each tick of the open document draws ([`Engine::request_picture_table`]).
     picture_table: std::sync::Mutex<picture_table::PictureTable>,
     /// Pictures not decoded because the module was too low on memory ([`Engine::pictures_refused`]).
     pictures_refused: std::sync::atomic::AtomicUsize,
+    pictures_decoded: std::sync::atomic::AtomicUsize,
     progress: std::sync::atomic::AtomicU32,
     /// Worker threads that stopped under the engine ([`Engine::note_worker_lost`]).
     workers_lost: std::sync::atomic::AtomicU32,
@@ -184,8 +188,23 @@ impl Engine {
         Engine::with_notifier(clock, budgets, None)
     }
 
+    /// A headless document whose only picture consumer is an export. The export
+    /// owns its decode requests; no stage will consume a second decoded copy.
+    pub fn for_export(clock: Clock, budgets: Budgets) -> Engine {
+        Engine::create(Arc::new(clock), budgets, None, false)
+    }
+
     /// An engine that calls `notifier` whenever background work finishes.
     pub fn with_notifier(clock: Clock, budgets: Budgets, notifier: Option<Notifier>) -> Engine {
+        Engine::create(Arc::new(clock), budgets, notifier, true)
+    }
+
+    /// An instance-owned clock for native applications and parallel hosts.
+    pub fn with_clock(clock: Arc<dyn Fn() -> f64 + Send + Sync>, budgets: Budgets) -> Engine {
+        Engine::create(clock, budgets, None, true)
+    }
+
+    fn create(clock: Arc<dyn Fn() -> f64 + Send + Sync>, budgets: Budgets, notifier: Option<Notifier>, preload_stage: bool) -> Engine {
         Engine {
             inner: Arc::new(Inner {
                 state: Shared::new(State {
@@ -201,15 +220,19 @@ impl Engine {
                 next_generation: AtomicU64::new(1),
                 stopping: AtomicBool::new(false),
                 picture_bytes: budgets.picture_bytes,
+                preload_stage,
                 atlas_pages: std::sync::atomic::AtomicU32::new(ATLAS_PAGES),
                 picture_table: Default::default(),
                 pictures_refused: Default::default(),
+                pictures_decoded: Default::default(),
                 progress: std::sync::atomic::AtomicU32::new(0),
                 workers_lost: std::sync::atomic::AtomicU32::new(0),
                 notifier,
             }),
         }
     }
+
+    pub fn clock_source(&self) -> Arc<dyn Fn() -> f64 + Send + Sync> { self.inner.clock.clone() }
 
     pub fn now(&self) -> f64 {
         (self.inner.clock)()
@@ -413,3 +436,6 @@ enum Job {
     Task(TaskQueue),
     Frames(frames::Work),
 }
+
+#[cfg(feature = "inspect")]
+pub mod inspect;

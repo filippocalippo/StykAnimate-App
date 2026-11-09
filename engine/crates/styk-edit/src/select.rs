@@ -276,6 +276,9 @@ impl Editor {
 
     pub(crate) fn seek(&mut self, tick: f64) -> Result<Value, EditError> { self.seek_checked(tick,&mut || Ok(())) }
     pub(crate) fn seek_checked(&mut self, tick: f64, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
+        self.seek_options_checked(tick, false, check)
+    }
+    pub(crate) fn seek_options_checked(&mut self, tick: f64, beyond: bool, check: &mut dyn FnMut() -> Result<(), EditError>) -> Result<Value, EditError> {
         check()?;
         if !tick.is_finite() {
             return Err(crate::transform::not_finite("Timeline tick"));
@@ -284,7 +287,7 @@ impl Editor {
             self.commit_drag_checked(check)?;
         }
         let rows = rows(&self.report);
-        let next = tick.clamp(0.0, (total_ticks(&rows) - 1.0).max(0.0));
+        let next = tick.clamp(0.0, if beyond { 10_000_000.0 } else { (total_ticks(&rows) - 1.0).max(0.0) });
         let index = rows.partition_point(|r| r.start <= next).saturating_sub(1);
         self.tick = next;
         self.frame_index = index;
@@ -295,6 +298,13 @@ impl Editor {
     }
 
     /// `editor.activeLayerId`.
+    /// A drawing layer holds only drawing cels: a movieclip placed while one is active used to be assigned to it (by replacements, which are
+    /// not checked as a key's frame is), and a movieclip made of it afterwards held a figure on a drawing layer, which opening refuses.
+    pub(crate) fn refuse_on_drawing_layer(&self) -> Result<(), EditError> {
+        let drawing = self.report.path(&["_styk", "layers", "byId", &self.active_layer(), "drawing", "version"]).and_then(Value::as_f64) == Some(1.0);
+        if drawing { Err(EditError::Invalid("errors.editorLayerSheet.drawingLayersAcceptOneDrawingCelAtA".into())) } else { Ok(()) }
+    }
+
     pub(crate) fn active_layer(&self) -> String {
         let layers = self.report.path(&["_styk", "layers"]);
         let named = |key: &str| layers.and_then(|l| l.get(key)).and_then(Value::as_str).map(str::to_string);

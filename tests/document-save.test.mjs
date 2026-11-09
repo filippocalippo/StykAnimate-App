@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 import {DocumentSave, RecoveryDeadline, documentCheckpoint, matchesDocumentCheckpoint} from '../src/document-save.mjs';
+import {makeProjectFile, releaseSnapshots} from '../src/engine/engine-document-export.mjs';
+import {nodeEngine, sessionFromDocument} from './support/engine-node.mjs';
+import {ownedEditorSync} from './support/owned-editor.mjs';
 
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => {resolve = yes; reject = no;}); return {promise, resolve, reject}; };
 const source = await readFile(new URL('../src/app.mjs', import.meta.url), 'utf8');
@@ -12,7 +17,7 @@ const changeAt = source.indexOf('editor.addEventListener("change", (e) => {');
 const epochSource = source.slice(source.indexOf('  const kind = e.detail?.kind;', changeAt), source.indexOf("  if ((['toggle-selection'", changeAt));
 
 /** Exercise the application's actual save/close functions with staged I/O. */
-function app({browser = false} = {}) {
+function app({browser = false, exportDocument = null} = {}) {
   const editor = {report: {}, revision: 1, dirty: true, name: 'Animation', markSaved() {this.dirty = false;}};
   const state = {documentToken: 'document-1'}, manualSave = new DocumentSave(), recoveryDeadline = new RecoveryDeadline();
   const calls = {pickers: 0, writes: 0, committed: 0, closed: 0, restarted: 0, failed: [], statuses: [], cleared: []};
@@ -34,8 +39,8 @@ function app({browser = false} = {}) {
     telemetry: {}, status(value) {calls.statuses.push(value);}, fail(error) {calls.failed.push(error);},
     interfaceText: value => value, notify() {}, messageError: error => error,
     desktop, browserRecovery: {clear: slot => { calls.cleared.push(slot); return hooks.cleanup(); }},
-    async writeNativeBlob(_desktop, _blob, {signal}) {calls.writes++; await hooks.write(); if (signal.aborted) throw new DOMException('', 'AbortError'); calls.committed++; return true;},
-    async runDocumentExport(_format, consume, {controller}) {return consume({}, controller.signal);},
+    async writeNativeBlob(_desktop, _blob, {signal}) {calls.writes++; await hooks.write(_blob); if (signal.aborted) throw new DOMException('', 'AbortError'); calls.committed++; return true;},
+    async runDocumentExport(_format, consume, {controller}) {return consume(exportDocument ? await exportDocument() : {}, controller.signal);},
     workspaceLayout: {flushPreferences: () => hooks.flushPreferences()},
     editorSettings: {flush: () => hooks.flushSettings()},
   });
@@ -127,6 +132,41 @@ test('final close handoff is bounded and honors a main-process checkpoint reject
   // The checkpoint names the project in front, its revision and mutation epoch, and the list of open projects.
   a.hooks.close = async checkpoint => {assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:0'); return false;};
   held.resolve(); assert.equal(await closing, false); assert.equal(a.calls.closed, 1);
+});
+
+test('a project opening would refuse, with nothing to mend it, is not saved: the file on disk, its recovery copy and its unsaved changes stay', async t => {
+  await nodeEngine();
+  // A project with a movieclip whose retained scene has a layer sheet with a broken counter: opening refuses it and nothing mends it.
+  const fixture = JSON.parse(await readFile(new URL('../engine/tests/edit/sheet-movieclip.document.json', import.meta.url), 'utf8'));
+  const {editor: maker, owner} = ownedEditorSync({demo: false, layerTimeline: true, propertyChannels: true}, fixture, {verify: false});
+  maker.select(maker.evaluatedFrame.objects[0].unique_id, -1);
+  maker.createMovieclip({start: 0, end: 3});
+  const project = JSON.parse(owner.session().report_json());
+  const retained = project.figure_types.findLast(figure => figure._styk?.movieclip)._styk.movieclip.document._styk.movieclipSource.document;
+  retained._styk.layerSheet.nextId = 0;
+  // A session holding that project as it is: no command breaks a document this way, and the save's check is the net under it.
+  const state = {layerTimeline: true, propertyChannels: true, tick: 0, frameIndex: 0, selectedUid: null, selectedUids: [], selectedJoint: -1, activeLayerId: maker.activeLayerId};
+  const session = await sessionFromDocument(project, state);
+  t.after(() => session.free());
+  // The project file on disk that the save's bytes would replace.
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'styk-refused-save-')), file = path.join(folder, 'Animation.styk');
+  t.after(() => rm(folder, {recursive: true, force: true}));
+  const existing = Buffer.from('the project as it was last saved');
+  await writeFile(file, existing);
+  // The engine's save of the session's document, as the export worker makes it, then the app's own save path.
+  const a = app({exportDocument: () => {
+    const snapshots = [session.snapshot()];
+    try { return new Blob([makeProjectFile({join: null, cancelled: () => false, request: {snapshots, scopes: [], name: 'Animation'}}).bytes]); }
+    catch (error) { releaseSnapshots(snapshots); throw error; }
+  }});
+  a.hooks.write = async blob => writeFile(file, Buffer.from(await blob.arrayBuffer()));
+  await assert.rejects(a.saveNative(), error => /^errors\.layerSheet\./.test(error.messageKey ?? error.message), 'the save is refused with the reason opening gives');
+  assert.deepEqual(await readFile(file), existing, 'the file on disk is untouched');
+  assert.equal(a.calls.writes, 0, 'nothing was written');
+  assert.deepEqual(a.calls.cleared, [], 'the recovery copy is kept');
+  assert.equal(a.editor.dirty, true, 'the project stays unsaved');
+  assert.equal(a.calls.statuses.at(-1)?.messageKey, 'app.saveFailed', 'the person sees that the save failed');
+  assert.equal(a.projects.summary().unsaved, 1, 'closing still asks to save it');
 });
 
 test('a save removes only its own project\'s recovery copy', async () => {

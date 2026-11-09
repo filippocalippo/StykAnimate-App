@@ -339,6 +339,9 @@ impl Editor {
         if !self.sheet() {
             return Err(EditError::Unported("adding a figure on a native timeline".into()));
         }
+        if clip {
+            self.refuse_on_drawing_layer()?;
+        }
         if self.drag.is_some() {
             self.commit_drag()?;
         }

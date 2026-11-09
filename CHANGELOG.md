@@ -45,6 +45,8 @@ What's new in each version of StykAnimate.
 - Fixed editing an existing text figure, which opened with the default text instead of its own.
 - Fixed Auto key, builder snapping and camera follow missing from the command palette.
 - Saving no longer fails when Windows is still scanning the file you just saved over, and a save that runs out of memory now says your project is still open.
+- Fixed projects that would not open again after you made a movieclip in a project that already had another movieclip on its timeline. Projects already saved that way now open, and StykAnimate tells you it repaired them.
+- Saving now repairs damage it finds in a project, so the saved file opens again.
 - Exporting the same animation twice no longer occasionally leaves a frame with garbled pixels.
 
 ### Performance
@@ -60,6 +62,7 @@ What's new in each version of StykAnimate.
 - Timeline and asset library previews appear almost instantly, and large projects use less memory, while they are shown and once opened.
 - Smoother playback for animations with parallax layers, a following camera, moved figure origins, Stick Nodes sprites, turning 3D drawings or animated properties.
 - Undoing and redoing big movieclip edits is much faster.
+- Drawing for a long time no longer keeps growing the memory StykAnimate uses.
 - Stepping through frames with the keyboard shows the next frame sooner on large animations.
 
 ### Removed

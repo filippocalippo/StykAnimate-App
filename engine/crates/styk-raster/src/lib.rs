@@ -106,7 +106,7 @@ impl Images {
 
     /// Adds a decoded image (`styk_eval::assets::decode_image` / `decode_cel`), copied.
     pub fn add(&mut self, assets: &Assets, image: &DecodedImage) {
-        self.add_shared(assets, Arc::new(DecodedImage { index: image.index, drawing: image.drawing, soft: image.soft, width: image.width, height: image.height, rgba: image.rgba.clone() }));
+        self.add_shared(assets, Arc::new(DecodedImage { index: image.index, drawing: image.drawing, soft: image.soft, width: image.width, height: image.height, rgba: image.rgba.clone(), placement: image.placement }));
     }
 
     /// Adds a decoded image the engine already holds. Over the budget, the least recently used are dropped.
@@ -185,6 +185,9 @@ impl Images {
     /// taken) are decoded from `doc`, and the least recently used of the others are dropped to stay in it. An error
     /// says the memory cannot hold a picture: the frame would be drawn without it.
     pub fn ensure(&mut self, list: &DrawList, doc: &Document, assets: &Assets) -> Result<(), styk_alloc::OutOfMemory> {
+        self.ensure_cancellable(list, doc, assets, &|| false)
+    }
+    pub fn ensure_cancellable(&mut self, list: &DrawList, doc: &Document, assets: &Assets, cancelled: &dyn Fn() -> bool) -> Result<(), styk_alloc::OutOfMemory> {
         let places = Images::places(list);
         if self.failed_in != (assets.atlas.len(), assets.drawing.len()) {
             self.failed.clear();
@@ -196,6 +199,13 @@ impl Images {
         for &place in &places {
             let held = if place.0 { self.tiles.get_mut(&place.1) } else { self.sprites.get_mut(&place.1) };
             match held {
+                // A tile of a cel the document replaced: its slot is another cel's now (`Assets::extended`), and what is held is the old cel's.
+                Some(held) if place.0 && held.image.placement != 0 && !assets.holds_placement(held.image.placement) => {
+                    if let Some(old) = self.tiles.remove(&place.1) {
+                        self.bytes -= old.image.rgba.len();
+                    }
+                    missing.push(place);
+                }
                 Some(held) => held.used = clock,
                 None if !self.failed.contains(&place) => missing.push(place),
                 None => {}
@@ -211,7 +221,10 @@ impl Images {
                 }
             }
             for picture in pictures {
-                for image in styk_eval::assets::decode_picture(doc, assets, picture)? {
+                if cancelled() { return Ok(()); }
+                let decoded = styk_eval::assets::decode_picture_cancellable(doc, assets, picture, cancelled)?;
+                if cancelled() { return Ok(()); }
+                for image in decoded {
                     self.insert(assets, Arc::new(image));
                 }
             }
@@ -267,6 +280,28 @@ impl Images {
     }
 }
 
+/// What a device holds of the pictures of an atlas, by place: the placement ([`DecodedImage::placement`]) of the tile written there, 0 for a sprite.
+/// A place is lacking when it holds nothing, or the tile of a cel that no longer has the slot.
+#[derive(Default)]
+pub struct Uploads(HashMap<Place, u64>);
+
+impl Uploads {
+    /// The device was allocated again, or the atlas laid out anew: it holds nothing.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// The pictures of `places` that `images` holds and the device does not hold as they are now.
+    pub fn lacking<'a>(&self, places: impl IntoIterator<Item = Place>, images: &'a Images) -> Vec<(Place, &'a Arc<DecodedImage>)> {
+        places.into_iter().filter_map(|place| images.get(place).map(|image| (place, image))).filter(|(place, image)| self.0.get(place) != Some(&image.placement)).collect()
+    }
+
+    /// `images` were written to the device.
+    pub fn record<'a>(&mut self, written: impl IntoIterator<Item = (Place, &'a Arc<DecodedImage>)>) {
+        self.0.extend(written.into_iter().map(|(place, image)| (place, image.placement)));
+    }
+}
+
 /// Whether two pictures are the same one.
 fn same(a: Picture, b: Picture) -> bool {
     match (a, b) {
@@ -282,13 +317,10 @@ fn sources(assets: &Assets) -> HashMap<Place, Picture> {
     for (index, entry) in assets.atlas.iter().enumerate().filter(|(_, entry)| entry.valid) {
         sources.insert(Place(false, (entry.layer, entry.x, entry.y)), Picture::Image(index));
     }
-    for (cel, (tiles, starts)) in &assets.cels {
-        for (level, drawn) in tiles.levels.iter().enumerate() {
-            let Some(&first) = starts.get(level) else { continue };
-            for slot in first as usize..first as usize + drawn.len() {
-                if let Some(entry) = assets.drawing.get(slot).filter(|entry| entry.valid) {
-                    sources.insert(Place(true, (entry.layer, entry.x, entry.y)), Picture::Cel(*cel));
-                }
+    for (cel, (_, slots)) in &assets.cels {
+        for &slot in slots.iter().flatten() {
+            if let Some(entry) = assets.drawing.get(slot as usize).filter(|entry| entry.valid) {
+                sources.insert(Place(true, (entry.layer, entry.x, entry.y)), Picture::Cel(*cel));
             }
         }
     }
@@ -361,19 +393,26 @@ impl Raster {
 
     /// Draws `list` seen through `view` at `size`, with `images`.
     pub fn render(&mut self, list: &DrawList, images: &Images, view: &ViewParams, size: [u32; 2]) -> Frame {
+        self.render_cancellable(list, images, view, size, &|| false).expect("uncancelled raster")
+    }
+    pub fn render_cancellable(&mut self, list: &DrawList, images: &Images, view: &ViewParams, size: [u32; 2], cancelled: &dyn Fn() -> bool) -> Option<Frame> {
+        if cancelled() { return None; }
         let size = [size[0].max(1), size[1].max(1)];
         let crisp = self.edges == Edges::Crisp;
         // Lone glyphs: the masks this view calls for (filled now when no frame has yet).
         let resolution = styk_render::effects::plan::raster_resolution(view.matrix[0].hypot(view.matrix[1]));
-        let glyphs = if list.glyphs.is_empty() { Vec::new() } else { self.glyphs.prepare(list, resolution, !crisp) };
+        let glyphs = if list.glyphs.is_empty() { Vec::new() } else { self.glyphs.prepare(list, resolution, !crisp, cancelled) };
         let mut frame = frame::Frame::new(list, images, view, size, crisp, glyphs, self.drawing_grid, self.paint_context);
+        frame.cancelled = cancelled;
+        if cancelled() { return None; }
         let pixels = frame.draw();
+        if cancelled() { return None; }
         self.stats = frame::Stats { glyph_masks: self.glyphs.count() as u32, glyph_masks_filled: self.glyphs.filled, glyph_bytes: self.glyphs.bytes(), ..frame.stats };
         let mut bytes = Vec::with_capacity(pixels.len() * 4);
         for p in pixels {
             bytes.extend_from_slice(&p);
         }
-        Frame { width: size[0], height: size[1], pixels: bytes }
+        Some(Frame { width: size[0], height: size[1], pixels: bytes })
     }
 
     /// Lets go of the glyph masks kept between frames.

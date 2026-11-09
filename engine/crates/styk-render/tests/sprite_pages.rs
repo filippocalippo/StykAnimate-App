@@ -34,12 +34,12 @@ fn assets() -> Assets {
 fn sharp(assets: &Assets, picture: u32, color: [u8; 4]) -> DecodedImage {
     let e = &assets.atlas[picture as usize];
     let (w, h) = (e.w + 2, e.h + 2);
-    DecodedImage { index: picture, drawing: false, soft: false, width: w, height: h, rgba: color.iter().copied().cycle().take((w * h * 4) as usize).collect() }
+    DecodedImage { index: picture, drawing: false, soft: false, width: w, height: h, rgba: color.iter().copied().cycle().take((w * h * 4) as usize).collect(), placement: 0 }
 }
 
 fn soft(assets: &Assets, picture: u32, color: [u8; 4]) -> DecodedImage {
     let (_, _, w, h) = soft_rect(&assets.atlas[picture as usize]);
-    DecodedImage { index: picture, drawing: false, soft: true, width: w, height: h, rgba: color.iter().copied().cycle().take((w * h * 4) as usize).collect() }
+    DecodedImage { index: picture, drawing: false, soft: true, width: w, height: h, rgba: color.iter().copied().cycle().take((w * h * 4) as usize).collect(), placement: 0 }
 }
 
 /// A picture of the layout drawn as a `PICTURE` pixel square with its corner at `at`.
@@ -87,9 +87,12 @@ fn close(pixel: [u8; 4], color: [u8; 4]) -> bool {
 }
 
 fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    // Exact frame comparisons use Vulkan: docs/native/frame-parity.md#dx12-msaa-repeatability-driver-floor.
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::VULKAN;
+    let instance = wgpu::Instance::new(descriptor);
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
-        eprintln!("skipped: no GPU adapter");
+        eprintln!("skipped: no Vulkan adapter");
         return None;
     };
     Some(pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device"))
@@ -97,6 +100,29 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
 
 fn renderer(device: &wgpu::Device, queue: &wgpu::Queue) -> Renderer {
     Renderer::new(device, queue, wgpu::TextureFormat::Rgba8Unorm)
+}
+
+#[test]
+fn a_refused_picture_table_keeps_the_installed_pixels_and_can_retry() {
+    let (device, queue) = device().expect("this stage admission test requires a GPU");
+    let assets = assets();
+    let list = two(&assets);
+    let fulls: Vec<_> = (1..PAGES).map(|p| sharp(&assets, p, SHARP[p as usize])).collect();
+    let mut renderer = renderer(&device, &queue);
+    renderer.prepare_sprites(&assets);
+    renderer.upload_images(&assets, &fulls);
+    let before = draw(&mut renderer, &device, &queue, &list);
+    assert_eq!(centre(&before, 4), SHARP[1]);
+    assert!(renderer.prepare_sprites_export_bounded(&assets, 2, 1).is_err());
+    assert_eq!(draw(&mut renderer, &device, &queue, &list), before);
+    renderer.prepare_sprites_export_bounded(&assets, 3, 1024 * 1024).unwrap();
+    for page in 1..PAGES {
+        renderer.map_sprite_page(page, Some(page));
+        renderer.set_picture(&assets.atlas[page as usize], Some(page));
+    }
+    renderer.flush_sprite_map(); renderer.flush_pictures();
+    renderer.upload_images(&assets, &fulls);
+    assert_eq!(draw(&mut renderer, &device, &queue, &list), before);
 }
 
 #[test]
@@ -229,9 +255,9 @@ fn the_picture_table_finds_every_picture_of_a_crowded_page() {
     for i in 0..64u32 {
         let e = &assets.atlas[i as usize];
         let (w, h) = (e.w + 2, e.h + 2);
-        let sharp = DecodedImage { index: i, drawing: false, soft: false, width: w, height: h, rgba: color(i, true).iter().copied().cycle().take((w * h * 4) as usize).collect() };
+        let sharp = DecodedImage { index: i, drawing: false, soft: false, width: w, height: h, rgba: color(i, true).iter().copied().cycle().take((w * h * 4) as usize).collect(), placement: 0 };
         let (_, _, sw, sh) = soft_rect(e);
-        let soft = DecodedImage { index: i, drawing: false, soft: true, width: sw, height: sh, rgba: color(i, false).iter().copied().cycle().take((sw * sh * 4) as usize).collect() };
+        let soft = DecodedImage { index: i, drawing: false, soft: true, width: sw, height: sh, rgba: color(i, false).iter().copied().cycle().take((sw * sh * 4) as usize).collect(), placement: 0 };
         kept.upload_images(&assets, [&soft, &sharp]);
         // Every third picture is in; the rest draw soft.
         if i % 3 == 0 {

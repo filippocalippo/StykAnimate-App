@@ -748,6 +748,7 @@ impl Editor {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn commit_sheet_range_worker(&mut self, plans: &[(f64, Value, Vec<u32>)], inserted: &[u32], hints: &std::collections::HashMap<u32, String>, definitions: Vec<Value>, label: &str, selection: crate::select::SelectionState, payload: Option<(&[Value], bool)>, deletion: Option<(&[u32], &[Value])>, mut worker: Option<&mut crate::movieclip_planning::TimelineWorker<'_>>) -> Result<bool, EditError> {
+        self.check_definition_depth(definitions.iter())?;
         if let Some(worker) = worker.as_mut() { (worker.check)()?; }
         self.ensure_counts();
         let mut ids: Vec<String> = Vec::new();
@@ -1049,6 +1050,10 @@ impl Editor {
                     }
                 }
             }
+        }
+        // A definition the command adds that is a drawing keeps what makes it one (an imported or pasted cel from a damaged file, or a foreign clipboard's, does not).
+        if plan.definitions.iter().any(|definition| definition.path(&["_styk", "drawing"]).is_some_and(Value::truthy) && !crate::load::drawing_keeps_its_image(definition)) {
+            return Err(EditError::Invalid("errors.editorDrawing.aDrawingKeepsItsOneImage".into()));
         }
         self.validate_plan_checked(&mut plan, check)?;
         // The new sheet: the old one with the replaced tracks, counters and length.
@@ -1448,5 +1453,21 @@ mod tests {
         inherited.make_obj().unwrap().get_mut("bezier").unwrap().make_arr().unwrap()[0] = Value::Num(0.5);
         assert_eq!(styk_doc::json::to_string(&inherited), r#"{"interpolation":"bezier","bezier":[0.5,0.2,0.8,0.9]}"#);
         assert_eq!(styk_doc::json::to_string(keys[0].get("bezier").unwrap()), "[0.1,0.2,0.8,0.9]");
+    }
+
+    #[test]
+    fn a_figure_replaced_twice_in_one_call_keeps_only_its_last_patch() {
+        let report = parse(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/edit/sheet-movieclip.document.json")).unwrap());
+        let mut editor = crate::Editor::new(report, crate::Options { property_channels: true, layer_timeline: true, auto_key: false });
+        let mut plan = editor.planner(&["layer-1".to_string()]).unwrap();
+        // Figure 1 is named twice, for two pose sources, and figure 2 once: the repeated calls this stands for leave figure 1 with the second.
+        let by = |uid: u32, frame_id: &str| Replacement { uid, frame: &Value::Null, extra: Some(("frameId", Value::str(frame_id))) };
+        editor.replace_each_at(&mut plan, "layer-1", 2.0, &[by(1, "frame-3"), by(2, "frame-3"), by(1, "frame-4")], 7.0).unwrap();
+        editor.publish(plan, "Replace", crate::select::SelectionState::default(), None).unwrap();
+        let keys = items(editor.report.path(&["_styk", "layerSheet", "tracks", "layer-1", "keys"]));
+        let key = keys.iter().find(|key| num(key, "tick") == Some(2.0)).expect("the replacement makes a key at its tick");
+        let patches: Vec<(f64, String)> = items(key.get("movieclipPatches")).iter().map(|patch| (num(patch, "uid").unwrap(), patch.get("frameId").and_then(Value::as_str).unwrap().to_string())).collect();
+        assert_eq!(patches.iter().filter(|(uid, _)| *uid == 1.0).collect::<Vec<_>>(), [&(1.0, "frame-4".to_string())], "one patch for the figure named twice, the last: {patches:?}");
+        assert_eq!(patches.iter().filter(|(uid, _)| *uid == 2.0).count(), 1, "{patches:?}");
     }
 }

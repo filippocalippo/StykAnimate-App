@@ -15,6 +15,23 @@ use styk_eval::records::Records;
 use crate::record::{frame_mut, uid};
 use crate::{EditError, Editor};
 
+/// One evaluation of the records at `tick`: with `clips` the movieclips sampled; `editor_native` the native timeline's
+/// own reading (`evaluatedEditorWith`), else `evaluatedFrame`.
+fn evaluate(records: &Records, tick: f64, clips: bool, editor_native: bool) -> Result<Value, EditError> {
+    Ok(if editor_native { records.evaluated_editor_with(tick, clips)? } else { records.evaluated_with(tick, clips)? })
+}
+
+/// The frame on show at `tick` of `report`, from views made of it (`prepared`): exactly what the editor evaluates and
+/// caches for its playhead, made elsewhere (the facts lane, from a published generation).
+pub fn editor_frame(report: &Value, prepared: &Prepared, tick: f64) -> Result<Value, EditError> {
+    editor_frame_cancellable(report, prepared, tick, &|| false)
+}
+
+pub fn editor_frame_cancellable(report: &Value, prepared: &Prepared, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Value, EditError> {
+    let sheet = report.path(&["_styk", "layerSheet"]).is_some();
+    evaluate(&Records::new_cancellable(report, prepared, cancelled)?, tick, true, !sheet)
+}
+
 /// What evaluation keeps between calls, for as long as the document does not change.
 #[derive(Clone, Default)]
 pub(crate) struct Cache {
@@ -28,6 +45,7 @@ pub(crate) struct Cache {
     /// Only the latest successfully converted shown frame. Object nodes may be
     /// reused within this Prepared lineage; geometry is always built afresh.
     latest_typed: Option<Arc<EditFramePair>>,
+    committed_preview: Option<(Value, u64, Value)>,
 }
 
 struct EditFramePair {
@@ -103,6 +121,14 @@ pub(crate) fn objects_of(frame: &Value) -> Vec<Value> {
 }
 
 impl Editor {
+    /// Refuses, with nothing changed, a command about to take about `bytes` more than the host can give (`memory_gate`).
+    pub(crate) fn admit(&self, bytes: usize) -> Result<(), EditError> {
+        match self.memory_gate {
+            Some(gate) if !gate(bytes) => Err(EditError::Invalid("errors.engine.outOfMemory".into())),
+            _ => Ok(()),
+        }
+    }
+
     /// Whether the document is edited through its layer sheet (always, in the app).
     pub(crate) fn sheet(&self) -> bool {
         self.report.path(&["_styk", "layerSheet"]).is_some()
@@ -117,6 +143,19 @@ impl Editor {
         cache.report = Some(self.report.clone());
         cache.frames.clear();
         cache.latest_typed = None;
+    }
+
+    pub(crate) fn publish_property_preview(&self, frame: Option<Value>) {
+        self.eval.borrow_mut().committed_preview = frame.map(|frame| (self.report.clone(), self.tick.to_bits(), frame));
+    }
+
+    /// Figure definitions are independent of timeline edits. The old conversion is reusable
+    /// only when the immutable definition table is still exactly the session's table.
+    pub(crate) fn figure_ready(&self, id: u32) -> Option<Arc<styk_eval::doc::Figure>> {
+        let cache = self.eval.borrow();
+        let held = cache.report.as_ref()?;
+        if !held.get("figure_types").zip(self.report.get("figure_types")).is_some_and(|(a, b)| a.same_node(b)) { return None; }
+        cache.prepared.as_ref()?.doc.figure(id).cloned()
     }
 
     /// The typed views the editor holds of `report` (the document as it is now), when it has made them.
@@ -176,8 +215,7 @@ impl Editor {
         if let Some((_, _, _, frame)) = self.eval.borrow().frames.iter().find(|(at, with, editor, _)| *at == tick.to_bits() && *with == clips && *editor == editor_native) {
             return Ok(frame.clone());
         }
-        let records = Records::new(&self.report, &prepared)?;
-        let frame = if editor_native { records.evaluated_editor_with(tick, clips)? } else { records.evaluated_with(tick, clips)? };
+        let frame = evaluate(&Records::new(&self.report, &prepared)?, tick, clips, editor_native)?;
         let mut cache = self.eval.borrow_mut();
         if cache.frames.len() >= 4 {
             cache.frames.remove(0);
@@ -191,6 +229,47 @@ impl Editor {
     pub(crate) fn evaluated_without_patches(&self, tick: f64) -> Result<Value, EditError> {
         let prepared = self.prepared()?;
         Ok(Records::new(&self.report, &prepared)?.evaluated_options(tick, false, true)?)
+    }
+
+    /// The frame on show when answering needs no evaluation and no conversion: a gesture's draft or preview, the
+    /// retained frame, or the evaluation the editor holds for the playhead over views of the document as it is now.
+    /// `None` when only evaluating would answer (the interface then asks a worker: [`editor_frame`]).
+    pub(crate) fn shown_frame_ready(&self) -> Option<Value> {
+        if let Some(preview) = self.property_preview() {
+            return Some(preview);
+        }
+        if let Some((report, tick, frame)) = &self.eval.borrow().committed_preview
+            && report.same_node(&self.report) && *tick == self.tick.to_bits() { return Some(frame.clone()); }
+        match (&self.authored, &self.retained) {
+            (Some(edit), _) => Some(edit.frame.clone()),
+            (None, Some(frame)) => Some(frame.clone()),
+            (None, None) => {
+                let editor_native = !self.sheet();
+                let cache = self.eval.borrow();
+                cache.report.as_ref().filter(|held| held.same_node(&self.report))?;
+                cache.frames.iter().find(|(at, clips, editor, _)| *at == self.tick.to_bits() && *clips && *editor == editor_native).map(|(.., frame)| frame.clone())
+            }
+        }
+    }
+
+    /// Takes the frame on show a worker made of `report` (the document as it is now) at `tick` with [`editor_frame`],
+    /// after the views it was made with were adopted: the next read at that tick is ready without evaluating.
+    pub fn adopt_frame(&self, report: &Value, tick: f64, frame: Value) {
+        if !report.same_node(&self.report) {
+            return;
+        }
+        let editor_native = !self.sheet();
+        let mut cache = self.eval.borrow_mut();
+        if !cache.report.as_ref().is_some_and(|held| held.same_node(report)) {
+            return;
+        }
+        if cache.frames.iter().any(|(at, clips, editor, _)| *at == tick.to_bits() && *clips && *editor == editor_native) {
+            return;
+        }
+        if cache.frames.len() >= 4 {
+            cache.frames.remove(0);
+        }
+        cache.frames.push((tick.to_bits(), true, editor_native, frame));
     }
 
     /// `editor.evaluatedFrame`: the draft of the gesture in progress, else the

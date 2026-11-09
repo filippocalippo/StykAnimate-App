@@ -65,7 +65,7 @@ fn worker_bake_cancellation_and_budget_preserve_live_gesture() {
         let mut checks = 0;
         successful.call_movieclip_timeline_worker("bakeMovieclip", &[], &mut TimelineWorker {
             max_source_bytes: 128 * 1024 * 1024, check: &mut || { checks += 1; Ok(()) },
-            progress: &mut |_| {}, clock: || 0.0,
+            progress: &mut |_| {}, clock: &|| 0.0,
         }).unwrap();
         assert!(checks > 1);
         for at in 1..=checks {
@@ -75,7 +75,7 @@ fn worker_bake_cancellation_and_budget_preserve_live_gesture() {
             let result = cancelled.call_movieclip_timeline_worker("bakeMovieclip", &[], &mut TimelineWorker {
                 max_source_bytes: 128 * 1024 * 1024,
                 check: &mut || { seen += 1; if seen == at { Err(EditError::Invalid("host-bake-cancel".into())) } else { Ok(()) } },
-                progress: &mut |_| {}, clock: || 0.0,
+                progress: &mut |_| {}, clock: &|| 0.0,
             });
             assert!(matches!(result, Err(EditError::Invalid(ref key)) if key == "host-bake-cancel"), "{name} at{at}");
             assert_eq!(cancelled.report_json(), report, "{name} at{at}");
@@ -91,7 +91,7 @@ fn worker_bake_cancellation_and_budget_preserve_live_gesture() {
             let mut limited = live(name);
             let (report, state) = (limited.report_json(), limited.state_value());
             let result = limited.call_movieclip_timeline_worker("bakeMovieclip", &[], &mut TimelineWorker {
-                max_source_bytes: bytes, check: &mut || Ok(()), progress: &mut |_| {}, clock: || 0.0,
+                max_source_bytes: bytes, check: &mut || Ok(()), progress: &mut |_| {}, clock: &|| 0.0,
             });
             assert!(matches!(result, Err(EditError::Invalid(ref key)) if key.starts_with("errors.editorLayerMigration.")), "{name} budget{bytes}");
             assert_eq!(limited.report_json(), report);
@@ -114,7 +114,7 @@ fn worker_bake_preserves_existing_unrecorded_native_draft_and_ik_refusals() {
         let mut editor = Editor::new(report, Options::default());
         let (report, state) = (editor.report_json(), editor.state_value());
         let result = editor.call_movieclip_timeline_worker("bakeMovieclip", &[], &mut TimelineWorker {
-            max_source_bytes: 128 * 1024 * 1024, check: &mut || Ok(()), progress: &mut |_| {}, clock: || 0.0,
+            max_source_bytes: 128 * 1024 * 1024, check: &mut || Ok(()), progress: &mut |_| {}, clock: &|| 0.0,
         });
         assert!(matches!(result, Err(EditError::Unported(_))), "{name}: {result:?}");
         assert_eq!(editor.report_json(), report);
@@ -246,7 +246,7 @@ fn the_interface_call_bakes_as_the_worker_entry_does() {
     for name in ["bake-native-live", "bake-sheet-live"] {
         let mut worker = live(name);
         worker.call_movieclip_timeline_worker("bakeMovieclip", &[], &mut TimelineWorker {
-            max_source_bytes: 128 * 1024 * 1024, check: &mut || Ok(()), progress: &mut |_| {}, clock: || 0.0,
+            max_source_bytes: 128 * 1024 * 1024, check: &mut || Ok(()), progress: &mut |_| {}, clock: &|| 0.0,
         }).unwrap();
         let mut called = live(name);
         let depth = called.state_value().get("undoLabel").cloned();

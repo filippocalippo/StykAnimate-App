@@ -303,3 +303,46 @@ fn a_scene_over_the_one_held_is_kept_only_when_a_build_would_give_it() {
         }
     }
 }
+
+/// Drawing cels held live no longer turn the memory off: the objects that draw no cel are kept, the object that draws one is encoded
+/// again each frame from the slots as they are, and every list is the list encoded whole.
+#[test]
+fn objects_that_draw_no_live_cel_are_kept_and_the_one_that_does_is_not() {
+    use styk_eval::live::{LiveCels, LiveView};
+    // A document of plain figures, with an unrelated cel held live: everything is kept.
+    let document = prepared("eval/follow-figures.json");
+    let assets = Assets::build(&document.doc);
+    let frame = document.evaluate(0.0);
+    let (mut built, mut encoded) = (BuildMemory::default(), EncodeMemory::default());
+    let mut live = LiveCels::default();
+    live.update("elsewhere", false, vec![((0, 0), Some(vec![255u8; styk_eval::live::TILE_BYTES]))]).expect("room");
+    live.show("elsewhere", true, false);
+    for round in 0..3 {
+        let scene = geometry::build_remembering(&document.doc, &frame, &mut built);
+        let overrides = Overrides { live: Some(LiveView { cels: &live, base: assets.pages }), ..Default::default() };
+        let remembered = encode_composed_remembering(&document.doc, &assets, &scene, &overrides, &[], None, &mut encoded);
+        let whole = encode_composed(&document.doc, &assets, &scene, &overrides, &[], None);
+        same_list(&remembered, &whole, &format!("follow-figures with a live cel elsewhere, round {round}"));
+    }
+    assert!(encoded.kept() > 0, "the objects are kept while a cel is held live");
+
+    // A document whose object draws the cel: it is encoded from the live slots every frame.
+    let document = prepared("drawlist/drawing-cel.json");
+    let assets = Assets::build(&document.doc);
+    let id = document.doc.figures[0].images.iter().find_map(|image| image.cel.as_ref()).expect("a cel").id.clone();
+    let frame = document.evaluate(0.0);
+    let (mut built, mut encoded) = (BuildMemory::default(), EncodeMemory::default());
+    let mut live = LiveCels::default();
+    let tile = |value: u8| Some(vec![value; styk_eval::live::TILE_BYTES]);
+    live.update(&id, false, vec![((0, 0), tile(200))]).expect("room");
+    live.show(&id, true, false);
+    for (round, value) in [(0, 200u8), (1, 90), (2, 40)] {
+        live.update(&id, false, vec![((0, 0), tile(value)), ((round + 1, 0), tile(value))]).expect("room");
+        let scene = geometry::build_remembering(&document.doc, &frame, &mut built);
+        let overrides = Overrides { live: Some(LiveView { cels: &live, base: assets.pages }), ..Default::default() };
+        let remembered = encode_composed_remembering(&document.doc, &assets, &scene, &overrides, &[], None, &mut encoded);
+        let whole = encode_composed(&document.doc, &assets, &scene, &overrides, &[], None);
+        same_list(&remembered, &whole, &format!("drawing-cel, round {round}: the slots as they are now"));
+        assert_eq!(encoded.kept(), 0, "the object that draws the live cel is not kept");
+    }
+}

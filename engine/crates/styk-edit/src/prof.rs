@@ -9,9 +9,12 @@ mod native {
     use std::time::Instant;
 
     thread_local! {
-        static ENABLED: bool = std::env::var_os("STYK_EDIT_PROFILE").is_some();
+        static ENABLED: std::cell::Cell<bool> = std::cell::Cell::new(std::env::var_os("STYK_EDIT_PROFILE").is_some());
         static TOTALS: RefCell<HashMap<&'static str, (u64, f64)>> = RefCell::new(HashMap::new());
     }
+
+    #[cfg(test)]
+    pub fn enable_for_test() { ENABLED.with(|on| on.set(true)); take(); }
 
     pub struct Scope(Option<(&'static str, Instant)>);
 
@@ -25,7 +28,7 @@ mod native {
     }
 
     pub fn scope(name: &'static str) -> Scope {
-        Scope(ENABLED.with(|on| *on).then(|| (name, Instant::now())))
+        Scope(ENABLED.with(|on| on.get()).then(|| (name, Instant::now())))
     }
 
     /// The totals so far, slowest first, and clears them.
@@ -46,3 +49,6 @@ pub fn scope(_name: &'static str) {}
 
 #[cfg(target_arch = "wasm32")]
 pub fn take() -> Vec<(&'static str, u64, f64)> { Vec::new() }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use native::enable_for_test;

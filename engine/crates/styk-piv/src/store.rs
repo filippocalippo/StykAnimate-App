@@ -407,7 +407,7 @@ pub(crate) fn finish_upload(ctx: &Ctx<'_>, mut document: Value, payload: Option<
         bridge::validate_document(ctx, &document)?;
     }
     // Validate any embedded source before editing.
-    bridge::source_bytes(&document)?;
+    bridge::source_bytes(ctx, &document)?;
     Ok(Imported { document, payload })
 }
 
@@ -669,8 +669,8 @@ impl Store {
         let empty = Value::object(styk_doc::Obj::new());
         let metadata = py::get(document, "_stykSource")?.unwrap_or(&empty);
         let embedded_source = match original {
-            Some(bytes) => Some(bridge::checked_source(py::get(document, "_stykSource")?, bytes)?),
-            None => bridge::source_bytes(document)?,
+            Some(bytes) => Some(bridge::checked_source(ctx, py::get(document, "_stykSource")?, bytes)?),
+            None => bridge::source_bytes(ctx, document)?,
         };
         let (source, source_kind, original_digest): (Option<Arc<[u8]>>, Option<String>, Option<String>) = match pivot_entry {
             Some(found) => {
