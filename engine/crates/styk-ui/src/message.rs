@@ -201,8 +201,7 @@ pub fn raw_at(core: &mut Core, event: &iced::Event, ignored: bool, now: u64) -> 
     match event {
         iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { .. }) if ignored && core.overlays().top().is_some() => Some(update_at(core, Message::Key(event.clone()), now)),
         iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_)) => {
-            let release = Message::Overlay(styk_design::widgets::menu::Event::Pointer { press: false, inside: false, x: 0.0, y: 0.0 });
-            Some(update_at(core, release, now))
+            Some(update_at(core, Message::Command(Command::Overlay { event: styk_core::overlay::host::Event::Lifted, now }), now))
         }
         _ => None,
     }

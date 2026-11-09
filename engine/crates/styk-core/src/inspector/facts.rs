@@ -44,8 +44,14 @@ pub(crate) fn degrees(radians: f64) -> f64 {
     radians * 180.0 / std::f64::consts::PI
 }
 
+/// How many times this thread scanned a frame's whole object list (what tests count to show an interface-thread read does not).
+#[cfg(any(test, feature = "testing"))]
+thread_local! { pub(crate) static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 /// The objects of the frame on show.
 pub(crate) fn frame_objects(frame: &Value) -> Vec<Value> {
+    #[cfg(any(test, feature = "testing"))]
+    SCANS.with(|scans| scans.set(scans.get() + 1));
     frame.get("objects").and_then(Value::elements).map(|items| items.iter().collect()).unwrap_or_default()
 }
 

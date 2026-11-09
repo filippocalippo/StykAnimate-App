@@ -122,11 +122,6 @@ impl Default for Facts {
 /// The view toggles whose rows show a check (today's `TOGGLE_STATES`, the ones the menus carry).
 pub const TOGGLES: [C; 5] = [C::ToggleHandles, C::ToggleMotionPaths, C::ToggleGrid, C::ToggleOnion, C::ToggleLoop];
 
-/// Commands that remove something: their rows are red (`DANGER_COMMANDS`).
-fn danger(command: C) -> bool {
-    matches!(command, C::Delete | C::DeleteSegment | C::DeleteSingleSegment | C::DeleteFrame)
-}
-
 struct Builder<'a> {
     presentation: &'a Presentation,
     facts: &'a Facts,
@@ -140,7 +135,7 @@ impl Builder<'_> {
     /// A row of a command: glyph, catalogue label and (when it applies) the disabled state.
     fn row(&self, command: C, icon: &str, key: &'static str, disabled: bool) -> Entry {
         let checked = TOGGLES.contains(&command).then(|| self.facts.checked(command));
-        Entry::Item(Item { icon: Some(icon.to_owned()), checked, disabled, danger: danger(command), ..Item::new(command, self.text(key)) })
+        Entry::Item(Item { icon: Some(icon.to_owned()), checked, disabled, danger: command.info().danger, ..Item::new(command, self.text(key)) })
     }
 
     fn on(&self, command: C, icon: &str, key: &'static str) -> Entry {
@@ -356,6 +351,11 @@ impl crate::app::Core {
     /// The state the menus' rows depend on, read from the owners that hold it: the selection of the project in front (only the
     /// reads that never evaluate), the settings, the dock's visible panels and the open projects.
     ///
+    /// Opening a menu never evaluates or scans a frame: the selection is read from the session, and what kind of figure it is from
+    /// the Inspector's prepared model ([`crate::inspector::Panel::kind_of`]). While that model is pending the Joint rows are
+    /// disabled, as the Inspector's own controls are (today's menu always has the frame at hand; the other answer, no selection,
+    /// would be wrong for a figure that is selected).
+    ///
     /// The stage's overlay flags (Joints, Motion paths, Onion skin, Grid) have no owner in the core yet: the menu shows their
     /// starting state until the stage owns them.
     pub fn menu_facts(&self) -> Facts {
@@ -370,9 +370,11 @@ impl crate::app::Core {
         if let Some(document) = self.documents.active() {
             let selection = facts::selection(document);
             figure = selection.uid.is_some() || !selection.uids.is_empty();
-            // The Joint menu needs one joint of one figure that is not a movieclip (`noJoint`).
-            let movieclip = document.frame_records_ready().and_then(|frame| facts::selected_object(document, &frame)).and_then(|object| facts::figure_of(document, &object)).is_some_and(|figure| figure.movieclip.is_some());
-            joint = figure && !movieclip && selection.joint >= 0 && selection.uids.len() <= 1;
+            // The Joint menu needs one joint of one figure that is not a movieclip (`noJoint`). What kind of figure it is comes
+            // from the Inspector's prepared model, which is stamped with the revision and the selection it was made for; while
+            // that is pending (or made for another state) the Joint rows are disabled until it lands: nothing is scanned here.
+            let kind = self.inspector().kind_of(document);
+            joint = figure && selection.joint >= 0 && selection.uids.len() <= 1 && kind.is_some_and(|kind| kind != crate::inspector::model::Kind::Movieclip);
         }
         Facts {
             figure,

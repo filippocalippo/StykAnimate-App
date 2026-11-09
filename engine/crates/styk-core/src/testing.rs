@@ -160,3 +160,9 @@ pub fn poll_until(core: &mut Core, done: impl Fn(&Core) -> bool) -> Result<Vec<c
     }
     Err(format!("the documents host did not answer in 15 s (recovery: {:?})", core.documents.recovery_view()))
 }
+
+/// How many whole-frame object scans this thread has made (a counter, never a clock): a read on the interface thread that
+/// must not walk the frame shows no change.
+pub fn frame_scans() -> usize {
+    crate::inspector::facts::SCANS.with(|scans| scans.get())
+}

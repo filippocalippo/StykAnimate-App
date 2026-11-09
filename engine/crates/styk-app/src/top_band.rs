@@ -1231,6 +1231,35 @@ mod tests {
         click_focus(top, id);
     }
 
+    /// The press that closes the mark's menu leaves nothing behind when its release lands elsewhere (no click follows): the next
+    /// click opens the menu. The window's raw release (`Message::Raw`) follows each release the layer saw, as the subscription sends.
+    #[test]
+    fn a_press_on_the_mark_that_is_released_elsewhere_does_not_swallow_the_next_click() {
+        let raw_release = |top: &mut TopBand| drop(top.update(Message::Raw(Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)), true)));
+        let (mut top, _) = band();
+        open(&mut top, 1);
+        drive(&mut top, |_| {});
+        click_focus(&mut top, ids::MARK);
+        raw_release(&mut top);
+        assert!(top.core.overlays().menu_of(ids::MARK).is_some(), "the click opened the menu");
+        // Press the mark (its menu closes), move off the button and release over the empty stage.
+        drive(&mut top, |driver| {
+            let at = driver.snapshot().bounds_of(ids::MARK).expect("the mounted mark").center();
+            driver.point_at(at);
+            driver.events(&[Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))]);
+            driver.point_at((700.0, 500.0));
+            driver.events(&[Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))]);
+        });
+        raw_release(&mut top);
+        assert!(top.core.overlays().menus().is_empty(), "the press closed the menu and no click opened it again");
+        click_focus(&mut top, ids::MARK);
+        raw_release(&mut top);
+        assert!(top.core.overlays().menu_of(ids::MARK).is_some(), "the next click on the mark opens the menu");
+        click_focus(&mut top, ids::MARK);
+        raw_release(&mut top);
+        assert!(top.core.overlays().menus().is_empty(), "and the one after closes it");
+    }
+
     #[test]
     fn the_mounted_mark_opens_its_menu_a_clicked_row_runs_its_command_and_a_second_press_closes_it() {
         let (mut top, _) = band();

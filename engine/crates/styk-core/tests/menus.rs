@@ -210,3 +210,31 @@ fn two_open_projects_list_in_the_menu_and_choosing_one_brings_it_to_the_front() 
     assert_eq!(core.documents.active().map(|document| document.id()), Some(first), "the row switched the project");
     assert!(core.overlays().menus().is_empty());
 }
+
+#[test]
+fn opening_the_menu_scans_no_frame_and_the_joint_rows_wait_for_the_prepared_model() {
+    use styk_core::testing;
+    let mut core = with_project();
+    testing::settle_facts(&mut core).unwrap();
+    testing::call(&mut core, "select", "[1,0]").unwrap();
+    let before = testing::frame_scans();
+    let facts = core.menu_facts();
+    open_mark(&mut core);
+    assert_eq!(testing::frame_scans(), before, "reading the facts and opening the menu walked no frame (a count, not a time)");
+    assert!(facts.figure && facts.joint, "a joint of a figure is selected and the model is ready: the Joint menu works");
+    press(&mut core, "Joint");
+    let joint = core.overlays().menus().last().unwrap().entries().iter().filter_map(|entry| if let Entry::Item(item) = entry { Some(item.disabled) } else { None }).collect::<Vec<_>>();
+    assert!(joint.iter().all(|disabled| !disabled), "{joint:?}");
+    core.dispatch(AppCommand::Overlay { event: Event::Escape, now: 20 });
+    core.dispatch(AppCommand::Overlay { event: Event::Escape, now: 21 });
+    assert!(core.overlays().menus().is_empty());
+    // An edit makes the frame on show wait for its worker: until the model is prepared again the Joint rows stay disabled.
+    core.dispatch(AppCommand::Run(CommandId::Rotate));
+    assert!(core.inspector().pending(), "the frame on show is being made on a worker");
+    let before = testing::frame_scans();
+    let pending = core.menu_facts();
+    assert_eq!(testing::frame_scans(), before, "and still nothing is scanned while it waits");
+    assert!(pending.figure && !pending.joint, "the selection is known, the kind of figure is not yet");
+    testing::settle_facts(&mut core).unwrap();
+    assert!(core.menu_facts().joint, "the prepared model enables them again");
+}

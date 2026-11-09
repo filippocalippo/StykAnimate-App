@@ -1,5 +1,5 @@
 styk-auto/1
-# The application menus' interaction check (docs/native/menus.md): the mark opens its menu, a submenu opens on hover, a row
+# The application menus' interaction check (docs/native/menus.md): the mark opens its menu, a submenu opens beside its row, a row
 # runs its command through Core::dispatch (Undo, Redo), a row whose feature is not ported answers and closes the menu, and a
 # second press of the mark closes it. Run from the repository root:
 #   STYK_BACKGROUND_WINDOW=1 stykanimate --size 1560x900 --clock fixed --automation engine/crates/styk-app/automation/menu-interaction.script
@@ -10,12 +10,10 @@ edit 30
 expect history 1
 expect menus 0
 
-# The mark opens the menu; hovering Edit opens its submenu once the hover intent has passed (150 ms).
+# The mark opens the menu; pressing Edit opens its submenu beside it.
 click mark
 expect menus 1
-menu hover Edit
-expect menus 1
-advance 200000000
+menu press Edit
 expect menus 2
 screenshot ../../../../tmp/menus/edit-open.png
 # Undo is a registry command: the row runs it on the project in front and the whole tree closes.
@@ -23,7 +21,7 @@ menu press Undo
 expect menus 0
 expect history 0
 
-# Redo the same way, by pressing the submenu's row (a press opens it at once).
+# Redo the same way.
 click mark
 menu press Edit
 expect menus 2

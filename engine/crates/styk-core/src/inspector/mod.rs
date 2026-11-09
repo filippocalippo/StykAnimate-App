@@ -295,6 +295,17 @@ impl Panel {
         self.model.as_ref()
     }
 
+    /// The kind of context the model shows for the document as it is now: only a model built from the frame on show at this
+    /// revision, for this selection (a revision-stamped result of the last refresh), never a pending copy of an older one.
+    /// Reading it is a comparison; nothing is evaluated or scanned (the menus read it as they open).
+    pub fn kind_of(&self, document: &crate::documents::Document) -> Option<model::Kind> {
+        let model = self.model.as_ref().filter(|_| !self.pending)?;
+        let key = self.key.as_ref()?;
+        let selection = facts::selection(document);
+        let current = key.document == document.id() && key.revision == document.revision() && key.selection.0 == selection.uid && key.selection.1 == selection.uids && key.selection.2 == selection.joint;
+        current.then_some(model.kind)
+    }
+
     /// The facts the model shows.
     pub fn shown(&self) -> &Shown {
         &self.shown
