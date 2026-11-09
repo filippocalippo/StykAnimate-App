@@ -107,19 +107,19 @@ high-risk or unclear one reverts its chunk); no catch-up merges into branches wi
 | K-timeline views 1 | Sonnet | built at `6a591305` (the header, the Advanced sheet, the Simple strip; six screens within limits, identical in the preview; 14 mounted tests with mutations); waits for the core gaps, then drops its stopgap view arithmetic; one Sol review of the whole |
 | K-dev panels | Astra, then Sonnet | ready at `600ac90d` (core: Sol high, three majors fixed; views: Sol high, five majors fixed in two steps): the developer mark, the profiler, logs, live parameters and the pass-through overlay, release build clean; merging native-app into its branch (conflicts with the timeline's registry and routing), then merges alone |
 
-**Step 3 in flight** (`perf/briefs/native/step3-plan.md`; all unmerged, `origin/native-app` at `951f23a8`):
+**Step 3 in flight** (`perf/briefs/native/step3-plan.md`; unmerged unless marked):
 
 | Chunk | Who | State |
 | --- | --- | --- |
 | V0 visible loop | Astra xhigh | in its final checks (queue priority) |
 | Timeline part 1 gaps and views | Astra core, Sonnet views | `t3/timeline-views-1` `edf88a82`; Sol xhigh: one blocker (redraw work grows with the document) and eight majors (deferred release lost, FPS commits only on Enter and seeded from the effective rate, preview incomplete, popovers placed by the view and outside the overlay host, two view decisions, tests that inject wakes); Astra fixing the core, then Sonnet the views; re-check of the blocker |
-| F4 session-end flake | Astra | `session_end_retains_the_checkpoint...` ("the idle app kept scheduling work"): wake loop or test, 20 contended runs |
+| F4 session-end flake | Astra | **merged `5b4c032f`** (alone, pass green, pushed; Sol xhigh: no findings): two real idle wake loops (an empty frame outbox turned contention into a wake; a contended worker exchange woke the interface at once) fixed so a contended exchange wakes its worker, which resumes the interface after releasing it; the session-end test ordered by a worker gate (80/80 under contention) |
 | G1 gate tooling | Astra | `4a3002d9`; six smokes, 36-comparison save oracle; Sol high: three majors (benchmark workloads differ, export automation bypasses the app path, the Inspector smoke never runs), fixing; the Inspector smoke switches on after V0 |
 | B1 Inspector rest | Opus core, Sonnet views | core `c4de5d42` (40 save comparisons byte-equal); views merging it; then Sol xhigh on the whole |
 | B3 colour picker | Opus core, Sonnet views | core `3bffe54c` (on B1's paint model; merges after B1); views building. Open: palette persistence (a quit-order owner), the eyedropper (ST-089), Draw's live pickers |
-| T3 frame edits and easing | Astra xhigh | from `fb30ff6e`; merges after the timeline branch |
-| T5 onion, navigation, scopes | Opus | from `edf88a82`; interface in its checks |
-| L1 Library panel (My library) | Opus | plan `0bbe5b60` checked by Sol (three blockers fixed: quit order, per-operation file transactions, the insert on the session worker); coding. Community (HO-074-079) is L1b |
+| T3 frame edits and easing | Astra xhigh core, Sonnet views | core `38d6a968` (20 rows, 112 native saves byte-equal, 41 timeline tests); views building on a merge of `edf88a82` and the core; merges after the timeline branch, Sol xhigh on the whole |
+| T5 onion, navigation, scopes | Opus core | interface `33fd32e6` (onion preferences in Settings' view memory, the header model, zoom and pan); logic in progress; views start once the timeline branch's fixes land (same header files) |
+| L1 Library panel (My library) | Opus core, Sonnet views | plan checked by Sol (three blockers fixed); interface `ac1e3bd9`; read paths in progress; views building |
 | B2 VFX panel | Astra xhigh | plan `ba9373f8` checked by Sol (randomness through the session, preset migration fixed); interface next. Lanes go with T4 |
 | M1 menus | Sonnet | building |
 
