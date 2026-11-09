@@ -102,18 +102,27 @@ fn clear_message(state: &mut UpdateState) {
 }
 
 /// Whether this copy was installed by the Setup installer: the uninstaller sits beside it.
-fn installed() -> bool {
+pub fn installed() -> bool {
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("uninstall.exe").exists()))
         .unwrap_or(false)
 }
 
+/// A feed other than the public one, for an updater run in a development or developer build (`STYK_UPDATE_FEED`):
+/// the real plugin checks it, downloads and verifies the signature. The shipping build has no such switch.
+fn feed_override() -> Option<url::Url> {
+    if !cfg!(any(debug_assertions, feature = "devtools")) {
+        return None;
+    }
+    std::env::var("STYK_UPDATE_FEED").ok().and_then(|value| url::Url::parse(&value).ok())
+}
+
 /// Sets the updater up (called at start, before the window opens).
 pub fn init(app: &AppHandle) {
     let shell = app.state::<Shell>();
     let portable = std::env::var_os("STYK_PORTABLE_DIR").is_some();
-    let hooked = super::test_hooks::read("update.json").is_some();
+    let hooked = super::test_hooks::read("update.json").is_some() || feed_override().is_some();
     let reason = if hooked { None } else { unavailable(shell.packaged, cfg!(windows), portable, installed()) };
     let state = UpdateState {
         status: if reason.is_some() { "unavailable" } else { "idle" },
@@ -207,7 +216,10 @@ async fn run(app: &AppHandle) {
         if let Some(hooked) = super::test_hooks::read("update.json") {
             return run_hooked(app, &hooked).await;
         }
-        let updater = app.updater().map_err(|e| e.to_string())?;
+        let updater = match feed_override() {
+            Some(feed) => app.updater_builder().endpoints(vec![feed]).and_then(|b| b.build()).map_err(|e| e.to_string())?,
+            None => app.updater().map_err(|e| e.to_string())?,
+        };
         let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
             updates.set(app, |state| {
                 state.status = "current";
@@ -319,6 +331,13 @@ pub async fn update_restart(app: AppHandle, checkpoint: Option<Value>) -> Result
         }
         let ready = updates.ready.lock().unwrap_or_else(|e| e.into_inner()).take();
         let (update, bytes) = match ready {
+            // An updater run with the test hooks downloads and verifies for real, and records the install instead of
+            // starting the installer (an agent never installs on the machine it runs on).
+            Some(Ready::Verified(update, bytes)) if super::test_hooks::folder().is_some() => {
+                updates.set(&app, |state| state.status = "restarting");
+                super::test_hooks::record("update-install", serde_json::json!({"version": update.version, "bytes": bytes.len()}));
+                return Ok(true);
+            }
             Some(Ready::Verified(update, bytes)) => (update, bytes),
             Some(Ready::Hooked(version)) => {
                 updates.set(&app, |state| state.status = "restarting");

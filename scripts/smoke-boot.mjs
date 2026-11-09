@@ -88,7 +88,8 @@ try {
   expect('The page raised no errors', errors.length === 0, errors[0]);
 } finally {
   await app?.close().catch(() => {});
-  await rm(profile, { recursive: true, force: true });
+  // WebView2 may hold its profile's lock a moment after the window closes; cleanup never hides the checks.
+  await rm(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }).catch(() => {});
 }
 if (failures.length) { console.error(`\n${failures.length} check(s) failed:\n - ${failures.join('\n - ')}`); process.exitCode = 1; }
 else console.log('\nThe desktop app booted cleanly.');

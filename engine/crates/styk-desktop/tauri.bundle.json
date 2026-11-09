@@ -1,5 +1,4 @@
 {
-  "$comment": "Merged only when packaging (scripts/tauri-build.mjs): tauri-build checks that resources exist on every compile, and development and test builds have no staged encoder.",
   "bundle": {
     "resources": {
       "../../../build/video-encoder/": "video-encoder/",

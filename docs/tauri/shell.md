@@ -84,8 +84,9 @@ areas are the window's caption: WebView2's non-client region support (on in wry)
   with Electron, every later ordinary launch still opens its own window and project (with a `workspaces/<pid>`
   folder for its recovery copies and browser storage), and only `stykanimate://` links go to the first window. A
   launch with a file opens that file in its window. `new_window` starts such a process.
-- `stykanimate://open`, `privacy`, `library` and `library/<public id>` are accepted, as today. A packaged first
-  process registers itself as the handler for the current user (as `setAsDefaultProtocolClient` did).
+- `stykanimate://open`, `privacy`, `library` and `library/<public id>` are accepted, as today. An installed first
+  process on its real data folder registers itself as the handler for the current user (as
+  `setAsDefaultProtocolClient` did); portable copies and test runs (`STYK_USER_DATA_DIR`) never touch the registration.
 - File associations are the Electron app's: the same extensions, names (ProgIDs) and roles, in `tauri.conf.json`.
 - GPU switches: WebView2 enables WebGPU through D3D12 with no opt-in (`STYK_GPU_UNSAFE=1` adds it). Development builds
   also take `STYK_EXTRA_BROWSER_ARGS` for diagnosis.
