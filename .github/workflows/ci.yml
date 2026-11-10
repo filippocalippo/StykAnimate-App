@@ -60,7 +60,7 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'

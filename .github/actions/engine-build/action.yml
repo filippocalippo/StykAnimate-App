@@ -41,4 +41,9 @@ runs:
     - name: Engine tests
       if: inputs.test == 'true'
       shell: bash
+      # Without debug information: with it the test binaries of the workspace fill the Linux runner's disk and slow the Windows link.
+      env:
+        CARGO_PROFILE_DEV_DEBUG: '0'
+        CARGO_PROFILE_TEST_DEBUG: '0'
+        CARGO_INCREMENTAL: '0'
       run: npm run engine:test
