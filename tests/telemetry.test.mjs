@@ -72,7 +72,8 @@ test('delete removes local data, queues an offline request, survives restart and
   assert.equal(JSON.parse(await readFile(path.join(directory, 'telemetry-state.json'), 'utf8')).deletions.length, 0);
 });
 test('unchanged and idle-only reports do not use hosting requests; new activity carries deferred idle time', async () => {
-  let now = Date.now(); const { service, requests } = await fixture({ now: () => now });
+  // Noon, so that the twenty minutes added below never cross into the next day.
+  let now = new Date().setUTCHours(12, 0, 0, 0); const { service, requests } = await fixture({ now: () => now });
   await service.setConsent(consent); await service.upload();
   const sequence = service.preview().snapshots[0].sequence;
   assert.equal(service.record({ epoch: service.epoch, data: {} }), false);

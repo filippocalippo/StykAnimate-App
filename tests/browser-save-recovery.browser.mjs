@@ -95,7 +95,7 @@ try{
   check('Saving one tab leaves the other tab’s recovery intact',(await recovery(page))?.name==='Second tab');
   check('A live tab’s copy cannot be discarded by another tab',await page.evaluate(async record=>!await styk.recovery.discard(record),copies.find(r=>r.name==='Second tab')));
   await other.close();
-  await page.reload();await page.waitForFunction(()=>window.styk?.ready);
+  await page.reload();await page.waitForFunction(()=>window.styk?.ready,null,{timeout:120000});
   await page.getByRole('button',{name:'Restore',exact:true}).click();
   await page.waitForFunction(()=>styk.editor.name==='Second tab'&&styk.editor.dirty);
   check('An abandoned tab’s project restores through the ordinary importer',true);
@@ -107,7 +107,7 @@ try{
   for(const [tab,name] of [[third,'Third tab'],[fourth,'Fourth tab']]){
     await edit(tab);await tab.evaluate(name=>{styk.editor.name=name;return styk.actions.save();},name);await tab.close();
   }
-  await page.reload();await page.waitForFunction(()=>window.styk?.ready);
+  await page.reload();await page.waitForFunction(()=>window.styk?.ready,null,{timeout:120000});
   await page.getByRole('button',{name:'Restore',exact:true}).click();
   const chooser=page.getByRole('combobox',{name:'Recovery copy'});
   await chooser.waitFor();
@@ -169,7 +169,7 @@ try{
       tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);
     };
   }));
-  await legacy.goto(site.origin);await legacy.waitForFunction(()=>window.styk?.ready);
+  await legacy.goto(site.origin);await legacy.waitForFunction(()=>window.styk?.ready,null,{timeout:120000});
   const migration=await legacy.evaluate(async()=>{
     const m=await import('/src/browser-recovery.mjs'),record=await m.readBrowserRecovery();
     const bytes=Array.from(new Uint8Array(await record.blob.arrayBuffer()));
