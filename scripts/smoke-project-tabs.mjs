@@ -75,7 +75,8 @@ try {
   const offered = await page.waitForFunction(async () => (await stykDesktop.listRecoveries()).length, null, {timeout: 20000}).then(handle => handle.jsonValue());
   check('The next start offers every project\'s copy', offered === 2);
   await page.locator('#manage-recovery').click();
-  const chooser = page.locator('dialog[open]', {has: page.locator('select')});
+  // The release notes can be open at the same start, and they hold a version list: the recovery dialog is the other one.
+  const chooser = page.locator('dialog[open]:not(.release-splash)', {has: page.locator('select')});
   await chooser.waitFor();
   // The message with its own Restore stays above the dialog, inside it: the dialog's is in its foot.
   await chooser.locator('.ui-dialog-foot').getByRole('button', {name: 'Restore', exact: true}).click();
