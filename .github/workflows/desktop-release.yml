@@ -96,6 +96,8 @@ jobs:
         run: |
           npm run verify:package
           if [ "$RUNNER_OS" = Linux ]; then display=(xvfb-run -a); else display=(); fi
+          # The Linux runner has no GPU: the packaged app runs on its WebGL 2 path there (desktop/gpu-switches.cjs).
+          if [ "$RUNNER_OS" = Linux ]; then export STYK_GPU_UNSAFE=0; fi
           "${display[@]}" npm run test:boot:packaged
           "${display[@]}" npm run test:export:packaged
           "${display[@]}" npm run test:updates:desktop

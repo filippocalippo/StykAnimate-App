@@ -84,6 +84,10 @@ jobs:
     name: Linux app
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      # The runner has no GPU. The app's Linux WebGPU opt-in would land on a software device whose pictures cannot be
+      # read back, so the packaged app runs on its WebGL 2 path here (desktop/gpu-switches.cjs).
+      STYK_GPU_UNSAFE: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
