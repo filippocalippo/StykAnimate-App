@@ -1,10 +1,11 @@
 use super::*;
 
-fn renderer() -> Renderer {
-    let gpu = native_gpu::native_gpu(false, "lifetime reuse", |a| wgpu::Limits::default().using_resolution(a.limits())).expect("GPU required");
+/// A renderer on this machine's adapter, or `None` where there is none (a Linux runner).
+fn renderer() -> Option<Renderer> {
+    let gpu = native_gpu::native_gpu(false, "lifetime reuse", |a| wgpu::Limits::default().using_resolution(a.limits())).ok()?;
     let mut renderer = Renderer::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
     renderer.set_exact_sizes(true);
-    renderer
+    Some(renderer)
 }
 fn scene(count: u32) -> Arc<DrawList> {
     use styk_draw::*;
@@ -38,7 +39,7 @@ fn no_owners(device: &wgpu::Device, names: &[&str]) {
 }
 #[test]
 fn isolation_and_msaa_reuse_across_quiet_frames_and_release_at_close() {
-    let mut r = renderer();
+    let Some(mut r) = renderer() else { eprintln!("skipped: no graphics adapter"); return; };
     let device = r.device.clone();
     draw(&mut r, &scene(8));
     let layers = r.layers[1].texture.clone();
@@ -53,7 +54,7 @@ fn isolation_and_msaa_reuse_across_quiet_frames_and_release_at_close() {
 }
 #[test]
 fn primitives_reuse_capacity_and_release_at_close() {
-    let mut r = renderer();
+    let Some(mut r) = renderer() else { eprintln!("skipped: no graphics adapter"); return; };
     let device = r.device.clone();
     let mut large = (*scene(1)).clone();
     large.prims = vec![large.prims[1]; 2000];

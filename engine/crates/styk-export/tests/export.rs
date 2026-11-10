@@ -383,7 +383,7 @@ fn cel_document(pictures: u32) -> Vec<u8> {
 /// even when most pages in the document are never drawn by the requested frame.
 #[test]
 fn headless_frame_source_allocates_only_resident_sprite_pages() {
-    let gpu = gpu().expect("GPU required for native memory regression");
+    let Some(gpu) = gpu() else { eprintln!("skipped: no Vulkan adapter"); return; };
     let engine = Engine::for_export(clock, Budgets { picture_bytes: 32 << 20, ..Budgets::for_device(None) });
     engine.open(&cel_document(3), "json", "memory regression").unwrap();
     let frames = engine.export_frames(0).unwrap();
@@ -417,7 +417,7 @@ fn picture_list(assets: &styk_eval::assets::Assets, picture: usize) -> std::sync
 
 #[test]
 fn native_adjacent_frames_keep_their_sprite_pages_until_export_end() {
-    let gpu = gpu().expect("GPU required");
+    let Some(gpu) = gpu() else { eprintln!("skipped: no Vulkan adapter"); return; };
     let engine = Engine::for_export(clock,Budgets::for_device(None));
     engine.open(&cel_document(3),"json","adjacent pages").unwrap();
     let frames = engine.export_frames(0).unwrap();
@@ -458,7 +458,7 @@ fn native_adjacent_frames_keep_their_sprite_pages_until_export_end() {
 
 #[test]
 fn prefetched_frame_draws_without_uploading_again() {
-    let gpu = gpu().unwrap();
+    let Some(gpu) = gpu() else { eprintln!("skipped: no Vulkan adapter"); return; };
     let engine = Engine::for_export(clock,Budgets::for_device(None));
     engine.open(&cel_document(3),"json","prefetch").unwrap();
     let frames = engine.export_frames(0).unwrap();

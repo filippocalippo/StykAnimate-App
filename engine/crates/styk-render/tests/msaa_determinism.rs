@@ -116,6 +116,13 @@ fn different(a: &[u8], b: &[u8]) -> usize {
 }
 
 fn equality(backend: wgpu::Backends, unoptimized: bool, opaque: bool, split: bool) {
+    // A machine without this backend (a runner without Vulkan) has no frames to compare.
+    let mut probe = wgpu::InstanceDescriptor::new_without_display_handle();
+    probe.backends = backend;
+    if pollster::block_on(wgpu::Instance::new(probe).request_adapter(&wgpu::RequestAdapterOptions::default())).is_err() {
+        eprintln!("skipped: no adapter for {backend:?}");
+        return;
+    }
     let mut reference: Option<Vec<u8>> = None;
     let mut failures = 0;
     for device in 0..3 {
