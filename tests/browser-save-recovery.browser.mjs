@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {launchBrowser} from './support/cross-browser.mjs';
+import {launchBrowser, requireDrawing} from './support/cross-browser.mjs';
 import {buildWeb} from '../scripts/build-web.mjs';
 import {startWebServer} from '../scripts/serve-web.mjs';
 
@@ -12,6 +12,7 @@ const temp = await mkdtemp(path.join(os.tmpdir(), 'styk-save-recovery-'));
 const site = process.env.STYK_URL ? {origin:process.env.STYK_URL, close:async()=>{}}
   : await startWebServer({root:(await buildWeb({output:path.join(temp,'site')})).output});
 const browser = await launchBrowser();
+await requireDrawing(browser, site.origin, async()=>{await browser.close();await site.close();await rm(temp,{recursive:true,force:true});});
 const checks=[], errors=[];
 const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
 // Several editors start in one browser here: on a small machine without a GPU the later ones take over 30 s to be ready.

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { BROWSER, launchBrowser } from './support/cross-browser.mjs';
+import { BROWSER, launchBrowser, requireDrawing } from './support/cross-browser.mjs';
 import { startCommunitySite } from './support/community-site.mjs';
 import { buildWeb } from '../scripts/build-web.mjs';
 import { startWebServer } from '../scripts/serve-web.mjs';
@@ -19,6 +19,7 @@ const existing = process.env.STYK_WEB_DIR && path.resolve(process.env.STYK_WEB_D
 const community = await startCommunitySite();
 const site = await startWebServer({ root: existing ?? (await buildWeb({ output: path.join(temp, 'site') })).output, upstream: community.upstream });
 const browser = await launchBrowser();
+await requireDrawing(browser, site.origin, async () => { await browser.close(); await site.close(); await rm(temp, { recursive: true, force: true }); });
 const checks = [];
 const check = (name, condition) => { assert.ok(condition, `[${BROWSER}] ${name}`); checks.push(name); console.log('PASS', `[${BROWSER}]`, name); };
 const until = async (description, read, timeout = 45000) => {

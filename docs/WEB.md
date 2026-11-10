@@ -202,7 +202,10 @@ Safari itself. The previous Windows WebKit build lacked `OffscreenCanvas`; the
 Linux build used for this release runs the full storage/editor suites. The app
 checks `OffscreenCanvas`, WebAssembly, IndexedDB, Web Crypto, `createImageBitmap`,
 `structuredClone`, dialogs and workers before loading. Missing features produce
-an explanation instead of a blank editor. WebGPU is optional.
+an explanation instead of a blank editor. The engine draws with WebGPU or WebGL 2: a browser that offers
+neither (hardware acceleration turned off) gets the same explanation. On a test machine without a GPU, Firefox
+and WebKit may offer neither; the suites that need the running editor then report that they were skipped
+(`tests/support/cross-browser.mjs`), and Chrome must always draw.
 
 On a phone or a tablet the editor opens its touch interface ([docs/TOUCH.md](TOUCH.md)); `npm run
 test:touch` checks it in Chromium with touch emulation. Real phones and tablets, and Safari (the

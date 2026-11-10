@@ -15,6 +15,8 @@
   need('the dialog element', typeof HTMLDialogElement === 'function');
   need('Object.hasOwn and Array.at', typeof Object.hasOwn === 'function' && typeof [].at === 'function');
   need('module workers', typeof Worker === 'function');
+  // The engine draws with WebGPU or WebGL 2. A browser with hardware acceleration turned off may offer neither.
+  need('WebGPU or WebGL 2 (turn on hardware acceleration in the browser settings)', !!navigator.gpu || (() => { try { return typeof OffscreenCanvas === 'function' && !!new OffscreenCanvas(1, 1).getContext('webgl2'); } catch { return false; } })());
   if (!missing.length) return;
 
   const show = () => {
