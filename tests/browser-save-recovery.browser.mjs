@@ -17,7 +17,11 @@ const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('
 // Several editors start in one browser here: on a small machine without a GPU the later ones take over 30 s to be ready.
 async function open(context){
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(site.origin);await page.waitForFunction(()=>window.styk?.ready===true,null,{timeout:120000});
+  // What the page said while starting, shown when it never becomes ready: the browser's own reason.
+  const said=[];page.on('console',message=>{if(said.length<60)said.push(`[${message.type()}] ${message.text().slice(0,300)}`);});page.on('pageerror',error=>said.push(`[pageerror] ${String(error.stack??error).slice(0,400)}`));
+  await page.goto(site.origin);
+  try{await page.waitForFunction(()=>window.styk?.ready===true,null,{timeout:120000});}
+  catch(error){console.error(['The editor did not start. The page said:',...said,await page.evaluate(()=>document.body.innerText.slice(0,400)).catch(()=>'')].join('\n'));throw error;}
   await page.evaluate(()=>{document.querySelector('.styk-privacy [data-decline]')?.click();styk.settingsUI.commit({autosaveSeconds:0});});
   return page;
 }
