@@ -101,6 +101,12 @@ registerAppScheme(protocol);
 // (Windows would otherwise count an off-screen window as occluded and stop its frames).
 const backgroundWindow = process.env.STYK_BACKGROUND_WINDOW === '1';
 if (backgroundWindow) app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+// The developer tools (docs/DEVTOOLS.md): only a source checkout started with --styk-developer (npm run dev) or
+// STYK_DEVELOPER=1 loads them. Their module is not packaged, and a packaged app never looks for it.
+const developer = !app.isPackaged && (process.argv.includes('--styk-developer') || process.env.STYK_DEVELOPER === '1') ? require('./devtools.cjs') : null;
+let developerTools = null;
+// The profiling command attaches to the page through the inspector protocol, on the port it names.
+if (developer && /^\d+$/.test(process.env.STYK_REMOTE_DEBUGGING_PORT ?? '')) app.commandLine.appendSwitch('remote-debugging-port', process.env.STYK_REMOTE_DEBUGGING_PORT);
 
 app.setName('StykAnimate');
 const profileDirectory = process.env.STYK_USER_DATA_DIR || (!app.isPackaged ? path.join(APP_ROOT, '.desktop-data') : null);
@@ -761,6 +767,7 @@ function startupView() {
 /** `storageCleared` settles when the previous launch's browser storage is gone: the page loads after it. */
 async function createWindow(storageCleared = Promise.resolve()) {
   const view = startupView();
+  if (developer) developerTools ??= developer.startDevtools({ appRoot: APP_ROOT, page: () => window?.webContents ?? null });
   window = new BrowserWindow({
     width: 1560, height: 1000, minWidth: 1000, minHeight: 680,
     ...(backgroundWindow ? { x: -20000, y: -20000, skipTaskbar: true } : {}),
@@ -775,7 +782,7 @@ async function createWindow(storageCleared = Promise.resolve()) {
       contextIsolation: true, nodeIntegration: false, sandbox: true,
       webSecurity: true, allowRunningInsecureContent: false,
       backgroundThrottling: !backgroundWindow, spellcheck: false,
-      additionalArguments: view ? [`--styk-startup-view=${view}`] : [],
+      additionalArguments: [...(view ? [`--styk-startup-view=${view}`] : []), ...(developerTools ? [developerTools.preloadArgument] : [])],
     },
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -786,6 +793,15 @@ async function createWindow(storageCleared = Promise.resolve()) {
     if (!webHost.owns(url)) event.preventDefault();
   });
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  if (developerTools) {
+    // F12 and Ctrl+Shift+I open the browser inspector in a developer launch.
+    window.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || !(input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i'))) return;
+      event.preventDefault();
+      window?.webContents.toggleDevTools();
+    });
+    window.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => { if (mainFrame && !inPlace) developerTools.pageChanged(); });
+  }
   const editorWindow = window;
   let rendererFailed = false, crashDialogPending = false;
   async function offerRendererRecovery() {
@@ -915,4 +931,5 @@ app.on('before-quit', (event) => {
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('will-quit', () => updates?.dispose());
+app.on('will-quit', () => developerTools?.close());
 app.on('will-quit', () => { library?.dispose().catch(() => {}); fileStreams?.dispose().catch(() => {}); videoExports?.dispose().catch(() => {}); vfwExports?.dispose().catch(() => {}); audioImports?.dispose().catch(() => {}); });

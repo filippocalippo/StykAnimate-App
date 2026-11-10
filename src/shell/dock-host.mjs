@@ -32,7 +32,7 @@ import {PANEL_CATALOG, createPanelRegistry} from './panel-registry.mjs';
 import {createDockStore, desktopDockBackend, storageDockBackend} from './dock-store.mjs';
 import {
   STAGE, activatePanel, closePanel, dockFloat, findPanel, findGroup, groupsOf, moveGroup, movePanel, panelsOf, placeFloat,
-  reopenPanel, resizeChildren, setCollapsed, setTools, walk,
+  reopenPanel, repairLayout, resizeChildren, setCollapsed, setTools, walk,
 } from './dock-model.mjs';
 import {
   applyPreset, defaultLayout, deleteLayout, exportLayout, focusActive, importLayout, isModified, normalizeMode, presetLayout,
@@ -976,6 +976,25 @@ export function createDockHost({document: doc = globalThis.document, window: win
   const presentation = id => solution?.panels[id]?.presentation ?? 'unavailable';
 
   /** Shows a panel: activates its tab, opens its flyout, the sheet or the timeline's body, or reopens it; `focus` moves focus to it. */
+  /**
+   * A panel defined after the arrangements were read (the developer build's tools, src/devtools/panels.mjs) is placed in
+   * each workspace that lacks it, as a repair places any missing panel: where its descriptor's `defaultDock` says
+   * (closed for 'hidden'), so no layout changes shape on its own. A panel already placed stays where it is.
+   */
+  function placeDefined(id) {
+    // One update for every workspace: the store refuses a state where any workspace lacks a panel it should hold.
+    store.update(state => {
+      let next = state;
+      for (const m of ['animate', 'draw', 'rig']) {
+        const layout = next.workspaces[m].layout;
+        if (!panelsOf(m, catalog()).includes(id) || findPanel(layout, id)) continue;
+        next = setLayout(next, m, repairLayout(layout, m, {catalog: catalog(), fallback: defaultLayout(m, {catalog: catalog()})}));
+      }
+      return next;
+    });
+  }
+
+
   function showPanel(id, {focus = true, invoker} = {}) {
     if (!registry.has(id) || presentation(id) === 'unavailable') return false;
     onBeforeChange?.();
@@ -1331,7 +1350,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
   const bandWatch = band ? watchBand(band, {window: win, document: doc, storage: browserStorage(win), start: ready, onChange: () => schedule()}) : null;
   const modeObserver = new win.MutationObserver(modeChanged);
   modeObserver.observe(workspace, {attributes: true, attributeFilter: ['data-mode']});
-  registry.on('define', () => schedule(), {signal});
+  registry.on('define', ({id}) => { placeDefined(id); schedule(); }, {signal});
   store.on('change', ({origin: from}) => { if (from === 'merge') schedule(); });
   win.addEventListener('blur', () => { if (dragging) dividerEls.get(dragging.key)?.dispatchEvent(new win.Event('pointercancel')); }, {signal});
   win.addEventListener('pagehide', () => { void store.flush(); }, {signal});

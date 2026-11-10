@@ -26,6 +26,22 @@ const messageError = (error, key, params) => diagnosticError(error, diagnosticEn
 
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
+// A developer launch (desktop/devtools.cjs, never packaged): run the developer tools' early script before the page's
+// first script, and expose the bridge its control channel answers through. The main process sends both; without the
+// launch argument nothing here runs.
+if ((process.argv ?? []).includes('--styk-developer')) {
+  try {
+    const developer = ipcRenderer.sendSync('styk:developer-early');
+    if (developer?.script && typeof developer.bridge === 'string') {
+      contextBridge.exposeInMainWorld(developer.bridge, Object.freeze({
+        reply: (ticket, answer) => ipcRenderer.send('styk:developer-reply', ticket, answer),
+        ready: () => ipcRenderer.send('styk:developer-ready'),
+      }));
+      webFrame.executeJavaScript(developer.script);
+    }
+  } catch { /* the app starts without its developer tools */ }
+}
+
 function subscribe(channel, callback) {
   if (typeof callback !== 'function') throw messageError(new TypeError(''), 'desktop.preload.errors.aCallbackIsRequired', {});
   const listener = (_event, value) => callback(value);

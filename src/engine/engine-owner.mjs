@@ -30,6 +30,8 @@
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
 import {openMovieclipNow, payloadText, registeredEngine} from './engine-open.mjs';
+import {traceBegin, traceEnd} from '../trace.mjs';
+
 import {fetchedRecords, holdAllRecords, holdingAll, recordsOf, tableOf} from '../lazy-table.mjs';
 import {messageError} from '../localized-error.mjs';
 import {validationLabel} from '../validation-labels.mjs';
@@ -47,6 +49,14 @@ import {createClipboards} from './engine-clipboards.mjs';
 import {SESSION_COMMANDS, VIEW_CALLS} from './engine-commands.mjs';
 import {yieldLoadTask} from '../yield-task.mjs';
 import {drawingFigures} from '../figure-types.mjs';
+
+/** One call of an edit session, with or without another session's document (`clip`): the span the profiler shows per method. */
+function sessionCall(live, method, args, view, clip) {
+  const span = traceBegin('edit session call');
+  try { return clip ? live.call_with_document(method, args, view, clip) : live.call(method, args, view); }
+  // The span's arguments are built only when one is open: the shipping build pays a null check.
+  finally { if (span !== 0) traceEnd(span, {method}); }
+}
 
 /** How many values of each kind a call that draws many identities is handed. */
 const MANY_DRAWS = 512;
@@ -170,7 +180,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   /** A bookkeeping call of the owner (`owner.rs`): not an edit, no history entry. `patch`: the answer's document changes reach the read
    * view, as a call's do (a call that retires history entries collects their pose sources). */
   const send = (method, args, {patch = false} = {}) => {
-    const answer = JSON.parse(session.call(method, JSON.stringify(args), JSON.stringify({...view(), patch: true})));
+    const answer = JSON.parse(sessionCall(session, method, JSON.stringify(args), JSON.stringify({...view(), patch: true})));
     if (answer.status !== 'ok') throw new Error(`The engine refused the owner's ${method}: ${answer.error ?? answer.reason}`);
     adoptState(answer, {patch});
     return answer;
@@ -529,7 +539,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   /** The error of an answer the engine refused with a message of the interface's (it is out of memory): the person reads it as the editor words it. */
   const refusal = answer => typeof answer.error === 'string' && Object.hasOwn(english, answer.error) ? failure(answer.error, answer.errorParams) : null;
   const call = (method, args) => {
-    const answer = JSON.parse(session.call(method, JSON.stringify(args), JSON.stringify(view())));
+    const answer = JSON.parse(sessionCall(session, method, JSON.stringify(args), JSON.stringify(view())));
     if (answer.status !== 'ok') throw refusal(answer) ?? new Error(`${method}: ${answer.error ?? answer.reason}`);
     return answer;
   };
@@ -623,7 +633,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     const pastes = name === 'pasteSelection' ? {figureClipboardPastes: true} : {};
     const encoded = payload.encoded ? {encoded: true} : {};
     const viewText = more => JSON.stringify({...view(), patch: true, changesOnly: true, draws: pool(more), drawPool: true, ...pastes, ...encoded});
-    const run = more => clipSession ? live.call_with_document(name, payload.text, viewText(more), clipSession) : live.call(name, payload.text, viewText(more));
+    const run = more => clipSession ? sessionCall(live, name, payload.text, viewText(more), clipSession) : sessionCall(live, name, payload.text, viewText(more));
     let text = run();
     // A call that makes more identities than the pool holds (rippling the audio cuts many clips) changed nothing: it asks again with enough.
     if (text.includes('"unported"') && JSON.parse(text).reason?.startsWith('a call that draws more than the pool')) text = run(MANY_DRAWS);
@@ -714,7 +724,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
   };
   /** The session's undo or redo and the adoption of its answer; `pixels` applies the drawing store's tiles before the events. */
   const perform = (live, redo, pixels) => {
-    const answer = JSON.parse(live.call(redo ? 'redo' : 'undo', '[]', JSON.stringify({...view(), patch: true})));
+    const answer = JSON.parse(sessionCall(live, redo ? 'redo' : 'undo', '[]', JSON.stringify({...view(), patch: true})));
     if (answer.status === 'unported') throw refuse(redo ? 'redo' : 'undo', answer.reason);
     if (answer.status !== 'ok') throw refusal(answer) ?? new Error(`The engine could not ${redo ? 'redo' : 'undo'}: ${answer.error ?? answer.reason}`);
     adoptState(answer);

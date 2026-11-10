@@ -17,6 +17,8 @@ StykAnimate is a local stick animation program built on sound architecture and g
 | Architecture and setup | `docs/ARCHITECTURE.md`, `README.md`, `package.json` |
 | Document, commands, undo | `engine/crates/styk-edit/`, `src/engine/engine-owner.mjs`, `src/engine/engine-commands.mjs`, `src/editor.mjs` (read view and view state), `docs/engine/editing.md`, `docs/SCENE-EDITING.md` |
 | Timeline and animation modes | `src/layer-timeline.mjs`, `docs/TIMELINE.md`, `docs/animation-modes.md` |
+| Panel docking and layouts | `src/shell/dock-*.mjs`, `docs/DOCKING.md` |
+| Developer tools (developer launch only: `npm run dev`) | `src/devtools/`, `src/trace.mjs`, `desktop/devtools.cjs`, `scripts/styk-dev.mjs`, `scripts/styk-profile.mjs`, `docs/DEVTOOLS.md` |
 | Home, project list, tutorials | `src/home/`, `src/tutorials/`, `desktop/project-library.cjs`, `docs/HOME.md`, `docs/TUTORIALS.md` |
 | Rust engine: plan, decisions, subsystems | `docs/RUST-ENGINE-PORT.md` (read first), `docs/engine/README.md`, `docs/engine/decisions/`, `docs/engine/INVENTORY.md`, `engine/` |
 | Engine in the app: owner, frame reads, stage, playback, exports | `src/engine/`, `docs/engine/document.md`, `docs/engine/evaluation.md`, `docs/engine/rendering.md`, `docs/engine/threading.md` |

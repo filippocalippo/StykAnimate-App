@@ -353,9 +353,12 @@ function placeHome(layout, id, mode, {catalog, fallback, open = false}) {
   // A panel the default keeps closed stays closed when it was missing, but opens when a person asks for it.
   if (home?.where === 'closed' && !open) return {...layout, closed: [...layout.closed, {id}]};
   const descriptor = catalog.find(panel => panel.id === id);
+  // A panel whose descriptor says where it arrives when nothing records it (panel-registry.mjs `defaultDock`):
+  // 'hidden' arrives closed and 'strip' collapsed, so a panel defined later never reshapes a layout on its own.
+  if (!home && descriptor?.defaultDock === 'hidden' && !open) return {...layout, closed: [...layout.closed, {id}]};
   const side = HOME_SIDE[id] ?? (descriptor?.docks?.[0] === 'left' ? 'left' : descriptor?.docks?.[0] === 'bottom' ? 'bottom' : 'right');
   const group = makeGroup(layout, [id]);
-  if (home?.group?.collapsed) group.collapsed = true;
+  if (home?.group?.collapsed || (!home && descriptor?.defaultDock === 'strip')) group.collapsed = true;
   return insertAtEdge(layout, group, side);
 }
 

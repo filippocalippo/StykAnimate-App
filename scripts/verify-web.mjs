@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CODEC_FILES, precacheList } from './build-web.mjs';
 import { headersFor, parseHeaders } from './serve-web.mjs';
+import { isDeveloperPath } from './check-devtools-shipping.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Cloudflare Workers static assets: https://developers.cloudflare.com/workers/static-assets/
@@ -102,7 +103,8 @@ export async function verifyWeb(root = path.join(appRoot, 'build', 'web')) {
       const target = path.posix.normalize(path.posix.join(directory, reference));
       // A reference ending in "/" names a directory, which must contain files.
       const present = reference.endsWith('/') ? [...files.keys()].some((file) => file.startsWith(target)) : files.has(target);
-      if (!present) fail(`${name} imports ${reference}, which is not in the site.`);
+      // The developer tools load only in the developer build (src/devtools-gate.mjs); no site ships them.
+      if (!present && !isDeveloperPath(target)) fail(`${name} imports ${reference}, which is not in the site.`);
     }
   }
 

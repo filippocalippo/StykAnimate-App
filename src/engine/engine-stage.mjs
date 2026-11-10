@@ -14,6 +14,7 @@
  * exposure, whose new cel the session does not hold yet. The onion skins are the session's as well.
  */
 import {loadEngine, expectedAdapterInfo} from './engine.mjs';
+import {traceBegin, traceEnd} from '../trace.mjs';
 import {holdsRevision} from './engine-open.mjs';
 import {engineTicket} from './engine-playback.mjs';
 import {failEngine, engineRefusal} from './engine-failure.mjs';
@@ -340,12 +341,15 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       if (lost) return false;
       const revision = request.revision ?? 0;
       if (engineRefusal(side, request.report, revision)) return false;
+      const span = traceBegin('stage draw');
       try {
         const drawn = drawEdit(request);
+        if (span !== 0) traceEnd(span, {drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs});
         if (drawn) engineShown = true;
         if (renderer.measureFrame) renderer.telemetryStages = {geometry: side.stats.lastSendMs, submit: side.stats.lastDrawMs};
         return drawn;
       } catch (error) {
+        if (span !== 0) traceEnd(span, {error: true});
         if (error?.code === 'engine_busy') { resend(); retryWhenIdle(); return false; }
         refuse(error, request.report, revision);
         return false;
@@ -371,15 +375,18 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       const ticket = engineTicket(key);
       if (!ticket) return false;
       const view = frame.view ?? {}, seen = side.engine.progressSeen();
+      const span = traceBegin('stage draw prepared');
       try {
         stage.set_canvas_drawing(false);
         orient(view);
         const drawn = stage.render_ticket(ticket.generation, ticket.epoch, ticket.tick, (view.scale ?? 1) * deviceRatio, (view.x ?? 0) * deviceRatio, (view.y ?? 0) * deviceRatio, frame.cameraEnabled !== false, true);
         if (drawn) { engineShown = true; side.stats.frames++; awaitPictures(seen); }
         else if (stage.surface_pending()) redrawSoon();
+        if (span !== 0) traceEnd(span, {tick: ticket.tick, drawn});
         return drawn;
       } catch (error) {
         // The same refusal on every frame of a playback is reported once.
+        if (span !== 0) traceEnd(span, {error: true});
         if (preparedError !== error?.message) { preparedError = error?.message; options.onError?.(error); }
         return false;
       }

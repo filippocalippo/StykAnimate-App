@@ -10,6 +10,7 @@
  */
 import init, {EditSession, EngineHandle, Stage, api_version} from './pkg/styk_engine.js';
 import {declaredMemoryPages} from './engine-memory.mjs';
+import {traceBegin, traceEnd, tuned} from '../trace.mjs';
 
 /** The command/query API this loader was written for. */
 const API_VERSION = 1;
@@ -87,7 +88,13 @@ export function waitForEngineProgress(progress, threaded, seen, timeoutMs = 250)
   });
 }
 
-async function load({workers = defaultWorkerCount(), deviceMemory = globalThis.navigator?.deviceMemory} = {}) {
+/** Live parameters' ranges (src/trace.mjs `tuned`): constants, so reading a parameter allocates nothing. */
+const WORKERS_SPEC = Object.freeze({min: 0, max: 16, description: 'Preparation threads (applies when the app reloads; 0 runs without workers)'});
+const ATLAS_PAGES_SPEC = Object.freeze({min: 0, max: 64, description: 'Sprite layout pages kept in the texture (documents opened from now on; 0: the default)'});
+
+async function load({workers = tuned('engine.workers', defaultWorkerCount(), WORKERS_SPEC),
+  deviceMemory = globalThis.navigator?.deviceMemory} = {}) {
+  const span = traceBegin('engine load');
   const source = new URL('./pkg/styk_engine_bg.wasm', import.meta.url);
   const {module, pages} = await compile(source);
   const reserved = createEngineMemory(pages);
@@ -110,7 +117,11 @@ async function load({workers = defaultWorkerCount(), deviceMemory = globalThis.n
     worker.postMessage({module, memory, address: handle.address(), stack: WORKER_STACK_BYTES});
     pool.push(worker);
   });
+  // The sprite pages a document's pictures keep resident; 0 leaves the engine's own default.
+  const atlasPages = tuned('engine.atlasPages', 0, ATLAS_PAGES_SPEC);
+  if (atlasPages > 0) handle.set_atlas_pages(atlasPages);
   if (threaded) await Promise.all(Array.from({length: Math.min(workers, LAUNCH_WORKERS)}, spawn));
+  if (span !== 0) traceEnd(span, {workers, threaded});
   let growing = null, stopped = false;
   const progress = new Int32Array(memory.buffer, handle.progress_address(), 1);
   const stages = stageHandoff(canvas => Stage.create(canvas, handle));

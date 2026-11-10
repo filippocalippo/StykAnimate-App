@@ -199,7 +199,7 @@ export async function buildApp({ root = appRoot, output = path.join(root, 'build
     build({ absWorkingDir: root, entryPoints: { [STYLESHEET.slice(0, -'.css'.length)]: STYLESHEET }, outdir: options.outdir, bundle: true, target: TARGET,
       plugins: [stylesheetAssets(root, sheet)], logLevel: 'warning' }),
   ]));
-  // The metafile names files relative to the working directory.
+  // The metafile names files relative to the working directory, or in full when the output is on another drive (path.resolve takes both).
   const prefix = `${path.relative(root, output).split(path.sep).join('/')}/`;
   const preloads = new Set();
   for (const entry of LAUNCH_ENTRIES) for (const file of launchFiles(result.metafile, prefix + entry)) preloads.add(`./${file.slice(prefix.length)}`);
@@ -208,9 +208,9 @@ export async function buildApp({ root = appRoot, output = path.join(root, 'build
   const tablesOf = async (metafile) => {
     const tables = [];
     for (const file of Object.keys(metafile.outputs).filter((name) => name.endsWith('.mjs'))) {
-      const map = JSON.parse(await readFile(path.join(root, `${file}.map`), 'utf8'));
-      tables.push([path.join(root, file), frameTable(map)]);
-      await rm(path.join(root, `${file}.map`));
+      const map = JSON.parse(await readFile(path.resolve(root, `${file}.map`), 'utf8'));
+      tables.push([path.resolve(root, file), frameTable(map)]);
+      await rm(path.resolve(root, `${file}.map`));
     }
     return tables;
   };

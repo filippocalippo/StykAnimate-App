@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isDeveloperPath } from './check-devtools-shipping.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** The Pivot codec's module: fetched after the editor when the app installs, and on the first Pivot file otherwise. */
@@ -34,11 +35,14 @@ async function* walk(directory) {
   }
 }
 
-/** Files under `root` selected by patterns of the forms `name`, `*.ext` and `dir/**\/*`. */
+/** Files under `root` selected by patterns of the forms `name`, `*.ext` and `dir/**\/*`. The developer tools (src/devtools/) are never
+ * selected: only the developer build carries them (docs/DEVTOOLS.md). */
 export async function selectFiles(root, patterns) {
-  const selected = new Set();
+  // `!dir/**` leaves a folder out (the desktop package's list uses it for the developer tools).
+  const selected = new Set(), excluded = [];
   for (const pattern of patterns) {
-    if (pattern.endsWith('/**/*')) {
+    if (/^![^*?]+\/\*\*$/.test(pattern)) excluded.push(pattern.slice(1, -2));
+    else if (pattern.endsWith('/**/*')) {
       const directory = path.join(root, pattern.slice(0, -5));
       try { for await (const file of walk(directory)) selected.add(path.relative(root, file)); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -49,7 +53,7 @@ export async function selectFiles(root, patterns) {
       try { if ((await stat(path.join(root, pattern))).isFile()) selected.add(pattern); } catch { /* absent files are simply not shipped */ }
     } else throw new Error(`Unsupported packaging pattern: ${pattern}`);
   }
-  return [...selected].sort();
+  return [...selected].filter((file) => !isDeveloperPath(file) && !excluded.some((prefix) => file.split(path.sep).join('/').startsWith(prefix))).sort();
 }
 
 const INSTALL_TAGS = [

@@ -178,6 +178,9 @@ import {
   inverseCameraScale,
 } from "./pivot/background.mjs";
 import {findFigureType, figureRows} from './figure-types.mjs';
+import {traceComplete, tracing, tuned} from './trace.mjs';
+import {tableOf} from './lazy-table.mjs';
+import {startDevtools} from './devtools-gate.mjs';
 
 const $ = (id) => document.getElementById(id),
   esc = (v) =>
@@ -236,7 +239,13 @@ function interruptRecovery() {
   clearTimeout(state.recoveryTimer);
   if (editor.dirty) scheduleRecovery();
 }
-async function runDocumentExport(format, consume, { recovery = false, controller = new AbortController() } = {}) {
+/** A save, an export or a recovery write, as one span of the profiler's tasks lane. */
+async function runDocumentExport(format, consume, options) {
+  const started = performance.now();
+  try { return await runDocumentExportTraced(format, consume, options); }
+  finally { if (tracing) traceComplete(options?.recovery ? 'recovery write' : format === 'styk' ? 'save' : 'export', started, performance.now() - started, {format}, 'tasks'); }
+}
+async function runDocumentExportTraced(format, consume, { recovery = false, controller = new AbortController() } = {}) {
   if (!recovery){finishCurrentEdit();await drawingController?.barrier();}
   const job = { controller, recovery };
   exportJobs.add(job);
@@ -602,7 +611,10 @@ function playbackRange() {
   if(state.motionPreviewRange)return state.motionPreviewRange;
   return normalizePlaybackRange(state.loopRange, editor.totalTicks);
 }
-function prepareAhead(start = editor.tick, count = 48, {bidirectional = false, idle = false} = {}) {
+/** Frames playback prepares ahead of the playhead, before the core count trims them (playbackLookaheadSize). */
+const LOOKAHEAD_SPEC = Object.freeze({min: 2, max: 240, description: 'Frames prepared ahead of the playhead'});
+const lookahead = () => tuned('playback.lookaheadFrames', 48, LOOKAHEAD_SPEC);
+function prepareAhead(start = editor.tick, count = lookahead(), {bidirectional = false, idle = false} = {}) {
   if (state.drag || state.scrubbing || !editor.totalTicks) return;
   syncPlayback();
   // Preparation shares the CPU with the UI thread: shallow lookahead keeps
@@ -630,7 +642,7 @@ function warmPlayback({immediate = false} = {}) {
     // Learn the current frame's real footprint before widening the idle window.
     // User input owns the foreground; obsolete warm-up never chases the playhead.
     await prepareAhead(tick,2,{idle:true});
-    if(current())await prepareAhead(tick,48,{bidirectional:true,idle:true});
+    if(current())await prepareAhead(tick,lookahead(),{bidirectional:true,idle:true});
   }, immediate||playback.report!==report ? 0 : 150);
 }
 function previewScrub() {
@@ -1707,7 +1719,7 @@ function loop(now) {
           audioEngine.stop();
           state.buffering = true;
           localizedText($("preview-badge"), "app.preparing", {});
-          prepareAhead(next, 48);
+          prepareAhead(next, lookahead());
         }
       }
     }
@@ -1788,6 +1800,8 @@ function loop(now) {
     state.dirtyMonitor = false;
     paintCameraMonitor();
     const elapsed = performance.now() - start;
+    // Span arguments only in the developer build: the shipping frame allocates nothing for tracing.
+    if (tracing) traceComplete('paint', start, elapsed, {playing: state.playing, prepared: preparedPresented});
     if(sampled)stages.camera=performance.now()-stageStarted;
     if(telemetry.isForeground)telemetry.performance.frame(elapsed,stages||{},sampled);
     state.renderSamples.push(elapsed);
@@ -1807,7 +1821,7 @@ function loop(now) {
     }
   }
   // The engine's workers wake for this request and contend for the frames' lock: after the draw, which reads it.
-  if (prepareFrom !== null) prepareAhead(prepareFrom, 48);
+  if (prepareFrom !== null) prepareAhead(prepareFrom, lookahead());
   // Hover, previews and path sampling change only tool feedback. Keep the
   // displayed artwork intact; document edits still request a scene render.
   if (state.dirtyOverlay && !scenePainted) {
@@ -1890,7 +1904,7 @@ async function play() {
   state.playbackPacket = null;
   // A changed density is committed with its repaint at the next animation task.
   // Avoid queuing obsolete full-size packets just before that transaction.
-  if (pendingPreviewQuality === null) prepareAhead(playTick, 48);
+  if (pendingPreviewQuality === null) prepareAhead(playTick, lookahead());
   state.playing = true;
   audioScrubController?.abort();
   audioEngine.stop(); audioEngine.hasAudio = false;
@@ -3588,6 +3602,7 @@ async function importFiles(files) {
     if (result !== false) telemetry.timing('import_ms', performance.now() - started);
     return result;
   } catch (error) { telemetry.count(error.name === 'AbortError' ? 'import_cancelled' : 'import_failed'); telemetry.error(error, 'import'); throw persistentFailure(error); }
+  finally { if (tracing) traceComplete('open', started, performance.now() - started, {files: files.length}, 'tasks'); }
 }
 function recordImportKind(filename = '') {
   const extension = filename.split('.').at(-1)?.toLowerCase();
@@ -3669,7 +3684,7 @@ async function acceptNativeFile(result) {
     telemetry.count(error.name === 'AbortError' ? 'import_cancelled' : 'import_failed');
     telemetry.operation({ ...context, operation: 'import', stage: 'complete', outcome: error.name === 'AbortError' ? 'cancelled' : 'failed' }, performance.now() - started);
     if (error.name !== 'AbortError') telemetry.error(error, 'import', { ...context, stage: 'decode' }); throw persistentFailure(error);
-  }
+  } finally { if (tracing) traceComplete('open', started, performance.now() - started, {native: true}, 'tasks'); }
 }
 async function acceptNativeFileTracked(result) {
   pause();
@@ -5859,6 +5874,8 @@ window.styk = {
   importFiles,
   acceptImport,
   fit,
+  // Draws the scene again on the next animation frame (the developer tools' control channel waits for that frame).
+  requestRender,
   drawingResourcesFor,
   // The figure-bounds callback of alignment and camera centering: tools replay recorded calls through it.
   boundsOf,
@@ -6285,6 +6302,8 @@ async function init() {
   markEditorReady();
   window.styk.telemetry = telemetry;
   window.styk.privacyUI = privacyUI;
+  // The developer build's tools (src/devtools/, never shipped): nothing happens in the shipping build.
+  startDevtools(window.styk, {loadEngine, tableOf});
   // The listeners for what the main process pushes (the launch file, a stykanimate:// link's menu action) are all on: it sends what it kept (desktop/page-pushes.cjs).
   desktop?.pageListening?.();
   updateNotice = new UpdateUI(desktop, { onRestart: () => actions['restart-update']() });
