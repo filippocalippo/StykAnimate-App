@@ -35,6 +35,10 @@ async function walk(relative) {
   }
 }
 for (const directory of ['src', 'vendor', 'assets']) await walk(directory);
+// The developer tools are never packaged (docs/DEVTOOLS.md): the package must not hold them, and the source's copy is not compared.
+const developerTools = path.join('src', 'devtools');
+if (existsSync(path.join(webRoot, developerTools))) throw new Error('The package holds the developer tools (src/devtools): they are for source checkouts only.');
+for (let index = files.length - 1; index >= 0; index--) if (files[index].startsWith(developerTools + path.sep)) files.splice(index, 1);
 // The engine, the Pivot codec and the drawing raster engine are WebAssembly modules built into src/engine/pkg (node scripts/engine-build.mjs).
 if (!snapshot) for (const required of ['styk_engine_bg.wasm', 'styk_codec_bg.wasm', 'styk_codec.js', 'styk_drawing_bg.wasm', 'styk_drawing.js'].map((name) => path.join('src', 'engine', 'pkg', name)))
   if (!files.includes(required)) throw new Error(`${required.replaceAll('\\', '/')} is missing; build it with node scripts/engine-build.mjs.`);
@@ -58,7 +62,9 @@ for (const filename of files) {
   manifest.push({ path: filename.replaceAll('\\', '/'), sha256: hash(packaged), bytes: packaged.length });
 }
 const nativeFiles = snapshot ? asar.listPackage(path.join(resources, 'app.asar')).map((filename) => filename.replaceAll('\\', '/')).filter((filename) => /^\/?desktop\/[^/]+\.cjs$/.test(filename)).map((filename) => filename.split('/').at(-1))
-  : (await readdir(path.join(appRoot, 'desktop'))).filter((filename) => filename.endsWith('.cjs'));
+  : (await readdir(path.join(appRoot, 'desktop'))).filter((filename) => filename.endsWith('.cjs') && filename !== 'devtools.cjs');
+// The developer launch's module is for source checkouts only (docs/DEVTOOLS.md).
+if (asar.listPackage(path.join(resources, 'app.asar')).some((filename) => /[\\/]desktop[\\/]devtools\.cjs$/.test(filename))) throw new Error('The package holds desktop/devtools.cjs: it is for source checkouts only.');
 for (const filename of nativeFiles) {
   const packaged = asar.extractFile(path.join(resources, 'app.asar'), `desktop/${filename}`);
   if (!snapshot) {

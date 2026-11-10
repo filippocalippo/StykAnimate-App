@@ -14,9 +14,10 @@ const site = process.env.STYK_URL ? {origin:process.env.STYK_URL, close:async()=
 const browser = await launchBrowser();
 const checks=[], errors=[];
 const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
+// Several editors start in one browser here: on a small machine without a GPU the later ones take over 30 s to be ready.
 async function open(context){
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(site.origin);await page.waitForFunction(()=>window.styk?.ready===true);
+  await page.goto(site.origin);await page.waitForFunction(()=>window.styk?.ready===true,null,{timeout:120000});
   await page.evaluate(()=>{document.querySelector('.styk-privacy [data-decline]')?.click();styk.settingsUI.commit({autosaveSeconds:0});});
   return page;
 }

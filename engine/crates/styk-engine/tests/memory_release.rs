@@ -1,4 +1,5 @@
 //! A very compressible Pivot file on the engine's own path. The first test reads the private bytes of the process: no other test here holds memory of size.
+#![cfg(windows)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
