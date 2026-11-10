@@ -767,7 +767,7 @@ function startupView() {
 /** `storageCleared` settles when the previous launch's browser storage is gone: the page loads after it. */
 async function createWindow(storageCleared = Promise.resolve()) {
   const view = startupView();
-  if (developer) developerTools ??= developer.startDevtools({ appRoot: APP_ROOT, page: () => window?.webContents ?? null });
+  if (developer) developerTools ??= developer.startDevtools({ appRoot: APP_ROOT, page: () => window?.webContents ?? null, openFile: queueOpenFile });
   window = new BrowserWindow({
     width: 1560, height: 1000, minWidth: 1000, minHeight: 680,
     ...(backgroundWindow ? { x: -20000, y: -20000, skipTaskbar: true } : {}),

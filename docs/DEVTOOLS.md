@@ -124,7 +124,7 @@ A request is `{id, op, args?, detail?: "short" | "full"}`. The answer is `{id, o
 | `command.list`, `command.run` | the app's command registry (what the palette and menus run) |
 | `seek`, `play`, `pause`, `undo`, `redo`, `select`, `view`, `settle` | automation steps; each waits for the frame on show |
 | `target.handle` | where to press to drag a joint or move a figure (the view is centred on it) |
-| `open` | `{url, name}`: open a document the page can fetch |
+| `open` | `{url, name}`: open a document the page can fetch. Over the pipe, `{path}`: the main process opens the file as it opens one from outside, and the answer comes once it is drawn |
 | `screenshot` | the stage as a PNG data URL |
 | `tools.overlay`, `tools.panel` | show or hide the overlay and the panel |
 

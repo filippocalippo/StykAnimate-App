@@ -25,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from '../tests/support/playwright.mjs';
+import {connect} from './styk-dev.mjs';
 
 const require = createRequire(import.meta.url);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -128,7 +129,7 @@ async function launchApp(executable, userData, args = []) {
     if (!page) await sleep(300);
   }
   if (!page) { child.kill(); throw new Error('The app\'s page never loaded its developer tools.'); }
-  return {page, mode: 'app', close: async () => { await browser.close().catch(() => {}); child.kill(); }};
+  return {page, mode: 'app', pid: child.pid, close: async () => { await browser.close().catch(() => {}); child.kill(); }};
 }
 
 /** Serves the document to the page under its own origin, so the page's `open` operation fetches it like any file. */
@@ -157,9 +158,18 @@ function driver(page) {
   return {request, traced};
 }
 
-async function runScenario(name, page, {request, traced}, documentName) {
+async function runScenario(name, page, {request, traced}, documentName, desktop) {
   const view = (await request('state')).view;
   if (name === 'open') {
+    // The desktop app opens the file itself, as it opens one from outside (the control channel's `open {path}`).
+    if (desktop) return traced('open', async () => {
+      const pipe = await connect(desktop.pid);
+      try {
+        const answer = await pipe.request('open', {path: desktop.file});
+        if (!answer.ok) throw new Error(`open: ${answer.error.what}`);
+        return {ms: answer.result.ms};
+      } finally { pipe.close(); }
+    });
     return traced('open', async () => ({ms: (await request('open', {url: '/__styk_profile__/document', name: documentName})).ms}));
   }
   if (name === 'play') {
@@ -267,7 +277,7 @@ export async function profile(options) {
       const documentName = await serveDocument(app.page, options.file);
       const tools = driver(app.page), results = {};
       for (const scenario of options.scenarios) {
-        const result = await runScenario(scenario, app.page, tools, `document${path.extname(options.file)}`);
+        const result = await runScenario(scenario, app.page, tools, `document${path.extname(options.file)}`, app.mode === 'app' ? {pid: app.pid, file: options.file} : null);
         results[scenario] = measures(scenario, result);
         if (result.dropped) unusual.push(`${scenario}, run ${run + 1}: ${result.dropped} events dropped (the ring filled)`);
         if (scenario === 'drag' && !results.drag.edit) unusual.push(`drag, run ${run + 1}: the press did not start a drag (no edit call): its numbers measure no edit`);

@@ -22,10 +22,11 @@ function developerLaunch(app) {
 }
 
 /**
- * Starts the desktop half. `page()` returns the editor's webContents, or null while there is none.
+ * Starts the desktop half. `page()` returns the editor's webContents, or null while there is none; `openFile(path)`
+ * opens a file as the app opens one from outside.
  * Returns the argument the preload script looks for and a `close` that ends the pipe.
  */
-function startDevtools({ appRoot, page }) {
+function startDevtools({ appRoot, page, openFile }) {
   const early = readFileSync(path.join(appRoot, 'src', 'devtools', 'early.js'), 'utf8');
   // The preload script asks once, before the page's first script: a synchronous answer keeps the early script first.
   ipcMain.on('styk:developer-early', event => { event.returnValue = { script: early, bridge: BRIDGE }; });
@@ -48,10 +49,8 @@ function startDevtools({ appRoot, page }) {
     settle(ticket, answer.length > MAX_ANSWER ? failure(id, 'The answer is larger than 1 MiB.', 'Ask for less: a smaller limit or page, or detail "short".') : answer);
   });
 
-  /** One request line to one answer line. */
-  const ask = line => new Promise(resolve => {
-    let request;
-    try { request = JSON.parse(line); } catch { return resolve(failure(null, 'The request is not JSON.', 'Send one JSON object per line.')); }
+  /** One request to the page, answered as a line. */
+  const askPage = request => new Promise(resolve => {
     const id = Number.isInteger(request?.id) ? request.id : null;
     const contents = page();
     if (!contents || contents.isDestroyed() || !ready) return resolve(failure(id, 'The app\'s page is not ready.', 'Retry once the window has loaded.'));
@@ -61,6 +60,23 @@ function startDevtools({ appRoot, page }) {
     contents.executeJavaScript(`globalThis.__stykDevtoolsReceive?.(${ticket}, ${JSON.stringify(request)}); undefined`, true)
       .catch(error => settle(ticket, failure(id, `The page could not take the request: ${error.message}`, 'Read logs.')));
   });
+  /**
+   * `open {path}`: the main process opens the file as it opens one from outside, between the page's `document.mark`
+   * and `document.wait`, and the answer is the wait's.
+   */
+  const openPath = async request => {
+    const id = Number.isInteger(request.id) ? request.id : null;
+    const marked = JSON.parse(await askPage({ id, op: 'document.mark' }));
+    if (!marked.ok) return JSON.stringify(marked);
+    await openFile(path.resolve(request.args.path));
+    return askPage({ id, op: 'document.wait', args: { token: marked.result.token, timeoutMs: request.args.timeoutMs }, detail: request.detail });
+  };
+  /** One request line to one answer line. */
+  const ask = line => {
+    let request;
+    try { request = JSON.parse(line); } catch { return Promise.resolve(failure(null, 'The request is not JSON.', 'Send one JSON object per line.')); }
+    return request?.op === 'open' && typeof request.args?.path === 'string' ? openPath(request) : askPage(request);
+  };
 
   const file = pipePath(process.pid);
   if (process.platform !== 'win32') { try { unlinkSync(file); } catch { /* no socket left behind */ } }
