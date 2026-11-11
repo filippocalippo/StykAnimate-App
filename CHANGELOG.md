@@ -17,15 +17,57 @@ What's new in each version of StykAnimate.
 - A new Home page to start an animation in landscape, vertical or square, reopen your projects and organize them with pins and folders.
 - Five short interactive tutorials that guide you step by step through the canvas, posing, the timeline and the panels.
 - Right-click a joint and choose Disconnect segment to turn that part of a figure into a figure of its own.
+- Arrange panels freely: drag any panel beside the stage or another panel, group panels as tabs, float them, or collapse them to icon strips, with a preview of where each one will land.
+- Save your own panel layouts for each workspace, and export or import them to share.
 
 ### Changed
 
 - Ctrl-dragging a node that uses IK stretches it like any other node.
 - A calmer top bar: the menus are in the StykAnimate menu, and your open projects take their place.
+- Exports preserve effects and 3D artwork when No smoothing is selected.
+- Recent colors, personal palettes and your brush library are kept between launches on desktop.
 
 ### Fixed
 
+- Moving a figure shows its new position immediately.
+- Onion skins of styled figures no longer show an old shape after you change the figure’s settings, such as an angle lock.
+- Repeated pastes keep the expected spacing between copied figures.
+- Pasting segment settings no longer fails after changing the selected segment.
+- Undoing a timeline change made of several steps keeps your selection and shows the right frame.
+- Timeline and camera previews show the correct frame and parallax layer positions.
+- Moving a segment while building a figure no longer bends other parts of the figure.
+- Fixed fine brush detail on drawing layers and clipped edges in camera previews with blur, glow or outlines.
+- Fixed errors when adjusting motion paths on joined figures.
+- Failed attempts to add figures or movieclips keep the project and figure joins unchanged.
+- Fixed an inspector error when viewing between frames.
 - Fixed an error when deleting your last color palette.
+- Fixed changing a figure's draw order on a keyframe with a custom easing curve.
+- Fixed editing an existing text figure, which opened with the default text instead of its own.
+- Fixed Auto key, builder snapping and camera follow missing from the command palette.
+- Saving no longer fails when Windows is still scanning the file you just saved over, and a save that runs out of memory now says your project is still open.
+- Fixed projects that would not open again after you made a movieclip in a project that already had another movieclip on its timeline. Projects already saved that way now open, and StykAnimate tells you it repaired them.
+- Saving now repairs damage it finds in a project, so the saved file opens again.
+- Exporting the same animation twice no longer occasionally leaves a frame with garbled pixels.
+
+### Performance
+
+- Large Pivot files open several times faster, and in the web app the first one no longer waits for a large download.
+- StykAnimate starts faster, and large projects save in a fraction of the time without pausing the app.
+- Large projects play without stutters, and artwork near the edge of the canvas no longer blinks during playback.
+- Dragging joints, releasing a pose and undoing keep up better on large animations with onion skins, and undoing a brush stroke no longer pauses.
+- Editing large animations and 3D figures is faster.
+- Exporting animations with effects, particles, 3D or many figures is several times faster.
+- Animations with particles, auras, beams, smoke or explosions play and edit more smoothly.
+- Fills, magic wand selections, filters and saving are faster on drawing layers.
+- Timeline and asset library previews appear almost instantly, and large projects use less memory, while they are shown and once opened.
+- Smoother playback for animations with parallax layers, a following camera, moved figure origins, Stick Nodes sprites, turning 3D drawings or animated properties.
+- Undoing and redoing big movieclip edits is much faster.
+- Drawing for a long time no longer keeps growing the memory StykAnimate uses.
+- Stepping through frames with the keyboard shows the next frame sooner on large animations.
+
+### Removed
+
+- The Graphics mode setting: StykAnimate now chooses the best option for your computer automatically.
 
 ## [1.2.5]
 

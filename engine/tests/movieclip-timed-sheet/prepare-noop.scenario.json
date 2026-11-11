@@ -1,0 +1,32 @@
+{
+ "name": "prepare-noop",
+ "document": "prepare-noop.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "_prepareSheetMovieclips"
+  ],
+  [
+   "@select",
+   null,
+   -1
+  ],
+  [
+   "_prepareSheetMovieclips"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

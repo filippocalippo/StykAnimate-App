@@ -1,9 +1,9 @@
 import {objectBounds,cameraMatrix,worldToScreen} from './renderer-geometry.mjs';
 import {VFX_REGISTRY} from './vfx.mjs';
-import {connectedVfxGeometry} from './vfx-connected.mjs';
-import {vfxRenderFrame} from './vfx-clips.mjs';
+import {layerVisible} from './layers.mjs';
 import {isGeneratorType} from './vfx-registry.mjs';
 import {canvasFont} from './ui/font-loading.mjs';
+import {isMovieclip} from './movieclips.mjs';
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 /** Ephemeral canvas controls. A drag edits one stack through the normal history transaction. */
 export class VfxGizmos {
@@ -13,6 +13,24 @@ export class VfxGizmos {
   document.addEventListener('keydown',event=>{if(event.key!=='Escape')return;if(this.drag){event.preventDefault();event.stopImmediatePropagation();this.cancel();}else if(this.editor._vfxAimPick){event.preventDefault();event.stopImmediatePropagation();this.editor._vfxAimPick=null;this.inspector.sync();this.onChange();}},{capture:true,signal:this.abort.signal});
  }
  get active(){return Boolean(this.drag);}
+ /** The uids of the figures that figure `uid`'s connected effects filter together at the frame on show, or null: what the engine says of it, read again when the frame or the document changes. */
+ group(options,uid){
+  const held=this.groupRead,editor=this.editor;
+  if(held?.geometry!==options.geometry||held.uid!==uid||held.revision!==editor.revision||held.tick!==editor.tick){
+   const members=editor._shown?.vfxGroup(uid);
+   this.groupRead={geometry:options.geometry,uid,revision:editor.revision,tick:editor.tick,members:members?new Set(members):null};
+  }
+  return this.groupRead.members;
+ }
+ /** What the movieclip instances among `uids` paint, content included (their geometry here is their handle alone): the engine's, read again when the frame or the document changes. */
+ clipExtent(options,uids){
+  const groups=[...options.geometry.objects.values()].filter(g=>g&&uids.has(g.obj.unique_id)&&isMovieclip(g.fig));
+  if(!groups.length)return null;
+  const key=groups.map(g=>g.obj.unique_id).join(),held=this.extentRead,editor=this.editor;
+  if(held?.geometry!==options.geometry||held.key!==key||held.revision!==editor.revision||held.tick!==editor.tick)
+   this.extentRead={geometry:options.geometry,key,revision:editor.revision,tick:editor.tick,rect:editor._shown?.vfxExtent(groups.map(g=>g.obj.unique_id))??null};
+  return this.extentRead.rect;
+ }
  control(){
   if(!this.inspector.visible)return null;
   const selected=this.inspector.selectedEffect();if(!selected||!selected.effect.enabled)return null;
@@ -28,9 +46,15 @@ export class VfxGizmos {
    map=p=>({x:(d*(p.x-e)-c*(p.y-f))/det,y:(-b*(p.x-e)+a*(p.y-f))/det});inverse=p=>({x:a*p.x+c*p.y+e,y:b*p.x+d*p.y+f});
   }else{
    let items=options.geometry.drawables.filter(item=>item.obj.unique_id===target.uid);if(target.kind==='segment')items=items.filter(item=>item.seg?.segment_id===target.handleId&&item.fig?.figure_type_id===target.figureTypeId);
-   const frame=vfxRenderFrame(options.report,options.frame),owner=frame.objects.find(o=>o.unique_id===target.uid);
-   if(target.kind==='figure'&&(selected.includeAttached||owner?._stykVfxScope===1)){const grouped=connectedVfxGeometry(options.geometry,frame,options.report,options.hiddenUids),slot=frame.objects.indexOf(owner);items=grouped.connectedVfxAssemblies?.get(slot)??grouped.objects.get(slot)?.drawables??items;}
-   if(!items.length)return null;bounds=objectBounds(items,{...options.resources,vfxBounds:false});unit=Math.max(.000001,Math.abs(owner?.scale??1));map=p=>p;inverse=p=>p;
+   const owner=options.frame.objects.find(o=>o.unique_id===target.uid),group=target.kind==='figure'?this.group(options,target.uid):null;
+   // A figure that owns a connected group is measured with the figures its effects filter together.
+   if(group)items=options.geometry.drawables.filter(item=>group.has(item.obj.unique_id)&&layerVisible(options.report,item.obj.unique_id));
+   // A whole figure's effects cover what a movieclip instance paints; a segment's cover that segment's drawables alone.
+   const clip=target.kind==='figure'?this.clipExtent(options,group?new Set([...group].filter(uid=>layerVisible(options.report,uid))):new Set([target.uid])):null;
+   if(!items.length&&!clip)return null;
+   bounds=items.length?objectBounds(items,{...options.resources,vfxBounds:false}):clip;
+   if(items.length&&clip){const x=Math.min(bounds.x,clip.x),y=Math.min(bounds.y,clip.y);bounds={x,y,width:Math.max(bounds.x+bounds.width,clip.x+clip.width)-x,height:Math.max(bounds.y+bounds.height,clip.y+clip.height)-y};}
+   unit=Math.max(.000001,Math.abs(owner?.scale??1));map=p=>p;inverse=p=>p;
   }
   const [a,b,c,d,e,f]=cameraMatrix(options),det=a*d-b*c;
   const project=p=>worldToScreen(map(p),options),unproject=p=>inverse({x:(d*(p.x-e)-c*(p.y-f))/det,y:(-b*(p.x-e)+a*(p.y-f))/det});

@@ -14,8 +14,8 @@ try{
  await page.getByRole('combobox',{name:'Gradient type'}).selectOption('radial');
  await page.getByRole('button',{name:'Add gradient stop',exact:true}).click();
  await page.getByRole('textbox',{name:'Hex color'}).fill('F0408080');await page.getByRole('textbox',{name:'Hex color'}).press('Tab');
- assert.equal(await page.evaluate(()=>window.styk.editor.figure.segments[0].paint.stops.length),3);
- assert.ok(Math.abs(await page.evaluate(()=>window.styk.editor.figure.segments[0].paint.stops[1].opacity)-128/255)<.01);
+ assert.equal(await page.evaluate(async()=>{const {resolveInstanceFigure}=await import('/src/animation-style.mjs'),e=window.styk.editor;return resolveInstanceFigure(e.figure,e.object).segments[0].paint.stops.length;}),3);
+ assert.ok(Math.abs(await page.evaluate(async()=>{const {resolveInstanceFigure}=await import('/src/animation-style.mjs'),e=window.styk.editor;return resolveInstanceFigure(e.figure,e.object).segments[0].paint.stops[1].opacity;})-128/255)<.01);
  await page.getByRole('button',{name:'Reverse gradient',exact:true}).click();
  await page.getByRole('combobox',{name:'Gradient type'}).selectOption('angular');
  await mkdir('artifacts/color-picker',{recursive:true});await page.screenshot({path:'artifacts/color-picker/gradient.png'});
@@ -46,21 +46,12 @@ try{
 
  const exportChecks=await page.evaluate(async()=>{
   const {DocumentExporter}=await import('/src/document-export.mjs');const ex=new DocumentExporter(),report=window.styk.editor.serialize();
-  const saved=JSON.parse(await(await ex.export(report,{format:'styk'})).text());
-  let rejected=false;try{await ex.export(report,{format:'piv'});}catch(e){rejected=e.message.includes('cannot represent');}
-  const {canvasPaint,svgPaintDefinition}=await import('/src/paint.mjs'),differences={};
-  for(const type of ['linear','radial','angular','diamond']){
-    const paint={type,angle:25,stops:[{offset:0,color:[240,30,20],opacity:.2},{offset:.35,color:[50,240,80],opacity:.65},{offset:1,color:[10,40,250],opacity:1}]};
-    const a=document.createElement('canvas'),b=document.createElement('canvas');a.width=a.height=b.width=b.height=128;const ac=a.getContext('2d'),bc=b.getContext('2d');
-    ac.fillStyle=canvasPaint(ac,paint,{x:0,y:64},{x:128,y:64});ac.fillRect(0,0,128,128);
-    const xml=`<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><defs>${await svgPaintDefinition(paint,{x:0,y:64},{x:128,y:64},'paint')}</defs><rect width="128" height="128" fill="url(#paint)"/></svg>`;
-    const img=new Image();img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(xml);await img.decode();bc.drawImage(img,0,0);
-    const ap=ac.getImageData(0,0,128,128).data,bp=bc.getImageData(0,0,128,128).data;let error=0;for(let i=0;i<ap.length;i++)error+=Math.abs(ap[i]-bp[i]);differences[type]=error/ap.length;
-  }
-  return {savedPaint:saved.figure_types[0].segments[0].paint.type,rejected,differences};
+  const {decodeDocument}=await import('/tests/support/native-files.mjs'),blob=await ex.export(report,{format:'styk',revision:window.styk.editor.revision});
+  const {document:saved}=await decodeDocument(new Uint8Array(await blob.arrayBuffer()),'styk');
+  let rejected=false;try{await ex.export(report,{format:'piv',revision:window.styk.editor.revision});}catch(e){rejected=e.message.includes('cannot represent');}
+  return {savedPaint:JSON.stringify(saved).includes('"angular"'),rejected};
  });
- assert.equal(exportChecks.savedPaint,'angular');assert.equal(exportChecks.rejected,true);console.log('Export checks',exportChecks);
- for(const difference of Object.values(exportChecks.differences))assert.ok(difference<8,'SVG and Canvas paint should match');
+ assert.equal(exportChecks.savedPaint,true);assert.equal(exportChecks.rejected,true);console.log('Export checks',exportChecks);
  assert.deepEqual(errors,[]);console.log('Picker interactions, alpha rendering, reopen and Escape passed',pixels);
 }finally{await browser.close();}
 

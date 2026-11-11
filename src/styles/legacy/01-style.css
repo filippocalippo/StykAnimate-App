@@ -2003,7 +2003,6 @@ dialog::backdrop {
   text-align: center;
 }
 
-#renderer-label.compatibility { display: inline; color: var(--theme-danger, #8a5a00); cursor: help; }
 .polygon-item + .polygon-item { border-top: 1px solid var(--theme-border, #ededed); margin-top: 6px; padding-top: 4px; }
 .polygon-style-details { margin: 0 0 6px; }
 .polygon-style-details > summary { color: var(--theme-muted, #767676); cursor: pointer; font-size: 10px; padding: 5px 0 8px; }

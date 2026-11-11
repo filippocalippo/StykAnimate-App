@@ -1,3 +1,5 @@
+import {tableOf} from './lazy-table.mjs';
+
 /** Stable source-pose identities shared by the editor and composition workers. */
 const indices = new WeakMap();
 export function invalidateFrameIndex(report) { indices.delete(report); }
@@ -10,7 +12,10 @@ function indexFor(report) {
   }
   return index.byId;
 }
-export function frameIndexForId(report, id) {
+function frameIndexForId(report, id) {
+  // A table of the read view knows the identity of every record without fetching them (the last one with an identity names it).
+  const table = tableOf(report.keyframes);
+  if (table) return table.positionOf(id, true);
   const position = indexFor(report).get(id);
   if (position === undefined) return -1;
   if (report.keyframes[position]?._styk?.frameId === id) return position;

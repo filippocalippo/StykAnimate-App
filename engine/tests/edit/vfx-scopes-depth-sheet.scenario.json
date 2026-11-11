@@ -1,0 +1,2320 @@
+{
+ "name": "vfx-scopes-depth-sheet",
+ "document": {
+  "version": 5,
+  "canvas_width": 960,
+  "canvas_height": 540,
+  "fps": 24,
+  "auto_easing": false,
+  "auto_easing_disabled_raw": 1,
+  "auto_easing_source": "file",
+  "backgrounds": [],
+  "figure_types": [
+   {
+    "figure_type_id": 1,
+    "name": "Figure 1",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 2,
+    "name": "Figure 2",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 3,
+    "name": "Figure 3",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 4,
+    "name": "Figure 4",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 5,
+    "name": "Figure 5",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 6,
+    "name": "Figure 6",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 7,
+    "name": "Figure 7",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 8,
+    "name": "Figure 8",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 9,
+    "name": "Figure 9",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 10,
+    "name": "Figure 10",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 11,
+    "name": "Figure 11",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 12,
+    "name": "Figure 12",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 13,
+    "name": "Figure 13",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 14,
+    "name": "Figure 14",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 15,
+    "name": "Figure 15",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 16,
+    "name": "Figure 16",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 17,
+    "name": "Figure 17",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   },
+   {
+    "figure_type_id": 18,
+    "name": "Figure 18",
+    "segment_count": 3,
+    "segments": [
+     {
+      "segment_id": 11,
+      "parent_id": 0,
+      "length": 90,
+      "angle_rad": 0.8,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 22,
+      "parent_id": 11,
+      "length": 90,
+      "angle_rad": 2,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     },
+     {
+      "segment_id": 33,
+      "parent_id": 22,
+      "length": 35,
+      "angle_rad": 0,
+      "thickness": 6,
+      "bend_rad": 0,
+      "primitive_code": 0,
+      "aux_code": 0,
+      "flags": 0,
+      "segment_type": "line",
+      "segment_kind": "line",
+      "color_rgb": [
+       43,
+       43,
+       43
+      ],
+      "transparency": 0,
+      "visible": true,
+      "z_order": 1,
+      "is_static": false
+     }
+    ],
+    "polyfills": [],
+    "image_assets": [],
+    "text_assets": []
+   }
+  ],
+  "keyframes": [
+   {
+    "duration_raw": 1,
+    "background_id": 0,
+    "background_id_b": 0,
+    "background_mix": 0,
+    "camera": {
+     "is_default": true,
+     "x": 0,
+     "y": 0,
+     "scale": 1,
+     "angle_rad": 0
+    },
+    "objects": [
+     {
+      "object_slot": 0,
+      "unique_id": 1,
+      "figure_type_id": 1,
+      "root_x": 200,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": null
+     },
+     {
+      "object_slot": 1,
+      "unique_id": 2,
+      "figure_type_id": 2,
+      "root_x": 205,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 0,
+       "target_unique_id": 1,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 2,
+      "unique_id": 3,
+      "figure_type_id": 3,
+      "root_x": 210,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 1,
+       "target_unique_id": 2,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 3,
+      "unique_id": 4,
+      "figure_type_id": 4,
+      "root_x": 215,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 2,
+       "target_unique_id": 3,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 4,
+      "unique_id": 5,
+      "figure_type_id": 5,
+      "root_x": 220,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 3,
+       "target_unique_id": 4,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 5,
+      "unique_id": 6,
+      "figure_type_id": 6,
+      "root_x": 225,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 4,
+       "target_unique_id": 5,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 6,
+      "unique_id": 7,
+      "figure_type_id": 7,
+      "root_x": 230,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 5,
+       "target_unique_id": 6,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 7,
+      "unique_id": 8,
+      "figure_type_id": 8,
+      "root_x": 235,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 6,
+       "target_unique_id": 7,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 8,
+      "unique_id": 9,
+      "figure_type_id": 9,
+      "root_x": 240,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 7,
+       "target_unique_id": 8,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 9,
+      "unique_id": 10,
+      "figure_type_id": 10,
+      "root_x": 245,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 8,
+       "target_unique_id": 9,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 10,
+      "unique_id": 11,
+      "figure_type_id": 11,
+      "root_x": 250,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 9,
+       "target_unique_id": 10,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 11,
+      "unique_id": 12,
+      "figure_type_id": 12,
+      "root_x": 255,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 10,
+       "target_unique_id": 11,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 12,
+      "unique_id": 13,
+      "figure_type_id": 13,
+      "root_x": 260,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 11,
+       "target_unique_id": 12,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 13,
+      "unique_id": 14,
+      "figure_type_id": 14,
+      "root_x": 265,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 12,
+       "target_unique_id": 13,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 14,
+      "unique_id": 15,
+      "figure_type_id": 15,
+      "root_x": 270,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 13,
+       "target_unique_id": 14,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 15,
+      "unique_id": 16,
+      "figure_type_id": 16,
+      "root_x": 275,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 14,
+       "target_unique_id": 15,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 16,
+      "unique_id": 17,
+      "figure_type_id": 17,
+      "root_x": 280,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 15,
+       "target_unique_id": 16,
+       "target_handle_id": 22
+      }
+     },
+     {
+      "object_slot": 17,
+      "unique_id": 18,
+      "figure_type_id": 18,
+      "root_x": 285,
+      "root_y": 170,
+      "scale": 1,
+      "color_override_raw": 0,
+      "field28": 0,
+      "angles": [
+       0.8,
+       2,
+       0
+      ],
+      "len_flag": 0,
+      "lengths": [],
+      "bend_flag": 0,
+      "bends": [],
+      "join": {
+       "target_object_slot": 16,
+       "target_unique_id": 17,
+       "target_handle_id": 22
+      }
+     }
+    ],
+    "object_draw_order": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17
+    ],
+    "object_draw_order_unique_ids": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17,
+     18
+    ],
+    "_styk": {
+     "frameId": "frame-1"
+    }
+   }
+  ],
+  "_styk": {
+   "format": "StykAnimate",
+   "format_version": 1,
+   "name": "Untitled animation",
+   "layers": {
+    "version": 1,
+    "nextId": 2,
+    "order": [
+     "layer-1"
+    ],
+    "byId": {
+     "layer-1": {
+      "name": "Layer 1",
+      "visible": true,
+      "locked": false
+     }
+    },
+    "assignments": {},
+    "defaultLayerId": "layer-1",
+    "activeId": "layer-1",
+    "fixed": {
+     "scene": {
+      "visible": true,
+      "locked": false
+     },
+     "camera": {
+      "visible": true,
+      "locked": false
+     }
+    }
+   },
+   "animation": {
+    "version": 1,
+    "nextKeyId": 17,
+    "channels": [
+     {
+      "id": "figure:1:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 1
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-1",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:2:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 2
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-2",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:3:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 3
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-3",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:4:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 4
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-4",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:5:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 5
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-5",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:6:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 6
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-6",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:7:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 7
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-7",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:8:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 8
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-8",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:9:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 9
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-9",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:10:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 10
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-10",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:11:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 11
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-11",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:12:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 12
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-12",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:13:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 13
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-13",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:14:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 14
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-14",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:15:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 15
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-15",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     },
+     {
+      "id": "figure:16:vfxScope",
+      "target": {
+       "kind": "figure",
+       "uid": 16
+      },
+      "property": "vfxScope",
+      "keys": [
+       {
+        "id": "key-16",
+        "tick": 0,
+        "value": 1,
+        "interpolation": "constant"
+       }
+      ]
+     }
+    ]
+   },
+   "vfxClips": {
+    "version": 1,
+    "clips": [
+     {
+      "id": "clip-deep",
+      "name": "",
+      "target": {
+       "kind": "figure",
+       "uid": 17
+      },
+      "start": 0,
+      "duration": null,
+      "offset": 0,
+      "enabled": true,
+      "strength": 1,
+      "fadeIn": 0,
+      "fadeOut": 0,
+      "includeAttached": false,
+      "effects": [
+       {
+        "version": 2,
+        "id": "fx-deep",
+        "type": "tint",
+        "enabled": true,
+        "params": {
+         "effectStrength": 1,
+         "color": 6737151,
+         "mix": 0.5
+        }
+       }
+      ],
+      "keys": {}
+     }
+    ]
+   }
+  }
+ },
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 17
+   },
+   true
+  ],
+  [
+   "pasteVfx",
+   {
+    "kind": "figure",
+    "uid": 17
+   },
+   [
+    {
+     "version": 2,
+     "id": "fx-paint",
+     "type": "tint",
+     "enabled": true,
+     "params": {
+      "color": {
+       "type": "linear",
+       "angle": 45,
+       "stops": [
+        {
+         "offset": 1,
+         "color": [
+          240.5,
+          60.2,
+          80
+         ],
+         "opacity": 0.6
+        },
+        {
+         "offset": 0,
+         "color": [
+          40,
+          120.5,
+          255
+         ],
+         "opacity": 1
+        }
+       ]
+      },
+      "mix": 0.7
+     }
+    }
+   ],
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "addVfxClip",
+   {
+    "kind": "figure",
+    "uid": 17
+   },
+   "glow",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "addVfxGroup",
+   {
+    "kind": "figure",
+    "uid": 17
+   },
+   "Neon",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "setVfxClip",
+   "clip-deep",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   false
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 17
+   },
+   true
+  ],
+  [
+   "setVfxClip",
+   "clip-deep",
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

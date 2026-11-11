@@ -1,0 +1,48 @@
+{
+ "name": "sheet-clipboard-ik-sheet",
+ "document": "ik-joined-unpinned.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "createLayer",
+   "Copy"
+  ],
+  [
+   "sheetCopyFrames",
+   [
+    "layer-1"
+   ],
+   0,
+   4
+  ],
+  [
+   "sheetPasteFrames",
+   [
+    "layer-2"
+   ],
+   0
+  ],
+  [
+   "@select",
+   5,
+   0
+  ],
+  [
+   "poseJoint",
+   340,
+   290
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

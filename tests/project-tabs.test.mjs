@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {newOwnedEditor} from './support/owned-editor.mjs';
 import {ProjectTabs, MAX_OPEN_PROJECTS} from '../src/project-tabs.mjs';
 import {createProjectTabsHost} from '../src/project-tabs-host.mjs';
-import {sessionProject, sessionUnsaved} from '../src/editor-sessions.mjs';
+import {movieclipScopes, sessionProjectName, sessionUnsaved} from '../src/editor-sessions.mjs';
 import {beginNativePropertyEdit, previewNativePropertyEdit, commitNativePropertyEdit} from '../src/native-property-edit.mjs';
 
 const names = tabs => tabs.items.map(item => item.name);
@@ -48,7 +48,7 @@ test('the list is bounded', () => {
 
 /** The application around the host, reduced to what the host asks of it. */
 function application({limit} = {}) {
-  const editor = new Editor({demo: false, propertyChannels: true, layerTimeline: true}).newDocument();
+  const editor = newOwnedEditor({demo: false, propertyChannels: true, layerTimeline: true}).newDocument();
   const app = {view: 1, token: 'token-1', tokens: 1, released: [], shown: [], refused: [], settles: 0, canSettle: true, answer: true, busy: false, idle: true,
     checkpoints: [], checkpoint: async () => true, recoveryCurrent: false};
   const host = createProjectTabsHost({editor, tabs: new ProjectTabs(limit ? {limit} : {}), hooks: {
@@ -215,7 +215,7 @@ test('a project that rests with changes gets one recovery copy, in a quiet momen
   assert.deepEqual(app.checkpoints, ['First']); assert.equal(first.state.recoveryCurrent, true);
   t.mock.timers.tick(60000); await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(app.checkpoints, ['First'], 'a resting project cannot change, so one copy settles it');
-  assert.deepEqual(sessionProject(first.session), {report: first.session.report, name: 'First'});
+  assert.equal(movieclipScopes(first.session), undefined, 'no movieclip of it is being edited'); assert.equal(sessionProjectName(first.session), 'First');
   assert.equal(sessionUnsaved(first.session), true); assert.equal(sessionUnsaved(second.session ?? {_revision: 1, _savedRevision: 1}), false);
 
   // A copy still being written is abandoned when its project comes back to the front.

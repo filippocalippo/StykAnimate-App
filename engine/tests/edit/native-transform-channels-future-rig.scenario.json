@@ -1,0 +1,90 @@
+{
+ "name": "native-transform-channels-future-rig",
+ "document": "native-transform-channels-future-rig.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginTranslationDrag"
+  ],
+  [
+   "moveSelection",
+   2.125,
+   -1.25
+  ],
+  [
+   "addAnimationKey",
+   {
+    "kind": "figure",
+    "uid": 3
+   },
+   "x",
+   8,
+   455.25
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@seek",
+   8.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "x",
+     "tick": 8,
+     "value": 301.25
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "scale",
+     "tick": 8,
+     "value": 0.85
+    }
+   ]
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ]
+ ]
+}

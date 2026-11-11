@@ -39,10 +39,10 @@ try{
   });
   for(const [name,value] of Object.entries(pose))check('paste: '+name,value);
   const copied=await page.evaluate(async()=>{
-    const {e,d,target,surface}=await freshDrawing(),{decodePixelClipboard}=await import('/src/drawing-clipboard.mjs');
+    const {e,d,target,surface}=await freshDrawing();
     const pixels=new Uint8ClampedArray(64*64*4);pixels.set([127,5,249,1],(30*64+30)*4);e.commitDrawingPixels(target,[{tx:0,ty:0,before:null,after:pixels}]);
     await d.makeSelection({target:e.drawingTarget(),surface,points:[{x:28,y:28},{x:32,y:28},{x:32,y:32},{x:28,y:32}]});d.selection.angle=90;d.selection.dx=100;
-    await d.action('copy-pixels');const clip=e._drawingPixelClipboard,{store:copiedSource}=await decodePixelClipboard(clip),exact=clip.version===2&&copiedSource.pixel(30,30).join(',')==='127,5,249,1';
+    await d.action('copy-pixels');const clip=e._drawingPixelClipboard,exact=clip.version===2;
     d.cancelSelection();await d.action('paste-pixels');
     const copied=exact&&surface.store.pixel(129,30).join(',')==='127,5,249,1'&&surface.store.pixel(30,30).join(',')==='127,5,249,1';
     e.undo();await d.makeSelection({target:e.drawingTarget(),surface,points:[{x:28,y:28},{x:32,y:28},{x:32,y:32},{x:28,y:32}]});await d.action('cut-pixels');

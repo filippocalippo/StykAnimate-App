@@ -1,0 +1,61 @@
+{
+ "name": "locked-sheet",
+ "document": "sheet-locked.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   2
+  ],
+  [
+   "@select",
+   3,
+   -1
+  ],
+  [
+   "moveSelection",
+   5,
+   5
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   5,
+   5
+  ],
+  [
+   "rotateSelection",
+   0.2
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   3,
+   0
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   400,
+   400
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

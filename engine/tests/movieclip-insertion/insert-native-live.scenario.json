@@ -1,0 +1,52 @@
+{
+ "name": "insert-native-live",
+ "document": "insert-native-live.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginTranslationDrag",
+   "Insert after drag"
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2.25
+  ],
+  [
+   "addFigure",
+   999
+  ],
+  [
+   "moveSelection",
+   1,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "beginTranslationDrag",
+   "Insert after accepted drag"
+  ],
+  [
+   "moveSelection",
+   3,
+   -1
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

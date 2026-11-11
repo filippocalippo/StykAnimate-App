@@ -1,0 +1,79 @@
+{
+ "name": "channels-camera-scene-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/channels/channels-camera-scene.sheet.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   12,
+   4
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "@select",
+   2,
+   1
+  ],
+  [
+   "rotateJoint",
+   0.3
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "camera"
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   1.2
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "setSceneColor",
+   4279246912
+  ],
+  [
+   "@seek",
+   9
+  ],
+  [
+   "setSceneBackground",
+   0
+  ],
+  [
+   "sheetInsertFrames",
+   [
+    "layer-1"
+   ],
+   4,
+   1
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

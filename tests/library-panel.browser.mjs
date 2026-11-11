@@ -10,7 +10,7 @@ const labels=async menu=>(await menu.locator('[role^="menuitem"] > span:first-of
 // The community library's posters are WebP; saving converts them to the PNG the library keeps.
 const webp='data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==';
 try{
-  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk.ready);
+  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   await page.locator('#library-tab').click();
   // A browser keeps its own library (src/web-library.mjs); tests/web-library.browser.mjs exercises it for real.
   await page.getByText('No saved assets yet').waitFor();

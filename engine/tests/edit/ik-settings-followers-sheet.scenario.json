@@ -1,0 +1,58 @@
+{
+ "name": "ik-settings-followers-sheet",
+ "document": "ik-settings-followers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "setNodeIK",
+   {
+    "allowStretch": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "setNodeIK",
+   {
+    "allowStretch": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 1
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "bendDirection": -1
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

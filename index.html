@@ -10,9 +10,15 @@
     />
     <title>StykAnimate — First steps</title>
     <link rel="icon" type="image/svg+xml" href="./mark.svg" />
+    <link rel="modulepreload" href="./src/engine/engine-start.mjs" />
+    <link rel="modulepreload" href="./src/engine/engine.mjs" />
+    <link rel="modulepreload" href="./src/engine/pkg/styk_engine.js" />
+    <link rel="modulepreload" href="./src/engine/engine-memory.mjs" />
+    <link rel="preload" href="./src/engine/pkg/styk_engine_bg.wasm" as="fetch" type="application/wasm" crossorigin />
     <script src="./src/theme-bootstrap.js"></script>
     <link rel="preload" href="./assets/fonts/inter-latin-opsz-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="./src/styles/app.css" />
+    <script type="module" src="./src/engine/engine-start.mjs"></script>
   </head>
   <body>
     <div id="app" class="shell">
@@ -142,12 +148,6 @@
             <button type="button" class="ui-tool-button" data-action="delete-single-segment" aria-label="Delete part" data-tooltip="Delete part" data-icon="trash" data-i18n-aria-label="chrome.deletePart" data-i18n-tooltip="chrome.deletePart"></button>
           </div>
         </nav>
-        <aside class="shell-left shell-dock" id="left-dock" data-region="left" aria-label="Structure" hidden data-i18n-aria-label="chrome.structure">
-          <div class="ui-island shell-island" data-island="left-0">
-            <div class="ui-tabs shell-tabs" role="tablist" aria-label="Structure" data-ui hidden data-i18n-aria-label="chrome.structure"></div>
-            <div id="builder-outliner" class="builder-outliner shell-panel" data-panel="structure" hidden></div>
-          </div>
-        </aside>
         <main class="center shell-stage" aria-label="Stage" data-i18n-aria-label="chrome.stage">
           <div class="stage-head" role="toolbar" aria-label="Stage" data-i18n-aria-label="chrome.stage">
             <div class="stage-head-start" data-slot="stage-start">
@@ -213,22 +213,6 @@
             <div class="viewport-help" id="viewport-hint" hidden></div>
           </div>
         </main>
-        <aside class="right-panel shell-right shell-dock" id="right-dock" data-region="right" aria-label="Inspector" data-i18n-aria-label="chrome.inspector">
-          <div class="ui-island shell-island" data-island="right-0">
-            <div class="ui-tabs shell-tabs" role="tablist" aria-label="Inspector" data-ui data-i18n-aria-label="chrome.inspector">
-              <button type="button" role="tab" class="ui-tab" id="properties-tab" data-vfx-tab="properties" data-panel="properties" aria-controls="properties-panel" aria-selected="true" data-i18n="chrome.properties">Properties</button>
-              <button type="button" role="tab" class="ui-tab" id="vfx-tab" data-vfx-tab="vfx" data-panel="vfx" aria-controls="vfx-panel" aria-selected="false" tabindex="-1" data-i18n="chrome.vfx">VFX</button>
-              <button type="button" role="tab" class="ui-tab" id="library-tab" data-panel="library" aria-controls="user-library" aria-selected="false" tabindex="-1" data-i18n="chrome.library">Library</button>
-            </div>
-            <section id="properties-panel" class="shell-panel" data-panel="properties" role="tabpanel" aria-labelledby="properties-tab">
-              <div class="inspector-header" data-slot="inspector-target"><div><span class="panel-tab-title" data-i18n="chrome.properties">Properties</span><span id="inspector-context" data-i18n="chrome.figure">Figure</span></div><button id="object-actions" class="icon-button" aria-label="Selection actions" aria-haspopup="menu" aria-expanded="false" title="Selection actions" data-i18n-aria-label="chrome.selectionActions" data-i18n-title="chrome.selectionActions">•••</button></div>
-              <div class="inspector-head" data-slot="inspector-head" hidden></div>
-              <div id="inspector"></div>
-            </section>
-            <div id="vfx-panel" class="shell-panel" data-panel="vfx" role="tabpanel" aria-labelledby="vfx-tab" hidden></div>
-            <section id="user-library" class="shell-panel" data-panel="library" role="tabpanel" aria-labelledby="library-tab" hidden></section>
-          </div>
-        </aside>
         <section class="timeline-panel shell-bottom ui-island" id="animation-timeline" aria-label="Timeline" data-i18n-aria-label="chrome.timeline">
           <div class="timeline-toolbar">
             <div class="timeline-title" data-i18n="chrome.timeline">Timeline</div>
@@ -311,6 +295,20 @@
             ><span id="selection-summary">No figure selected</span>
           </div>
         </section>
+        <!-- The dock host (src/shell/dock-host.mjs) places these panels and their tabs; what is not on screen waits here. -->
+        <div class="shell-parking" hidden>
+          <button type="button" role="tab" class="ui-tab" id="properties-tab" data-vfx-tab="properties" data-panel="properties" aria-controls="properties-panel" aria-selected="true" data-i18n="chrome.properties">Properties</button>
+          <button type="button" role="tab" class="ui-tab" id="vfx-tab" data-vfx-tab="vfx" data-panel="vfx" aria-controls="vfx-panel" aria-selected="false" tabindex="-1" data-i18n="chrome.vfx">VFX</button>
+          <button type="button" role="tab" class="ui-tab" id="library-tab" data-panel="library" aria-controls="user-library" aria-selected="false" tabindex="-1" data-i18n="chrome.library">Library</button>
+          <div id="builder-outliner" class="builder-outliner shell-panel" data-panel="structure" hidden></div>
+          <section id="properties-panel" class="shell-panel" data-panel="properties" role="tabpanel" aria-labelledby="properties-tab">
+              <div class="inspector-header" data-slot="inspector-target"><div><span class="panel-tab-title" data-i18n="chrome.properties">Properties</span><span id="inspector-context" data-i18n="chrome.figure">Figure</span></div><button id="object-actions" class="icon-button" aria-label="Selection actions" aria-haspopup="menu" aria-expanded="false" title="Selection actions" data-i18n-aria-label="chrome.selectionActions" data-i18n-title="chrome.selectionActions">•••</button></div>
+              <div class="inspector-head" data-slot="inspector-head" hidden></div>
+              <div id="inspector"></div>
+            </section>
+            <div id="vfx-panel" class="shell-panel" data-panel="vfx" role="tabpanel" aria-labelledby="vfx-tab" hidden></div>
+            <section id="user-library" class="shell-panel" data-panel="library" role="tabpanel" aria-labelledby="library-tab" hidden></section>
+        </div>
         <!-- Home (docs/HOME.md): a page over the workspace, built when it first shows (src/home/home-view.mjs). -->
         <section id="home" class="home" aria-label="Home" data-i18n-aria-label="home.home" hidden></section>
       </section>

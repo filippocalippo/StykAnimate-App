@@ -19,7 +19,6 @@ export default Object.freeze({
   "drawingController.alreadyDrawing": "This cell already starts a drawing. Use Next copy to add time.",
   "drawingController.sameResolution": "This drawing already uses the chosen resolution.",
   "drawingController.resampled": "Drawing resampled. Undo restores its original pixels.",
-  "drawingController.finishingStroke": "Finishing stroke",
   "drawingController.fillingDrawing": "Filling drawing",
   "drawingController.selectingPixels": "Selecting pixels",
   "drawingController.copyingPixels": "Copying pixels",

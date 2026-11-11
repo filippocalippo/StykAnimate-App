@@ -128,8 +128,7 @@ figures still animated by legacy property curves.
 
 ### Implementation
 
-`editor-disconnect.mjs` publishes one compound history step (the existing
-`movieclipBatch` collector) of three commands. A `disconnect` command inserts
+The engine session (`styk-edit/src/disconnect.rs`) publishes one compound history step of three commands. A `disconnect` command inserts
 the new instance beside the source in each native keyframe and pose source that
 holds it, forking a shared definition; its definitions travel in
 `figureDefinitionSplice` and its layer membership in `frameUidCounts`, so undo,

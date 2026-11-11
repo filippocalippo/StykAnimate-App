@@ -1,0 +1,45 @@
+{
+ "name": "clip-native-batch-cancel",
+ "document": "clip-native-batch-cancel.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@batch",
+   "Abort conversion",
+   [
+    [
+     "createMovieclip",
+     {
+      "start": 2,
+      "end": 6
+     }
+    ],
+    [
+     "placeMovieclip",
+     {
+      "start": 7,
+      "end": 2
+     }
+    ]
+   ]
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 2,
+    "end": 6
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

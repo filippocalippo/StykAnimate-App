@@ -7,7 +7,7 @@ const check = (name, value=true) => {assert.ok(value,name); checks.push(name); c
 const snapshot = () => page.evaluate(()=>({tick:styk.editor.tick,duration:styk.editor.totalTicks,keys:styk.editor.layerFrameKeys('layer-1').map(k=>k.tick)}));
 const grid = () => page.getByRole('grid',{name:'Layer frames'});
 try {
-  await page.goto(process.env.STYK_URL || 'http://127.0.0.1:47831'); await page.waitForFunction(()=>styk?.ready);
+  await page.goto(process.env.STYK_URL || 'http://127.0.0.1:47831'); await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(async()=>{
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs'); const report=emptyDocument();
     report.keyframes=[0,40].map(x=>createFrame([createObject(report.figure_types[0],1,200+x,250)],12));

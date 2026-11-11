@@ -15,5 +15,19 @@ export default Object.freeze({
   "dockTabs.moveToolsLeft": "Move tools left",
   "dockTabs.moveToolsRight": "Move tools right",
   "dockTabs.tools": "Tools",
-  "dockTabs.moveCancelled": "Move cancelled"
+  "dockTabs.moveCancelled": "Move cancelled",
+  "dockTabs.splitLeft": "Split left",
+  "dockTabs.splitRight": "Split right",
+  "dockTabs.splitAbove": "Split above",
+  "dockTabs.splitBelow": "Split below",
+  "dockTabs.dockAbove": "Dock above",
+  "dockTabs.dockBelow": "Dock below",
+  "dockTabs.dockLeftEdge": "Dock along the left edge",
+  "dockTabs.dockRightEdge": "Dock along the right edge",
+  "dockTabs.dockTopEdge": "Dock along the top",
+  "dockTabs.dockBottomEdge": "Dock along the bottom",
+  "dockTabs.dockBack": "Dock back",
+  "dockTabs.collapse": "Collapse",
+  "dockTabs.expand": "Expand",
+  "dockTabs.close": "Close"
 });

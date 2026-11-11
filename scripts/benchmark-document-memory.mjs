@@ -5,9 +5,9 @@ import {createHash} from 'node:crypto';
 import {setImmediate as yieldTask} from 'node:timers/promises';
 import path from 'node:path';
 import os from 'node:os';
-import backend from '../desktop/backend.cjs';
 import {Editor} from '../src/editor.mjs';
 import {materializeNativeFrames,unpackNativeFrameResponse,NATIVE_FRAME_CONTENT_TYPE} from '../src/import-wire.mjs';
+import {nodeCodec} from '../tests/support/codec.mjs';
 
 // A benchmark-only conservative graph inventory. Count shared containers once;
 // string storage is deliberately an upper estimate without engine internals.
@@ -47,10 +47,9 @@ async function inventory(root){
 assert.ok(globalThis.gc,'Use node --expose-gc');
 const source=path.resolve(process.argv[2]),output=process.argv[3]||'artifacts/document-memory.json';
 const bytes=await readFile(source),sha=bytes=>createHash('sha256').update(bytes).digest('hex'),sourceDigest=sha(bytes);
-const service=await backend.startBackend({appRoot:process.cwd()});
-try{
+{
   globalThis.gc();const before=process.memoryUsage();
-  const response=await fetch(`${service.origin}/api/import?filename=${encodeURIComponent(path.basename(source))}`,
+  const response=await nodeCodec().fetch(`/api/import?filename=${encodeURIComponent(path.basename(source))}`,
     {method:'POST',headers:{Accept:NATIVE_FRAME_CONTENT_TYPE,'Content-Type':'application/octet-stream'},body:bytes});
   assert.equal(response.status,200);assert.equal(response.headers.get('Content-Type'),NATIVE_FRAME_CONTENT_TYPE);
   const wire=await response.arrayBuffer(),{result,offset}=unpackNativeFrameResponse(wire);
@@ -73,4 +72,4 @@ try{
   assert.equal(sha(await readFile(source)),sourceDigest);
   await mkdir(path.dirname(output),{recursive:true});await writeFile(output,JSON.stringify(report,null,2));
   console.log(JSON.stringify({heapDeltaBytes:report.heapDeltaBytes,wireBytes:wire.byteLength,rows:rows.map(({counts,estimatedBytes,elapsedMs,workMs,maxSliceMs})=>({counts,estimatedBytes,elapsedMs,workMs,maxSliceMs}))}));
-}finally{service.stop();}
+}

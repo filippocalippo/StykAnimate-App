@@ -2,7 +2,11 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {emptyPerformance,recordPerformance,mergePerformance,validatePerformance,trimPerformance,PERFORMANCE_METRICS,performancePercentile,provenance,performanceContext} from '../src/telemetry-performance-schema.mjs';
 import {PerformanceMeasurements} from '../src/telemetry-performance.mjs';
-import {GpuTiming,requestInstrumentedDevice} from '../src/gpu-timing.mjs';
+
+test('performance contexts name the graphics backends of the engine',()=>{
+  for(const backend of ['webgpu','webgl2','unavailable'])assert.equal(performanceContext({backend}).backend,backend);
+  assert.equal(performanceContext({backend:'WebGL2'}).backend,'unknown');
+});
 
 test('diagnostics retain finer fast-action quantiles and reject malformed or private dimensions',()=>{
   const perf=emptyPerformance();for(const value of [8,12,16,20,25])recordPerformance(perf,'action_edit',value);
@@ -35,20 +39,14 @@ test('recovery outcome and incident summaries retain durations without paths or 
   assert.ok(!JSON.stringify(meter.data).match(/private|SECRET/));assert.equal(meter.data.rows.find(row=>row.metric==='loaf_script').context.source,'app');
   assert.doesNotThrow(()=>validatePerformance(meter.drain()));
 });
-test('GPU timestamps keep one readback in flight and discard results after withdrawal',async()=>{
-  globalThis.GPUBufferUsage={QUERY_RESOLVE:1,COPY_SRC:2,COPY_DST:4,MAP_READ:8};globalThis.GPUMapMode={READ:1};
-  let enabled=true,resolveMap,allocations=0,results=[];
-  const buffer={mapAsync:()=>new Promise(resolve=>resolveMap=resolve),getMappedRange:()=>new BigUint64Array([1000n,2001000n]).buffer,unmap(){},destroy(){}};
-  const device={features:new Set(['timestamp-query']),createQuerySet:()=>({destroy(){}}),createBuffer:()=>{allocations++;return buffer;}};
-  const timer=new GpuTiming(device,{enabled:()=>enabled,onTiming:n=>results.push(n)});
-  const writes=timer.begin(true);assert.ok(writes);assert.equal(timer.begin(true),undefined);assert.equal(allocations,2);
-  timer.submitted(writes);enabled=false;resolveMap();await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(results,[]);assert.equal(timer.busy,false);timer.destroy();
-  delete globalThis.GPUBufferUsage;delete globalThis.GPUMapMode;
-});
-test('optional GPU timing failure preserves the hardware renderer',async()=>{
-  const calls=[],device={};
-  const adapter={features:new Set(['timestamp-query']),async requestDevice(options){calls.push(options);if(options)throw new Error('Unavailable optional feature');return device;}};
-  assert.equal(await requestInstrumentedDevice(adapter),device);assert.equal(calls.length,2);assert.equal(calls[1],undefined);
+
+test('long-frame scripts are attributed to the app, the stage, the editor or other by module name alone',()=>{
+  const meter=new PerformanceMeasurements({consent:{diagnostics:true}},{now:()=>0,random:()=>0});
+  const script=(url)=>({duration:10,sourceURL:url,invoker:'SECRET'});
+  meter.loaf([{startTime:0,duration:60,styleAndLayoutStart:0,scripts:[script('https://x.invalid/src/engine/engine-stage.mjs?v=1'),script('https://x.invalid/src/engine/engine-owner.mjs'),script('https://x.invalid/src/app.mjs'),script('https://x.invalid/src/renderer.mjs')]}]);
+  const bySource=Object.fromEntries(meter.data.rows.filter(row=>row.metric==='loaf_script').map(row=>[row.context.source,row.count]));
+  assert.deepEqual(bySource,{renderer:1,editor:1,app:1,other:1});
+  assert.ok(!JSON.stringify(meter.data).match(/SECRET|invalid/));
 });
 
 test('post-close memory phase stops being idle as soon as editing resumes',()=>{

@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 import {DocumentSave, RecoveryDeadline, documentCheckpoint, matchesDocumentCheckpoint} from '../src/document-save.mjs';
+import {makeProjectFile, releaseSnapshots} from '../src/engine/engine-document-export.mjs';
+import {nodeEngine, sessionFromDocument} from './support/engine-node.mjs';
+import {ownedEditorSync} from './support/owned-editor.mjs';
 
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => {resolve = yes; reject = no;}); return {promise, resolve, reject}; };
 const source = await readFile(new URL('../src/app.mjs', import.meta.url), 'utf8');
@@ -12,14 +17,14 @@ const changeAt = source.indexOf('editor.addEventListener("change", (e) => {');
 const epochSource = source.slice(source.indexOf('  const kind = e.detail?.kind;', changeAt), source.indexOf("  if ((['toggle-selection'", changeAt));
 
 /** Exercise the application's actual save/close functions with staged I/O. */
-function app({browser = false} = {}) {
-  const editor = {report: {}, revision: 1, frameDraftRevision: 0, dirty: true, name: 'Animation', markSaved() {this.dirty = false;}};
+function app({browser = false, exportDocument = null} = {}) {
+  const editor = {report: {}, revision: 1, dirty: true, name: 'Animation', markSaved() {this.dirty = false;}};
   const state = {documentToken: 'document-1'}, manualSave = new DocumentSave(), recoveryDeadline = new RecoveryDeadline();
   const calls = {pickers: 0, writes: 0, committed: 0, closed: 0, restarted: 0, failed: [], statuses: [], cleared: []};
   // One open project: the list of open projects reports the editor's own state.
   const projects = {tabs: {activeId: 'project-1'}, summary: () => ({open: 1, unsaved: editor.dirty ? 1 : 0, unsavedName: editor.dirty ? editor.name : '', stamp: 0}),
     saveAll: async save => !editor.dirty || save()};
-  const hooks = {write: async () => {}, cleanup: async () => {}, picker: async () => {}, flushPreferences: async () => {}, flushSettings: async () => {}, flushClipboard: async () => {}, publish: async () => {}, close: async () => {}};
+  const hooks = {write: async () => {}, cleanup: async () => {}, picker: async () => {}, flushPreferences: async () => {}, flushSettings: async () => {}, publish: async () => {}, close: async () => {}};
   const desktop = browser ? null : {
     beginProjectWrite() {}, async deleteRecovery(target) {calls.cleared.push(target); await hooks.cleanup();},
     async setDocumentState(value) {await hooks.publish(value);},
@@ -34,10 +39,10 @@ function app({browser = false} = {}) {
     telemetry: {}, status(value) {calls.statuses.push(value);}, fail(error) {calls.failed.push(error);},
     interfaceText: value => value, notify() {}, messageError: error => error,
     desktop, browserRecovery: {clear: slot => { calls.cleared.push(slot); return hooks.cleanup(); }},
-    async writeNativeBlob(_desktop, _blob, {signal}) {calls.writes++; await hooks.write(); if (signal.aborted) throw new DOMException('', 'AbortError'); calls.committed++; return true;},
-    async runDocumentExport(_format, consume, {controller}) {return consume({}, controller.signal);},
+    async writeNativeBlob(_desktop, _blob, {signal}) {calls.writes++; await hooks.write(_blob); if (signal.aborted) throw new DOMException('', 'AbortError'); calls.committed++; return true;},
+    async runDocumentExport(_format, consume, {controller}) {return consume(exportDocument ? await exportDocument() : {}, controller.signal);},
     workspaceLayout: {flushPreferences: () => hooks.flushPreferences()},
-    editorSettings: {flush: () => hooks.flushSettings()}, nativeFrameClipboard: {flush: () => hooks.flushClipboard()},
+    editorSettings: {flush: () => hooks.flushSettings()},
   });
   const functions = vm.runInContext(`let savingDocument = false, lastSave = null, saveMutationEpoch = 0, finalizingDocument = false, recoveredEpoch = -1;\n${saveSource}\nfunction editorChanged(e) {${epochSource}}\n({saveNative, finishDocumentAction, saveEveryProjectThen, checkpoint: () => lastSave, emitChange: kind => editorChanged({detail: {kind}})})`, context);
   return {editor, state, calls, hooks, projects, ...functions};
@@ -81,10 +86,11 @@ test('recovery deletion failure cannot reject or undo a committed Save', async (
 test('failed native writing leaves work dirty and permits a later retry', async () => {
   const a = app(); a.hooks.write = async () => {throw new Error('Write failed');};
   await assert.rejects(a.saveNative(), /Write failed/); assert.equal(a.editor.dirty, true); assert.equal(a.calls.committed, 0);
+  assert.equal(a.calls.statuses.at(-1)?.messageKey, 'app.saveFailed', 'the line no longer says the project is being saved');
   a.hooks.write = async () => {}; assert.equal(await a.saveNative(), true);
 });
 
-for (const action of ['close', 'restartForUpdate']) for (const stage of ['flushPreferences', 'flushSettings', 'flushClipboard', 'publish']) {
+for (const action of ['close', 'restartForUpdate']) for (const stage of ['flushPreferences', 'flushSettings', 'publish']) {
   test(`${action} preserves an edit arriving during ${stage}`, async () => {
     const a = app(); assert.equal(await a.saveNative(), true);
     a.hooks[stage] = async () => {a.editor.revision++; a.editor.dirty = true;};
@@ -93,8 +99,8 @@ for (const action of ['close', 'restartForUpdate']) for (const stage of ['flushP
   });
 }
 
-test('close rejects replacement documents and new frame drafts despite clean dirty flags', async () => {
-  for (const change of [a => {a.editor.report = {};}, a => {a.state.documentToken = 'replacement';}, a => {a.editor.frameDraftRevision++;}]) {
+test('close rejects replacement documents despite clean dirty flags', async () => {
+  for (const change of [a => {a.editor.report = {};}, a => {a.state.documentToken = 'replacement';}]) {
     const a = app(); assert.equal(await a.saveNative(), true); change(a);
     assert.equal(await a.finishDocumentAction('close', a.checkpoint()), false); assert.equal(a.calls.closed, 0);
   }
@@ -123,9 +129,44 @@ test('final close handoff is bounded and honors a main-process checkpoint reject
   a.hooks.flushPreferences = () => held.promise;
   const closing = a.finishDocumentAction('close', a.checkpoint());
   assert.equal(await a.finishDocumentAction('close', a.checkpoint()), false);
-  // The checkpoint names the project in front, its revision, draft and mutation epoch, and the list of open projects.
-  a.hooks.close = async checkpoint => {assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:0:0'); return false;};
+  // The checkpoint names the project in front, its revision and mutation epoch, and the list of open projects.
+  a.hooks.close = async checkpoint => {assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:0'); return false;};
   held.resolve(); assert.equal(await closing, false); assert.equal(a.calls.closed, 1);
+});
+
+test('a project opening would refuse, with nothing to mend it, is not saved: the file on disk, its recovery copy and its unsaved changes stay', async t => {
+  await nodeEngine();
+  // A project with a movieclip whose retained scene has a layer sheet with a broken counter: opening refuses it and nothing mends it.
+  const fixture = JSON.parse(await readFile(new URL('../engine/tests/edit/sheet-movieclip.document.json', import.meta.url), 'utf8'));
+  const {editor: maker, owner} = ownedEditorSync({demo: false, layerTimeline: true, propertyChannels: true}, fixture, {verify: false});
+  maker.select(maker.evaluatedFrame.objects[0].unique_id, -1);
+  maker.createMovieclip({start: 0, end: 3});
+  const project = JSON.parse(owner.session().report_json());
+  const retained = project.figure_types.findLast(figure => figure._styk?.movieclip)._styk.movieclip.document._styk.movieclipSource.document;
+  retained._styk.layerSheet.nextId = 0;
+  // A session holding that project as it is: no command breaks a document this way, and the save's check is the net under it.
+  const state = {layerTimeline: true, propertyChannels: true, tick: 0, frameIndex: 0, selectedUid: null, selectedUids: [], selectedJoint: -1, activeLayerId: maker.activeLayerId};
+  const session = await sessionFromDocument(project, state);
+  t.after(() => session.free());
+  // The project file on disk that the save's bytes would replace.
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'styk-refused-save-')), file = path.join(folder, 'Animation.styk');
+  t.after(() => rm(folder, {recursive: true, force: true}));
+  const existing = Buffer.from('the project as it was last saved');
+  await writeFile(file, existing);
+  // The engine's save of the session's document, as the export worker makes it, then the app's own save path.
+  const a = app({exportDocument: () => {
+    const snapshots = [session.snapshot()];
+    try { return new Blob([makeProjectFile({join: null, cancelled: () => false, request: {snapshots, scopes: [], name: 'Animation'}}).bytes]); }
+    catch (error) { releaseSnapshots(snapshots); throw error; }
+  }});
+  a.hooks.write = async blob => writeFile(file, Buffer.from(await blob.arrayBuffer()));
+  await assert.rejects(a.saveNative(), error => /^errors\.layerSheet\./.test(error.messageKey ?? error.message), 'the save is refused with the reason opening gives');
+  assert.deepEqual(await readFile(file), existing, 'the file on disk is untouched');
+  assert.equal(a.calls.writes, 0, 'nothing was written');
+  assert.deepEqual(a.calls.cleared, [], 'the recovery copy is kept');
+  assert.equal(a.editor.dirty, true, 'the project stays unsaved');
+  assert.equal(a.calls.statuses.at(-1)?.messageKey, 'app.saveFailed', 'the person sees that the save failed');
+  assert.equal(a.projects.summary().unsaved, 1, 'closing still asks to save it');
 });
 
 test('a save removes only its own project\'s recovery copy', async () => {
@@ -143,7 +184,7 @@ test('the desktop is told what every open project would lose, and closing needs 
   assert.equal(await a.saveNative(), true);
   a.projects.summary = () => ({open: 3, unsaved: 1, unsavedName: 'Resting project', stamp: 4});
   assert.equal(await a.finishDocumentAction('close'), true);
-  assert.deepEqual({...published.at(-1)}, {name: 'Animation', dirty: true, activeDirty: false, unsaved: 1, unsavedName: 'Resting project', revision: 'document-1:1:0:0:4'});
+  assert.deepEqual({...published.at(-1)}, {name: 'Animation', dirty: true, activeDirty: false, unsaved: 1, unsavedName: 'Resting project', revision: 'document-1:1:0:4'});
   // Save and close saves the others first and stops when one of them is not saved.
   let saved = 0;
   a.projects.saveAll = async () => { saved++; return false; };
@@ -151,7 +192,7 @@ test('the desktop is told what every open project would lose, and closing needs 
   a.projects.saveAll = async () => true;
   assert.equal(await a.saveEveryProjectThen('close'), false, 'a project still unsaved keeps the window open');
   a.projects.summary = () => ({open: 3, unsaved: 0, unsavedName: '', stamp: 5});
-  a.hooks.close = async checkpoint => { assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:0:5'); };
+  a.hooks.close = async checkpoint => { assert.equal(checkpoint.saved, true); assert.equal(checkpoint.revision, 'document-1:1:0:5'); };
   assert.equal(await a.saveEveryProjectThen('close'), true); assert.equal(a.calls.closed, 2);
 });
 
@@ -176,7 +217,7 @@ test('recovery retry floors bound failed work and a hidden-page checkpoint can e
 
 function recoveryApp() {
   let now = 0, timerId = 0;
-  const timers = new Map(), editor = {report: {}, revision: 1, frameDraftRevision: 0, dirty: true, name: 'Animation'};
+  const timers = new Map(), editor = {report: {}, revision: 1, dirty: true, name: 'Animation'};
   const state = {documentToken: 'document-1', settings: {autosaveSeconds: 2.5}, recoveryBackoff: 1};
   const calls = {exports: 0, writes: 0, warnings: 0}, hooks = {export: async () => {}}, manualSave = new DocumentSave();
   let busy = false, controller;

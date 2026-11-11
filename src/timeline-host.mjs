@@ -18,12 +18,12 @@ import {t as interfaceText, messageText as sayTimeline} from './localization.mjs
  * import: createTimelineHost() wires the header when it is called.
  *
  * ctx (from app.mjs): {editor, state, $, actions, guarded, audioEngine,
- * onionController, hotkeys, play, pause, finishKeyboardHandle, cancelDrag,
+ * onionController, hotkeys, play, pause, finishKeyboardHandle,
  * cancelPolygonDraft, interruptRecovery, cancelWarmPlayback, warmPlayback,
  * scheduleRecovery, requestRender, queueUI, renderInspector,
  * syncSelectionControls, rangeFrames(all), selectTrack, previewScrub,
  * scrubAudio(tick), stopAudioScrub(), changeFigureLayer,
- * runClipboardOperation, confirmDiscardFrame, simpleFrameCount, fail,
+ * confirmDiscardFrame, simpleFrameCount, fail,
  * setTimelineMode(mode), onMount(timeline), and getters for what app.mjs
  * creates later: propertyControls(), cameraMotionControls(), drawing(),
  * builder(), sharedClipboard(), thumbnails(), localization(), touch()}; optionally
@@ -31,7 +31,6 @@ import {t as interfaceText, messageText as sayTimeline} from './localization.mjs
  */
 import {Timeline} from './layer-timeline.mjs';
 import {SheetFilmstrip as SimpleTimeline} from './sheet-filmstrip.mjs';
-import {InsertInbetweenDialog} from './insert-inbetween-dialog.mjs';
 import {drawingResourcesFor} from './drawing-resources.mjs';
 import {refreshHotkeyHints} from './hotkey-hints.mjs';
 import {icon} from './icons.mjs';
@@ -43,7 +42,7 @@ import {TimelineLayerView} from './timeline-layer-view.mjs';
 export function createTimelineHost(ctx) {
   const {editor, state, $, actions} = ctx;
   const layerView = new TimelineLayerView(editor);
-  let timeline = null, inbetweenDialog, shownPlayback = null;
+  let timeline = null, shownPlayback = null;
   const header = createTimelineHeader(ctx, {
     get timeline() { return timeline; },
     goToFrame: (number) => goToFrame(number),
@@ -132,7 +131,6 @@ export function createTimelineHost(ctx) {
       localizationText: (key, params) => ctx.localization?.()?.t?.(key, params) ?? key,
       onDeleteLayer: id => ctx.changeFigureLayer(interfaceText("timelineHost.deleteLayer"),options=>editor.deleteLayerAsync(id,options), {labelKey:"timelineHost.deleteLayer"}),
       hotkeys: ctx.hotkeys,
-      runClipboardOperation: ctx.runClipboardOperation,
       sharedClipboard: ctx.sharedClipboard(),
       confirmDiscardFrame: ctx.confirmDiscardFrame,
       onTrackSelect: ctx.selectTrack,
@@ -143,21 +141,6 @@ export function createTimelineHost(ctx) {
         ctx.queueUI();
       },
       renderThumbnail,
-      onInsertInbetween: (indices) => {
-        ctx.finishKeyboardHandle();
-        ctx.pause();
-        ctx.cancelDrag();
-        ctx.propertyControls()?.cancel();
-        inbetweenDialog ??= new InsertInbetweenDialog({
-          editor,
-          getSettings: () => state.settings,
-          renderThumbnail,
-          onApply: ctx.queueUI,
-          onClose: ctx.queueUI,
-          onError: ctx.fail,
-        });
-        inbetweenDialog.open(indices);
-      },
       onUpdateFrame: () => {
         if (editor.dragging) editor.commitDrag();
         ctx.queueUI();
@@ -166,7 +149,7 @@ export function createTimelineHost(ctx) {
       beforeCommand: () => ctx.drawing()?.settle({selection:true}),
       // Wait for both preparation and its canvas submission before another seek.
       // The timeline retains only the latest pointer target during this interval.
-      canScrub: () => !state.editablePreparing && !state.dirtyRender,
+      canScrub: () => !state.dirtyRender,
       onScrubStart: () => {
         ctx.pause();
         ctx.interruptRecovery();

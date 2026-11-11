@@ -109,7 +109,7 @@ export class DesktopTelemetryClient extends TelemetryAccumulator {
   playbackPresent(now, fps, schedule) { if (this.consent.diagnostics) this.playbackMeasurements?.present(now, fps, this.isForeground, schedule); }
   action(name) {
     if(this.isForeground)this.performance.action(name);
-    const key = ACTIONS[name] || (name.startsWith('camera-') ? 'camera' : name.startsWith('builder-') ? 'builder' : name.includes('inbetween') ? 'inbetween' : name.includes('movieclip') ? 'movieclip' : null);
+    const key = ACTIONS[name] || (name.startsWith('camera-') ? 'camera' : name.startsWith('builder-') ? 'builder' : name.includes('movieclip') ? 'movieclip' : null);
     if (key) this.count(key);
   }
   tick() {

@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
+import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
 import {strokeSegments} from '../src/builder-construction.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 function fixture() {
-  const e = new Editor({demo:false}); e.addFigure(); e.select(e.selectedUid, 2);
+  const e = ownedEditorFor({demo:false, layerTimeline:true}); e.addFigure(); e.select(e.selectedUid, 2);
   e.updateSegmentStyle({color:'#e54283', thickness:19});
   return e;
 }
@@ -16,7 +17,7 @@ test('line and chain inherit their actual parent style with atomic undo and save
   assert.equal(parts[0].parent_id,parent);assert.equal(parts[1].parent_id,parts[0].segment_id);
   assert.equal(e._undo.length,history+1);
   const after=JSON.stringify(e.serialize());e.undo();assert.equal(JSON.stringify(e.serialize()),before);e.redo();assert.equal(JSON.stringify(e.serialize()),after);
-  const restored=new Editor({demo:false}).load(e.serialize());restored.select(e.selectedUid);
+  const restored=ownedEditorFor({demo:false},e.serialize());restored.select(e.selectedUid);
   assert.equal(restored.figure.segments.at(-1).thickness,19);
   assert.deepEqual(restored.figure.segments.at(-1).color_rgb,[229,66,131]);
 });
@@ -29,8 +30,10 @@ test('explicit parents win over selection; zero and explicit thickness propagate
   assert.equal(e.addSegment({parentId:0}).thickness,8);
 });
 test('per-instance colour and thickness are inherited without shared references', () => {
-  const e=fixture(), id=e.figure.segments[2].segment_id;
-  e.object._stykStyle={segments:{[id]:{color:0x123456,thickness:23}}};
+  const report=emptyDocument(), figure=report.figure_types[0], id=figure.segments[2].segment_id;
+  report.keyframes=[createFrame([createObject(figure,1,200,200)],10)];
+  report.keyframes[0].objects[0]._stykStyle={segments:{[id]:{color:0x123456,thickness:23}}};
+  const e=ownedEditorFor({demo:false}, report); e.select(1, 2);
   const s=e.addSegment();assert.equal(s.thickness,23);assert.deepEqual(s.color_rgb,[18,52,86]);
   s.color_rgb[0]=99;assert.notEqual(e.figure.segments[2].color_rgb[0],99);
 });

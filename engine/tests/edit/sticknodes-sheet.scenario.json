@@ -1,0 +1,74 @@
+{
+ "name": "sticknodes-sheet",
+ "document": "sticknodes.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "poseJoint",
+   330,
+   230
+  ],
+  [
+   "rotateJoint",
+   0.1
+  ],
+  [
+   "bendJoint",
+   340,
+   220
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "poseJoint",
+   300,
+   300
+  ],
+  [
+   "bendJoint",
+   290,
+   310,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "poseJoint",
+   280,
+   330,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "bendJoint",
+   270,
+   335
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

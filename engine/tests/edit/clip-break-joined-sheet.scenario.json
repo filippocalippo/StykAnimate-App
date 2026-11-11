@@ -1,0 +1,49 @@
+{
+ "name": "clip-break-joined-sheet",
+ "document": "clip-break-joined-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

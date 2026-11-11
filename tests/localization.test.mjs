@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_LOCALE, SUPPORTED_LOCALES, Localization, normalizeLocale, isSupportedLocale } from '../src/localization.mjs';
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, Localization, loadLocales, normalizeLocale, isSupportedLocale } from '../src/localization.mjs';
 import english from '../src/locales/en.mjs';
-import packs from '../src/locales/locale-packs.mjs';
+import italian from '../src/locales/messages/it.mjs';
 
-const italian = packs.find(pack => pack.locale.id === 'it').messages;
+await loadLocales();
 
 test('English is the default and invalid persisted locales fall back without guessing from the machine', () => {
   assert.equal(DEFAULT_LOCALE, 'en');

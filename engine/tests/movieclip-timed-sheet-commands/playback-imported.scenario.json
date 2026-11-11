@@ -1,0 +1,71 @@
+{
+ "name": "playback-imported",
+ "document": "playback-imported.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "speed": 1.125,
+    "offset": 0.875,
+    "mode": "hold"
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "restartMovieclip"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "removeMovieclipRestart"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -31,10 +31,10 @@ import {rigIKAllowed} from './rig-constraints.mjs';
 import {cameraMotionView, parallaxView} from './camera-motion-ui.mjs';
 import {paintCSS} from './paint.mjs';
 import {figurePalette, displayedSegmentPaint, displayedColor} from './figure-colors.mjs';
-import {isStatic} from './pivot/geometry.mjs';
-import {cameraValues} from './editor-camera.mjs';
+import {isStatic} from './pivot/read-view.mjs';
+import {cameraValues} from './pivot/model.mjs';
 import {builderDrawables} from './editor-builder-style.mjs';
-import {branchSegmentIndices} from './editor-builder-branch.mjs';
+import {segmentBranchIndices} from './pivot/structure.mjs';
 import {isBuilderContext} from './builder-aids.mjs';
 import {partNameMessage, partGlyph} from './builder-outliner.mjs';
 import {resolveInstanceFigure} from './animation-style.mjs';
@@ -46,6 +46,7 @@ import {sheetKeyAt} from './layer-sheet.mjs';
 import {iconNames} from './icons.mjs';
 import {SectionMemory, renderInspector} from './inspector-kit.mjs';
 import {esc, grid, group, heading, numericField, propertyPrecision} from './inspector-legacy.mjs';
+import {findFigureType} from './figure-types.mjs';
 
 const hex = rgb => `#${(rgb || [43, 43, 43]).map(n => (Math.round(n)).toString(16).padStart(2, '0')).join('')}`;
 const num = n => Number(Number(n ?? 0).toFixed(2));
@@ -217,11 +218,11 @@ function drawingDescriptor(editor, drawing, number, hotkeyLabel) {
 }
 
 function sceneDescriptor(editor, number, propertyState) {
-  const report = editor.report, frame = editor.frame, colorState = propertyState?.('scene_color'), backgroundState = propertyState?.('scene_background');
-  const background = report.backgrounds?.find(item => item.background_id === (backgroundState?.value ?? frame.background_id));
+  const report = editor.report, frame = editor.frameSummary, colorState = propertyState?.('scene_color'), backgroundState = propertyState?.('scene_background');
+  const background = report.backgrounds?.find(item => item.background_id === (backgroundState?.value ?? frame.background));
   const raw = colorState?.value ?? background?.color ?? 0xffffffff;
   const color = typeof raw === 'string' && /^#[0-9a-f]{6}$/i.test(raw) ? raw : `#${(raw & 0xffffff).toString(16).padStart(6, '0')}`;
-  const name = background?.name || interfaceText("inspectorView.white"), figures = editor.frame.objects.length, frames = editor.totalTicks ?? report.keyframes.length;
+  const name = background?.name || interfaceText("inspectorView.white"), figures = frame.figures, frames = editor.totalTicks ?? report.keyframes.length;
   const scopes = editor._movieclipScopes ?? [];
   return {kind: 'scene', target: {name: scopes.length ? scopes.map(scope => scope.name).join(' › ') : interfaceText("inspectorView.scene"), ...(!scopes.length?{nameKey:'inspectorView.scene'}:{}), glyph: scopes.length ? 'frame' : 'scene'}, sections: [
     {id: 'summary', rows: [{kind: 'meta', text: interfaceText("inspectorView.s", {value: plural(figures, 'figure'), value2: plural(frames, 'frame'), value3: num(frames / report.fps)}), textKey: "inspectorView.s", textParams: {value: plural(figures, 'figure'), value2: plural(frames, 'frame'), value3: num(frames / report.fps)}}]},
@@ -287,7 +288,7 @@ function frameDescriptor(editor, number) {
     ]};
   }
   return {kind: 'keyframe', target: {name: interfaceText('inspectorView.keyframe', {frame: (editor.frameIndex ?? 0) + 1}), nameKey:'inspectorView.keyframe', nameParams:{frame:(editor.frameIndex ?? 0) + 1}}, sections: [
-    {id: 'timing', title: interfaceText("inspectorView.timing"), titleKey: "inspectorView.timing", rows: [{kind: 'grid', rows: [number(interfaceText("inspectorView.duration"), 'duration', editor.frame.duration_raw ?? 1, 'ticks', {min: 0, max: 65535, labelKey: "inspectorView.duration", labelParams: {}})]}]},
+    {id: 'timing', title: interfaceText("inspectorView.timing"), titleKey: "inspectorView.timing", rows: [{kind: 'grid', rows: [number(interfaceText("inspectorView.duration"), 'duration', editor.frameSummary.duration ?? 1, 'ticks', {min: 0, max: 65535, labelKey: "inspectorView.duration", labelParams: {}})]}]},
   ]};
 }
 
@@ -307,9 +308,9 @@ function layerDescriptor(editor) {
 function selectionDescriptor(editor, number, {bounds: b, selectionCount, range, scope}) {
   const objects = editor.selectedObjects ?? [editor.object], object = editor.object;
   const opacities = new Set(objects.map(item => item.field28 || 0));
-  const figureOf = item => resolveInstanceFigure(editor.report.figure_types.find(type => type.figure_type_id === item.figure_type_id), item);
+  const figureOf = item => resolveInstanceFigure(findFigureType(editor.report.figure_types, item.figure_type_id), item);
   const colours = new Set(objects.flatMap(item => figurePalette(editor.report, figureOf(item), item).map(entry => entry.color)));
-  const joined = objects.some(item => item.join) || editor.frame.objects.some(part => part.join && objects.some(item => item.object_slot === part.join.target_object_slot));
+  const joined = objects.some(item => item.join) || editor.selectionFrame.objects.some(part => part.join && objects.some(item => item.object_slot === part.join.target_object_slot));
   const align = [messageTuple(['left', 'align-left', interfaceText("inspectorView.alignLeft")], {2: {key: "inspectorView.alignLeft", params: {}}}), messageTuple(['center-x', 'align-horizontal-center', interfaceText("inspectorView.alignCenter")], {2: {key: "inspectorView.alignCenter", params: {}}}), messageTuple(['right', 'align-right', interfaceText("inspectorView.alignRight")], {2: {key: "inspectorView.alignRight", params: {}}}),
     messageTuple(['top', 'align-top', interfaceText("inspectorView.alignTop")], {2: {key: "inspectorView.alignTop", params: {}}}), messageTuple(['center-y', 'align-vertical-center', interfaceText("inspectorView.alignMiddle")], {2: {key: "inspectorView.alignMiddle", params: {}}}), messageTuple(['bottom', 'align-bottom', interfaceText("inspectorView.alignBottom")], {2: {key: "inspectorView.alignBottom", params: {}}})];
   return {kind: 'figures', target: {name: interfaceText('inspectorView.selectedFigures', {count: selectionCount}), nameKey:'inspectorView.selectedFigures', nameParams:{count:selectionCount}}, quick: {context: 'figures'}, scope, sections: [
@@ -373,13 +374,13 @@ function fillGroup(editor, figure, object, index, order) {
  * connection, the used colours and fills and the drawing sets are titled.
  */
 function figureDescriptor(editor, figure, number, {range, scope, drawingSets, spatial, order, builder, polygonPage, palettePage}) {
-  const report = editor.report, frame = editor.frame, object = editor.object;
+  const report = editor.report, frame = editor.selectionFrame, object = editor.object;
   // A joint index past the figure's segments shows the figure, without its colours.
   const whole = editor.selectedJoint < 0, palette = whole ? editor.figurePalette() : [], own = whole ? figurePalette(report, figure, object) : [];
   const kind = figure.segments.every(segment => segment.primitive_code === 5) ? 'text' : figure.segments.every(segment => segment.primitive_code === 2) ? 'image' : 'figure';
   const children = frame.objects.some(part => part.join?.target_object_slot === object.object_slot);
   const parent = object.join ? frame.objects[object.join.target_object_slot] : null;
-  const parentName = parent && (parent.name || report.figure_types.find(type => type.figure_type_id === parent.figure_type_id)?.name || interfaceText("inspectorView.figure"));
+  const parentName = parent && (parent.name || findFigureType(report.figure_types, parent.figure_type_id)?.name || interfaceText("inspectorView.figure"));
   const polygons = figure.polyfills || [], start = Math.min(Math.max(0, polygonPage) * 12, Math.max(0, Math.floor((polygons.length - 1) / 12) * 12));
   const paletteStart = Math.min(Math.max(0, palettePage) * 32, Math.max(0, Math.ceil(palette.length / 32) - 1) * 32);
   const joinLabel = parent ? interfaceText("inspectorView.unjoinFigure") : interfaceText("inspectorView.joinToFigure");
@@ -505,7 +506,7 @@ function jointDescriptor(editor, figure, segment, number, {range, scope, drawing
   };
   if (builder) {
     // One part (not a picked branch) with Whole branch on: the scope line names what an edit reaches and stops it.
-    const branchParts = builderBranch && single && !editor.branchSelected ? branchSegmentIndices(figure, joint).length : 0;
+    const branchParts = builderBranch && single && !editor.branchSelected ? segmentBranchIndices(figure.segments, segment.segment_id).length : 0;
     const branchScope = branchParts > 1 && !scope
       ? {label: interfaceText("inspectorView.editingTheWholeBranch", {value: plural(branchParts, 'part')}), labelKey: "inspectorView.editingTheWholeBranch", labelParams: {value: plural(branchParts, 'part')}, stop: {action: 'toggle-builder-branch', label: interfaceText("inspectorView.stop"), labelKey: "inspectorView.stop", tip: interfaceText("inspectorView.editOnlyThisPartB"), tipKey: "inspectorView.editOnlyThisPartB"}} : null;
     return {kind: 'joint', target: {name: title, ...titleBinding, glyph: part ? 'link' : partGlyph(segment), rename: single && !editor.branchSelected && !part ? partRename : undefined},

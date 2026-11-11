@@ -25,7 +25,7 @@ import {rigControlChange} from './rig-controls.mjs';
 import {installInspectorChrome} from './inspector-header.mjs';
 import {changeSurfaceSide} from './builder-surface-ui.mjs';
 import {layerIdForUid} from './layers.mjs';
-import {shortest} from './pivot/geometry.mjs';
+import {shortest} from './pivot/read-view.mjs';
 
 /** The handlers in the order they are tried. Each is [selector, (target, event) => false | anything]. */
 export function inspectorBindings(ctx) {
@@ -116,62 +116,23 @@ export function inspectorBindings(ctx) {
     ['#static-joint', (target, event) => { ctx.updateBuilderStyle({ static: target.checked }, event); }],
     ['#background-color', (target) => {
       const raw = (0xff000000 | parseInt(target.value.slice(1), 16)) >>> 0;
-      if (editor.setSceneColor)
-        editor.setSceneColor(raw, {
-          indices: ctx.rangeFrames(),
-        });
-      else
-        editor.transaction("Background color", (f, r) => {
-          const id =
-            Math.max(0, ...(r.backgrounds || []).map((b) => b.background_id)) +
-            1;
-          r.backgrounds = [
-            ...(r.backgrounds || []),
-            { background_id: id, kind: 2, color: raw },
-          ];
-          f.background_id = id;
-        });
+      editor.setSceneColor(raw, { indices: ctx.rangeFrames() });
     }],
     ['#join-target', (target) => {
       if (ctx.rangeFrames()) {
         if (target.value)
           editor.joinFiguresInFrames(Number(target.value), 0, ctx.rangeFrames());
         else editor.detachFiguresInFrames(ctx.rangeFrames());
-      } else if (editor.joinFigure) {
-        editor.joinFigure(target.value ? Number(target.value) : null, 0);
       } else {
-        editor.transaction("Attach figure", () => {
-          const o = editor.object,
-            parent = editor.frame.objects.find(
-              (p) => p.unique_id === Number(target.value),
-            );
-          if (!parent) {
-            const g = editor.geometry.objects.get(o.object_slot);
-            o.root_x = g.root.x;
-            o.root_y = g.root.y;
-            o.join = null;
-            return;
-          }
-          let p = parent,
-            seen = new Set([o.unique_id]);
-          while (p) {
-            if (seen.has(p.unique_id))
-              throw messageError(new Error(''), "errors.inspectorBindings.thisAttachmentWouldCreateACycle", {});
-            seen.add(p.unique_id);
-            p = p.join ? editor.frame.objects[p.join.target_object_slot] : null;
-          }
-          o.join = {
-            target_object_slot: parent.object_slot,
-            target_unique_id: parent.unique_id,
-            target_handle_id: 0,
-          };
-        });
+        editor.joinFigure(target.value ? Number(target.value) : null, 0);
       }
     }],
   ];
 }
 
-/** A numeric field (`data-field`): the scene, the selection, the figure, the joint or the camera. */
+/** A numeric field (`data-field`) the property controls do not take: the scene, the selection, the figure or the joint. The camera's
+ * fields (`camera_*`) are always the property controls' (`propertyChannel` in app.mjs answers for them), and no view renders a
+ * field for the parent joint an attachment hangs from. */
 function fieldChange(ctx, key, target, event) {
   const {editor} = ctx;
   const value = Number(target.value);
@@ -210,55 +171,19 @@ function fieldChange(ctx, key, target, event) {
     const angle = (value * Math.PI) / 180,
       obj = editor.object,
       delta = shortest(angle - obj.angles[editor.selectedJoint]);
-    editor.rotateJoint?.(delta);
-    if (!editor.rotateJoint)
-      editor.transaction("Joint angle", () => {
-        obj.angles[editor.selectedJoint] = angle;
-      });
+    editor.rotateJoint(delta);
   } else if (key === "joint_length" || key === "joint_bend") {
     editor.updateSegment(
       key === "joint_length"
         ? { length: value }
         : { bend_rad: (value * Math.PI) / 180 },
     );
-  } else if (key.startsWith("camera_")) {
-    editor.transaction("Camera", (frame) => {
-      frame.camera = {
-        x: 0,
-        y: 0,
-        scale: 1,
-        angle_rad: 0,
-        ...frame.camera,
-        is_default: false,
-      };
-      frame.camera[key === "camera_angle" ? "angle_rad" : key.slice(7)] =
-        key === "camera_scale"
-          ? value / 100
-          : key === "camera_angle"
-            ? (value * Math.PI) / 180
-            : value;
-    });
   } else if (key === "canvas_width" || key === "canvas_height") {
     if (value < 1 || value > 16384 || !Number.isInteger(value))
       throw messageError(new Error(''), "errors.inspectorBindings.canvasDimensionsMustBeWholePixelsBetween1", {});
-    if (editor.updateProject) editor.updateProject({ [key]: value });
-    else
-      editor.transaction(
-        "Canvas size",
-        (_, report) => (report[key] = value),
-      );
+    editor.updateProject({ [key]: value });
     ctx.fit();
-  } else if (key === "join_handle")
-    editor.transaction("Join handle", () => {
-      const parent =
-          editor.frame.objects[editor.object.join.target_object_slot],
-        fig = editor.report.figure_types.find(
-          (f) => f.figure_type_id === parent.figure_type_id,
-        );
-      if (value !== 0 && !fig.segments.some((s) => s.segment_id === value))
-        throw messageError(new Error(''), "errors.inspectorBindings.thatParentJointDoesNotExist", {});
-      editor.object.join.target_handle_id = value;
-    });
+  }
 }
 
 /**

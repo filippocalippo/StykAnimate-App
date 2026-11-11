@@ -1,0 +1,534 @@
+{
+ "name": "rig-behavior-sheet",
+ "document": "rig.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "enableSmartStretch",
+   true
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "enableSmartStretch",
+   true
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "setRigBehavior",
+   {
+    "stretch": {
+     "min": 0.5,
+     "width": "scale"
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "stretch": {
+     "min": 200
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "bogus": 1
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "connector": {
+     "start": 11
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "response": {
+     "mode": "rigid"
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "response": {
+     "multiplier": 2
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "response": {
+     "mode": "bounce"
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "response": null
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "orientation": "world"
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "orientation": "sideways"
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "stretch": null
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "setRigBehavior",
+   {
+    "follow": {
+     "driver": 11
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "follow": {
+     "influence": 9
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "follow": {
+     "driver": 44
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "follow": null
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "weighted": {
+     "origin": 22,
+     "anchors": [
+      {
+       "joint": 55,
+       "weight": 0.5
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "weighted": {
+     "anchors": [
+      {
+       "joint": 55,
+       "weight": 500
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "weighted": null
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "anglePath": {
+     "driver": 11,
+     "origin": 0,
+     "restAngle": 0,
+     "pitchRestAngle": 0,
+     "figureRestAngle": 0,
+     "keys": [
+      [
+       0,
+       10,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       10,
+       0
+      ]
+     ]
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "anglePath": {
+     "keys": [
+      [
+       3,
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "anglePath": null
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "weighted": {
+     "origin": 22,
+     "anchors": [
+      {
+       "joint": 55,
+       "weight": 0.5
+      },
+      {
+       "joint": 55,
+       "weight": 0.5
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "enableSmartStretch",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "setRigBehavior",
+   {
+    "connector": null
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "connector": {
+     "end": 999
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "connector": {
+     "end": 44
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "stretch": {}
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "stretch": {
+     "source": "slide"
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "stretch": {
+     "source": "slide",
+     "restPosition": 0.4
+    }
+   }
+  ],
+  [
+   "setRigBehavior",
+   {
+    "angleLock": {
+     "mode": "world",
+     "angle": 0,
+     "multiplier": 1
+    }
+   }
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "updateBuilderSegmentStyle",
+   {
+    "static": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "setAngleLock",
+   "parent"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "setAngleLock",
+   "world"
+  ],
+  [
+   "rotateFigure",
+   0.3
+  ],
+  [
+   "setAngleLock",
+   "figure"
+  ],
+  [
+   "setAngleLock",
+   "parent"
+  ],
+  [
+   "rotateFigure",
+   -0.2
+  ],
+  [
+   "setSecondaryAngleReference",
+   11
+  ],
+  [
+   "setSecondaryAngleReference",
+   999
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "poseJoint",
+   400,
+   250,
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   4
+  ],
+  [
+   "setRigBehavior",
+   {
+    "angleLock": {
+     "space": "authored"
+    }
+   }
+  ],
+  [
+   "setSecondaryAngleReference",
+   22
+  ],
+  [
+   "setSecondaryAngleReference",
+   0
+  ],
+  [
+   "setAngleLock",
+   "bogus"
+  ],
+  [
+   "setAngleLock",
+   "off"
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "setAngleLock",
+   "parent"
+  ],
+  [
+   "setSecondaryAngleReference",
+   22
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "bindStretchParts",
+   11
+  ],
+  [
+   "bindStretchParts",
+   11,
+   {
+    "branch": true,
+    "mode": "rigid",
+    "influence": 2
+   }
+  ],
+  [
+   "bindStretchParts",
+   0
+  ],
+  [
+   "bindStretchParts",
+   55,
+   {
+    "influence": 3
+   }
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "bindStretchParts",
+   11
+  ],
+  [
+   "enableSmartStretch",
+   false
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setRigBehavior",
+   {
+    "orientation": "world"
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "beginDrag",
+   "Pose joint"
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "setRigBehavior",
+   {
+    "orientation": "inherit"
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

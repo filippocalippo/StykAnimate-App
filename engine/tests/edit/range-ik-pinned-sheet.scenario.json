@@ -1,0 +1,119 @@
+{
+ "name": "range-ik-pinned-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/startup-pinned.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "mirrorFiguresInFrames",
+   "horizontal",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0,
+     4
+    ]
+   }
+  ],
+  [
+   "rotateFiguresInFrames",
+   0.2,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     2
+    ]
+   }
+  ],
+  [
+   "scaleFiguresInFrames",
+   1.2,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     3,
+     6
+    ]
+   }
+  ],
+  [
+   "centerFiguresInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     5
+    ]
+   }
+  ],
+  [
+   "resetPoseInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "duplicateInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1,
+     2
+    ]
+   }
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 30
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1
+    ]
+   }
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "mirrorSelection",
+   "vertical"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

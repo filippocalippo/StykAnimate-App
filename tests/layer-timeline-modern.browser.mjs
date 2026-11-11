@@ -38,7 +38,7 @@ try{
   await click(4);await settle();
   const replaceBefore=await page.evaluate(()=>JSON.stringify(styk.editor.serialize()));
   await page.evaluate(()=>styk.settingsUI.open('animation'));
-  const replacement=page.getByRole('checkbox',{name:'Replace keyframes on drop',exact:true});
+  const replacement=page.getByRole('switch',{name:'Replace keyframes on drop',exact:true});
   assert.equal(await replacement.isChecked(),true);await replacement.uncheck();
   await page.evaluate(async()=>{await styk.settingsUI.flush();styk.settingsUI.close();});
   assert.equal(await page.evaluate(async()=>{const {EDITOR_SETTINGS_KEY,normalizeEditorSettings}=await import('/src/settings.mjs');return normalizeEditorSettings(JSON.parse(localStorage.getItem(EDITOR_SETTINGS_KEY))).replaceKeyframesOnDrop;}),false);

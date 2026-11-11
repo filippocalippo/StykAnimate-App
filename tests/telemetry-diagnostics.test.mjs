@@ -1,23 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
+import {readdirSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {diagnosticDetails,sanitizeError,validateSnapshot} from '../src/telemetry-schema.mjs';
+import {diagnosticDetails,sanitizeError,validateSnapshot,ERROR_MODULES} from '../src/telemetry-schema.mjs';
 import {TelemetryAccumulator} from '../src/telemetry-core.mjs';
 import {TelemetryService} from '../desktop/telemetry.cjs';
 
 test('worker diagnostics retain cause, stage and safe source frames through wrapping',()=>{
-  const error=Object.assign(new RangeError('SECRET PROJECT'),{code:'export_memory_limit',stack:'RangeError: SECRET PROJECT\n at f (C:\\PRIVATE\\src\\export-memory.mjs:42:2)\n at f (https://private.example/src/export-frame-worker.mjs:100:2)'});
+  const error=Object.assign(new RangeError('SECRET PROJECT'),{code:'export_memory_limit',stack:'RangeError: SECRET PROJECT\n at f (C:\\PRIVATE\\src\\export-memory.mjs:42:2)\n at f (https://private.example/src/engine/engine-export-worker.mjs:100:2)'});
   const details=diagnosticDetails(error,'prepare','worker_failed');
   assert.ok(!/SECRET|PRIVATE|private.example/.test(JSON.stringify(details)));
   const wrapped=Object.assign(new Error('Worker failed'),details);
   const entry=sanitizeError(wrapped,'export');
   assert.equal(entry.type,'RangeError');assert.equal(entry.code,'out_of_memory');assert.equal(entry.stage,'prepare');
-  assert.deepEqual(entry.frames,[{module:'export-memory.mjs',line:42},{module:'export-frame-worker.mjs',line:100}]);
+  assert.deepEqual(entry.frames,[{module:'export-memory.mjs',line:42},{module:'engine-export-worker.mjs',line:100}]);
   assert.equal(sanitizeError({code:'export_canvas_lost'}).code,'device_lost');
   assert.equal(sanitizeError({code:'ENOSPC'}).code,'disk_full');
   assert.deepEqual(sanitizeError({telemetryFrames:[{module:'camera-monitor.mjs',line:20,secret:'private'},{module:'secret.mjs',line:2},{module:'app.mjs',line:-1}]}).frames,[{module:'camera-monitor.mjs',line:20}]);
+});
+
+test('the error module allowlist names the modules that ship, the engine modules among them',()=>{
+  const shipped=new Set();
+  const walk=directory=>{for(const entry of readdirSync(new URL(directory,import.meta.url),{withFileTypes:true})){
+    if(entry.isDirectory()){if(!['node_modules','pkg','locales'].includes(entry.name))walk(`${directory}${entry.name}/`);}
+    else shipped.add(entry.name);
+  }};
+  walk('../src/');walk('../desktop/');
+  assert.equal(new Set(ERROR_MODULES).size,ERROR_MODULES.length,'no module is listed twice');
+  assert.deepEqual(ERROR_MODULES.filter(name=>!shipped.has(name)),[],'every listed module exists');
+  for(const name of ['engine-stage.mjs','engine-owner.mjs','engine-export-worker.mjs','engine-preview-worker.mjs','engine-drawing-worker.mjs','engine-worker.mjs'])assert.ok(ERROR_MODULES.includes(name),name);
+  const stack=['Error: SECRET',' at a (https://private.example/src/engine/engine-owner.mjs:7:1)',' at b (https://private.example/src/engine/engine-stage.mjs:9:2)',' at c (https://private.example/src/playback-worker.mjs:3:4)'].join('\n');
+  assert.deepEqual(sanitizeError(Object.assign(new Error('SECRET'),{stack}),'app').frames,[{module:'engine-owner.mjs',line:7},{module:'engine-stage.mjs',line:9}]);
 });
 
 function saturated() {
@@ -49,4 +64,24 @@ test('desktop aggregation also retains later failures and validates a bounded up
   assert.equal(snapshot.operationContexts.length,12);assert.equal(snapshot.counters.dropped_operation_contexts,3);
   assert.equal(snapshot.operationContexts.find(row=>row.outcome==='failed').timing.count,1);
   assert.equal(snapshot.errors[0].code,'device_lost');assert.ok(JSON.stringify(snapshot).length<=32768);
+});
+
+test('a frame in a bundled script is reported as the module and source line it came from, and only for modules reports may name',()=>{
+  const stack=file=>line=>`Error: SECRET\n at f (styk-app://app/src/${file}:${line}:9)`;
+  const frames=(file,line)=>sanitizeError(Object.assign(new Error('SECRET'),{stack:stack(file)(line)}),'app').frames;
+  // chunk-A.mjs: engine-owner.mjs is bundled lines 100-150 (its lines 10-30, then from bundled line 110 its lines 40 on), a module that reports may not name is 151-200, editor.mjs 201-300.
+  globalThis.__stykFrames={'chunk-A.mjs':[['engine-owner.mjs',150,100,10,110,40],['editor.mjs',300,201,5]]};
+  try{
+    assert.deepEqual(frames('chunks/chunk-A.mjs',100),[{module:'engine-owner.mjs',line:10}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',109),[{module:'engine-owner.mjs',line:19}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',110),[{module:'engine-owner.mjs',line:40}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',150),[{module:'engine-owner.mjs',line:80}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',175),[],'a module reports may not name is dropped');
+    assert.deepEqual(frames('chunks/chunk-A.mjs',250),[{module:'editor.mjs',line:54}]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',99),[]);
+    assert.deepEqual(frames('chunks/chunk-A.mjs',301),[]);
+    assert.deepEqual(frames('engine/engine-stage.mjs',7),[{module:'engine-stage.mjs',line:7}],'a file without a table keeps its own name');
+    assert.deepEqual(frames('chunks/chunk-B.mjs',7),[],'an unknown chunk is not an allowed module');
+    assert.deepEqual(sanitizeError(Object.assign(new Error('SECRET'),{stack:stack('chunks/chunk-A.mjs')(120)}),'app').frames,sanitizeError(Object.assign(new Error('SECRET'),{stack:stack('engine/engine-owner.mjs')(50)}),'app').frames,'the same place has the same fingerprint, bundled or not');
+  }finally{delete globalThis.__stykFrames;}
 });

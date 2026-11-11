@@ -11,12 +11,12 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 const customView = {scale:1.7, x:123, y:-87};
 const view = () => page.evaluate(() => ({...styk.state.view}));
-const start = () => page.evaluate(custom => {
+const start = () => page.evaluate(async custom => {
   styk.state.view = {...custom};
-  styk.actions.play();
+  await styk.actions.play();
   return styk.state.playing;
 }, customView);
-const stop = () => page.evaluate(() => { if (styk.state.playing) styk.actions.play(); });
+const stop = () => page.evaluate(async () => { if (styk.state.playing) await styk.actions.play(); });
 try {
   await page.goto(process.env.STYK_URL || 'http://127.0.0.1:47831');
   await page.waitForFunction(() => window.styk?.ready);
@@ -25,7 +25,7 @@ try {
   assert.deepEqual(await view(), fitted);
   await stop();
   await page.evaluate(() => styk.settingsUI.open('animation'));
-  const checkbox = page.getByRole('checkbox', {name:'Fit view when playback starts', exact:true});
+  const checkbox = page.getByRole('switch', {name:'Fit view when playback starts', exact:true});
   assert.equal(await checkbox.isChecked(), true);
   await checkbox.uncheck();
   await mkdir('artifacts', {recursive:true});

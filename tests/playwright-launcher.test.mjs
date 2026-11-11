@@ -24,7 +24,7 @@ test('caller features are merged and caller switches are never duplicated', () =
 test('installed Chrome is used unchanged', async () => {
   const type = fakeType(() => 'browser');
   assert.equal(await launchChromium({channel: 'chrome', headless: true}, {browserType: type, platform: 'win32', env: {}}), 'browser');
-  assert.deepEqual(type.calls, [{channel: 'chrome', headless: true, args: []}]);
+  assert.deepEqual(type.calls, [{channel: 'chrome', headless: true, args: ['--disable-gpu-process-crash-limit']}]);
 });
 
 test('a missing Chrome falls back to the browser Playwright installs', async () => {

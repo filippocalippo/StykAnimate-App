@@ -2,9 +2,6 @@
 import {descriptorAttributes, localizedAttribute, localizedMarkup, messageHTML, localizedText} from './localization-bindings.mjs';
 import {t as interfaceText} from './localization.mjs';
 
-import {sampleCameraMotion} from './camera-motion.mjs';
-import {sampleFollow} from './camera-follow.mjs';
-import {evaluationGeneration} from './pivot/geometry.mjs';
 import {icon} from './icons.mjs';
 
 const VIEWS={move:{labelKey: "cameraMotionGraph.move",unit:'px',keys:['x','y']},roll:{labelKey: "cameraMotionGraph.roll",unit:'°',keys:['roll']},zoom:{labelKey: "cameraMotionGraph.zoom",unit:'%',keys:['zoom']}};
@@ -18,22 +15,24 @@ const axisLabel=n=>Math.abs(n)>=10000?`${number(n/1000)}k`:motionGraphValueLabel
 const xAt=u=>LEFT+u*(RIGHT-LEFT);
 const yAt=(value,scale)=>ZERO-value/scale*(BOTTOM-TOP)/2;
 export const motionGraphValues=sample=>({x:sample.x,y:sample.y,roll:sample.rotation*180/Math.PI,zoom:(sample.zoom-1)*100});
-/** One clip's own output: follow reads its shaped path (zoom out is negative), the presets their impulse. */
-function clipSample(clip,tick,fps,report){
-  if(clip.type!=='follow')return sampleCameraMotion({clips:[clip]},tick,fps);
-  const f=sampleFollow(report,[clip],tick);return {x:f.x,y:f.y,rotation:0,zoom:Math.exp(-f.zoom)};
-}
-
-/** One selected clip, with bounded sampling independent of document size. */
-export function sampleMotionGraph(clip,fps,report){
+/** The ticks a clip's curve is plotted at, bounded however long the clip is: the first and last frame of the clip and the ones between. */
+export function motionGraphTicks(clip,fps){
   const span=Math.max(0,clip.duration-1);
   const count=clip.type==='follow'?Math.max(1,Math.min(2048,span)):Math.min(2048,Math.max(256,Math.ceil(span/fps*clip.params.frequency*16)));
-  const channels={x:[],y:[],roll:[],zoom:[]},peaks={x:0,y:0,roll:0,zoom:0},state={clips:[clip]};
+  return {count,span,ticks:Array.from({length:count+1},(_,i)=>clip.start+span*i/count)};
+}
+/** The curve of a clip from what the engine samples of it at `plot.ticks` (`[x, y, rotation, zoom, …]`, as `cameraSamples` answers). */
+export function plotMotionGraph({count,span},samples){
+  const channels={x:[],y:[],roll:[],zoom:[]},peaks={x:0,y:0,roll:0,zoom:0};
   for(let i=0;i<=count;i++){
-    const values=motionGraphValues(clip.type==='follow'?clipSample(clip,clip.start+span*i/count,fps,report):sampleCameraMotion(state,clip.start+span*i/count,fps));
+    const values=motionGraphValues({x:samples[4*i],y:samples[4*i+1],rotation:samples[4*i+2],zoom:samples[4*i+3]});
     for(const key of CHANNELS){channels[key].push(values[key]);peaks[key]=Math.max(peaks[key],Math.abs(values[key]));}
   }
   return {channels,peaks,count,span};
+}
+/** What a clip does to the shot at each of `ticks`, read from the engine; nothing where it does not answer. */
+function clipSamples(editor,clip,ticks){
+  return editor._shown?.cameraSamples(clip,ticks)??ticks.flatMap(()=>[0,0,0,1]);
 }
 export function motionGraphScale(peak){
   if(peak<1e-8)return 1;
@@ -83,10 +82,10 @@ export class CameraMotionGraph{
     const fps=this.editor.report.fps,newClip=this.clip?.id!==id;
     if(newClip){this.channel=clip.type==='pulse'?'zoom':'move';this.scales=null;this.hover=null;}
     // A follow curve also changes when the followed figures or the camera keys do.
-    const generation=clip.type==='follow'?evaluationGeneration(this.editor.report):0;
+    const generation=clip.type==='follow'?this.editor.revision:0;
     const sampled=clip!==this.clip||fps!==this.fps||generation!==this.generation;
     this.generation=generation;
-    if(sampled)this.plot=sampleMotionGraph(clip,fps,this.editor.report);
+    if(sampled){const plot=motionGraphTicks(clip,fps);this.plot=plotMotionGraph(plot,clipSamples(this.editor,clip,plot.ticks));}
     const replaced=this.node!==node||this.cursor!==node.querySelector('[data-motion-graph-cursor]');
     this.clip=clip;this.fps=fps;this.node=node;
     if(sampled||replaced||this.needsPlot){
@@ -118,7 +117,7 @@ export class CameraMotionGraph{
     const inside=tick>=clip.start&&tick<clip.start+clip.duration;
     const signature=`${tick}:${inside}`;if(signature===this.cursorSignature)return;this.cursorSignature=signature;
     const cursor=node.querySelector('[data-motion-graph-cursor]');cursor.style.display=inside?'':'none';
-    const values=motionGraphValues(clipSample(clip,tick,this.fps,this.editor.report));
+    const [sx,sy,rotation,zoom]=clipSamples(this.editor,clip,[tick]),values=motionGraphValues({x:sx,y:sy,rotation,zoom});
     const x=xAt(plot.span?(tick-clip.start)/plot.span:0);
     cursor.querySelector('path').setAttribute('d',`M${x} ${TOP}V${BOTTOM}`);
     for(const key of view.keys){

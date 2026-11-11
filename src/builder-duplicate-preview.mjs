@@ -1,4 +1,4 @@
-import {segmentBranchIndices} from './editor-builder.mjs';
+import {segmentBranchIndices} from './pivot/structure.mjs';
 import {ConstructionIndex} from './builder-construction.mjs';
 /** One bounded raster per placement. Pointer moves only translate the bitmap. */
 export function duplicatePreview(geometry,index,{branch=false,flip=false,scale=1}={}) {

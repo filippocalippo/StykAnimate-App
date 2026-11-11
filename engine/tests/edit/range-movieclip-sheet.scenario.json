@@ -1,0 +1,81 @@
+{
+ "name": "range-movieclip-sheet",
+ "document": "sheet-movieclip-loose.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 60
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0,
+     3
+    ]
+   }
+  ],
+  [
+   "orderFiguresInFrames",
+   "back",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     2
+    ]
+   }
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "detachFiguresInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1
+    ]
+   }
+  ],
+  [
+   "rotateFiguresInFrames",
+   0.2,
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1,
+     5
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

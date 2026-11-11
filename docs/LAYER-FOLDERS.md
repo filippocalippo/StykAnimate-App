@@ -75,7 +75,7 @@ slots, figure identities, joins and exposures remain unchanged. Formats without
 layer metadata retain the artwork's stacking but cannot retain the folders.
 
 Implementation: `layer-folders.mjs` validates and projects optional layer metadata;
-`editor-layer-folders.mjs` authors sparse layer history changes. Folder rows never
+the engine session's `layers.rs` authors sparse layer history changes. Folder rows never
 enter the exposure sheet or frame-editing commands. Collapse state belongs to
 each timeline view and is reset when replacing the document.
 

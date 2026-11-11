@@ -21,7 +21,7 @@ try{
  assert.equal(await page.evaluate(()=>styk.editor._undo.length),before.undo+1);assert.ok(await page.evaluate(()=>styk.editor.getSpatialCamera().strength)>.5);
  await page.evaluate(()=>styk.editor.undo());assert.deepEqual(await page.evaluate(()=>styk.editor.serialize()),before.doc);
  await camera.focus();await camera.press('End');assert.equal(await page.evaluate(()=>styk.editor.getSpatialCamera().strength),1);
- await page.evaluate(()=>{const e=styk.editor,i=e.figure.segments.findIndex(s=>s.name==='Right lower leg'||s.name==='Forearm');e.select(1,i);if(!e.getIKSettings().enabled)e.setNodeIK({enabled:true,chainLength:2,pinned:false});else e.setNodeIK({pinned:false});const p=e.geometry.objects.get(e.selectedSlot).segments[i].end;e.poseIKTarget(p.x+15,p.y-30);});
+ await page.evaluate(()=>{const e=styk.editor,i=e.figure.segments.findIndex(s=>s.name==='Right lower leg'||s.name==='Forearm');e.select(1,i);if(!e.getIKSettings().enabled)e.setNodeIK({enabled:true,chainLength:2,pinned:false});else e.setNodeIK({pinned:false});const p=e.geometry.objects.get(e.selectedSlot).segments[i].end;e.poseJoint(p.x+15,p.y-30);});
  const depth=page.getByRole('spinbutton',{name:'Toward camera value',exact:true});const oldDepth=Number(await depth.inputValue());await depth.fill(String(oldDepth+12));await depth.press('Tab');
  const reach=await page.evaluate(()=>{const e=styk.editor,s=e.geometry.objects.get(e.selectedSlot).segments[e.selectedJoint];return s.end.rawPoint[2];});assert.ok(Math.abs(reach-oldDepth-12)<.1);
  await page.getByRole('button',{name:source?'Ankle rotation':'Hand rotation',exact:true}).click();

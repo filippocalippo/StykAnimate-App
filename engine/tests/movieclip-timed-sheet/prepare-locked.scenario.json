@@ -1,0 +1,38 @@
+{
+ "name": "prepare-locked",
+ "document": "prepare-locked.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "_prepareSheetMovieclips"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "_prepareSheetMovieclips"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

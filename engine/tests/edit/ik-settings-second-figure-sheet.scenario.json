@@ -1,0 +1,88 @@
+{
+ "name": "ik-settings-second-figure-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "duplicateFigure"
+  ],
+  [
+   "@select",
+   2,
+   3
+  ],
+  [
+   "setNodeIK",
+   {
+    "pinned": true
+   }
+  ],
+  [
+   "rotateIKTarget",
+   0.2
+  ],
+  [
+   "setNodeIK",
+   {
+    "bendDirection": -1
+   }
+  ],
+  [
+   "setNodeIK",
+   {
+    "bendDirection": 0
+   }
+  ],
+  [
+   "poseJoint",
+   540,
+   330
+  ],
+  [
+   "setNodeIK",
+   {
+    "pinned": false
+   }
+  ],
+  [
+   "poseJoint",
+   530,
+   320
+  ],
+  [
+   "setNodeIK",
+   {
+    "chainLength": 1
+   }
+  ],
+  [
+   "beginDrag",
+   "Pose joint"
+  ],
+  [
+   "poseJoint",
+   525,
+   310
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

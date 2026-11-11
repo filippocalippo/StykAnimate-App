@@ -77,7 +77,7 @@ its existing binary sections. Clips reference an asset ID and contain start,
 source offset, duration, gain, fade-in and fade-out, all in seconds or linear
 gain. Tracks contain stable IDs, names, gain, mute, solo and clip lists.
 
-`editor-audio.mjs` publishes validated immutable state and records small edit
+The engine session runs every audio command (`engine/crates/styk-edit/src/audio.rs`): it validates the state and records small edit
 commands. Unchanged assets/tracks are shared. Added and removed media count
 toward history retention without serializing their bytes to measure a command.
 Deleting the last clip reference removes its embedded asset from the live
@@ -170,7 +170,6 @@ tolerances.
 - `node tests/audio.desktop.mjs` with a working Electron environment and bundled FFmpeg
 - `node tests/layer-timeline-modern.browser.mjs`
 - `node tests/timeline-polish.browser.mjs`
-- `node scripts/benchmark-audio.mjs`
 - `npm test` and `npm run check`
 
 Evidence is written under `artifacts/audio/`, `artifacts/audio-navigation/`,

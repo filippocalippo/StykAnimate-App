@@ -1,0 +1,21 @@
+[package]
+name = "styk-app"
+description = "StykAnimate native viewer/editor prototype (desktop shell over the portable engine)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "styk-native"
+path = "src/main.rs"
+
+[dependencies]
+styk-core = { path = "../styk-core" }
+styk-render = { path = "../styk-render" }
+eframe = { version = "0.36", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts"] }
+egui = "0.36"
+rfd = "0.15"
+rayon = "1"
+crossbeam-channel = "0.5"
+image = { version = "0.25", default-features = false, features = ["png"] }

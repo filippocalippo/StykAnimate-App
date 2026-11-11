@@ -1,0 +1,141 @@
+{
+ "name": "builder-split-sheet",
+ "document": "builder.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "splitBuilderSegments",
+   {
+    "branch": false,
+    "fraction": 0.5
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "splitBuilderSegments",
+   {
+    "branch": true,
+    "fraction": 0.5
+   }
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "splitSegment",
+   0.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "splitSegmentBranch",
+   0.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "splitBuilderSegments",
+   {
+    "fraction": 2
+   }
+  ],
+  [
+   "splitBuilderSegments",
+   {
+    "branch": "x"
+   }
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "splitBuilderSegments",
+   {
+    "branch": false,
+    "fraction": 0.5
+   }
+  ],
+  [
+   "@select",
+   1,
+   1
+  ]
+ ]
+}

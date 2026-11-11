@@ -1,0 +1,153 @@
+{
+ "name": "origin-channels-future-sheet",
+ "document": "origin-future-plain-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "addAnimationKey",
+   {
+    "kind": "figure",
+    "uid": 3
+   },
+   "rotation",
+   8,
+   0.47
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "x",
+     "tick": 8,
+     "value": 440.125
+    },
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "scale",
+     "tick": 8,
+     "value": 0.91
+    }
+   ]
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@seek",
+   8
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "addAnimationKeys",
+   [
+    {
+     "target": {
+      "kind": "figure",
+      "uid": 3
+     },
+     "property": "rotation"
+    }
+   ]
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 3
+   },
+   "rotation"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "previewAnimationEdit",
+   0.38
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "cancelAnimationEdit"
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@frame"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@frame"
+  ]
+ ]
+}

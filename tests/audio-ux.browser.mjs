@@ -62,7 +62,7 @@ try {
   await page.locator('.audio-body').press('Control+y'); await settle();
 
   // Direct fade handles and visible volume controls are undoable, no dialogs needed.
-  await page.locator(`[data-clip="${id}"]`).click({position:{x:55, y:40}}); await settle();
+  await page.locator(`[data-clip="${id}"]`).click({position:{x:55, y:28}}); await settle();
   const fade = await page.locator(`[data-clip="${id}"] .audio-fadeIn`).boundingBox();
   await gesture({x:fade.x + 5, y:fade.y + 5}, {x:fade.x + 47, y:fade.y + 5}); await release();
   assert.equal((await state()).tracks[2].clips[0].fadeIn, .25);
@@ -96,7 +96,7 @@ try {
   const compact = await page.locator('.audio-body').evaluate(node => node.clientHeight);
   const wheelBox = await page.locator('.audio-body').boundingBox(); await page.mouse.move(wheelBox.x + 400, wheelBox.y + 40); await page.mouse.wheel(70, 0); await settle();
   const offsetBeforeExpand = await page.evaluate(() => styk.timeline.strip.scrollLeft); assert.ok(offsetBeforeExpand > 0);
-  await page.getByRole('button', {name:'Expand timeline', exact:true}).click(); await settle();
+  await page.locator('#expand-timeline').click(); await settle();
   const expanded = await page.locator('.audio-body').evaluate(node => node.clientHeight); assert.ok(expanded >= compact, `${compact} -> ${expanded}`);
   assert.equal(await page.evaluate(() => styk.timeline.strip.scrollLeft), offsetBeforeExpand, 'Expand preserves the timeline position');
   const focusPoint = await position(id, 35);
@@ -133,7 +133,7 @@ try {
   assert.equal(await page.locator('.audio-snap-line').isVisible(), true); assert.deepEqual(await state(), snapBefore);
   await release(); assert.equal((await state()).tracks[0].clips[0].start, 2);
   await page.locator('.audio-body').press('Control+z'); await settle();
-  await page.evaluate(() => {for(let i=4;i<=18;i++)styk.editor.addAudioTrack(`Audio ${i}`); styk.timeline.audio.verticalScroll.scrollTop=styk.timeline.audioTop;}); await settle();
+  await page.evaluate(() => {for(let i=4;i<=18;i++)styk.editor.addAudioTrack(`Audio ${i}`); styk.timeline.audio.verticalScroll.scrollTop=styk.timeline.audioTop-styk.timeline.bodyTop;}); await settle();
   assert.ok(await page.locator('.audio-track').count() < 10);
   const scrollPoint = await position(id), body = await page.locator('.sheet-scroll').boundingBox();
   await gesture(scrollPoint, {x:scrollPoint.x, y:body.y + body.height - 4}, 'Shift');
@@ -148,7 +148,7 @@ try {
     const report = styk.editor.serialize(), audio = report._styk.audio, assetId = Object.keys(audio.assets)[0];
     audio.tracks = Array.from({length:32}, (_, row) => ({id:`dense-track-${row}`, name:`Track ${row + 1}`, gain:1, mute:false, solo:false,
       clips:Array.from({length:128}, (_, i) => ({id:`dense-${row}-${i}`, assetId, start:i / 10, offset:0, duration:.05, fadeIn:0, fadeOut:0, gain:1}))}));
-    styk.editor.load(report); styk.timeline.audio.setOpen(true); styk.timeline.audio.verticalScroll.scrollTop = styk.timeline.audioTop;
+    styk.editor.load(report); styk.timeline.audio.setOpen(true); styk.timeline.audio.verticalScroll.scrollTop = styk.timeline.audioTop - styk.timeline.bodyTop;
   }); await settle();
   const tiny = await page.locator('[data-clip="dense-0-0"]').boundingBox();
   await page.keyboard.down('Shift'); await page.mouse.move(tiny.x + tiny.width / 2, tiny.y + 34); await page.mouse.down();

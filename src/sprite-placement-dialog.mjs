@@ -8,7 +8,6 @@ import {PIVOT_HANDLE_COLORS} from './canvas-interactions.mjs';
 import {drawingMetadata} from './drawing-model.mjs';
 
 const MIN=-2147483648,MAX=2147483647;
-const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const CSS=`
 #viewport.sprite-placement #overlay{cursor:crosshair}
 dialog.sprite-placement-dialog{width:min(640px,calc(100vw - 32px));max-width:640px}

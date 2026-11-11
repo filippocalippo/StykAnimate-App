@@ -44,7 +44,6 @@ try{
     if(software)await page.addInitScript(()=>Object.defineProperty(navigator,'gpu',{value:undefined}));
     await page.goto(url);await page.waitForFunction(()=>window.styk?.ready);
     await page.locator('[data-workspace-mode="draw"]').click();
-    await page.evaluate(()=>styk.state.renderer?.gpuDrawingReady);
     await page.evaluate(async scenario=>{
       const {emptyDocument,createObject,createFrame}=await import('/src/demo.mjs');
       const e=styk.editor,d=styk.drawing,report=emptyDocument();
@@ -115,7 +114,7 @@ try{
       const committedMs=performance.now()-releaseAt,latencies=b.samples.map(s=>s.latency).filter(v=>v!==null);
       const r=styk.state.renderer?.stats??{};
       const t0=b.samples[0]?.time??0,timeline=b.samples.filter((s,i)=>i%10===0).map(s=>[Math.round(s.time-t0),s.latency===null?null:Math.round(s.latency)]);
-      return{longTaskStarts:b.longTaskStarts??[],timeline,samples:b.samples.length,visible:latencies.length,latencies,frames:b.frames,longTasks:b.longTasks,renders:b.renders,probes:b.probes,committedMs,undo:styk.editor.undoLabel,backend:r.backend,drawingGpuBytes:r.drawingGpuBytes,tiles:styk.drawing.owner?.stats.tiles};
+      return{longTaskStarts:b.longTaskStarts??[],timeline,samples:b.samples.length,visible:latencies.length,latencies,frames:b.frames,longTasks:b.longTasks,renders:b.renders,probes:b.probes,committedMs,undo:styk.editor.undoLabel,backend:r.backend,tiles:styk.drawing.owner?.stats.tiles};
     },releaseAt);
     const publishStart=Date.now();await page.evaluate(()=>styk.drawing.owner.flush());const publishedMs=Date.now()-publishStart;
     const result={scenario:scenario.id,label,backend:measured.backend,dispatched,samples:measured.samples,visibleFraction:measured.visible/Math.max(1,measured.samples),

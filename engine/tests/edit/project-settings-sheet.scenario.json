@@ -1,0 +1,83 @@
+{
+ "name": "project-settings-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setFPS",
+   30
+  ],
+  [
+   "setFPS",
+   30
+  ],
+  [
+   "setFPS",
+   0
+  ],
+  [
+   "setFPS",
+   1.5
+  ],
+  [
+   "setCanvasSize",
+   1280,
+   720
+  ],
+  [
+   "setCanvasSize",
+   0,
+   5
+  ],
+  [
+   "updateProject",
+   {
+    "fps": 12,
+    "canvas_width": 640
+   }
+  ],
+  [
+   "updateProject",
+   {
+    "name": "x"
+   }
+  ],
+  [
+   "updateProject",
+   {
+    "canvas_height": 0
+   }
+  ],
+  [
+   "updateProject",
+   {
+    "fps": 2000
+   }
+  ],
+  [
+   "updateProject",
+   {}
+  ],
+  [
+   "updateProject",
+   {
+    "canvas_height": 480
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

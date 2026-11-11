@@ -3,7 +3,7 @@
 Each language owns one `src/locales/packs/<BCP-47 ID>.json` file. Its `locale`
 metadata contains `id`, English `name`, `nativeName`, `direction` (`ltr` or `rtl`),
 and optional explicit `aliases`. Its `messages` object uses the stable semantic
-keys in `src/locales/en.mjs`, composed from English feature files. Keys describe
+keys in `src/locales/en.mjs` (generated from the English feature files that `src/locales/en-catalog.mjs` composes). Keys describe
 intent, not English spelling or an element's location. Read the owning component
 for context; `docs/localization-message-context.json` lists source locations and
 caption snippets for review. Preserve distinctions between a figure definition,
@@ -45,7 +45,7 @@ existing translations and all placeholders. Validate with `npm run locales:valid
 -- --locale fr`; report coverage and uncertain terminology. Do not
 edit generated files, English catalogs or UI code.” Disjoint pack files can merge
 independently. The integration agent owns English keys, UI bindings, shared code,
-`src/locales/locale-packs.mjs`, `docs/localization-message-context.json`, the marked
+`src/locales/locale-index.mjs`, `src/locales/messages/`, `docs/localization-message-context.json`, the marked
 generated diagnostic block in `desktop/preload.cjs`, scripts, tests and
 documentation. It merges pack edits, regenerates once, validates, runs relevant
 UI checks and commits the reviewed result. Do not edit `native-catalogs.mjs`: it records the original imported

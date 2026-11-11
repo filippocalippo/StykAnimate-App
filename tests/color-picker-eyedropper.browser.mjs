@@ -25,7 +25,7 @@ try {
         return segmentPaint(resolveInstanceFigure(styk.editor.figure,styk.editor.object).segments[0]);
       };
     });
-    await page.waitForFunction(()=>!styk.state.editablePreparing);
+    await page.waitForFunction(()=>!styk.state.dirtyRender);
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     const point=await page.evaluate(()=>{const r=document.querySelector('#overlay').getBoundingClientRect(),v=styk.state.view;return {x:r.left+v.x+470*v.scale,y:r.top+v.y+260*v.scale};});
     if(await page.locator('[data-property-scope="joint"]').count())await page.locator('[data-property-scope="joint"]').click();

@@ -1,0 +1,55 @@
+{
+ "name": "clip-break-presence-gaps-native",
+ "document": "clip-break-presence-gaps-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@seek",
+   1.75
+  ],
+  [
+   "@select",
+   7,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "@select",
+   7,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "@seek",
+   6.25
+  ],
+  [
+   "@select",
+   7,
+   -1
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

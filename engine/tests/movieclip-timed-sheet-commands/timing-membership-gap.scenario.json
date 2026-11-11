@@ -1,0 +1,66 @@
+{
+ "name": "timing-membership-gap",
+ "document": "timing-membership-gap.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.75
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 1,
+    "end": 15
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "@seek",
+   4.5
+  ],
+  [
+   "splitMovieclip",
+   5
+  ],
+  [
+   "@seek",
+   13
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

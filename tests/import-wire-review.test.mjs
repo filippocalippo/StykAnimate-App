@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ImportClient} from '../src/import-client.mjs';
 import {materializeNativeFrames,unpackNativeFrameResponse} from '../src/import-wire.mjs';
+import {FakeCodecHost} from './support/codec-host.mjs';
 
 function transfer(count=3){
   const buffer=new ArrayBuffer(4+count*8),view=new DataView(buffer);view.setUint32(0,count,true);
@@ -39,15 +40,17 @@ test('a disposed import client cannot resolve an in-flight native materializatio
     terminate(){this.terminated=true;}
     receive(message){this.handlers.get('message')({data:message});}
   }
-  globalThis.Worker=FakeWorker;
+  globalThis.Worker=FakeWorker;const codecHost=new FakeCodecHost();
   try{
-    const client=new ImportClient({baseURL:'http://localhost',timeoutMs:0}),promise=client.openSample('sample.piv'),packet=transfer(30000);
+    const client=new ImportClient({baseURL:'http://localhost',timeoutMs:0,codecHost,readSample:()=>({ok:true,name:'sample.piv',bytes:new Uint8Array([1])})});
+    const promise=client.openSample('sample.piv'),packet=transfer(30000);
+    await new Promise(resolve=>setImmediate(resolve));
     worker.receive({id:1,ok:true,result:packet.result,nativeFrames:{buffer:packet.buffer,offset:0}});
     client.dispose();await assert.rejects(promise,/disposed/);
     await new Promise(resolve=>setTimeout(resolve,5));
     assert.equal(client.pending.size,0);assert.equal(worker.terminated,true);
     assert.deepEqual(packet.result.document.keyframes,[]);
-  }finally{globalThis.Worker=old;}
+  }finally{globalThis.Worker=old;codecHost.close();}
 });
 
 test('oversized and invalid response header extents fail before frame allocation',()=>{

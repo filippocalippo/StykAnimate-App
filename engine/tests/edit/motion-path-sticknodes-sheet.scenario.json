@@ -1,0 +1,65 @@
+{
+ "name": "motion-path-sticknodes-sheet",
+ "document": "sticknodes.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "sheetSetDuration",
+   8
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 22,
+    "joint": 1
+   },
+   4
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 300,
+    "y": 300
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "node",
+    "uid": 1,
+    "handleId": 33,
+    "joint": 2
+   },
+   5,
+   {
+    "falloff": {
+     "radius": 3
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 280,
+    "y": 330
+   },
+   {
+    "stretch": true
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

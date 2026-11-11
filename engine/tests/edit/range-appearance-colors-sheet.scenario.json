@@ -1,0 +1,121 @@
+{
+ "name": "range-appearance-colors-sheet",
+ "document": "range-colors.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "field28": 20
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "color_override_raw": 1090486272
+   },
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0,
+     2
+    ]
+   }
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "opacity": 0.3
+   },
+   [
+    0
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "deleteFiguresInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     0
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "detachFiguresInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     1
+    ]
+   }
+  ],
+  [
+   "duplicateInFrames",
+   [
+    0
+   ],
+   {
+    "ticks": [
+     2
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

@@ -17,6 +17,8 @@ import {chooseExport, exportDialogClosed, openEncoding} from './helpers/export-d
 const base = process.env.STYK_URL || 'http://127.0.0.1:47832';
 const browser = await chromium.launch({channel: 'chrome', headless: true});
 const page = await browser.newPage({viewport: {width: 1440, height: 900}, acceptDownloads: true});
+// Headless Chrome aborts showSaveFilePicker, so an export would wait on a picker; without it the export takes the download path.
+await page.addInitScript(() => { delete window.showSaveFilePicker; });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 page.setDefaultTimeout(10000);

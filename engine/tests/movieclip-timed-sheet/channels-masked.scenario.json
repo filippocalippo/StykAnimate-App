@@ -1,0 +1,79 @@
+{
+ "name": "channels-masked",
+ "document": "channels-masked.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "sheetApplyChannels",
+   [
+    {
+     "id": "figure:1:pose",
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "pose",
+     "keys": [
+      {
+       "id": "cell-5",
+       "tick": 0,
+       "interpolation": "linear",
+       "value": {
+        "frameId": "frame-3"
+       }
+      },
+      {
+       "id": "cell-6",
+       "tick": 6,
+       "interpolation": "linear",
+       "value": {
+        "frameId": "frame-4"
+       }
+      }
+     ],
+     "useBasePose": true,
+     "maskedRanges": [
+      [
+       2,
+       4
+      ]
+     ],
+     "movieclipCurve": true,
+     "clipEnd": 9
+    }
+   ],
+   "Break apart frame",
+   {
+    "preserveDuration": true
+   }
+  ],
+  [
+   "@seek",
+   3.5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   5.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

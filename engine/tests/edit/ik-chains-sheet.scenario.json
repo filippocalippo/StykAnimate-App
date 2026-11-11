@@ -1,0 +1,71 @@
+{
+ "name": "ik-chains-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/chain-long.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   15,
+   10
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "rotateSelection",
+   0.2
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "@select",
+   2,
+   3
+  ],
+  [
+   "poseJoint",
+   600,
+   300
+  ],
+  [
+   "@seek",
+   6
+  ],
+  [
+   "@select",
+   1,
+   0
+  ],
+  [
+   "bendJoint",
+   230,
+   140
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

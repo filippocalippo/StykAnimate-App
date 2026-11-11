@@ -1,0 +1,34 @@
+{
+ "name": "handle-edit-full-turn-sheet",
+ "document": "full-turn.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "editHandlePosition",
+   330,
+   260
+  ],
+  [
+   "editHandlePosition",
+   335,
+   250,
+   {
+    "bend": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

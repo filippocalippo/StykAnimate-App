@@ -43,7 +43,7 @@ try {
   await page.evaluate(()=>{for(const d of document.querySelectorAll('dialog[open]'))d.close();styk.editor.markSaved();});
   await page.locator('#file-input').setInputFiles(source);
   await page.waitForFunction(name=>!styk.state.importing&&styk.editor.name===name,path.basename(source,'.piv'),{timeout:180000});
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.dirtyRender);
+  await page.waitForFunction(()=>!styk.state.dirtyRender);
   await page.evaluate(()=>{
     for(const d of document.querySelectorAll('dialog[open]'))d.close();
     const e=styk.editor,s=styk.state,r=s.renderer;
@@ -74,24 +74,24 @@ try {
       const editable=[...e.geometry.objects.values()].find(g=>g.segments.some(s=>!s.static&&s.length>3));
       if(!editable)throw new Error('The benchmark requires a poseable joint.');
       e.select(editable.obj.unique_id,0);const g=e.geometry.objects.get(e.selectedSlot),point=g.segments.find(s=>!s.static&&s.length>3).end;
-      const {worldToScreen}=await import('/src/renderer.mjs'),screen=worldToScreen(point,{report:e.report,frame:e.evaluatedFrame,view:s.view,cameraEnabled:false});
+      const {worldToScreen}=await import('/src/renderer-geometry.mjs'),screen=worldToScreen(point,{report:e.report,frame:e.evaluatedFrame,view:s.view,cameraEnabled:false});
       s.view.x+=r.width/2-screen.x;s.view.y+=r.height/2-screen.y;window.dispatchEvent(new Event('resize'));
       return{x:r.x+r.width/2,y:r.y+r.height/2};
     },kind);
-    await page.waitForFunction(()=>!styk.state.dirtyRender&&!styk.state.editablePreparing);
+    await page.waitForFunction(()=>!styk.state.dirtyRender);
     const beforePose=kind==='pose'?await poseSnapshot():null;
     await page.mouse.move(target.x,target.y);await page.mouse.down({button:kind==='pan'?'middle':'left'});
     assert.equal(await page.evaluate(()=>styk.state.drag?.kind),kind);
     for(let i=1;i<=60;i++)await page.mouse.move(target.x+i*.8,target.y+i*.4);
     await page.mouse.up({button:kind==='pan'?'middle':'left'});
-    await page.waitForFunction(()=>!styk.state.dirtyRender&&!styk.state.editablePreparing);
+    await page.waitForFunction(()=>!styk.state.dirtyRender);
     if(kind==='pose'){
       const final=await poseSnapshot();assert.notEqual(final,beforePose,'The gesture must change the visible pose');
-      await page.evaluate(()=>styk.editor.undo());await page.waitForFunction(()=>!styk.state.dirtyRender&&!styk.state.editablePreparing);
+      await page.evaluate(()=>styk.editor.undo());await page.waitForFunction(()=>!styk.state.dirtyRender);
       const undone=await poseSnapshot();
       if(undone!==beforePose)await writeFile(path.join(output,'pose-undo-mismatch.json'),JSON.stringify({before:JSON.parse(beforePose),after:JSON.parse(final),undone:JSON.parse(undone)}));
       assert.ok(undone===beforePose,'Undo must restore every joint and figure root; see pose-undo-mismatch.json');
-      await page.evaluate(()=>styk.editor.redo());await page.waitForFunction(()=>!styk.state.dirtyRender&&!styk.state.editablePreparing);
+      await page.evaluate(()=>styk.editor.redo());await page.waitForFunction(()=>!styk.state.dirtyRender);
       assert.ok(await poseSnapshot()===final,'Redo must restore the complete posed scene');
     }
   }
@@ -100,9 +100,9 @@ try {
   await page.mouse.move(sheet.x+24,sheet.y+14);await page.mouse.down();
   for(let i=1;i<=45;i++)await page.mouse.move(sheet.x+24+i*9,sheet.y+14);
   assert.ok(await page.evaluate(()=>styk.state.scrubbing));await page.mouse.up();
-  await page.waitForFunction(()=>!styk.state.editablePreparing&&!styk.state.dirtyRender);
+  await page.waitForFunction(()=>!styk.state.dirtyRender);
   const {profile}=await client.send('Profiler.stop');await writeFile(path.join(output,'main.cpuprofile'),JSON.stringify(profile));
-  await page.evaluate(()=>styk.state.renderer.device.queue.onSubmittedWorkDone());
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const result=await page.evaluate(()=>({...inputProbe,performance:styk.performance()}));
   const q=values=>{values.sort((a,b)=>a-b);return{n:values.length,p50:values[Math.floor(values.length*.5)],p95:values[Math.floor(values.length*.95)],max:values.at(-1)};};
   const summary={};

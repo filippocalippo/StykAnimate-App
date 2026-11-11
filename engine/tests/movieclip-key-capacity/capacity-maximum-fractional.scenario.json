@@ -1,0 +1,31 @@
+{
+ "name": "capacity-maximum-fractional",
+ "document": "capacity-maximum-fractional.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@seek",
+   3.25
+  ],
+  [
+   "addFigure",
+   4
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Capacity branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

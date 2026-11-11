@@ -1,0 +1,91 @@
+{
+ "name": "camera-center-media-sheet",
+ "document": "measured-bounds-media.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "selectMany",
+   [
+    1,
+    3
+   ]
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "end",
+   [
+    0,
+    1
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "centerCamera",
+   "x",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app",
+     "resources": {
+      "drawingBounds": {
+       "x": -13,
+       "y": 7,
+       "width": 52,
+       "height": 81
+      }
+     }
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "centerCamera",
+   "y",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app",
+     "resources": {
+      "vfxBounds": false
+     }
+    }
+   }
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

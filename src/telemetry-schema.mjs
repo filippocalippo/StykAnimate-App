@@ -70,14 +70,15 @@ export const complexityBucket = n => !Number.isFinite(n) || n < 0 ? 'unknown' : 
 export const fpsBucket = n => !Number.isFinite(n) || n <= 0 ? 'unknown' : n <= 24 ? 'up-to-24' : n <= 30 ? '25-30' : n <= 60 ? '31-60' : 'over-60';
 export const ERROR_TYPES = Object.freeze(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AbortError', 'OperationError', 'NotSupportedError', 'GPUError', 'RendererCrash', 'RendererHang', 'BackendError', 'UncleanExit']);
 export const ERROR_OPERATIONS = Object.freeze(['app', 'startup', 'import', 'save', 'export', 'playback', 'recovery', 'gpu', 'renderer', 'backend']);
-export const ERROR_MODULES = Object.freeze(['app.mjs', 'renderer.mjs', 'renderer-geometry.mjs', 'render-artwork.mjs', 'editor.mjs', 'editor-load.mjs', 'import-client.mjs', 'import-worker.mjs', 'document-export.mjs', 'document-export-worker.mjs', 'playback.mjs', 'playback-worker.mjs', 'export-frame-renderer.mjs', 'native-video.mjs', 'main.cjs', 'backend.cjs', 'file-streams.cjs', 'video-export-service.cjs', 'vfw-export-service.cjs', 'camera-monitor.mjs', 'geometry.mjs', 'background.mjs', 'export-frame-worker.mjs', 'export-frame-core.mjs', 'export-canvas.mjs', 'export-memory.mjs', 'playback-resources.mjs', 'preview-image.mjs', 'native-container.mjs', 'vfx-camera.mjs', 'vfx-canvas.mjs', 'vfx-gpu.mjs', 'vfx-webgpu.mjs', 'vfx-viewport.mjs']);
+// Basenames of shipped modules (src/, src/engine/, desktop/) that may appear in a forwarded stack; the server holds the same list.
+export const ERROR_MODULES = Object.freeze(['app.mjs', 'renderer-geometry.mjs', 'editor.mjs', 'import-client.mjs', 'import-worker.mjs', 'document-export.mjs', 'document-export-worker.mjs', 'native-video-export.mjs', 'main.cjs', 'file-streams.cjs', 'video-export-service.cjs', 'vfw-export-service.cjs', 'camera-monitor.mjs', 'geometry.mjs', 'background.mjs',  'export-canvas.mjs', 'export-memory.mjs', 'preview-image.mjs', 'native-file-codec.mjs',    'engine.mjs', 'engine-clipboards.mjs', 'engine-composite.mjs', 'engine-document.mjs', 'engine-drawing-worker.mjs', 'engine-drawing.mjs', 'engine-edit-bounds.mjs', 'engine-export-worker.mjs', 'engine-document-export.mjs', 'engine-export.mjs', 'engine-failure.mjs', 'engine-live-cels.mjs', 'engine-memory.mjs', 'engine-open.mjs', 'engine-owner-drawing.mjs', 'engine-owner.mjs', 'engine-patch.mjs', 'engine-pictures.mjs', 'engine-playback.mjs', 'engine-preview-worker.mjs', 'engine-previews.mjs', 'engine-shown.mjs', 'engine-stage.mjs', 'engine-thumbnails.mjs', 'engine-worker.mjs']);
 export const ENV_ENUMS = Object.freeze({
   os: ['win32', 'darwin', 'linux', 'web', 'unknown'], arch: ['x64', 'arm64', 'ia32', 'unknown'],
   osVersion: ['windows-10', 'windows-11', 'mac', 'linux', 'unknown'],
   ramBucket: ['4-or-less', '8', '16', '32', '64-plus', 'unknown'],
   cpuBucket: ['2-or-less', '4', '8', '16', '32-plus', 'unknown'],
   gpuFamily: ['nvidia', 'amd', 'intel', 'apple', 'qualcomm', 'software', 'unknown'],
-  backend: ['webgpu', 'canvas2d', 'unavailable', 'unknown'], mode: ['simple', 'advanced', 'unknown'],
+  backend: ['webgpu', 'webgl2', 'canvas2d', 'unavailable', 'unknown'], mode: ['simple', 'advanced', 'unknown'],
   locale: ['en', 'it', 'de', 'fr', 'es', 'pt', 'ja', 'ko', 'zh', 'ru', 'pl', 'tr', 'other', 'unknown'],
 });
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -99,13 +100,29 @@ export function percentile(histogram, fraction = .95) {
 export function sanitizeEnvironment(value = {}) {
   return Object.fromEntries(Object.entries(ENV_ENUMS).map(([key, values]) => [key, values.includes(value[key]) ? value[key] : 'unknown']));
 }
+/**
+ * The module and line a stack frame reports. A bundled script (scripts/build-app.mjs) has a table in `globalThis.__stykFrames` of the
+ * lines of its file that came from each module a report may name, with the line each has in that module's source; a frame in such a file
+ * is read through it (a line from any other module is dropped). Source files and workers without a table are read by their own name.
+ */
+function reportedFrame(file, line) {
+  const runs = globalThis.__stykFrames?.[file];
+  if (!Array.isArray(runs)) return ERROR_MODULES.includes(file) ? { module: file, line: Math.min(1e6, line) } : null;
+  for (const [module, last, ...pairs] of runs) {
+    if (line > last || line < pairs[0]) continue;
+    let i = pairs.length - 2;
+    while (pairs[i] > line) i -= 2;
+    return ERROR_MODULES.includes(module) ? { module, line: Math.min(1e6, pairs[i + 1] + line - pairs[i]) } : null;
+  }
+  return null;
+}
 export function sanitizeError(error, operation = 'app', now = Date.now(), context = {}) {
   const type = ERROR_TYPES.includes(error?.name) ? error.name : 'Error';
   // Only our module basenames and line numbers; never error text or stack arguments.
   const forwarded = Array.isArray(error?.telemetryFrames) ? error.telemetryFrames.filter(frame=>ERROR_MODULES.includes(frame?.module)&&Number.isSafeInteger(frame.line)&&frame.line>=0&&frame.line<=1e6).map(frame=>({module:frame.module,line:frame.line})).slice(0,5) : [];
   const frames = forwarded.length ? forwarded : String(error?.stack || '').split('\n').slice(1, 12).map(line => {
     const match = line.match(/(?:\/|\\)([a-z][a-z0-9-]{0,70}\.(?:mjs|cjs)):(\d+):\d+/i);
-    return match && ERROR_MODULES.includes(match[1]) ? { module: match[1], line: Math.min(1e6, Number(match[2])) } : null;
+    return match ? reportedFrame(match[1], Number(match[2])) : null;
   }).filter(Boolean).slice(0, 5);
   const op = ERROR_OPERATIONS.includes(operation) ? operation : 'app';
   const aliases = { ENOSPC: 'disk_full', EACCES: 'permission_denied', EPERM: 'permission_denied', import_timeout: 'timeout', ETIMEDOUT: 'timeout',

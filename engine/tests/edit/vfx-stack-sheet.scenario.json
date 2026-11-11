@@ -1,0 +1,292 @@
+{
+ "name": "vfx-stack-sheet",
+ "document": "property-vfx.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "glow"
+  ],
+  [
+   "addVfx",
+   [
+    {
+     "kind": "figure",
+     "uid": 1
+    },
+    {
+     "kind": "segment",
+     "uid": 1,
+     "handleId": 22
+    }
+   ],
+   "tint"
+  ],
+  [
+   "addVfx",
+   {
+    "kind": "scene"
+   },
+   "vignette"
+  ],
+  [
+   "addVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "vignette"
+  ],
+  [
+   "addVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "bogus"
+  ],
+  [
+   "addVfx",
+   {
+    "kind": "scene"
+   },
+   "outline"
+  ],
+  [
+   "addVfx",
+   {
+    "kind": "camera"
+   },
+   "glow"
+  ],
+  [
+   "duplicateVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001"
+  ],
+  [
+   "duplicateVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-none"
+  ],
+  [
+   "moveVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   1
+  ],
+  [
+   "moveVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   2
+  ],
+  [
+   "reorderVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   0
+  ],
+  [
+   "reorderVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   9
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001",
+   "radius",
+   6
+  ],
+  [
+   "resetVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001"
+  ],
+  [
+   "resetVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-none"
+  ],
+  [
+   "removeVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-00000000000040008000000000000001"
+  ],
+  [
+   "removeVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-none"
+  ],
+  [
+   "pasteVfx",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   [
+    {
+     "version": 2,
+     "id": "fx-00000000000040008000000000000001",
+     "type": "blur",
+     "enabled": true,
+     "params": {
+      "radius": 3
+     }
+    }
+   ]
+  ],
+  [
+   "pasteVfx",
+   {
+    "kind": "scene"
+   },
+   [
+    {
+     "version": 2,
+     "id": "fx-00000000000040008000000000000003",
+     "type": "blur",
+     "enabled": true,
+     "params": {
+      "radius": 2
+     }
+    }
+   ]
+  ],
+  [
+   "pasteVfx",
+   {
+    "kind": "scene"
+   },
+   [
+    {
+     "version": 2,
+     "id": "fx-00000000000040008000000000000003",
+     "type": "grade",
+     "enabled": false,
+     "params": {}
+    }
+   ]
+  ],
+  [
+   "pasteVfx",
+   [
+    {
+     "kind": "figure",
+     "uid": 1
+    }
+   ],
+   [
+    {
+     "version": 2,
+     "id": "fx-00000000000040008000000000000002",
+     "type": "glow",
+     "enabled": true,
+     "params": {}
+    }
+   ],
+   {
+    "includeAttached": false
+   }
+  ],
+  [
+   "pasteVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   [],
+   {
+    "includeAttached": "x"
+   }
+  ],
+  [
+   "pasteVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   [
+    {
+     "version": 2,
+     "id": "fx-x",
+     "type": "vignette",
+     "enabled": true,
+     "params": {}
+    }
+   ]
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "addVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "pixelate"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

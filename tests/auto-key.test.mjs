@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
 import {emptyDocument, createFrame, createObject} from '../src/demo.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
 function fixture({autoKey = true} = {}) {
   const report = emptyDocument(), figure = report.figure_types[0];
   report.keyframes = [0, 10, 20].map(x => createFrame([createObject(figure, 1, x, 200), createObject(figure, 2, 100 + x, 200)], 10));
-  const editor = new Editor({demo: false, propertyChannels: true, layerTimeline: true}).load(report);
+  const editor = ownedEditorFor({demo: false, propertyChannels: true, layerTimeline: true}, report);
   const layer = editor.createLayer('Effects'); editor.assignFiguresToLayer([2], layer.id);
   editor.sheetSetEasing(['layer-1'], 0, 20, {interpolation: 'constant'});
   editor.autoKey = autoKey; return editor;
@@ -52,7 +52,7 @@ test('auto key keys the camera at the playhead', () => {
   const cameraKeys = () => editor.layerFrameKeys('camera').map(key => key.tick);
   const before = cameraKeys();
   editor.seek(6);
-  editor.transaction('Camera', frame => { frame.camera = {x: 0, y: 0, scale: 1, angle_rad: 0, ...frame.camera, is_default: false, x: 40}; });
+  editor.setCameraValues({x: 40});
   assert.ok(cameraKeys().includes(6), `camera keyed at the playhead: ${cameraKeys()}`);
   assert.ok(before.every(tick => cameraKeys().includes(tick)));
 });

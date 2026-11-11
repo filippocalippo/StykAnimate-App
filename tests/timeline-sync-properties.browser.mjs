@@ -12,7 +12,7 @@ const mode=async mode=>{
 };
 const numeric=async(key,value)=>{const input=page.locator(`input[data-property="${key}"]`);await input.fill(String(value));await input.press('Enter');};
 try {
-  await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>styk.ready);
+  await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(async()=>{
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');const report=emptyDocument();
     report.keyframes=[100,200,300].map(x=>createFrame([createObject(report.figure_types[0],1,x,240)],5));

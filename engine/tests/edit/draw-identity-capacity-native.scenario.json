@@ -1,0 +1,60 @@
+{
+ "name": "draw-identity-capacity-native",
+ "document": "draw-identity-capacity-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "length": 5
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   2147483646,
+   1
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "rotateJoint",
+   0.13
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "length": 5
+    },
+    {
+     "length": 7
+    }
+   ]
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

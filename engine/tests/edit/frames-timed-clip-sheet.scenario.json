@@ -1,0 +1,106 @@
+{
+ "name": "frames-timed-clip-sheet",
+ "document": "sheet-movieclip-timed.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   2
+  ],
+  [
+   "sheetInsertFrames",
+   [
+    "scene",
+    "camera",
+    "layer-1"
+   ],
+   1,
+   2
+  ],
+  [
+   "sheetDuplicateFrameAfter"
+  ],
+  [
+   "sheetRemoveFrames",
+   [
+    "layer-1"
+   ],
+   0,
+   1
+  ],
+  [
+   "sheetInsertKey",
+   [
+    "layer-1"
+   ],
+   4
+  ],
+  [
+   "sheetAppendFrame",
+   {
+    "duration": 2
+   }
+  ],
+  [
+   "sheetInsertFrames",
+   [
+    "scene",
+    "camera",
+    "layer-1"
+   ],
+   0,
+   1
+  ],
+  [
+   "sheetInsertKey",
+   [
+    "layer-1"
+   ],
+   14
+  ],
+  [
+   "sheetClearFrames",
+   [
+    "layer-1"
+   ],
+   2,
+   3
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -1,0 +1,355 @@
+{
+ "name": "vfx-paints-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "pasteVfx",
+   [
+    {
+     "kind": "figure",
+     "uid": 1
+    },
+    {
+     "kind": "segment",
+     "uid": 1,
+     "handleId": 22
+    }
+   ],
+   [
+    {
+     "version": 2,
+     "id": "fx-paint",
+     "type": "tint",
+     "enabled": true,
+     "params": {
+      "color": {
+       "type": "linear",
+       "angle": 45,
+       "stops": [
+        {
+         "offset": 1,
+         "color": [
+          240.5,
+          60.2,
+          80
+         ],
+         "opacity": 0.6
+        },
+        {
+         "offset": 0,
+         "color": [
+          40,
+          120.5,
+          255
+         ],
+         "opacity": 1
+        }
+       ]
+      },
+      "mix": 0.7
+     }
+    }
+   ]
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-paint",
+   "color",
+   {
+    "type": "radial",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   }
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-paint",
+   "color",
+   null
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-paint",
+   "color",
+   []
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-paint",
+   "color",
+   {
+    "type": "bad",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   }
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-paint",
+   "color",
+   {
+    "type": "linear",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     }
+    ]
+   }
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-paint",
+   "color",
+   {
+    "type": "linear",
+    "angle": 36001,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   }
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-paint",
+   "color",
+   {
+    "type": "linear",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 0,
+      "color": [
+       1,
+       2
+      ],
+      "opacity": 1
+     },
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     }
+    ]
+   }
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "fx-paint",
+   "color",
+   {
+    "type": "linear",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 0,
+      "color": [
+       1,
+       2,
+       256
+      ],
+      "opacity": 1
+     },
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     }
+    ]
+   }
+  ],
+  [
+   "pasteVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   [
+    {
+     "version": 2,
+     "id": "fx-paint",
+     "type": "tint",
+     "enabled": true,
+     "params": {
+      "color": {
+       "type": "linear",
+       "angle": 45,
+       "stops": [
+        {
+         "offset": -1,
+         "color": [
+          1,
+          2,
+          3
+         ],
+         "opacity": 1
+        },
+        {
+         "offset": 1,
+         "color": [
+          240.5,
+          60.2,
+          80
+         ],
+         "opacity": 0.6
+        }
+       ]
+      }
+     }
+    }
+   ]
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "setVfxParameter",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   "fx-paint",
+   "color",
+   {
+    "type": "diamond",
+    "angle": 45,
+    "stops": [
+     {
+      "offset": 1,
+      "color": [
+       240.5,
+       60.2,
+       80
+      ],
+      "opacity": 0.6
+     },
+     {
+      "offset": 0,
+      "color": [
+       40,
+       120.5,
+       255
+      ],
+      "opacity": 1
+     }
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -6,6 +6,8 @@
   const need = (name, present) => { if (!present) missing.push(name); };
   need('OffscreenCanvas (Safari 16.4 or later)', typeof OffscreenCanvas === 'function');
   need('WebAssembly', typeof WebAssembly === 'object');
+  // The engine's modules use WebAssembly SIMD: a module with one 128-bit instruction validates only where it exists.
+  need('WebAssembly SIMD (Chrome 91, Firefox 89, Safari 16.4 or later)', typeof WebAssembly === 'object' && WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])));
   need('IndexedDB', !!window.indexedDB);
   need('the Web Crypto API (it needs a secure https page)', !!(window.crypto && window.crypto.subtle));
   need('createImageBitmap', typeof createImageBitmap === 'function');
@@ -13,6 +15,8 @@
   need('the dialog element', typeof HTMLDialogElement === 'function');
   need('Object.hasOwn and Array.at', typeof Object.hasOwn === 'function' && typeof [].at === 'function');
   need('module workers', typeof Worker === 'function');
+  // The engine draws with WebGPU or WebGL 2. A browser with hardware acceleration turned off may offer neither.
+  need('WebGPU or WebGL 2 (turn on hardware acceleration in the browser settings)', !!navigator.gpu || (() => { try { return typeof OffscreenCanvas === 'function' && !!new OffscreenCanvas(1, 1).getContext('webgl2'); } catch { return false; } })());
   if (!missing.length) return;
 
   const show = () => {

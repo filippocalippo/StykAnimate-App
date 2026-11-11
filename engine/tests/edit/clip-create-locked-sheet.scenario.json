@@ -1,0 +1,28 @@
+{
+ "name": "clip-create-locked-sheet",
+ "document": "clip-create-locked-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "createMovieclip",
+   {
+    "start": 2,
+    "end": 6
+   }
+  ],
+  [
+   "createEmptyMovieclip"
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

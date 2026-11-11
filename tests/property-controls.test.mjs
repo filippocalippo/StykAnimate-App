@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Editor } from "../src/editor.mjs";
+import { newOwnedEditor } from "./support/owned-editor.mjs";
 import {
   propertyStep,
   formatPropertyValue,
@@ -19,7 +19,7 @@ test("scrub modifiers preserve useful fractional units", () => {
 });
 
 test("explicit inspector contexts isolate camera, scene, frame and layer controls", () => {
-  const editor = new Editor();
+  const editor = newOwnedEditor();
   const camera = inspectorView({ editor, context: "camera" });
   for (const key of ["camera_x", "camera_y", "camera_scale", "camera_angle"])
     assert.ok(camera.includes(`data-property="${key}"`));
@@ -50,7 +50,7 @@ test("explicit inspector contexts isolate camera, scene, frame and layer control
 });
 
 test("composed property values preserve exact baselines without key controls", () => {
-  const editor = new Editor();
+  const editor = newOwnedEditor();
   const html = inspectorView({
     editor,
     context: "camera",

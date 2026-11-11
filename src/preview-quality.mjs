@@ -19,10 +19,6 @@ export function playbackQualityIndex(value) {
   return playbackQualityOptions.find(option=>option.id===normalizePlaybackQuality(value)).index;
 }
 
-export function normalizeMsaaCount(count = 4) {
-  return Number.isFinite(count) && count < 4 ? 1 : 4;
-}
-
 /** Preserve CSS coordinates while fitting the physical surface to the device. */
 export function viewportBackingSize(width, height, dpr, maxDimension) {
   width = Number.isFinite(width) ? Math.max(1, width) : 1;

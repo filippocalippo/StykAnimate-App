@@ -1,0 +1,38 @@
+{
+ "name": "update-object-native",
+ "document": "two-limbs.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateObject",
+   {
+    "scale": 0.75,
+    "root_y": 100
+   }
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "updateObject",
+   {
+    "field28": 64
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

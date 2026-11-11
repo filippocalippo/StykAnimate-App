@@ -1,0 +1,57 @@
+{
+ "name": "playback-authored",
+ "document": "playback-authored.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.75
+  ],
+  [
+   "setMovieclipPlayback",
+   {
+    "mode": "single",
+    "offset": 2.5
+   },
+   {
+    "allFrames": true
+   }
+  ],
+  [
+   "restartMovieclip"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "removeMovieclipRestart"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

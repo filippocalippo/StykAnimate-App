@@ -153,7 +153,7 @@ geometry audit again with the same maximum joint discrepancy.
 Run from this application directory:
 
 ```powershell
-node --test tests/sticknodes-import.test.mjs tests/movieclips.test.mjs tests/editor-style-topology.test.mjs
+node --test tests/sticknodes-import.test.mjs tests/movieclips.test.mjs
 node --test tests/*.test.mjs
 node scripts/check.mjs
 ```

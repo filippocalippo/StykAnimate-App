@@ -5,22 +5,15 @@ import {messageError} from './localized-error.mjs';
  * normalized sliding position (0..1), not its rendered span. No solver state is
  * carried between frames: arbitrary seeks and collapsed spans are deterministic.
  */
-import {animationRotation} from './animation-origin.mjs';
-import {projection} from './spatial-projection.mjs';
-import {sameAnglePath,validateAnglePath,sampleAnglePath} from './rig-angle-path.mjs';
-import {sameWeightedJoint,validateWeightedJoint,remapWeightedJoint,weightedJoint} from './rig-weighted.mjs';
-import {sameSpatial,validateSpatial,remapSpatial,evaluateSpatial,spatialSkin} from './rig-spatial.mjs';
+import {sameAnglePath, validateAnglePath} from './rig-angle-path.mjs';
+import {sameWeightedJoint, validateWeightedJoint, remapWeightedJoint} from './rig-weighted.mjs';
+import {sameSpatial, validateSpatial, remapSpatial, spatialSkin} from './rig-spatial.mjs';
 const plans = new WeakMap();
 const EPS = 1e-8;
-export const clampRig = (n, min, max) => Math.max(min, Math.min(max, n));
 const number = (n, label, min, max) => {
   if (!Number.isFinite(n) || n < min || n > max) throw messageError(new Error(''), "errors.cameraMotion.mustBeBetweenAnd", {label: validationLabel(label), min: min, max: max});
 };
 export function hasRigConstraints(figure) { return figure.segments.some(s => s._stykRig); }
-export function documentHasRigConstraints(document,seen=new Set()) {
-  if(seen.has(document))return false;seen.add(document);
-  return document.figure_types.some(f=>hasRigConstraints(f)||(f._styk?.movieclip&&documentHasRigConstraints(f._styk.movieclip.document,seen)));
-}
 
 /** O(V+E) compilation, iterative even for deeply nested connectors. Metadata is
  * immutable in commands; numeric signatures also catch external in-place edits. */
@@ -157,125 +150,7 @@ export function remapRigReferences(segment, remap) {
     ...(r.angleLock?.reference!==undefined?{angleLock:{...r.angleLock,reference:remap.get(r.angleLock.reference)??r.angleLock.reference,
       ...(r.angleLock.secondary?{secondary:{...r.angleLock.secondary,reference:remap.get(r.angleLock.secondary.reference)??r.angleLock.secondary.reference}}:{})}}:{})};
 }
-export function rigWidth(ratio, response) {
-  return response==='inverse'?1/Math.max(.01,ratio):response==='scale'?ratio:1;
-}
 export const derivedRigJoint=segment=>Boolean(spatialSkin(segment)||segment?._stykRig?.connector||segment?._stykRig?.angleLock||segment?._stykRig?.anglePath||segment?._stykRig?.weighted);
 export function rigIKAllowed(figure,index) {
   return Boolean(figure.segments[index])&&!derivedRigJoint(figure.segments[index]);
-}
-/** One lightweight context per evaluated object; outputs are bounded by its rig.
- * Positions belong to the caller's normal geometry, never a second scene graph. */
-export function createRigEvaluation(figure, object, root, plan=rigConstraintPlan(figure), stateStorage, {project=true}={}) {
-  const states=stateStorage??new Array(figure.segments.length), scale=Number(object.scale??1);
-  const figureAngle=animationRotation(figure,object),camera=project?projection(object,root):null;
-  return {plan, states, evaluate(i, input, joints) {
-    const seg=figure.segments[i], r=seg._stykRig, c=r?.connector, d=r?.stretch, f=r?.follow, response=r?.response, lock=r?.angleLock;
-    const parent=states[plan.ids.get(seg.parent_id)], rotation=r?.orientation==='world'?0:parent?.rotation??0;
-    let {start,angle,length,bend}=input, width=1, inheritedRotation=rotation, ratio=1, handle, followAxis, followScale, position,span;
-    if(r?.spatial)return states[i]=evaluateSpatial(r.spatial,{segment:seg,input,get:id=>states[plan.ids.get(id)],referenceRest:id=>figure.segments[plan.ids.get(id)].angle_rad??0,root,scale,figureAngle,mirror:Boolean(object.image_text_flags),restAngle:seg.angle_rad??0,camera,shape:object._stykSpatial?.shape?.[seg.segment_id]});
-    if(r?.weighted)return states[i]=weightedJoint(r.weighted,joints,root,angle);
-    if(r?.anglePath){
-      const path=r.anglePath;let x,y,z,delta,origin;
-      if(path.source!==undefined){const source=states[plan.ids.get(path.source)];({pathOrigin:origin,pathRotation:delta,pathDepth:z}=source);x=z;y=0;}
-      else{
-        delta=figureAngle-path.figureRestAngle;origin=joints.get(path.origin)??root;
-        const turn=states[plan.ids.get(path.driver)].authoredAngle-path.restAngle-delta;
-        [x,y,z]=sampleAnglePath(path.keys,turn);
-        if(path.pitch!==undefined){const pitch=states[plan.ids.get(path.pitch)].authoredAngle-path.pitchRestAngle-delta,c=Math.cos(pitch),s=Math.sin(pitch),oldY=y;y=oldY*c-z*s;z=oldY*s+z*c;}
-      }
-      const c=Math.cos(delta),s=Math.sin(delta),dx=(x*c-y*s)*scale,dy=(x*s+y*c)*scale;
-      start=origin;angle=Math.atan2(dy,dx);length=Math.hypot(dx,dy);handle={x:origin.x+dx,y:origin.y+dy};
-      return states[i]={start,angle,authoredAngle:angle,length,bend:0,width:1,handle,rotation:angle-input.angle,ratio:1,impulseAngle:angle,
-        space:{rotation:delta,locked:true},pathOrigin:origin,pathRotation:delta,pathDepth:z};
-    }
-    angle+=rotation;
-    const source=plan.inputs[i],driver=source&&states[source.driver];
-    let lockedAngle;
-    if(lock){
-      const figureDelta=lock.mode==='parent'&&lock.figureRestAngle!==undefined?animationRotation(figure,object)-lock.figureRestAngle:0;
-      const reference=lock.mode==='parent'?states[plan.ids.get(lock.reference)]:null;
-      const difference=lock.mode==='parent'?(lock.space==='authored'?reference.authoredAngle:reference.angle)-lock.restAngle-figureDelta:lock.mode==='figure'?animationRotation(figure,object)-lock.restAngle:0;
-      lockedAngle=lock.angle+figureDelta+lock.multiplier*Math.atan2(Math.sin(difference),Math.cos(difference));
-      if(lock.secondary){
-        const other=states[plan.ids.get(lock.secondary.reference)],delta=(lock.space==='authored'?other.authoredAngle:other.angle)-lock.secondary.restAngle-figureDelta;
-        lockedAngle+=lock.secondary.multiplier*Math.atan2(Math.sin(delta),Math.cos(delta));
-      }
-      if(lock.space==='authored'){angle=lockedAngle;inheritedRotation=angle-input.angle;}
-    }
-    const rawAngle=angle;
-    const incoming=driver?.ratio??1;
-    if(c) {
-      start=joints.get(c.start)??root;
-      const end=joints.get(c.end)??root, dx=end.x-start.x, dy=end.y-start.y, distance=Math.hypot(dx,dy);
-      span=distance;
-      bend=clampRig(bend,-Math.PI*1.99,Math.PI*1.99);
-      const factor=Math.abs(bend)<EPS?1:2*Math.sin(bend/2)/bend;
-      angle=distance>EPS?Math.atan2(dy,dx)-bend/2:input.angle+rotation;
-      length=distance/factor;
-      inheritedRotation=angle-input.angle-(scale<0?Math.PI:0);
-      const t=clampRig(object.len_flag?object.lengths[i]:seg.length,0,1), sweep=bend*t;
-      position=t;
-      handle=Math.abs(bend)<EPS?{x:start.x+dx*t,y:start.y+dy*t}:
-        {x:start.x+length/bend*(Math.sin(angle+sweep)-Math.sin(angle)),y:start.y+length/bend*(Math.cos(angle)-Math.cos(angle+sweep))};
-    } else if(source&&(response?.mode??f?.mode??'stretch')==='stretch') {
-      const widthResponse=figure.segments[source.driver]._stykRig.stretch.width;
-      const amount=source.legacy&&response?.multiplier===undefined?
-        clampRig((incoming<0?-1:1)*Math.pow(f.influence<0?Math.max(.01,Math.abs(incoming)):Math.abs(incoming),f.influence),-100,100):
-        clampRig(1+(incoming-1)*(response?.multiplier??1),-100,100);
-      followAxis=response?.reset?angle:states[source.axis].impulseAngle;followScale=amount;
-      const relative=angle-followAxis;
-      const x=Math.cos(relative)*amount,y=Math.sin(relative), factor=Math.hypot(x,y);
-      angle=factor<EPS?angle:followAxis+Math.atan2(y,x);length*=factor;width*=rigWidth(Math.abs(amount),widthResponse);
-    }
-    if(d) {
-      let actual=(c&&d.branch?span:Math.abs(length))/(Math.max(EPS,Math.abs(scale))*d.restLength);
-      if(c){
-        if(d.source==='slide')actual=position/d.restPosition;
-        else if(d.source==='combined')actual*=position/d.restPosition;
-        if(source&&response?.mode!=='rigid')actual*=clampRig(1+(incoming-1)*(response?.multiplier??1),-100,100);
-      }
-      ratio=c?(actual<0?-1:1)*clampRig(Math.abs(actual),d.min,d.max):clampRig(actual,d.min,d.max);
-      // Connector endpoints are authoritative; limits bound their influence only.
-      if(!c && actual>EPS)length*=ratio/actual;
-      else if(!c && actual<=EPS)length=d.restLength*ratio*scale;
-      width*=rigWidth(Math.abs(ratio),d.width);
-    }
-    if(lock&&lock.space!=='authored'){
-      // Parent multipliers act within the figure. A whole-figure rotation must
-      // still carry a counter-rotating attachment with the rest of its artwork.
-      angle=lockedAngle;
-      inheritedRotation=angle-input.angle;
-    }
-    const result={start,angle,authoredAngle:c||(lock&&lock.space!=='authored')?angle:rawAngle,length,bend,width,handle,position,connector:Boolean(c),rotation:inheritedRotation,ratio,
-      impulseAngle:c?angle:response?.reset?rawAngle:angle,
-      space:rotation||followScale!==undefined||lock?{rotation,followAxis,followScale,locked:Boolean(lock)}:undefined};
-    states[i]=result;
-    const outgoing=plan.outputs[i];
-    if(outgoing&&!outgoing.legacy)result.childSpace={rotation:inheritedRotation,followAxis:states[outgoing.axis].impulseAngle,followScale:states[outgoing.driver].ratio};
-    return result;
-  }};
-}
-
-/** Invert the derived local space for predictable direct posing of details. */
-export function authoredRigTarget(shape,x,y,pose) {
-  const space=shape.rigSpace;if(!space)return {x,y};
-  let dx=x-shape.start.x,dy=y-shape.start.y;
-  if(space.followScale!==undefined){
-    const c=Math.cos(space.followAxis),s=Math.sin(space.followAxis);let side=-dx*s+dy*c,along;
-    if(Math.abs(space.followScale)<1e-4&&pose&&Math.abs(shape.bend??0)<1e-7){
-      // An edge-on fixed-length control has lost one visible coordinate. Lift
-      // the remaining coordinate onto its authored circle, keeping the nearest
-      // branch instead of dividing pointer noise by zero or flipping the joint.
-      const radius=Math.abs(pose.length);side=clampRig(side,-radius,radius);
-      const prior=pose.length*Math.cos(pose.angle+space.rotation-space.followAxis);
-      along=(prior<0?-1:1)*Math.sqrt(Math.max(0,radius*radius-side*side));
-    }else{
-      if(Math.abs(space.followScale)<1e-8)throw messageError(new Error(''), "errors.rigConstraints.expandTheStretchDriverBeforePosingAFully", {});
-      along=(dx*c+dy*s)/space.followScale;
-    }
-    dx=along*c-side*s;dy=along*s+side*c;
-  }
-  const c=Math.cos(space.rotation),s=Math.sin(space.rotation);
-  return {x:shape.start.x+dx*c+dy*s,y:shape.start.y-dx*s+dy*c};
 }

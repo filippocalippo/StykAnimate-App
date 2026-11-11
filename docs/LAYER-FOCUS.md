@@ -21,7 +21,15 @@ temporary lock with the live report only. Copies used for saving, export and
 playback do not inherit this editing restriction. Layer descriptors expose
 `savedLocked`, `focusLocked` and the effective `locked` value, and the existing
 figure lock predicate includes the temporary lock. Focus changes invalidate
-selection/layer UI without changing document revision or undo history.
+selection/layer UI without changing document revision or undo history. They have a
+revision of their own (`layerFocusRevision`, apart from `layerRevision`, which counts
+the engine session's changes of the layers); caches of how the layers look key on both
+(`layerViewKey`).
+
+Edits run in the engine session, which has no focus of its own: with **Focus and lock**
+the editor sends the focused layers with every call, and the session refuses an edit of
+any other layer, Scene or Camera as it refuses a saved lock, with the same message.
+A layer a call creates is free. The focus does not outlive the call that carried it.
 
 Document replacement and timeline disposal clear focus. Deleting a focused layer
 prunes it from the set; deleting the last focused layer ends focus. Figure, connected

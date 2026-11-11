@@ -1,0 +1,190 @@
+{
+ "name": "vfx-scopes-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   true
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   true
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   false
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "segment",
+    "uid": 1,
+    "handleId": 22
+   },
+   true
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "scene"
+   },
+   true
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   1
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 99
+   },
+   true
+  ],
+  [
+   "pasteVfx",
+   [
+    {
+     "kind": "figure",
+     "uid": 1
+    },
+    {
+     "kind": "figure",
+     "uid": 2
+    },
+    {
+     "kind": "segment",
+     "uid": 1,
+     "handleId": 22
+    }
+   ],
+   [
+    {
+     "version": 2,
+     "id": "fx-paint",
+     "type": "tint",
+     "enabled": true,
+     "params": {
+      "color": {
+       "type": "linear",
+       "angle": 45,
+       "stops": [
+        {
+         "offset": 1,
+         "color": [
+          240.5,
+          60.2,
+          80
+         ],
+         "opacity": 0.6
+        },
+        {
+         "offset": 0,
+         "color": [
+          40,
+          120.5,
+          255
+         ],
+         "opacity": 1
+        }
+       ]
+      },
+      "mix": 0.7
+     }
+    }
+   ],
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 2
+   },
+   true
+  ],
+  [
+   "pasteVfx",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   [
+    {
+     "version": 2,
+     "id": "fx-paint",
+     "type": "blur",
+     "enabled": true,
+     "params": {
+      "effectStrength": 1,
+      "mode": 0,
+      "radius": 4,
+      "angle": 0,
+      "centerX": 0.5,
+      "centerY": 0.5
+     }
+    }
+   ],
+   {
+    "includeAttached": true
+   }
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   true
+  ],
+  [
+   "setVfxScope",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   true
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

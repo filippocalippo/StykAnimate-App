@@ -1,0 +1,110 @@
+{
+ "name": "spatial-mechanism-drag-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/spatial/mesh-mechanism.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   8
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   340,
+   200
+  ],
+  [
+   "poseJoint",
+   360,
+   220
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "@select",
+   1,
+   11
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   308.4274597167969,
+   213.79788208007812,
+   {
+    "anchor": {
+     "x": 307.4274597167969,
+     "y": 212.79788208007812
+    }
+   }
+  ],
+  [
+   "poseJoint",
+   313.4274597167969,
+   215.79788208007812
+  ],
+  [
+   "poseJoint",
+   319.4274597167969,
+   210.79788208007812
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   707.4274597167969,
+   212.79788208007812
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "@select",
+   1,
+   14
+  ],
+  [
+   "poseJoint",
+   350,
+   250
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   330,
+   160
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -29,7 +29,6 @@ async function setup() {
     ];
     styk.editor.load(report, "Replacement boundary");
     styk.settingsUI.commit({ timelineMode: "simple" });
-    styk.editor.beginFrameDraft({ mode: "add", index: 0 });
     styk.editor.select(90);
     styk.editor.markSaved();
     styk.fit();
@@ -117,32 +116,20 @@ try {
   await page.locator("#discard-changes").click();
   await page.evaluate(async () => {
     await pendingNew;
-    window.newRoot = JSON.stringify(styk.editor.frame.objects);
+    window.newRoot = JSON.stringify(styk.editor.evaluatedFrame.objects);
   });
   await page.mouse.up();
   check(
-    "Discarding the last project leaves a clean zero-frame document without an old drag",
+    "Discarding the last project leaves a clean new document without an old drag",
     await page.evaluate(
       () =>
         styk.editor.report !== replaceBefore.report &&
-        styk.editor.totalTicks === 0 &&
         !styk.state.drag &&
         !styk.editor._drag &&
         !styk.editor.canUndo &&
         !styk.editor.dirty &&
-        JSON.stringify(styk.editor.frame.objects) === newRoot,
+        JSON.stringify(styk.editor.evaluatedFrame.objects) === newRoot,
     ),
-  );
-  check(
-    "New footer reports zero stored keys",
-    (await page.locator("#timeline-summary").count())
-      ? await page
-          .locator("#timeline-summary")
-          .innerText()
-          .then((text) => text.startsWith("0 keys"))
-      : await page.evaluate(() =>
-          document.body.innerText.includes("0 keys · 0 frames"),
-        ),
   );
   await setup();
   await hold();
@@ -174,7 +161,7 @@ try {
     }),
   );
   await page.evaluate(() => {
-    window.importedRoot = JSON.stringify(styk.editor.frame.objects);
+    window.importedRoot = JSON.stringify(styk.editor.evaluatedFrame.objects);
   });
   await page.mouse.up();
   check(
@@ -185,7 +172,7 @@ try {
         !styk.state.drag &&
         !styk.editor._drag &&
         !styk.editor.dirty &&
-        JSON.stringify(styk.editor.frame.objects) === importedRoot,
+        JSON.stringify(styk.editor.evaluatedFrame.objects) === importedRoot,
     ),
   );
   check("No unhandled renderer errors", errors.length === 0);

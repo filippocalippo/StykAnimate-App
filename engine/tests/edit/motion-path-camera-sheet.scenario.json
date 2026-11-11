@@ -1,0 +1,115 @@
+{
+ "name": "motion-path-camera-sheet",
+ "document": "camera-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "camera"
+   },
+   3
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 420,
+    "y": 300
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 430,
+    "y": 310
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "camera"
+   },
+   6
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 380,
+    "y": 290
+   }
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "camera"
+   },
+   2,
+   {
+    "falloff": {
+     "radius": 4,
+     "shape": "smooth"
+    }
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 400,
+    "y": 320
+   }
+  ],
+  [
+   "motionPathFalloff"
+  ],
+  [
+   "commitMotionPathEdit"
+  ],
+  [
+   "beginMotionPathEdit",
+   {
+    "kind": "camera"
+   },
+   5,
+   {
+    "falloff": {
+     "radius": 2,
+     "shape": "sharp"
+    }
+   }
+  ],
+  [
+   "updateMotionPathEdit",
+   {
+    "x": 390,
+    "y": 280
+   }
+  ],
+  [
+   "cancelMotionPathEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

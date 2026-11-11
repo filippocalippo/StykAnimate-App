@@ -1,0 +1,66 @@
+{
+ "name": "clip-place-legacy-native",
+ "document": "clip-place-legacy-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "placeMovieclip",
+   {
+    "end": 6
+   }
+  ],
+  [
+   "@seek",
+   2.75
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 2,
+    "end": 9
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "@seek",
+   5.25
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 1,
+    "end": 8
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   7.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "createEmptyMovieclip",
+   "Branch"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

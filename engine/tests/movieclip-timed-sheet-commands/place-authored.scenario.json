@@ -1,0 +1,56 @@
+{
+ "name": "place-authored",
+ "document": "place-authored.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   2.75
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 2,
+    "end": 10
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "@seek",
+   4.5
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 1,
+    "end": 8
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   5.25
+  ]
+ ]
+}

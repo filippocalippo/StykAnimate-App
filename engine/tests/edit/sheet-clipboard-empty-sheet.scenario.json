@@ -1,0 +1,25 @@
+{
+ "name": "sheet-clipboard-empty-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "sheetPasteFrames",
+   [
+    "layer-1"
+   ],
+   0
+  ],
+  [
+   "sheetPasteFrames",
+   [
+    "layer-1",
+    "layer-1"
+   ],
+   0
+  ]
+ ]
+}

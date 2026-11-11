@@ -1,0 +1,119 @@
+{
+ "name": "ik-spatial-target-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/spatial.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   9
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   223,
+   241
+  ],
+  [
+   "poseJoint",
+   231,
+   235
+  ],
+  [
+   "poseJoint",
+   203,
+   251
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "poseJoint",
+   215,
+   245,
+   {
+    "depth": true,
+    "pixel": 2
+   }
+  ],
+  [
+   "poseJoint",
+   215,
+   275,
+   {
+    "depth": true,
+    "pixel": 2
+   }
+  ],
+  [
+   "poseJoint",
+   220,
+   275
+  ],
+  [
+   "poseJoint",
+   225,
+   270
+  ],
+  [
+   "commitDrag"
+  ],
+  [
+   "setSpatialIKTarget",
+   {
+    "swivel": 0.3
+   }
+  ],
+  [
+   "setSpatialIKTarget",
+   {
+    "pole": [
+     0,
+     0,
+     1
+    ]
+   }
+  ],
+  [
+   "setSpatialIKTarget",
+   {
+    "depth": 5
+   }
+  ],
+  [
+   "setSpatialIKTarget",
+   {
+    "bad": 1
+   }
+  ],
+  [
+   "setSpatialIKTarget",
+   {
+    "pole": [
+     1,
+     1,
+     0
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

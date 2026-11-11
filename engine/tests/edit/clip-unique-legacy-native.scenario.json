@@ -1,0 +1,40 @@
+{
+ "name": "clip-unique-legacy-native",
+ "document": "clip-unique-legacy-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "makeMovieclipUnique"
+  ],
+  [
+   "@seek",
+   3.25
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "makeMovieclipUnique"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

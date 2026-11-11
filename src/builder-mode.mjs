@@ -12,7 +12,6 @@ import {BuilderSession} from './builder-session.mjs';
 import {FigureOutliner, partName} from './builder-outliner.mjs';
 import {builderContextItems} from './builder-context-menu.mjs';
 
-const esc = value => String(value).replace(/[&<>"']/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
 const ENTRY_TOOLS = new Set(['rig', 'line', 'chain', 'circle', 'polygon', 'attach']);
 
 export function initBuilderMode({editor, state, host}) {

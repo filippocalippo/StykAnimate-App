@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { BROWSER, launchBrowser } from './support/cross-browser.mjs';
+import { BROWSER, launchBrowser, requireDrawing } from './support/cross-browser.mjs';
 import { buildWeb } from '../scripts/build-web.mjs';
 import { startWebServer } from '../scripts/serve-web.mjs';
 
@@ -16,6 +16,7 @@ const temp = await mkdtemp(path.join(os.tmpdir(), 'styk-autosave-'));
 const existing = process.env.STYK_WEB_DIR && path.resolve(process.env.STYK_WEB_DIR);
 const site = await startWebServer({ root: existing ?? (await buildWeb({ output: path.join(temp, 'site') })).output });
 const browser = await launchBrowser();
+await requireDrawing(browser, site.origin, async () => { await browser.close(); await site.close(); await rm(temp, { recursive: true, force: true }); });
 const checks = [];
 const check = (name, condition) => { assert.ok(condition, `[${BROWSER}] ${name}`); checks.push(name); console.log('PASS', `[${BROWSER}]`, name); };
 const until = async (description, read, timeout = 45000) => {
@@ -47,7 +48,7 @@ const recovery = (page) => page.evaluate(async () => {
 /** Moves the figure with the mouse, like a person, so the project becomes unsaved. */
 async function dragFigure(page, dx = 90) {
   const at = await page.evaluate(async () => {
-    const { worldToScreen } = await import('/src/renderer.mjs');
+    const { worldToScreen } = await import('/src/renderer-geometry.mjs');
     const { editor, state } = window.styk, rect = document.getElementById('overlay').getBoundingClientRect();
     editor.select(editor.frame.objects[0].unique_id, -1);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));

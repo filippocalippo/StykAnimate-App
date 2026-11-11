@@ -1,0 +1,63 @@
+{
+ "name": "channels-curves-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/channels/channels-curves.sheet.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "moveSelection",
+   10,
+   -10
+  ],
+  [
+   "@seek",
+   20
+  ],
+  [
+   "rotateSelection",
+   0.5
+  ],
+  [
+   "@seek",
+   27
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "moveSelection",
+   6,
+   6
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "sheetRemoveFrames",
+   [
+    "layer-1"
+   ],
+   10,
+   11
+  ],
+  [
+   "undo"
+  ]
+ ]
+}

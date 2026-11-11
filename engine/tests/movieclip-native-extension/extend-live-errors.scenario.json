@@ -1,0 +1,61 @@
+{
+ "name": "extend-live-errors",
+ "document": "extend-live-errors.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginTranslationDrag",
+   "Other figure"
+  ],
+  [
+   "moveSelection",
+   4.5,
+   -2.25
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   0
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   0.5
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   -1
+  ],
+  [
+   "addMovieclipToNextKeyframes",
+   1
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   2,
+   1
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

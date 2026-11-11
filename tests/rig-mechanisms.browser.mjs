@@ -6,7 +6,7 @@ const browser=await chromium.launch({channel:'chrome',headless:true}),page=await
 page.on('pageerror',e=>errors.push(e.message));
 const settle=()=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
 const saved=()=>page.evaluate(()=>JSON.stringify(styk.editor.serialize()));
-const gallery=async()=>{await page.locator('#library-tab').click();await page.locator('.rig-library-examples').click();await settle();};
+const gallery=async()=>{await page.evaluate(()=>styk.actions['rig-examples']());await settle();};
 try{
   await page.goto(process.env.STYK_URL??'http://127.0.0.1:47851');await page.waitForFunction(()=>window.styk?.ready);
   assert.ok(await page.locator('#viewport').isVisible());assert.deepEqual(errors,[]);

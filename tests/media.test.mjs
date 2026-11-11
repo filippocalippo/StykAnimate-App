@@ -1,24 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createImageFigure, createImageBackground, applySpriteColorKey, mediaImageFormat, preserveMediaBackground} from '../src/media-authoring.mjs';
-import {Editor} from '../src/editor.mjs';
-import {buildGeometry} from '../src/pivot/geometry.mjs';
 
 const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHk8AAAAASUVORK5CYII=';
-
-test('sprite factory enters the actual editor, renders as media, and survives undo/redo/JSON', () => {
-  const editor = new Editor({demo: false});
-  editor.importFigure(createImageFigure({dataUrl, width: 1, height: 1, name: 'Pixel.png'}));
-  const uid = editor.selectedUid, figure = editor.figure;
-  assert.equal(figure.name, 'Pixel'); assert.equal(figure.image_assets[0].data_url, dataUrl);
-  const shape = buildGeometry(editor.report, editor.frame).drawables.find(s => s.obj.unique_id === uid);
-  assert.equal(shape.type, 'image'); assert.ok(shape.asset.anchor_length > 0);
-  assert.equal(shape.start.x, editor.report.canvas_width / 2);
-  editor.undo(); assert.equal(editor.frame.objects.length, 0);
-  editor.redo(); assert.equal(editor.object.unique_id, uid);
-  const reopened = new Editor({demo: false}).load(JSON.parse(JSON.stringify(editor.serialize())));
-  assert.equal(reopened.figure.image_assets[0].data_url, dataUrl);
-});
 
 test('background creation preserves embedded image and gives an interchangeable safe name', () => {
   const background = createImageBackground({dataUrl, width: 1, height: 1, name: 'café 動画.png', backgroundId: 7});

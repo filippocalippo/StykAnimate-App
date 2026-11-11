@@ -1,0 +1,202 @@
+{
+ "name": "polygons-sheet",
+ "document": "startup.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addPolygon",
+   [
+    0,
+    2,
+    3
+   ]
+  ],
+  [
+   "addPolygon",
+   [
+    3,
+    2,
+    0
+   ]
+  ],
+  [
+   "addPolygon",
+   [
+    1,
+    4,
+    5,
+    1
+   ],
+   {
+    "color": "#FF8800",
+    "opacity": 0.5,
+    "zOrder": 3
+   }
+  ],
+  [
+   "addPolygon",
+   [
+    1,
+    1,
+    2
+   ]
+  ],
+  [
+   "addPolygon",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "addPolygon",
+   [
+    1,
+    2,
+    999
+   ]
+  ],
+  [
+   "addPolygon",
+   "x"
+  ],
+  [
+   "addPolygon",
+   [
+    0,
+    2,
+    4
+   ],
+   {
+    "color": "red"
+   }
+  ],
+  [
+   "addPolygon",
+   [
+    0,
+    2,
+    4
+   ],
+   {
+    "opacity": 2
+   }
+  ],
+  [
+   "addPolygon",
+   [
+    0,
+    2,
+    4
+   ],
+   {
+    "zOrder": 1e+39
+   }
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "handleIds": [
+     0,
+     2,
+     4
+    ]
+   }
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "zOrder": -5
+   }
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "handleIds": [
+     5,
+     4,
+     1
+    ]
+   }
+  ],
+  [
+   "updatePolygon",
+   5,
+   {
+    "zOrder": 1
+   }
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "fill": 1
+   }
+  ],
+  [
+   "updatePolygon",
+   0,
+   {
+    "surface": null
+   }
+  ],
+  [
+   "updatePolygon",
+   0,
+   {}
+  ],
+  [
+   "removePolygon",
+   0
+  ],
+  [
+   "removePolygon",
+   9
+  ],
+  [
+   "@select",
+   1,
+   3
+  ],
+  [
+   "beginDrag",
+   "Pose joint"
+  ],
+  [
+   "poseJoint",
+   520,
+   300
+  ],
+  [
+   "addPolygon",
+   [
+    0,
+    3,
+    4
+   ]
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

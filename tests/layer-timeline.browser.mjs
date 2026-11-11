@@ -27,10 +27,10 @@ try{
   const simple=await page.evaluate(()=>({duration:styk.editor.totalTicks,keys:styk.timeline.frameCount,draft:styk.editor.report._styk.simpleFrameDraft??null,tick:styk.editor.tick}));
   assert.equal(simple.draft,null);assert.equal(simple.tick,beforeAdd+1);assert.ok(simple.duration>simple.tick);
   await page.evaluate(()=>styk.settingsUI.commit({timelineMode:'advanced'}));
-  const binary=await page.evaluate(async()=>{const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{Editor}=await import('/src/editor.mjs');const e=styk.editor,exporter=new DocumentExporter(),importer=new ImportClient();try{
+  const binary=await page.evaluate(async()=>{const {DocumentExporter}=await import('/src/document-export.mjs'),{ImportClient}=await import('/src/import-client.mjs'),{pageEditor}=await import('/tests/support/page-editor.mjs');const e=styk.editor,exporter=new DocumentExporter(),importer=new ImportClient();try{
     const samples=e=>{const output=[];for(let t=0;t<e.totalTicks;t++){e.seek(t);output.push(e.evaluatedFrame.objects.map(o=>[o.unique_id,o.root_x,o.root_y]));}return output;};
-    const expected=samples(e),blob=await exporter.export(e.report,{format:'styk',name:'layer-test'}),result=await importer.importFile(new File([blob],'layer-test.styk')),reopened=new Editor({demo:false,layerTimeline:true}).load(result.document);
-    const exact=JSON.stringify(samples(reopened))===JSON.stringify(expected),piv=await exporter.export(e.report,{format:'piv',name:'layer-test'}),native=await importer.importFile(new File([piv],'layer-test.piv')),pivot=new Editor({demo:false,layerTimeline:true}).load(native.document);
+    const expected=samples(e),blob=await exporter.export(e.report,{format:'styk',name:'layer-test'}),result=await importer.importFile(new File([blob],'layer-test.styk')),reopened=pageEditor().load(result.document);
+    const exact=JSON.stringify(samples(reopened))===JSON.stringify(expected),piv=await exporter.export(e.report,{format:'piv',name:'layer-test',revision:e.revision}),native=await importer.importFile(new File([piv],'layer-test.piv')),pivot=pageEditor().load(native.document);
     return {exact,pivotExact:JSON.stringify(samples(pivot))===JSON.stringify(expected),bytes:blob.size,pivBytes:piv.size};
   }finally{exporter.dispose();importer.dispose();}});
   assert.equal(binary.exact,true,JSON.stringify(binary));assert.equal(binary.pivotExact,true,JSON.stringify(binary));

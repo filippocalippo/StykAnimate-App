@@ -1,0 +1,93 @@
+{
+ "name": "spatial-mechanism-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/spatial/mesh-mechanism.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   8
+  ],
+  [
+   "rotateJoint",
+   0.3
+  ],
+  [
+   "setSpatialMotion",
+   0.9
+  ],
+  [
+   "setSpatialMotion",
+   0.25,
+   {
+    "fraction": true
+   }
+  ],
+  [
+   "@select",
+   1,
+   11
+  ],
+  [
+   "setSpatialMotion",
+   10
+  ],
+  [
+   "setSpatialMotion",
+   1,
+   {
+    "fraction": true
+   }
+  ],
+  [
+   "rotateJoint",
+   0.2
+  ],
+  [
+   "setSpatialMotion",
+   null
+  ],
+  [
+   "@select",
+   1,
+   14
+  ],
+  [
+   "rotateJoint",
+   0.5
+  ],
+  [
+   "@select",
+   1,
+   5
+  ],
+  [
+   "setSpatialPose",
+   {
+    "turn": 0.2,
+    "pitch": 0.1
+   }
+  ],
+  [
+   "@select",
+   1,
+   2
+  ],
+  [
+   "setSpatialMotion",
+   0.5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

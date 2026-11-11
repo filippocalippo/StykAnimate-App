@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { TelemetryService, endpoint } from '../desktop/telemetry.cjs';
 import { TelemetryAccumulator } from '../src/telemetry-core.mjs';
-import { validateSnapshot, sanitizeError, percentile, POLICY_VERSION, emptyHistogram, observe } from '../src/telemetry-schema.mjs';
+import { validateSnapshot, sanitizeError, sanitizeEnvironment, percentile, POLICY_VERSION, emptyHistogram, observe } from '../src/telemetry-schema.mjs';
 const schemaPath = path.resolve('src/telemetry-schema.mjs');
 const consent = { analytics: true, diagnostics: true };
 async function fixture(options = {}) {
@@ -32,6 +32,10 @@ test('separate consent gates survive privileged boundary and category withdrawal
   service.record({ epoch: service.epoch, data: acc.drain(), environment: { mode: 'advanced', locale: 'it' } });
   report = service.preview().snapshots[0]; assert.equal(report.counters.open, undefined); assert.equal(report.counters.renderer_crashes, 1); assert.equal(report.timings.save_ms.count, 1); assert.deepEqual(report.milestones, {});
   assert.equal(validateSnapshot(report).environment.mode, 'unknown');
+});
+test('the graphics backends of the engine are reported by name', () => {
+  for (const backend of ['webgpu', 'webgl2', 'unavailable']) assert.equal(sanitizeEnvironment({ backend }).backend, backend);
+  assert.equal(sanitizeEnvironment({ backend: 'WebGL2' }).backend, 'unknown');
 });
 test('strict payload sanitization, finite histogram counts and redacted error context', async () => {
   const { service } = await fixture(); await service.setConsent(consent);
@@ -68,7 +72,8 @@ test('delete removes local data, queues an offline request, survives restart and
   assert.equal(JSON.parse(await readFile(path.join(directory, 'telemetry-state.json'), 'utf8')).deletions.length, 0);
 });
 test('unchanged and idle-only reports do not use hosting requests; new activity carries deferred idle time', async () => {
-  let now = Date.now(); const { service, requests } = await fixture({ now: () => now });
+  // Noon, so that the twenty minutes added below never cross into the next day.
+  let now = new Date().setUTCHours(12, 0, 0, 0); const { service, requests } = await fixture({ now: () => now });
   await service.setConsent(consent); await service.upload();
   const sequence = service.preview().snapshots[0].sequence;
   assert.equal(service.record({ epoch: service.epoch, data: {} }), false);

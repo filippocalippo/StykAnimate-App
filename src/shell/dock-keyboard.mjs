@@ -1,46 +1,36 @@
 import {t as interfaceText} from '../localization.mjs';
 import {appendLocalized, localizedText} from '../localization-bindings.mjs';
 /**
- * Keyboard paths through the shell (WCAG 2.5.7: every drag has one).
+ * Keyboard paths through the docked window (WCAG 2.5.7: every drag has one).
  *
  * - F6 and Ctrl+F6 (`focus-next-region`, `focus-previous-region`) cycle the
- *   regions: band → rail → left dock → stage header → stage → right dock →
- *   timeline → floating panels. Each region takes focus at its selected tab,
- *   its first control or itself; hidden and folded regions are skipped.
+ *   regions in reading order: the band, the tool bar, then the arrangement's
+ *   groups and the stage (its header, then the canvas) as the tree lists
+ *   them, then the floats. Each region takes focus at its selected tab, the
+ *   canvas, its named collection or its first control; hidden regions are
+ *   skipped. It works from a text field and in the browser.
  * - Ctrl+Alt+M (`layout-arrange`) moves the focused panel: the arrow keys
- *   step through the places it may go (Dock left, Dock right, Float), one
- *   calm drop target previews the place and says its name, Enter commits and
- *   Escape (or Tab, or a click) cancels. The instruction is announced with the
- *   first place, never shown as a sentence. While it moves, no other key
- *   reaches the editor.
+ *   step through every place it may go (dock-tabs.mjs dockTargets), the
+ *   exact area it would take shows with its name, Enter moves it and Escape
+ *   (or Tab, or a click) cancels. While it moves, no other key reaches the
+ *   editor.
  */
+import {dockTargets, previewRect, zoneLabelKey} from './dock-tabs.mjs';
+
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-const PLACE_KEYS = Object.freeze({left:'dockKeyboard.dockLeft', right:'dockKeyboard.dockRight', float:'dockKeyboard.floatHere'});
 /** A region's main collection, where focus lands before its first control. */
 export const COLLECTIONS = '[role="tree"][aria-label], [role="grid"][aria-label], [role="listbox"][aria-label]';
 
-const shown = element => Boolean(element?.isConnected && element.getClientRects().length && !element.closest('[hidden], [inert]'));
+const shown = element => Boolean(element?.isConnected && element.getClientRects().length && !element.closest('[hidden], [inert], .shell-parking'));
 
-/**
- * `host` is the dock host (dock-host.mjs). `announce(text)` speaks a short
- * status (a polite live region).
- */
 export function createDockKeyboard({document: doc = globalThis.document, window: win = globalThis.window, host, announce = () => {}} = {}) {
   const panelName = id => {
     const panel = host.registry.get(id);
-    return panel?.titleKey ? {messageKey:panel.titleKey} : panel?.title ?? id;
+    return panel?.titleKey ? {messageKey: panel.titleKey} : panel?.title ?? id;
   };
-  const regionList = () => {
-    const {hosts, bottom, stage, viewport, band, rail, floats} = host.regions();
-    const head = stage?.querySelector(':scope > .stage-head');
-    return [band, rail, hosts.left, head, viewport, hosts.right, bottom, ...floats].filter(element => shown(element));
-  };
+  const regionList = () => host.regions().ordered.filter(shown);
 
-  /**
-   * The element a region takes focus at: its selected tab, the stage itself,
-   * the timeline's named collection (the "Layer frames" grid, or Simple's
-   * frame list), else its first control. Never an unnamed container.
-   */
+  /** Where a region takes focus: its selected tab, the canvas, its named collection, else its first control. */
   function entry(region) {
     const tab = [...region.querySelectorAll('[role="tab"][aria-selected="true"]')].find(shown);
     if (tab) return tab;
@@ -80,19 +70,30 @@ export function createDockKeyboard({document: doc = globalThis.document, window:
 
   const panelOf = element => {
     const panel = element?.closest?.('[data-panel]');
-    if (!panel) return null;
-    const id = panel.dataset.panel;
-    return id && id !== 'timeline' && host.registry.has(id) ? id : null;
+    const id = panel?.dataset.panel ?? (element?.closest?.('#animation-timeline') ? 'timeline' : null);
+    return id && host.registry.has(id) ? id : null;
   };
+
+  /** The zone's area: the floating place for `float`, else the solved rectangle of the move. */
+  function areaOf(target) {
+    const s = host.solution;
+    if (target.kind === 'float') {
+      const width = Math.min(320, s.stage.width - 32), height = Math.min(480, s.stage.height - 32);
+      return {x: s.stage.x + s.stage.width - width - 24, y: s.stage.y + 56, width, height};
+    }
+    return previewRect(host, {panel: move.id}, target);
+  }
 
   function preview({announce: speak = true} = {}) {
     const target = move.targets[move.index];
-    const workspace = doc.querySelector('.workspace');
-    if (zone.parentElement !== workspace) appendLocalized(workspace, zone);
-    zone.dataset.target = target;
-    zone.hidden = false;
-    localizedText(zoneLabel, PLACE_KEYS[target]);
-    if (speak) announce(interfaceText(PLACE_KEYS[target]));
+    const rect = move.rects[move.index] ?? (move.rects[move.index] = areaOf(target));
+    if (zone.parentElement !== doc.body) appendLocalized(doc.body, zone);
+    const box = (doc.getElementById('app') ?? doc.documentElement).getBoundingClientRect();
+    if (rect) Object.assign(zone.style, {left: `${Math.round(rect.x + box.left)}px`, top: `${Math.round(rect.y + box.top)}px`, width: `${Math.round(rect.width)}px`, height: `${Math.round(rect.height)}px`});
+    zone.dataset.target = target.kind;
+    zone.hidden = !rect;
+    localizedText(zoneLabel, zoneLabelKey(target));
+    if (speak) announce(interfaceText(zoneLabelKey(target)));
   }
 
   function finish(commit) {
@@ -102,11 +103,11 @@ export function createDockKeyboard({document: doc = globalThis.document, window:
     zone.hidden = true;
     win.removeEventListener('keydown', onKey, true);
     win.removeEventListener('pointerdown', onPointer, true);
-    if (!commit) { announce(interfaceText("dockKeyboard.moveCancelled")); restore?.focus?.({preventScroll: true}); return; }
+    if (!commit) { announce(interfaceText('dockKeyboard.moveCancelled')); restore?.focus?.({preventScroll: true}); return; }
     const target = targets[index];
-    if (target === 'float') host.workspace.float(id);
-    else host.workspace.dock(id, target);
-    announce(interfaceText('dockKeyboard.panelLocation', {title:panelName(id), place:{messageKey:PLACE_KEYS[target]}}));
+    if (target.kind === 'float') host.workspace.float(id);
+    else host.workspace.move(id, target);
+    announce(interfaceText('dockKeyboard.panelLocation', {title: panelName(id), place: {messageKey: zoneLabelKey(target)}}));
     host.showPanel(id);
   }
 
@@ -121,7 +122,7 @@ export function createDockKeyboard({document: doc = globalThis.document, window:
       return;
     } else {
       // Any other key belongs to the move: it never reaches the editor's shortcuts (H would pick the Hand tool).
-      if (!['Shift', "Control", 'Alt', "Meta"].includes(event.key)) { event.preventDefault(); event.stopPropagation(); }
+      if (!['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) { event.preventDefault(); event.stopPropagation(); }
       return;
     }
     event.preventDefault();
@@ -130,21 +131,17 @@ export function createDockKeyboard({document: doc = globalThis.document, window:
   }
   const onPointer = () => finish(false);
 
-  /** Starts moving the panel that holds focus (or `id`); false when there is none that can move. */
+  /** Starts moving the panel that holds focus (or `id`); false when there is none. */
   function startMove(id = panelOf(doc.activeElement)) {
     if (move) finish(false);
-    if (!id) { announce(interfaceText("dockKeyboard.focusAPanelToMoveIt")); return false; }
-    const targets = ['left', 'right', 'float'].filter(target => host.canPlace(id, target));
-    if (targets.length < 2) { announce(interfaceText("dockKeyboard.thisPanelStaysWhereItIs")); return false; }
-    const presentation = host.presentation(id);
-    const current = presentation === 'float' ? 'float' : host.solution?.panels[id]?.side;
-    const start = Math.max(0, targets.indexOf(current));
-    move = {id, targets, index: (start + 1) % targets.length, restore: doc.activeElement};
+    if (!id || host.presentation(id) === 'unavailable') { announce(interfaceText('dockKeyboard.focusAPanelToMoveIt')); return false; }
+    const targets = dockTargets(host, {panel: id}).filter(target => target.kind === 'float' || previewRect(host, {panel: id}, target));
+    if (!targets.length) { announce(interfaceText('dockKeyboard.thisPanelStaysWhereItIs')); return false; }
+    move = {id, targets, rects: [], index: 0, restore: doc.activeElement};
     win.addEventListener('keydown', onKey, true);
     win.addEventListener('pointerdown', onPointer, true);
-    // One message, so the instructions are not overwritten by the first place in the same task.
     preview({announce: false});
-    announce(interfaceText('dockKeyboard.moveInstructions', {title:panelName(id), place:{messageKey:PLACE_KEYS[move.targets[move.index]]}}));
+    announce(interfaceText('dockKeyboard.moveInstructions', {title: panelName(id), place: {messageKey: zoneLabelKey(targets[0])}}));
     return true;
   }
 

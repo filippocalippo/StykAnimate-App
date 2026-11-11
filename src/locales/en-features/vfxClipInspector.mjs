@@ -34,7 +34,6 @@ export default Object.freeze({
   "vfxClipInspector.saveAsPreset2": "Save as preset…",
   "vfxClipInspector.copyAnimation": "Copy animation",
   "vfxClipInspector.effects": "Effects",
-  "vfxClipInspector.looks": "Looks",
   "vfxClipInspector.pointOnStage": "Point on stage",
   "vfxClipInspector.clickTheStage": "Click the stage…",
   "vfxClipInspector.pick": "Pick",

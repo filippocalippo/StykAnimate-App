@@ -2,18 +2,18 @@ import { chromium } from './support/playwright.mjs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import backendService from '../desktop/backend.cjs';
+import backendService from '../desktop/web-host.cjs';
 import {exportEditable} from './helpers/editable-export.mjs';
 
 const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'artifacts', 'media-worker');
 await mkdir(output, { recursive: true });
-const backend = await backendService.startBackend({ appRoot: root });
+const backend = await backendService.startDesktopHost({ appRoot: root });
 let browser;
 try {
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   const page = await browser.newPage({ viewport: { width: 1200, height: 820 }, acceptDownloads: true });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${backend.origin}/api/health`);
+  await page.goto(`${backend.origin}/tests/fixtures/blank.html`);
   const result = await page.evaluate(async () => {
     const { imageFileToFigure: rawFigure, imageFileToBackground: rawBackground } = await import('/src/media-authoring.mjs');
     const { GIFEncoder } = await import('/src/image-codecs.mjs');
@@ -118,7 +118,7 @@ try {
     await page.waitForFunction(() => !document.querySelector('#export-dialog'));
     const bytes = await readFile(filename);
     const restored = await page.evaluate(async ({ bytes, format }) => {
-      const response = await fetch(`/api/import?filename=native-sprites.${format}`, { method: 'POST', body: Uint8Array.from(bytes), headers: { 'Content-Type': 'application/octet-stream' } });
+      const response = await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=native-sprites.${format}`, { method: 'POST', body: Uint8Array.from(bytes), headers: { 'Content-Type': 'application/octet-stream' } });
       if (!response.ok) throw new Error(await response.text()); return (await response.json()).document;
     }, { bytes: [...bytes], format });
     const assets = restored.figure_types.flatMap(figure => figure.image_assets || []);

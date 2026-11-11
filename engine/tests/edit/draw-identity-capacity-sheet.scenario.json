@@ -1,0 +1,63 @@
+{
+ "name": "draw-identity-capacity-sheet",
+ "document": "draw-identity-capacity-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegment",
+   {
+    "length": 5
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@select",
+   2147483646,
+   1
+  ],
+  [
+   "beginDrag",
+   "Pose figure"
+  ],
+  [
+   "rotateJoint",
+   0.13
+  ],
+  [
+   "@select",
+   null
+  ],
+  [
+   "addSegments",
+   [
+    {
+     "length": 5
+    },
+    {
+     "length": 7
+    }
+   ]
+  ],
+  [
+   "cancelDrag"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -8,7 +8,7 @@ try{
  await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
  await page.evaluate(async()=>{
  const {emptyDocument,createFrame,createObject,defaultFigure}=await import('/src/demo.mjs');
- const {movieclipFigure}=await import('/src/movieclips.mjs');const {presencePlayback}=await import('/src/movieclip-presence.mjs');
+ const {movieclipFigure}=await import('/src/movieclips.mjs');const {presencePlayback}=await import('/tests/support/movieclip-playback.mjs');
  const f=defaultFigure(),child=emptyDocument();child.keyframes=[createFrame([createObject(f,1,50,60)],20)];
  const clip=movieclipFigure(2,'Walking clip',child,{duration:20,pivot:{x:50,y:60}}),report=emptyDocument();report.figure_types=[f,clip];
  report.keyframes=[0,1,2,3].map(n=>createFrame([createObject(f,1,200+n*20,300),...(n===0?[createObject(clip,7,420,300,{_stykMovieclip:presencePlayback()})]:[])],3));

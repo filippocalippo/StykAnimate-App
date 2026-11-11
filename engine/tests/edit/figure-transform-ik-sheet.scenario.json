@@ -1,0 +1,39 @@
+{
+ "name": "figure-transform-ik-sheet",
+ "document": "../../crates/styk-eval/tests/fixtures/ik/stretch.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "transformFigureHandle",
+   330,
+   260
+  ],
+  [
+   "@select",
+   2,
+   2
+  ],
+  [
+   "transformFigureHandle",
+   640,
+   330,
+   {
+    "ctrlKey": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

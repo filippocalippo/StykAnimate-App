@@ -25,7 +25,7 @@ const ID = /^[a-z0-9]{10}$/;
 const OBJECT_KEY = /^i\/[a-z0-9]{10}\/[\w.-]{1,120}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const CATEGORY = /^[a-z]{2,24}$/;
-export const SITE_PAGE = 'https://stykanimate.com/library/';
+const SITE_PAGE = 'https://stykanimate.com/library/';
 
 /** A failure with a message the Library panel can show as it is. */
 export class LibraryError extends Error {}

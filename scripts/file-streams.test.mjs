@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -220,4 +220,96 @@ test('read operations require a live token rather than a filename', async t => {
   const session = await streams.beginRead(destination);
   await streams.closeRead(session.token);
   await rejection(() => streams.read(session.token));
+});
+
+/** Makes `rename` fail with `code` the first `failures` times it is called (always, for Infinity), then do what it does. */
+function failingRename(t, code, failures) {
+  const fsPromises = createRequire(import.meta.url)('node:fs/promises'), real = fsPromises.rename, calls = [];
+  fsPromises.rename = async (...args) => {
+    calls.push(args);
+    if (calls.length <= failures) throw Object.assign(new Error(`${code}: rename`), { code });
+    return real(...args);
+  };
+  t.after(() => { fsPromises.rename = real; });
+  return calls;
+}
+
+async function written(streams, destination, text = 'new') {
+  const session = await streams.beginWrite({ destination, size: text.length });
+  await streams.write(session.token, new TextEncoder().encode(text));
+  return session.token;
+}
+
+for (const code of ['EPERM', 'EACCES', 'EBUSY']) test(`a save whose rename is refused for a moment with ${code} still replaces the file`, async t => {
+  const { streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination), calls = failingRename(t, code, 3);
+  assert.equal((await streams.finish(token)).saved, true);
+  assert.equal(calls.length, 4, 'three refusals and the rename that went through');
+  assert.equal(await readFile(destination, 'utf8'), 'new');
+});
+
+test('a rename that keeps being refused fails after about a second, keeps the old file and removes the temporary file', async t => {
+  const { root, streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination), calls = failingRename(t, 'EPERM', Infinity), started = Date.now();
+  await assert.rejects(streams.finish(token), { code: 'EPERM' });
+  const elapsed = Date.now() - started;
+  assert.ok(calls.length > 3 && calls.length <= 8, `${calls.length} attempts`);
+  assert.ok(elapsed >= 500 && elapsed < 3000, `${elapsed} ms`);
+  assert.equal(await readFile(destination, 'utf8'), 'previous');
+  assert.deepEqual((await readdir(root)).filter(name => name !== 'animation.styk'), [], 'nothing is left beside the file');
+});
+
+test('a failure that is not a refusal of the moment is reported at once', async t => {
+  const { streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination), calls = failingRename(t, 'ENOSPC', Infinity);
+  await assert.rejects(streams.finish(token), { code: 'ENOSPC' });
+  assert.equal(calls.length, 1);
+  assert.equal(await readFile(destination, 'utf8'), 'previous');
+});
+
+test('a cancel while the rename is tried again wins: the old file stays, the temporary file goes, and closing does not wait for the retries', async t => {
+  const { root, streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination), calls = failingRename(t, 'EPERM', Infinity);
+  const finishing = streams.finish(token).then(() => 'saved', error => error);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  const started = Date.now(), cancelled = await streams.cancel(token);
+  const outcome = await finishing;
+  assert.deepEqual(cancelled, { cancelled: true });
+  assert.ok(outcome instanceof Error && outcome.code !== 'EPERM', 'the save is reported cancelled');
+  assert.ok(Date.now() - started < 600, `stopped after ${Date.now() - started} ms`);
+  assert.ok(calls.length < 6);
+  assert.equal(await readFile(destination, 'utf8'), 'previous');
+  assert.deepEqual((await readdir(root)).filter(name => name !== 'animation.styk'), []);
+});
+
+test('closing while a save retries its rename returns within the longest retry delay', async t => {
+  const { streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination);
+  failingRename(t, 'EBUSY', Infinity);
+  const finishing = streams.finish(token).catch(() => {});
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const started = Date.now();
+  await streams.dispose();
+  await finishing;
+  assert.ok(Date.now() - started < 700, `closed after ${Date.now() - started} ms`);
+  assert.equal(await readFile(destination, 'utf8'), 'previous');
+});
+
+test('a cancel that comes after the rename went through is too late: the file is replaced and the save is reported as saved', async t => {
+  const { streams, destination } = await fixture(t);
+  await writeFile(destination, 'previous');
+  const token = await written(streams, destination);
+  const fsPromises = createRequire(import.meta.url)('node:fs/promises'), real = fsPromises.rename;
+  let cancelling;
+  fsPromises.rename = async (...args) => { await real(...args); cancelling = streams.cancel(token); };
+  t.after(() => { fsPromises.rename = real; });
+  const result = await streams.finish(token);
+  assert.equal(result.saved, true);
+  assert.deepEqual(await cancelling, { cancelled: false });
+  assert.equal(await readFile(destination, 'utf8'), 'new');
 });

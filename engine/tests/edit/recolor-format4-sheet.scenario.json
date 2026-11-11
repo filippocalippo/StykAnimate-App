@@ -1,0 +1,96 @@
+{
+ "name": "recolor-format4-sheet",
+ "document": "format4.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "color_override_raw": 255
+   },
+   [
+    0
+   ]
+  ],
+  [
+   "replaceFigureColor",
+   "#ff0000",
+   "#00ff00"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "color_override_raw": -16711936
+   },
+   [
+    0
+   ]
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "color": "#ff0000"
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 2,
+       "stops": []
+      }
+     ],
+     "polygons": []
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setFigureColor",
+   "#336699"
+  ],
+  [
+   "resetFigureColors"
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "color": "#ff0000"
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 2,
+       "stops": []
+      }
+     ],
+     "polygons": []
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

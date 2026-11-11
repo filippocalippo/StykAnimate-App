@@ -12,7 +12,7 @@ const SURFACE_KEYS=new Set(['basis','depth','depthTest','side']);
 const polyAlpha=p=>p.alpha_raw===undefined?(p.color_alpha??1):1-p.alpha_raw/255;
 
 /** The mesh a figure's skin surfaces would become, or the reason it cannot. */
-export function legacySpatialMesh(figure){
+function legacySpatialMesh(figure){
   if(figure._styk?.spatialMesh)return {reason:interfaceText("spatialMeshLegacy.theFigureAlreadyHasAMesh"), reasonKey: "spatialMeshLegacy.theFigureAlreadyHasAMesh"};
   if(figure._styk?.movieclip)return {reason:interfaceText("spatialMeshLegacy.movieclipsKeepTheirOwnMeshes"), reasonKey: "spatialMeshLegacy.movieclipsKeepTheirOwnMeshes"};
   const segments=figure.segments,candidates=new Map();

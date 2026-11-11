@@ -1,59 +1,105 @@
+// The inspector's branch opacity gesture on an editor the engine owns: one session animation edit of the branch's segments (and enclosed
+// polygons), previewed on the frame the gesture began on, keyed at the playhead as one entry when it ends.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Editor} from '../src/editor.mjs';
-import {createObject,createFrame} from '../src/demo.mjs';
-import {branchOpacityPlan} from '../src/editor-branch-style.mjs';
-import {beginNativePropertyEdit,previewNativePropertyEdit,commitNativePropertyEdit,cancelNativePropertyEdit} from '../src/native-property-edit.mjs';
-const reset=e=>{e._undo=[];e._redo=[];e._historySize=0;e.markSaved();};
-function fixture(){
- const e=new Editor({demo:false});e.addFigure();e.select(e.selectedUid,2);const f=e.figure;
- f.segments[2].secondary={rgb:[250,30,40],a:80};f.segments[3].secondary={rgb:[20,240,50],a:120};
- f.polyfills=[{polyfill_id:1,segment_ids:[1,3,4],color_rgb:[10,20,30],alpha_raw:35,color_alpha:1-35/255,z_order:.5}];
- const other=createObject(f,900,30,50,{object_slot:1});e.frame.objects.push(other);e.frame.object_draw_order.push(1);e.frame.object_draw_order_unique_ids.push(900);e.frame.duration_raw=12;e.report.keyframes.push(createFrame(e.frame.objects.map(object=>structuredClone(object))));e._invalidate({timing:true});reset(e);return e;
+import {emptyDocument, createObject, createFrame} from '../src/demo.mjs';
+import {beginNativePropertyEdit, previewNativePropertyEdit, commitNativePropertyEdit, cancelNativePropertyEdit} from '../src/native-property-edit.mjs';
+import {engineBuilt} from './support/engine-node.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
+
+/** Two figures of one definition keyed at ticks 0 and 6; figure 1's segment 3 is selected, its branch holds segments 3 and 4 and the polygon over 1, 3 and 4. */
+function fixture(style) {
+  const report = emptyDocument(), figure = report.figure_types[0];
+  figure.segments[2].secondary = {rgb: [250, 30, 40], a: 80};
+  figure.segments[3].secondary = {rgb: [20, 240, 50], a: 120};
+  figure.polyfills = [{polyfill_id: 1, segment_ids: [1, 3, 4], color_rgb: [10, 20, 30], alpha_raw: 35, color_alpha: 1 - 35 / 255, z_order: .5}];
+  report.keyframes = [0, 1].map(() => createFrame([createObject(figure, 1, 200, 200), createObject(figure, 2, 400, 200)], 6));
+  if (style) for (const frame of report.keyframes) frame.objects[0]._stykStyle = style;
+  const editor = ownedEditorFor({demo: false, layerTimeline: true, propertyChannels: true}, report);
+  editor.select(1, 2);
+  return editor;
 }
-const target=(e,handleId)=>({kind:'segment',uid:e.selectedUid,handleId});
-test('unoverridden numeric branch opacity keeps native shared definition and enclosed polygons in one sparse undo',()=>{
- const e=fixture(),f=e.figure,before=JSON.stringify(f),frame=e.frame,objects=e.frame.objects;
- assert.equal(branchOpacityPlan(e,'segment_opacity').authored,false);
- const token=beginNativePropertyEdit(e,'segment_opacity',{branch:true});previewNativePropertyEdit(token,40);
- assert.equal(f.segments[2].transparency,153);assert.equal(f.segments[3].transparency,153);assert.equal(f.polyfills[0].alpha_raw,153);
- assert.equal(e.animationChannels.length,0);assert.equal(e.frame,frame);assert.equal(e.frame.objects,objects);
- assert.ok(commitNativePropertyEdit(token));assert.equal(e._undo.length,1);assert.equal(e._undo[0].kind,'native-properties');assert.ok(e._undo[0].bytes<4000);
- e.undo();assert.equal(JSON.stringify(e.figure),before);
+const segment = (uid, handleId) => ({kind: 'segment', uid, handleId, figureTypeId: 1});
+const polygon = {kind: 'polygon', uid: 1, polygonId: 1, figureTypeId: 1};
+const value = (editor, target, property, tick = editor.tick) => editor.animationValue(target, property, tick);
+const edit = (editor, key, number, options = {branch: true}) => {
+  const token = beginNativePropertyEdit(editor, key, options);
+  previewNativePropertyEdit(token, number);
+  return commitNativePropertyEdit(token);
+};
+
+test('a cancelled branch edit leaves the document as it was, and the same value still sets the children that differ', {skip: !engineBuilt}, () => {
+  const editor = fixture({segments: {3: {gradientOpacity: .25}}});
+  const source = JSON.stringify(editor.report);
+  const cancel = beginNativePropertyEdit(editor, 'segment_gradient_opacity', {branch: true});
+  previewNativePropertyEdit(cancel, 60);
+  assert.equal(value(editor, segment(1, 4), 'gradientOpacity'), .6, 'the preview is what shows');
+  cancelNativePropertyEdit(cancel);
+  assert.equal(value(editor, segment(1, 4), 'gradientOpacity'), 1 - 120 / 255, 'and is gone when it is cancelled');
+  assert.equal(JSON.stringify(editor.report), source);
+  assert.equal(editor.canUndo, false, 'a cancelled edit is no entry');
+  assert.equal(editor._animationEdit, null);
+  // Segment 3 is at 25 already: typing 25 still brings segment 4 (at 53) to it.
+  const token = beginNativePropertyEdit(editor, 'segment_gradient_opacity', {branch: true});
+  assert.equal(token.initialValue, 25);
+  previewNativePropertyEdit(token, 25);
+  assert.ok(commitNativePropertyEdit(token));
+  assert.equal(value(editor, segment(1, 3), 'gradientOpacity'), .25);
+  assert.equal(value(editor, segment(1, 4), 'gradientOpacity'), .25);
+  assert.equal(JSON.stringify(editor.report.figure_types), JSON.stringify(JSON.parse(source).figure_types), 'the shared definition is untouched');
 });
-test('native secondary opacity preserves every existing gradient RGB and does not invent gradients or change polygons',()=>{
- const e=fixture(),f=e.figure,colors=f.segments.map(s=>s.secondary&&[...s.secondary.rgb]),poly=JSON.stringify(f.polyfills),before=JSON.stringify(f);
- const token=beginNativePropertyEdit(e,'segment_gradient_opacity',{branch:true});previewNativePropertyEdit(token,25);
- assert.equal(f.segments[2].secondary.a,191);assert.equal(f.segments[3].secondary.a,191);
- assert.deepEqual(f.segments.map(s=>s.secondary&&s.secondary.rgb),colors);assert.equal(JSON.stringify(f.polyfills),poly);
- cancelNativePropertyEdit(token);assert.equal(JSON.stringify(f),before);assert.equal(e._undo.length,0);
+
+test('a branch opacity edit keys the branch and its polygon at the playhead as one entry and no other figure', {skip: !engineBuilt}, () => {
+  const editor = fixture();
+  editor.seek(6);
+  const source = JSON.stringify(editor.report), entries = editor._undo.length;
+  const token = beginNativePropertyEdit(editor, 'segment_opacity', {branch: true});
+  assert.ok(editor._animationEdit.targets.length >= 3, 'the segments of the branch and the polygon it encloses are one edit');
+  previewNativePropertyEdit(token, 60);
+  assert.equal(editor._animationEdit.changed, true);
+  assert.ok(editor._sheetPropertyPreview, 'the stage shows the preview');
+  assert.equal(JSON.stringify(editor.report), source, 'a preview writes nothing');
+  assert.ok(commitNativePropertyEdit(token));
+  assert.equal(editor._sheetPropertyPreview, null);
+  assert.equal(editor._undo.length, entries + 1, 'one entry');
+  for (const target of [segment(1, 3), segment(1, 4), polygon]) assert.equal(value(editor, target, 'opacity'), .6, `${target.kind} ${target.handleId ?? target.polygonId}`);
+  assert.equal(value(editor, segment(1, 2), 'opacity'), 1, 'a segment outside the branch');
+  assert.equal(value(editor, segment(2, 3), 'opacity'), 1, 'another figure of the definition');
+  assert.equal(value(editor, segment(1, 3), 'opacity', 0), 1, 'the other key');
+  editor.undo();
+  assert.equal(JSON.stringify(editor.report), source);
 });
-test('one overridden primary target routes the whole selected branch to visible authored keys without mutating shared figures or polygons',()=>{
- const e=fixture();e.addAnimationKey(target(e,3),'opacity',0,.2);e.seek(6);reset(e);
- const before=e.report._styk.animation,beforeJSON=JSON.stringify(before),figure=e.figure,definition=JSON.stringify(figure),frames=e.report.keyframes,objects=e.frame.objects;
- const token=beginNativePropertyEdit(e,'segment_opacity',{branch:true});assert.ok(token.branchAnimation);assert.equal(token.definition,false);
- for(const value of [10,30,55,40])previewNativePropertyEdit(token,value);
- assert.equal(e.animationValue(target(e,3),'opacity'),.4);assert.equal(e.animationValue(target(e,4),'opacity'),.4);
- assert.equal(e.animationValue({kind:'segment',uid:900,handleId:3},'opacity'),1);
- assert.equal(JSON.stringify(figure),definition);assert.equal(JSON.stringify(before),beforeJSON);assert.equal(e.report.keyframes,frames);assert.equal(e.frame.objects,objects);assert.equal(e._undo.length,0);
- assert.ok(commitNativePropertyEdit(token));assert.equal(e._undo.length,1);assert.equal(e._undo[0].kind,'animation');
- assert.ok(e.animationChannel(target(e,3),'opacity').keys.some(k=>k.tick===6&&k.value===.4));
- e.undo();assert.deepEqual(e.report._styk.animation,before);e.redo();assert.equal(e.animationValue(target(e,4),'opacity'),.4);
+
+test('a branch edit with two keys chosen sets both, and the playhead moving ends the gesture', {skip: !engineBuilt}, () => {
+  const editor = fixture();
+  const keys = [editor.frameIndex]; keys.sheetTicks = [0, 6];
+  const entries = editor._undo.length;
+  assert.ok(edit(editor, 'segment_opacity', 40, {branch: true, indices: keys}));
+  assert.equal(editor._undo.length, entries + 1, 'one entry');
+  for (const tick of [0, 6]) assert.equal(value(editor, segment(1, 4), 'opacity', tick), .4, `at ${tick}`);
+  const token = beginNativePropertyEdit(editor, 'segment_opacity', {branch: true});
+  editor.seek(3);
+  assert.throws(() => previewNativePropertyEdit(token, 10), error => error.messageKey === 'errors.editorBranchStyle.theBranchEditTargetChanged');
+  assert.equal(editor._animationEdit, null, 'the gesture ended with nothing written');
 });
-test('captured secondary style cancels exactly and same selected value still updates heterogeneous branch children',()=>{
- const e=fixture();e.frame.objects[0]._stykStyle={segments:{3:{gradientOpacity:.25}}};e._invalidate();reset(e);
- const source=JSON.stringify(e.frame),before=e.report._styk.animation;
- const cancel=beginNativePropertyEdit(e,'segment_gradient_opacity',{branch:true});previewNativePropertyEdit(cancel,60);cancelNativePropertyEdit(cancel);
- assert.equal(e.report._styk.animation,before);assert.equal(JSON.stringify(e.frame),source);assert.equal(e._undo.length,0);
- const token=beginNativePropertyEdit(e,'segment_gradient_opacity',{branch:true});assert.equal(token.initialValue,25);previewNativePropertyEdit(token,25);assert.ok(commitNativePropertyEdit(token));
- assert.equal(e.animationValue(target(e,3),'gradientOpacity'),.25);assert.equal(e.animationValue(target(e,4),'gradientOpacity'),.25);assert.equal(JSON.stringify(e.frame),source);
-});
-test('branch authored editing resolves current definition scope and retains unrelated channel references and interpolation',()=>{
- const e=fixture(),foreign={...structuredClone(e.figure),figure_type_id:77};e.report.figure_types.push(foreign);
- e.addAnimationKey({...target(e,3),figureTypeId:77},'opacity',0,.9,{exactTarget:true});
- e.addAnimationKey(target(e,3),'opacity',0,.2,{exactTarget:true});
- const global=e.animationChannels.find(c=>c.target.figureTypeId===undefined),other=e.animationChannels.find(c=>c.target.figureTypeId===77);global.keys[0].interpolation='hold';
- e.seek(6);reset(e);const token=beginNativePropertyEdit(e,'segment_opacity',{branch:true});previewNativePropertyEdit(token,60);commitNativePropertyEdit(token);
- assert.equal(e.animationChannels.find(c=>c.target.figureTypeId===77),other);assert.equal(e.animationChannels.find(c=>c.id===global.id),global);
- assert.ok(e.animationChannels.some(c=>c.target.figureTypeId===e.figure.figure_type_id&&c.target.handleId===3&&c.keys.some(k=>k.tick===6&&k.value===.6)));
+
+test('a branch edit whose playhead moves before it ends is keyed at the tick it began on', {skip: !engineBuilt}, () => {
+  const editor = fixture();
+  editor.seek(3);
+  const token = beginNativePropertyEdit(editor, 'segment_opacity', {branch: true});
+  previewNativePropertyEdit(token, 55);
+  editor.seek(5);
+  assert.throws(() => previewNativePropertyEdit(token, 40), /./, 'a preview after the playhead moved is refused');
+  const quiet = beginNativePropertyEdit(editor, 'segment_opacity', {branch: true});
+  editor.seek(4);
+  assert.equal(commitNativePropertyEdit(quiet), false, 'an edit that previewed nothing ends quietly');
+  editor.seek(3);
+  const again = beginNativePropertyEdit(editor, 'segment_opacity', {branch: true});
+  previewNativePropertyEdit(again, 55);
+  editor.seek(5);
+  assert.ok(commitNativePropertyEdit(again), 'the value typed is kept');
+  assert.equal(editor.undoLabel !== null, true);
+  assert.equal(value(editor, segment(1, 3), 'opacity', 3), .55, 'at the tick the edit began on');
+  editor.undo();
+  assert.notEqual(value(editor, segment(1, 3), 'opacity', 3), .55);
 });

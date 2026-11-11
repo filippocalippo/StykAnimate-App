@@ -1,4 +1,5 @@
-import { readdir, readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -34,6 +35,13 @@ async function walk(relative) {
   }
 }
 for (const directory of ['src', 'vendor', 'assets']) await walk(directory);
+// The developer tools are never packaged (docs/DEVTOOLS.md): the package must not hold them, and the source's copy is not compared.
+const developerTools = path.join('src', 'devtools');
+if (existsSync(path.join(webRoot, developerTools))) throw new Error('The package holds the developer tools (src/devtools): they are for source checkouts only.');
+for (let index = files.length - 1; index >= 0; index--) if (files[index].startsWith(developerTools + path.sep)) files.splice(index, 1);
+// The engine, the Pivot codec and the drawing raster engine are WebAssembly modules built into src/engine/pkg (node scripts/engine-build.mjs).
+if (!snapshot) for (const required of ['styk_engine_bg.wasm', 'styk_codec_bg.wasm', 'styk_codec.js', 'styk_drawing_bg.wasm', 'styk_drawing.js'].map((name) => path.join('src', 'engine', 'pkg', name)))
+  if (!files.includes(required)) throw new Error(`${required.replaceAll('\\', '/')} is missing; build it with node scripts/engine-build.mjs.`);
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const manifest = [];
 let synchronized = 0;
@@ -54,7 +62,9 @@ for (const filename of files) {
   manifest.push({ path: filename.replaceAll('\\', '/'), sha256: hash(packaged), bytes: packaged.length });
 }
 const nativeFiles = snapshot ? asar.listPackage(path.join(resources, 'app.asar')).map((filename) => filename.replaceAll('\\', '/')).filter((filename) => /^\/?desktop\/[^/]+\.cjs$/.test(filename)).map((filename) => filename.split('/').at(-1))
-  : (await readdir(path.join(appRoot, 'desktop'))).filter((filename) => filename.endsWith('.cjs'));
+  : (await readdir(path.join(appRoot, 'desktop'))).filter((filename) => filename.endsWith('.cjs') && filename !== 'devtools.cjs');
+// The developer launch's module is for source checkouts only (docs/DEVTOOLS.md).
+if (asar.listPackage(path.join(resources, 'app.asar')).some((filename) => /[\\/]desktop[\\/]devtools\.cjs$/.test(filename))) throw new Error('The package holds desktop/devtools.cjs: it is for source checkouts only.');
 for (const filename of nativeFiles) {
   const packaged = asar.extractFile(path.join(resources, 'app.asar'), `desktop/${filename}`);
   if (!snapshot) {
@@ -64,23 +74,9 @@ for (const filename of nativeFiles) {
   manifest.push({ path: `app.asar/desktop/${filename}`, sha256: hash(packaged), bytes: packaged.length });
 }
 if (!snapshot) {
-  const sidecarBinary = process.platform === 'win32' ? 'styk-codec.exe' : 'styk-codec';
-  for (const [relative, sourcePath] of [
-    ['backend/server.py', path.join(appRoot, 'backend', 'server.py')],
-    ...['fast_decode.py','import_wire.py','native_scan.py','native_format.py','jobs.py'].map(filename=>[`backend/${filename}`,path.join(appRoot,'backend',filename)]),
-    ['codec_bridge.py', path.join(appRoot, 'codecs', 'codec_bridge.py')],
-    ['sidecar/build-info.json', path.join(appRoot, 'build', 'sidecar', 'build-info.json')],
-    [`sidecar/styk-codec/${sidecarBinary}`, path.join(appRoot, 'build', 'sidecar', 'styk-codec', sidecarBinary)],
-  ]) {
-    const source = await readFile(sourcePath), packaged = await readFile(path.join(resources, relative));
-    if (hash(source) !== hash(packaged)) throw new Error(`Packaged runtime differs from the verified build: ${relative}`);
-    manifest.push({ path: relative, sha256: hash(packaged), bytes: packaged.length });
-  }
-  const scannerName=process.platform==='win32'?'styk-piv-frame-scan.dll':process.platform==='darwin'?'libstyk-piv-frame-scan.dylib':'libstyk-piv-frame-scan.so';
-  const scannerRelative=`sidecar/styk-codec/_internal/native/${scannerName}`;
-  const scannerSource=await readFile(path.join(appRoot,'build',scannerRelative)),scannerPackaged=await readFile(path.join(resources,scannerRelative));
-  if(hash(scannerSource)!==hash(scannerPackaged))throw new Error('Packaged PIV scanner differs from its verified sidecar.');
-  manifest.push({path:scannerRelative,sha256:hash(scannerPackaged),bytes:scannerPackaged.length});
+  // No Python codec ships: the Pivot codec is the WebAssembly module among the web assets above.
+  for (const leftover of ['backend', 'tools', 'sidecar', 'codec_bridge.py'])
+    if (existsSync(path.join(resources, leftover))) throw new Error(`The package still carries the retired Python codec: ${leftover}`);
   for (const filename of await readdir(path.join(appRoot, 'build', 'video-encoder'))) {
     const relative = `video-encoder/${filename}`;
     const source = await readFile(path.join(appRoot, 'build', relative)), packaged = await readFile(path.join(resources, relative));
@@ -92,6 +88,41 @@ if (!snapshot) {
     if (hash(source) !== hash(packaged)) throw new Error(`Packaged Windows codec helper differs from its verified build: ${relative}`);
     manifest.push({path:relative,sha256:hash(packaged),bytes:packaged.length});
   }
+}
+// The page's scripts ship bundled (scripts/build-app.mjs) as resources/bundle, served in place of the modules among the web assets. A package
+// without it would run the modules without a word, so it is required, hashed, and (unless this is a baseline) equal to a fresh build of the source.
+const bundleRoot = path.join(resources, 'bundle');
+const bundleFiles = [];
+async function walkBundle(directory, prefix = '') {
+  let entries;
+  try { entries = await readdir(directory, { withFileTypes: true }); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  for (const entry of entries) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) await walkBundle(path.join(directory, entry.name), relative);
+    else bundleFiles.push(relative);
+  }
+}
+await walkBundle(bundleRoot);
+for (const required of ['index.html', 'src/app.mjs', 'src/frame-map.js', 'src/styles/app.css'])
+  if (!bundleFiles.includes(required)) throw new Error(`resources/bundle/${required} is missing: the package would run the unbundled modules. Run npm run pack.`);
+if (!snapshot) {
+  const { buildApp } = await import('./build-app.mjs');
+  // Inside the source tree, like the packaged build: the chunks' names depend on where the output is.
+  const fresh = path.join(appRoot, 'build', 'verify-bundle');
+  try {
+    await buildApp({ root: appRoot, output: fresh });
+    const expected = [];
+    const collect = async (directory, prefix = '') => { for (const entry of await readdir(directory, { withFileTypes: true })) { const relative = prefix ? `${prefix}/${entry.name}` : entry.name; if (entry.isDirectory()) await collect(path.join(directory, entry.name), relative); else expected.push(relative); } };
+    await collect(fresh);
+    const extra = bundleFiles.filter((name) => !expected.includes(name)), absent = expected.filter((name) => !bundleFiles.includes(name));
+    if (extra.length || absent.length) throw new Error(`The packaged bundle's files differ from a fresh build (extra: ${extra.slice(0, 3)}; missing: ${absent.slice(0, 3)}); run npm run pack.`);
+    for (const name of expected) if (hash(await readFile(path.join(fresh, name))) !== hash(await readFile(path.join(bundleRoot, name)))) throw new Error(`Packaged bundle file differs from a fresh build of the source: ${name}; run npm run pack.`);
+  } finally { await rm(fresh, { recursive: true, force: true }); }
+}
+for (const name of bundleFiles) {
+  const bytes = await readFile(path.join(bundleRoot, name));
+  manifest.push({ path: `bundle/${name}`, sha256: hash(bytes), bytes: bytes.length });
 }
 await mkdir(manifestDirectory, { recursive: true });
 manifest.push({ path: 'app.asar/package.json', sha256: hash(packagedMetadata), bytes: packagedMetadata.length });

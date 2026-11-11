@@ -12,7 +12,7 @@ The dialog guards queued close events and shared-dialog replacement so canceled 
 
 Verification:
 
-- `tests/editor-sprite-segment.test.mjs`: model behavior, rollback, capacity and native PIV/STK encode/reopen with exact embedded PNG bytes and anchors.
+- `tests/editor-sprite-segment.test.mjs` and the `sprite-segment-*` edit tapes: model behavior, rollback, capacity and native PIV/STK encode/reopen with exact embedded PNG bytes and anchors.
 - `tests/sprite-placement.test.mjs`: immutable placement and native integer anchor bounds.
 - `tests/sprite-placement.browser.mjs`: nine passing actual browser checks, including canvas pixels, dragging, keyboard positioning, cancellation races and narrow layout. Evidence and screenshots are under `artifacts/sprite-placement/`.
 - `scripts/smoke-sprite-builder.mjs`: eight passing actual Electron checks for the complete Build/attachment flow, Undo/Redo, native PIV/STK save and reopen, dialog/Escape/tool/document cancellation, and ordinary immediate Import Sprite. Evidence: `artifacts/sprite-builder-smoke.json`; its recorded directory contains the exported files and desktop screenshots.

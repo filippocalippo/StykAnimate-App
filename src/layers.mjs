@@ -7,7 +7,7 @@ export const FIXED_LAYER_IDS = Object.freeze(['scene', 'camera']);
 export const LAYER_COLORS = Object.freeze({blue:'#3399ee',violet:'#9966dd',rose:'#df6690',orange:'#d99035',green:'#43a878',teal:'#36a8b5'});
 const owns = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
-export const isUserLayerId = id => typeof id === 'string' && /^layer-[1-9]\d*$/.test(id);
+const isUserLayerId = id => typeof id === 'string' && /^layer-[1-9]\d*$/.test(id);
 export function createLayerState() {
   return {version: 1, nextId: 2, order: ['layer-1'], byId: {'layer-1': {name: 'Layer 1', visible: true, locked: false}},
     assignments: {}, defaultLayerId: 'layer-1', activeId: 'layer-1',
@@ -17,7 +17,7 @@ export function validateLayerState(state) {
   const iterator = validateLayerStateSteps(state);
   for (;;) {const step=iterator.next(); if (step.done) return step.value;}
 }
-export function* validateLayerStateSteps(state) {
+function* validateLayerStateSteps(state) {
   if (!record(state) || state.version !== 1 || !Array.isArray(state.order) || !state.order.length || state.order.length > 10000 ||
     !record(state.byId) || !record(state.assignments) || !Number.isSafeInteger(state.nextId) || state.nextId < 1)
     throw messageError(new Error(''), "errors.layers.invalidStykanimateLayerMetadata", {});

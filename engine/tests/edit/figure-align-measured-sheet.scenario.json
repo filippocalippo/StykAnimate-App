@@ -1,0 +1,399 @@
+{
+ "name": "figure-align-measured-sheet",
+ "document": "measured-bounds.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "selectMany",
+   [
+    2,
+    3
+   ]
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "start",
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     0,
+     3,
+     6
+    ]
+   },
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "center",
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     0,
+     3,
+     6
+    ]
+   },
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "end",
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     0,
+     3,
+     6
+    ]
+   },
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "y",
+   "start",
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     0,
+     3,
+     6
+    ]
+   },
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "y",
+   "center",
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     0,
+     3,
+     6
+    ]
+   },
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "y",
+   "end",
+   {
+    "@array": [
+     0
+    ],
+    "sheetTicks": [
+     0,
+     3,
+     6
+    ]
+   },
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "alignSelection",
+   "x",
+   "center",
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "beginDrag"
+  ],
+  [
+   "moveSelection",
+   8,
+   2
+  ],
+  [
+   "alignSelection",
+   "y",
+   "end",
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "start",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    },
+    "ticks": [
+     1,
+     4
+    ],
+    "uids": [
+     1,
+     3
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "alignFiguresInFrames",
+   "z",
+   "start",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "bogus",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "start",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    },
+    "ticks": [
+     1.5
+    ]
+   }
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "start",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "constant",
+     "value": {
+      "minX": 2,
+      "minY": 1,
+      "maxX": 0,
+      "maxY": 3
+     }
+    }
+   }
+  ],
+  [
+   "alignSelection",
+   "x",
+   "start",
+   {
+    "boundsOf": {
+     "@boundsCallback": "constant",
+     "value": null
+    }
+   }
+  ],
+  [
+   "alignSelection",
+   "y",
+   "end",
+   {
+    "boundsOf": {
+     "@boundsCallback": "constant",
+     "value": {
+      "x": 1,
+      "y": 2,
+      "width": 0,
+      "height": 4
+     }
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "alignSelection",
+   "x",
+   "start",
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "alignFiguresInFrames",
+   "y",
+   "end",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "selectMany",
+   [
+    2,
+    3
+   ]
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 3
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   0.8
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "end",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "selectMany",
+   []
+  ],
+  [
+   "alignFiguresInFrames",
+   "x",
+   "center",
+   [
+    0
+   ],
+   {
+    "boundsOf": {
+     "@boundsCallback": "app"
+    }
+   }
+  ]
+ ]
+}

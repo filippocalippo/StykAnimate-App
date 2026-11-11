@@ -121,7 +121,7 @@ try {
     (await state()).document === before.document,
   );
   const point = await hover();
-  await page.mouse.click(point.x + 90, point.y + 60, { button: "right" });
+  await page.mouse.click(point.x, point.y, { button: "right" });
   await page.locator('#menu [data-action="segment-values"]').click();
   await page.locator("#segment-angle").waitFor({ state: "visible" });
   check("Canvas context menu opens the same segment value dialog", true);

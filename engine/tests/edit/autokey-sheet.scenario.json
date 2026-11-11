@@ -1,0 +1,47 @@
+{
+ "name": "autokey-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true,
+  "autoKey": true
+ },
+ "steps": [
+  [
+   "@seek",
+   2
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "moveSelection",
+   10,
+   10
+  ],
+  [
+   "@seek",
+   5
+  ],
+  [
+   "@select",
+   3,
+   1
+  ],
+  [
+   "rotateJoint",
+   0.5
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

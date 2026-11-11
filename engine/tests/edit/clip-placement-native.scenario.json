@@ -1,0 +1,47 @@
+{
+ "name": "clip-placement-native",
+ "document": "clip-placement-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   4,
+   -1
+  ],
+  [
+   "placeMovieclip",
+   {
+    "end": 6
+   }
+  ],
+  [
+   "placeMovieclip",
+   {
+    "start": 2,
+    "end": 8
+   },
+   {
+    "move": true
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   4
+  ],
+  [
+   "splitMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

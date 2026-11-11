@@ -1,0 +1,138 @@
+{
+ "name": "camera-motion-add-sheet",
+ "document": "joined-chain.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "addCameraMotion",
+   "shake"
+  ],
+  [
+   "addCameraMotion",
+   "impact",
+   {
+    "start": 2
+   }
+  ],
+  [
+   "addCameraMotion",
+   "handheld",
+   {
+    "duration": 5
+   }
+  ],
+  [
+   "addCameraMotion",
+   "wobble"
+  ],
+  [
+   "addCameraMotion",
+   "pulse",
+   {
+    "start": 1,
+    "duration": 3
+   }
+  ],
+  [
+   "addCameraMotion",
+   "bogus"
+  ],
+  [
+   "addCameraMotion",
+   "follow"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "addCameraMotion",
+   "follow"
+  ],
+  [
+   "addCameraMotion",
+   "follow",
+   {
+    "targets": [
+     {
+      "uid": 1,
+      "weight": 2
+     }
+    ]
+   }
+  ],
+  [
+   "copyCameraMotion",
+   "nope"
+  ],
+  [
+   "pasteCameraMotion"
+  ],
+  [
+   "copyCameraMotion",
+   "motion-d0d0d0d0-0000-4000-8000-000000000001"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "pasteCameraMotion"
+  ],
+  [
+   "pasteCameraMotion",
+   5
+  ],
+  [
+   "duplicateCameraMotion",
+   "motion-d0d0d0d0-0000-4000-8000-000000000002"
+  ],
+  [
+   "duplicateCameraMotion",
+   "motion-d0d0d0d0-0000-4000-8000-000000000002",
+   1
+  ],
+  [
+   "duplicateCameraMotion",
+   "nope"
+  ],
+  [
+   "randomizeCameraMotion",
+   "motion-d0d0d0d0-0000-4000-8000-000000000003"
+  ],
+  [
+   "randomizeCameraMotion",
+   "nope"
+  ],
+  [
+   "setLayerLocked",
+   "camera",
+   true
+  ],
+  [
+   "addCameraMotion",
+   "shake"
+  ],
+  [
+   "setLayerLocked",
+   "camera",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

@@ -8,7 +8,7 @@ page.on('pageerror',error=>errors.push(error.message));
 const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
 try{
   const baseline=process.env.STYK_PIXEL_CLIPBOARD_BASELINE;
-  if(baseline)for(const name of ['drawing-png','drawing-tile-codec','native-container']){
+  if(baseline)for(const name of ['drawing-png','drawing-tile-codec']){
     const body=execFileSync('git',['show',`${baseline}:src/${name}.mjs`],{encoding:'utf8'});
     await page.context().route(`**/src/${name}.mjs`,route=>route.fulfill({contentType:'text/javascript',body}));
   }
@@ -105,9 +105,9 @@ try{
   check('an 8K raster copy/paste exceeds 16MP with exact pixels and history',dense.pixels>32*1024*1024-1024*1024&&dense.exact&&dense.undo&&dense.redo);
   check('copy reuses every published tile PNG without raw pixel transfers',dense.encodedInputs===8160&&dense.rawInputs===0);
   check('input tasks continue during large clipboard work',dense.ticks>10);
-  await page.evaluate(async()=>{await styk.drawing.barrier();await styk.drawing.prepareVisible();window.__gpuFrame=styk.state.renderer.drawingGpu?.frame??0;styk.drawing.onRender();});
-  // WebGPU draws resident tiles; the Canvas path waits for its worker preview.
-  await page.waitForFunction(()=>{const gpu=styk.state.renderer.drawingGpu,previews=styk.drawing.owner.previews;return styk.editor.geometry.drawables.some(i=>i.type==='image')&&(gpu?gpu.frame>window.__gpuFrame&&!gpu.incomplete:!previews.active&&previews.cache.size>0);});
+  await page.evaluate(async()=>{await styk.drawing.barrier();await styk.drawing.prepareVisible();styk.drawing.onRender();});
+  // The engine's stage draws the cel once its pictures are decoded and uploaded.
+  await page.waitForFunction(()=>styk.editor.geometry.drawables.some(i=>i.type==='image')&&!styk.state.dirtyRender&&styk.state.renderer.engineSide.stage.pictures_pending()===0);
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   check('the pasted raster is visible after redo',await page.evaluate(async()=>{
     const scene=document.querySelector('#scene'),image=new Image();image.src=scene.toDataURL();await image.decode();

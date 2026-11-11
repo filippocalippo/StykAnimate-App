@@ -1,4 +1,5 @@
 import {messageError} from './localized-error.mjs';
+import {figureRows} from './figure-types.mjs';
 /** Native GIF defaults are content-based, separate from edge smoothing. */
 export function normalizeGIFDither(value = false) {
   if (typeof value !== "boolean")
@@ -10,17 +11,5 @@ export function defaultGIFDither(report) {
   for (const background of report.backgrounds ?? []) {
     if (background.kind !== 2) return true;
   }
-  for (const figure of report.figure_types ?? []) {
-    if (figure.image_assets?.length) return true;
-    if (
-      figure.segments?.some(
-        (segment) =>
-          segment.segment_type === "image" ||
-          segment.segment_kind === "image" ||
-          segment.primitive_code === 2,
-      )
-    )
-      return true;
-  }
-  return false;
+  return figureRows(report.figure_types).some((row) => row.pictures);
 }

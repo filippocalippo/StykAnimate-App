@@ -39,7 +39,7 @@ jobs:
           - os: windows-latest
             platform: win32
             target: win
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             platform: linux
             target: linux
     runs-on: ${{ matrix.os }}
@@ -65,18 +65,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The unit tests open Pivot files through the codec module the engine build produces.
+      - uses: ./.github/actions/engine-build
       - name: Validate release and source
         run: |
           npm run changelog:check
           npm run check
           npm test
           python -m unittest discover -s backend -p 'test_*.py'
-      - name: Build standalone codecs and video encoder
+      - name: Build the installed-codec helpers and video encoder
         run: |
-          npm run build:frame-scan
           if [ "$RUNNER_OS" = Windows ]; then npm run build:vfw; fi
-          npm run build:sidecar
-          npm run verify:sidecar
           npm run build:video-encoder
       - name: Package the release
         env:
@@ -97,6 +96,8 @@ jobs:
         run: |
           npm run verify:package
           if [ "$RUNNER_OS" = Linux ]; then display=(xvfb-run -a); else display=(); fi
+          # The Linux runner has no GPU: the packaged app runs on its WebGL 2 path there (desktop/gpu-switches.cjs).
+          if [ "$RUNNER_OS" = Linux ]; then export STYK_GPU_UNSAFE=0; fi
           "${display[@]}" npm run test:boot:packaged
           "${display[@]}" npm run test:export:packaged
           "${display[@]}" npm run test:updates:desktop
@@ -125,7 +126,6 @@ jobs:
         with:
           name: release-evidence-${{ matrix.platform }}
           path: |
-            artifacts/sidecar-smoke.json
             artifacts/package-manifest.json
             artifacts/updates/smoke.json
             artifacts/updates/appimage-smoke.json
@@ -190,7 +190,7 @@ jobs:
   publish:
     needs: [desktop, web]
     if: startsWith(github.ref, 'refs/tags/') || inputs.publish || inputs.upload_draft
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

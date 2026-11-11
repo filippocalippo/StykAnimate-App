@@ -1,0 +1,183 @@
+{
+ "name": "camera-follow-commands-sheet",
+ "document": "camera-follow-joined.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@seek",
+   4
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "@seek",
+   0
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "copyCamera"
+  ],
+  [
+   "transformCamera",
+   {
+    "x": 4,
+    "y": -2,
+    "scale": 1.1,
+    "angle_rad": 0.2
+   }
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "beginCameraDrag"
+  ],
+  [
+   "updateCameraDrag",
+   {
+    "x": 12,
+    "scale": 0.8
+   }
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "updateCameraDrag",
+   {
+    "angle_rad": -0.1
+   },
+   {
+    "fromStart": false
+   }
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "commitCameraDrag"
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "beginCameraDrag"
+  ],
+  [
+   "updateCameraDrag",
+   {
+    "y": 9
+   }
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "cancelCameraDrag"
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "@seek",
+   3
+  ],
+  [
+   "setCameraValues",
+   {
+    "angle_rad": 0.35,
+    "scale": 0.72
+   }
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "resetCamera"
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "pasteCamera"
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "centerCamera"
+  ],
+  [
+   "centerCamera",
+   "x"
+  ],
+  [
+   "centerCamera",
+   "y",
+   [
+    0,
+    1
+   ]
+  ],
+  [
+   "centerCamera",
+   "bogus"
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    99
+   ]
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0
+   ],
+   {
+    "boundsOf": null
+   }
+  ],
+  [
+   "centerCamera",
+   "both",
+   [
+    0
+   ],
+   {
+    "boundsOf": 3
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@cameraAtTime"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@cameraAtTime"
+  ]
+ ]
+}

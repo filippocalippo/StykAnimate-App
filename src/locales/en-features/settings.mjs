@@ -3,8 +3,6 @@ export default Object.freeze({
   "settings.inFront": "In front",
   "settings.linkedInstance": "Linked instance",
   "settings.independentCopy": "Independent copy",
-  "settings.canvas2d": "Canvas 2D",
-  "settings.webgpu": "WebGPU",
   "settings.settingsFeedbackNote": "settings.feedback.{category}Note",
   "settings.message1pxSolid000": "1px solid #000",
   "settings.message0pxSolidTransparent": "0px solid transparent",

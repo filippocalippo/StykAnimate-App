@@ -1,0 +1,45 @@
+{
+ "name": "expansion-locked",
+ "document": "expansion-locked.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "makeMovieclipUnique"
+  ],
+  [
+   "@seek",
+   2.25
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "breakApartMovieclip"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

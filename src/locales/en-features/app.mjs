@@ -26,7 +26,6 @@ export default Object.freeze({
   "app.reshapingFrames": "Reshaping ±{radius} frames",
   "app.scrollToResizeEscCancels": "· scroll to resize · Esc cancels",
   "app.finishTheFigureOrReturnToAnimateTo": "Finish the figure or return to Animate to select other figures.",
-  "app.thePreviousAntialiasingSettingWasRetainedAfterA": "The previous antialiasing setting was retained after a graphics error.",
   "app.playing": "Playing",
   "app.playing2": "PLAYING",
   "app.preparing": "PREPARING",
@@ -63,11 +62,20 @@ export default Object.freeze({
   "app.openingFile": "Opening file…",
   "app.decodingPivotFile": "Decoding Pivot file…",
   "app.saveCancelled": "Save cancelled",
+  "app.saveFailed": "Save failed",
   "app.saveCancelledTheProjectChanged": "Save cancelled · the project changed",
   "app.savingProject": "Saving project…",
   "app.recoveryCopyCouldNotBeWritten": "Recovery copy could not be written: {message}",
   "app.closeAProjectToOpenAnother": "Close a project to open another. {count} can be open at once.",
   "app.waitForTheSaveOrTheOpeningFileToFinish": "Wait for the save or the opening file to finish.",
+  "app.savedAfterMendingTheProject": {
+    "one": "Saved. This project had damage in its movieclips, so {count} repair was made for the saved file to open.",
+    "other": "Saved. This project had damage in its movieclips, so {count} repairs were made for the saved file to open."
+  },
+  "app.openedAfterMendingTheProject": {
+    "one": "This project was saved with damaged movieclip data. It opened after {count} repair, and it is marked as having unsaved changes so that saving it fixes the file.",
+    "other": "This project was saved with damaged movieclip data. It opened after {count} repairs, and it is marked as having unsaved changes so that saving it fixes the file."
+  },
   "app.savedACopyNewerChangesAreStillUnsaved": "Saved a copy · newer changes are still unsaved",
   "app.projectSaved": "Project saved",
   "app.editText": "Edit text",
@@ -155,15 +163,9 @@ export default Object.freeze({
   "app.restore": "Restore",
   "app.preservingAnimation": "Preserving animation",
   "app.layerChangeCancelled": "Layer change cancelled",
-  "app.frameCopied": {
-    "one": "{count} frame copied",
-    "other": "{count} frames copied"
-  },
-  "app.clipboardOperationCancelled": "Clipboard operation cancelled",
   "app.preparingCanvasAndEffects": "Preparing canvas and effects…",
   "app.editorReadyFileServiceUnavailable": "Editor ready · File service unavailable",
   "app.theCanvasCouldNotReconnectYourAnimationIs": "The canvas could not reconnect. Your animation is still here and can be saved.",
-  "app.theCanvasUsesCompatibilityRenderingWhichCanBe": "{value} The canvas uses compatibility rendering, which can be slower.",
   "app.theGraphicsDeviceWasResetReconnectingYourCanvas": "The graphics device was reset. Reconnecting your canvas…",
   "app.reconnectCanvas": "Reconnect canvas",
   "app.cancel": "Cancel",
@@ -173,8 +175,6 @@ export default Object.freeze({
   "app.toDrawTheFigureSFirstCircle": "to draw the figure's first circle",
   "app.breakdown": "Breakdown",
   "app.withoutLeavingThisFrameDoubleClickToGo": " without leaving this frame, double-click to go there",
-  "app.compatibilityMode": "Compatibility mode",
-  "app.preparingCanvas": "Preparing canvas",
   "app.saving": "Saving…",
   "app.edited": "Edited",
   "app.saved": "Saved",
@@ -221,13 +221,8 @@ export default Object.freeze({
   "app.autoKeyOff": "Auto key off",
   "app.copyAnAppearanceFirst": "Copy an appearance first",
   "app.applyingLayerChanges": "Applying layer changes",
-  "app.copyingFrames": "Copying frames",
-  "app.cuttingFrames": "Cutting frames",
-  "app.pastingFrames": "Pasting frames",
-  "app.updatingFrames": "Updating frames",
   "app.loadingThePivotConverterFirstUseOnly": "Loading the Pivot converter (first use only)…",
   "app.startingThePivotConverter": "Starting the Pivot converter…",
-  "app.webgpuIsUnavailable": "WebGPU is unavailable.",
   "app.recoveryOffer": "in {name} from {time}?",
   "app.recoveryCopies": {
     "one": "{count} recovery copy is available.",
@@ -243,6 +238,5 @@ export default Object.freeze({
   "app.frameDragToReshapeMotionpathfalloffradiusFramesOfTheArc": "{frame} — drag to reshape ±{motionPathFalloffRadius} frames of the arc",
   "app.frameDragToReposeValue1RightDragToReshape": "{frame} — drag to repose{value1}; right-drag to reshape the arc",
   "app.valueFps": "{value} fps",
-  "app.allLengthInThisProject": "All {length} in this project…",
-  "app.valueCanvasCompatibilityRenderingIsActive": "{value} Canvas compatibility rendering is active."
+  "app.allLengthInThisProject": "All {length} in this project…"
 });

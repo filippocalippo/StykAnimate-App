@@ -34,9 +34,9 @@ export const SHELL_CONTRACT = Object.freeze({
     // Home (src/home/home.mjs builds its page into #home, the workspace's last child; docs/HOME.md).
     home: ['home'],
     // The dock host (src/shell/dock-host.mjs): the Properties panel's root, the
-    // Library's empty host (user-library fills it), the tabs tests click
-    // (#library-tab, #properties-tab, [data-vfx-tab]) and the two docks.
-    shell: ['properties-panel', 'user-library', 'properties-tab', 'vfx-tab', 'library-tab', 'left-dock', 'right-dock'],
+    // Library's empty host (user-library fills it) and the tabs tests click
+    // (#library-tab, #properties-tab, [data-vfx-tab]); it places them in islands it makes.
+    shell: ['properties-panel', 'user-library', 'properties-tab', 'vfx-tab', 'library-tab'],
     // app.mjs, layer-timeline, audio-timeline, studio-shell and
     // localization-bindings (#fps, #timeline-zoom, #play-button, #loop-button).
     transport: ['play-button', 'loop-button', 'time-display', 'fps', 'timeline-zoom', 'range-edit',
@@ -207,13 +207,14 @@ test('Structural hooks that modules dereference without null checks are intact',
   for (const action of ['minimize', 'maximize', 'close']) one(`[data-action="${action}"]`, controls);
   assert.ok(classes(one('[data-action="menu"]')).includes('brand'), '.brand[data-action="menu"] anchors the main menu');
   // studio-shell, builder-mode and the dock host read .workspace; app.mjs mounts the
-  // movieclip breadcrumb before .context-strip (movieclip-ui's mountBreadcrumb seam). The dock host places the workspace's
-  // direct children in its grid: the rail, the two docks, the stage island (.center,
-  // around #viewport) and the timeline island.
+  // movieclip breadcrumb before .context-strip (movieclip-ui's mountBreadcrumb seam). The dock host places the
+  // stage island (.center, around #viewport) in the workspace grid's one area, the rail on it, and every group
+  // (the timeline island among them) by its rectangle; panels it has not placed wait in .shell-parking.
   const workspace = one('.workspace');
-  for (const selector of ['.center', '.studio-rail', '.right-panel', '.context-strip']) one(selector, workspace);
-  for (const selector of ['.studio-rail', '.shell-left', '.center', '.right-panel', '.timeline-panel'])
+  for (const selector of ['.center', '.studio-rail', '.context-strip']) one(selector, workspace);
+  for (const selector of ['.studio-rail', '.center', '.timeline-panel', '.shell-parking'])
     assert.equal(one(selector, workspace).parent, workspace, `${selector} is a direct child of .workspace`);
+  assert.ok('hidden' in one('.shell-parking').attrs, 'the parking is hidden');
   one('#viewport', one('.center'));
   // The stage header (§3.12, stage-head.mjs): the stage island's first row, above #viewport and never inside
   // it (only the hidden context strip sits between them), with the start (crumb, or
@@ -237,7 +238,7 @@ test('Structural hooks that modules dereference without null checks are intact',
   for (const selector of ['.stage-head', '.canvas-view-controls', '.canvas-toolbar', '.drawing-quickbar', '.polygon-controls'])
     assert.equal(find(selector, byId.get('viewport')[0]).length, 0, `no ${selector} inside #viewport`);
   assert.equal(find('#viewport', one('.timeline-panel')).length, 0, 'the timeline is its own island, outside the stage');
-  one('#builder-outliner', one('.shell-left'));
+  one('#builder-outliner', one('.shell-parking'));
   const panel = one('.timeline-panel', workspace);
   assert.equal(panel.attrs.id, 'animation-timeline');
   for (const selector of ['.timeline-toolbar', '.timeline-title', '#timeline']) one(selector, panel);
@@ -255,11 +256,11 @@ test('Structural hooks that modules dereference without null checks are intact',
   for (const id of ['#play-button', '#loop-button', '#time-display', '#fps']) one(id, slot('transport'));
   for (const id of ['#range-edit', '#onion-button', '#onion-settings-button', '#timeline-audio']) one(id, slot('end'));
   for (const id of ['#expand-timeline', '#timeline-zoom']) one(id, slot('ruler-tools'));
-  const inspectorPanel = one('.right-panel');
-  for (const selector of ['.inspector-header', '#inspector', '#vfx-panel', '#user-library']) one(selector, inspectorPanel);
-  // Static tabs (dock host), each naming the panel it shows; the Library host is empty.
+  const parking = one('.shell-parking');
+  for (const selector of ['.inspector-header', '#inspector', '#vfx-panel', '#user-library']) one(selector, parking);
+  // Static tabs (the dock host moves them into its islands' tab lists), each naming the panel it shows; the Library host is empty.
   const tablist = one('#properties-tab').parent;
-  assert.equal(tablist.attrs.role, 'tablist');
+  assert.equal(tablist, parking);
   for (const [tab, target] of [['properties-tab', 'properties-panel'], ['vfx-tab', 'vfx-panel'], ['library-tab', 'user-library']]) {
     const element = one(`#${tab}`, tablist);
     assert.equal(element.attrs.role, 'tab');

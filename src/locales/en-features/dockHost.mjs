@@ -3,7 +3,6 @@ export default Object.freeze({
   "dockHost.resizeStackedRightPanels": "Resize stacked right panels",
   "dockHost.folded": "{value}, folded",
   "dockHost.dragToMovePanelRightClickForLayout": "Drag to move panel; right-click for layout options",
-  "dockHost.resizeStackedPanels": "Resize stacked {side} panels",
   "dockHost.leftPanels": "Left panels",
   "dockHost.inspector": "Inspector",
   "dockHost.restoreTimelineHeight": "Restore timeline height",
@@ -14,5 +13,9 @@ export default Object.freeze({
   "dockHost.message8PresetsSavedDeleteOneFirst": "8 presets saved. Delete one first.",
   "dockHost.presetStorageIsFullDeleteOneFirst": "Preset storage is full. Delete one first.",
   "dockHost.nameThePresetFirst": "Name the preset first.",
-  "dockHost.thisPresetNoLongerExists": "This preset no longer exists."
+  "dockHost.thisPresetNoLongerExists": "This preset no longer exists.",
+  "dockHost.layoutLimitReached": "{count} layouts saved. Delete one first.",
+  "dockHost.layoutFromNewerVersion": "This layout comes from a newer version of StykAnimate.",
+  "dockHost.layoutFileUnreadable": "This file is not a StykAnimate layout.",
+  "dockHost.stage": "Stage"
 });

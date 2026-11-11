@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {launchBrowser} from './support/cross-browser.mjs';
+import {launchBrowser, requireDrawing} from './support/cross-browser.mjs';
 import {buildWeb} from '../scripts/build-web.mjs';
 import {startWebServer} from '../scripts/serve-web.mjs';
 
@@ -12,11 +12,17 @@ const temp = await mkdtemp(path.join(os.tmpdir(), 'styk-save-recovery-'));
 const site = process.env.STYK_URL ? {origin:process.env.STYK_URL, close:async()=>{}}
   : await startWebServer({root:(await buildWeb({output:path.join(temp,'site')})).output});
 const browser = await launchBrowser();
+await requireDrawing(browser, site.origin, async()=>{await browser.close();await site.close();await rm(temp,{recursive:true,force:true});});
 const checks=[], errors=[];
 const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
+// Several editors start in one browser here: on a small machine without a GPU the later ones take over 30 s to be ready.
 async function open(context){
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(site.origin);await page.waitForFunction(()=>window.styk?.ready===true);
+  // What the page said while starting, shown when it never becomes ready: the browser's own reason.
+  const said=[];page.on('console',message=>{if(said.length<60)said.push(`[${message.type()}] ${message.text().slice(0,300)}`);});page.on('pageerror',error=>said.push(`[pageerror] ${String(error.stack??error).slice(0,400)}`));
+  await page.goto(site.origin);
+  try{await page.waitForFunction(()=>window.styk?.ready===true,null,{timeout:120000});}
+  catch(error){console.error(['The editor did not start. The page said:',...said,await page.evaluate(()=>document.body.innerText.slice(0,400)).catch(()=>'')].join('\n'));throw error;}
   await page.evaluate(()=>{document.querySelector('.styk-privacy [data-decline]')?.click();styk.settingsUI.commit({autosaveSeconds:0});});
   return page;
 }
@@ -89,7 +95,7 @@ try{
   check('Saving one tab leaves the other tab’s recovery intact',(await recovery(page))?.name==='Second tab');
   check('A live tab’s copy cannot be discarded by another tab',await page.evaluate(async record=>!await styk.recovery.discard(record),copies.find(r=>r.name==='Second tab')));
   await other.close();
-  await page.reload();await page.waitForFunction(()=>styk?.ready);
+  await page.reload();await page.waitForFunction(()=>window.styk?.ready,null,{timeout:120000});
   await page.getByRole('button',{name:'Restore',exact:true}).click();
   await page.waitForFunction(()=>styk.editor.name==='Second tab'&&styk.editor.dirty);
   check('An abandoned tab’s project restores through the ordinary importer',true);
@@ -101,7 +107,7 @@ try{
   for(const [tab,name] of [[third,'Third tab'],[fourth,'Fourth tab']]){
     await edit(tab);await tab.evaluate(name=>{styk.editor.name=name;return styk.actions.save();},name);await tab.close();
   }
-  await page.reload();await page.waitForFunction(()=>styk?.ready);
+  await page.reload();await page.waitForFunction(()=>window.styk?.ready,null,{timeout:120000});
   await page.getByRole('button',{name:'Restore',exact:true}).click();
   const chooser=page.getByRole('combobox',{name:'Recovery copy'});
   await chooser.waitFor();
@@ -163,7 +169,7 @@ try{
       tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);
     };
   }));
-  await legacy.goto(site.origin);await legacy.waitForFunction(()=>styk?.ready);
+  await legacy.goto(site.origin);await legacy.waitForFunction(()=>window.styk?.ready,null,{timeout:120000});
   const migration=await legacy.evaluate(async()=>{
     const m=await import('/src/browser-recovery.mjs'),record=await m.readBrowserRecovery();
     const bytes=Array.from(new Uint8Array(await record.blob.arrayBuffer()));

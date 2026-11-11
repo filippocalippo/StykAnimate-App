@@ -92,10 +92,14 @@ export class TextDialog {
     this.onApply = onApply;
     this.initial = {
       ...defaults,
+      // The figure's own text replaces the default, which is localized: its key must not stay.
       ...(figure
-        ? readTextFigureOptions(figure, {
-            assetIndex: initialOptions.assetIndex,
-          })
+        ? {
+            ...readTextFigureOptions(figure, {
+              assetIndex: initialOptions.assetIndex,
+            }),
+            textKey: undefined,
+          }
         : {}),
       ...initialOptions,
     };

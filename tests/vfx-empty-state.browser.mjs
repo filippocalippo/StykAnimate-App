@@ -6,7 +6,7 @@ const browser=await chromium.launch({channel:'chrome',headless:true}),page=await
 const errors=[];page.on('pageerror',e=>errors.push(e.stack));
 const check=(name,value)=>{assert.ok(value,name);console.log('PASS',name);};
 try{
-  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk.ready);
+  await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(()=>{const e=styk.editor;e.select(e.frame.objects[0].unique_id);});
   await page.getByRole('tab',{name:'VFX',exact:true}).click();
   check('an empty panel suggests effects and presets',await page.getByRole('button',{name:'Add Glow',exact:true}).isVisible()&&await page.getByRole('button',{name:'Add Power up',exact:true}).isVisible());

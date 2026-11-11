@@ -1,21 +1,34 @@
-/** Real ECMAScript JSON normalization + restart-safe native source identity. */
+/** Real ECMAScript JSON normalization + restart-safe native source identity, against the Python codec service
+ * (the development oracle; the app runs the WebAssembly codec). */
 import {chromium} from 'playwright';
-import {createRequire} from 'node:module';
+import {spawn} from 'node:child_process';
 import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {once} from 'node:events';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-
-const require = createRequire(import.meta.url);
-const {startBackend} = require('../desktop/backend.cjs');
+import {resolvePython} from '../scripts/run-python.mjs';
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** backend/server.py on loopback; resolves once it reports that it is listening. */
+async function startBackend({port = 0} = {}) {
+  const python = resolvePython();
+  if (!python) throw new Error('Python 3.11 or newer is required for the codec oracle (set STYK_PYTHON).');
+  const child = spawn(python.command, [...python.args, path.join(appRoot, 'backend', 'server.py'), '--port', String(port)], {cwd: appRoot, stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true});
+  const ready = await new Promise((resolve, reject) => {
+    let text = '';
+    child.once('error', reject); child.once('exit', code => reject(new Error(`The codec oracle exited (${code}).`)));
+    child.stdout.on('data', chunk => { text += chunk; const line = text.split('\n').find(row => row.includes('"ready"')); if (line) resolve(JSON.parse(line)); });
+  });
+  child.stdout.resume();
+  return {origin: ready.url, port: ready.port, child, stop: () => child.kill()};
+}
 const paths = ['Goku_Broly_Movie_by_Killer1.piv', 'PIVOT ANIMATOR SCENE TEST/Shroobs_JJK_Pack.piv'];
 const expected = await Promise.all(paths.map(async relative => {
   const source = await readFile(path.resolve(appRoot, '..', relative));
   return {path: relative, bytes: source.length, sha256: createHash('sha256').update(source).digest('hex')};
 }));
-let backend = await startBackend({appRoot}), browser;
+let backend = await startBackend(), browser;
 try {
   try { browser = await chromium.launch({headless: true}); }
   catch { browser = await chromium.launch({channel: 'chrome', headless: true}); }
@@ -51,7 +64,7 @@ try {
   const port = backend.port, stopped = once(backend.child, 'exit');
   backend.stop();
   await stopped;
-  backend = await startBackend({appRoot, port});
+  backend = await startBackend({port});
   const restored = await page.evaluate(async () => {
     const checks = [];
     const hash = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2, '0')).join('');

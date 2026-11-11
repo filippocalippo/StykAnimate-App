@@ -32,7 +32,7 @@ async function setup({ joint = 0, editMode = false, relative = false } = {}) {
   await page.evaluate(
     async ({ joint, editMode, relative }) => {
       window.valueDialog?.destroy();
-      const { Editor } = await import("/src/editor.mjs"),
+      const { pageEditor, registerPageEngine } = await import("/tests/support/page-editor.mjs"),
         { emptyDocument, createFrame, createObject } = await import(
           "/src/demo.mjs"
         ),
@@ -66,7 +66,7 @@ async function setup({ joint = 0, editMode = false, relative = false } = {}) {
         createFrame([createObject(figure, 1, 300, 220)]),
         createFrame([createObject(figure, 1, 320, 200)]),
       ];
-      window.editor = new Editor({ demo: false }).load(report);
+      await registerPageEngine();window.editor = pageEditor().load(report);
       editor.select(1, joint);
       window.beforeDocument = JSON.stringify(editor.report.keyframes);
       window.valueDialog = new SegmentValuesDialog({

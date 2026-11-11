@@ -44,11 +44,12 @@ try {
   );
   await page.goto(process.env.STYK_URL || "http://127.0.0.1:47831");
   await page.evaluate(async () => {
-    const [{ PropertyControls }, { inspectorView }, { Editor }] =
+    await (await import("/tests/support/page-editor.mjs")).registerPageEngine();
+    const [{ PropertyControls }, { inspectorView }, { pageEditor }] =
       await Promise.all([
         import("/src/property-controls.mjs"),
         import("/src/inspector-view.mjs"),
-        import("/src/editor.mjs"),
+        import("/tests/support/page-editor.mjs"),
       ]);
     const host = document.createElement("aside");
     host.id = "property-test";
@@ -57,7 +58,7 @@ try {
       // #inspector's own inline padding (features/inspector.css): sections span its content box, titles and sub-module markup reach its edges.
       "box-sizing:border-box;padding:0 var(--island-pad)";
     document.body.append(host);
-    const editor = new Editor(),
+    const editor = pageEditor({ demo: true }),
       values = {
         camera_x: 10.123456,
         camera_y: 20,

@@ -1,0 +1,97 @@
+{
+ "name": "layer-parallax-sheet",
+ "document": "sheet-layers.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "setLayerParallax",
+   "layer-2",
+   {
+    "enabled": true,
+    "x": 0.5
+   }
+  ],
+  [
+   "setLayerParallax",
+   "layer-2",
+   {
+    "y": 2
+   }
+  ],
+  [
+   "setLayerParallax",
+   "layer-2",
+   {
+    "linked": false,
+    "x": 1
+   }
+  ],
+  [
+   "setLayerParallax",
+   "layer-2",
+   {
+    "y": 3
+   }
+  ],
+  [
+   "setLayerParallax",
+   "layer-2",
+   {
+    "x": 5
+   }
+  ],
+  [
+   "setLayerParallax",
+   "layer-2",
+   {
+    "foo": 1
+   }
+  ],
+  [
+   "setLayerParallax",
+   "scene",
+   {
+    "x": 1
+   }
+  ],
+  [
+   "setLayerParallax",
+   "layer-2",
+   {
+    "reference": {
+     "x": 10,
+     "y": "a"
+    }
+   }
+  ],
+  [
+   "setLayerLocked",
+   "layer-2",
+   true
+  ],
+  [
+   "setLayerParallax",
+   "layer-2",
+   {
+    "x": 1
+   }
+  ],
+  [
+   "setLayerLocked",
+   "layer-2",
+   false
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

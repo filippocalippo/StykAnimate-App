@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
 import {chromium} from './support/playwright.mjs';
-import backendTools from '../desktop/backend.cjs';
+import backendTools from '../desktop/web-host.cjs';
 
-const backend = await backendTools.startBackend({appRoot: process.cwd()});
+const backend = await backendTools.startDesktopHost({appRoot: process.cwd()});
 const out = 'artifacts/inspector-order';
 await mkdir(out, {recursive: true});
 let browser, page;
@@ -26,7 +26,7 @@ try {
   browser = await chromium.launch({channel: 'chrome', headless: true});
   page = await browser.newPage({viewport: {width: 1440, height: 960}});
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(backend.origin); await page.waitForFunction(() => styk?.ready);
+  await page.goto(backend.origin); await page.waitForFunction(() => window.styk?.ready); await page.evaluate(async () => (await import('/tests/support/stage-probe.mjs')).watchStage());
   for (const mode of ['advanced', 'simple']) {
     await page.evaluate(async mode => {
       const {emptyDocument, createObject, createFrame} = await import('/src/demo.mjs');
@@ -91,7 +91,7 @@ try {
     await undo(); assert.deepEqual(await order(), [4, 3, 1, 2]);
     await redo(); assert.deepEqual(await order(), [3, 1, 2, 4]);
     assert.equal(await page.evaluate(() => originalPose === JSON.stringify([...styk.editor.geometry.objects.values()].map(g => [g.obj.unique_id, g.root, g.segments.map(s => [s.start, s.end]), g.obj.join?.target_unique_id ?? null]).sort((a, b) => a[0] - b[0]))), true);
-    await page.waitForFunction(() => JSON.stringify(styk.state.renderer.last.frame.object_draw_order_unique_ids) === JSON.stringify(styk.editor.evaluatedFrame.object_draw_order_unique_ids));
+    await page.waitForFunction(() => JSON.stringify(window.stageLast.frame.object_draw_order_unique_ids) === JSON.stringify(styk.editor.evaluatedFrame.object_draw_order_unique_ids));
     await page.screenshot({path: `${out}/${mode}-attached-branch.png`});
     console.log(`PASS ${mode}: figure, node and branch clicks to front/back; Shift-clicks one step; boundary, undo/redo, rendered order and unchanged pose/joins`);
   }

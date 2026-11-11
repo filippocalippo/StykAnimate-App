@@ -1,0 +1,31 @@
+{
+ "name": "clip-create-multilayer-sheet",
+ "document": "clip-create-multilayer-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "createMovieclip",
+   {
+    "start": 2,
+    "end": 6,
+    "uids": [
+     2,
+     3
+    ]
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   3
+  ]
+ ]
+}

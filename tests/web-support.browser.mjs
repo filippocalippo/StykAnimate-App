@@ -29,7 +29,8 @@ try {
   else check('A browser that lacks a feature says so in plain words', await probe.getByText('StykAnimate needs a newer browser').isVisible());
   await probe.context().close();
 
-  for (const [feature, removal] of [['OffscreenCanvas', () => { delete window.OffscreenCanvas; }], ['IndexedDB', () => { Object.defineProperty(window, 'indexedDB', { configurable: true, get: () => undefined }); }]]) {
+  for (const [feature, removal] of [['OffscreenCanvas', () => { delete window.OffscreenCanvas; }], ['WebAssembly SIMD', () => { const validate = WebAssembly.validate.bind(WebAssembly); WebAssembly.validate = (bytes) => bytes.includes(253) ? false : validate(bytes); }], ['IndexedDB', () => { Object.defineProperty(window, 'indexedDB', { configurable: true, get: () => undefined }); }],
+    ['WebGPU or WebGL 2', () => { Object.defineProperty(Navigator.prototype, 'gpu', { configurable: true, get: () => undefined }); const getContext = OffscreenCanvas.prototype.getContext; OffscreenCanvas.prototype.getContext = function (kind, ...rest) { return kind === 'webgl2' ? null : getContext.call(this, kind, ...rest); }; }]]) {
     const page = await (await browser.newContext()).newPage();
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));

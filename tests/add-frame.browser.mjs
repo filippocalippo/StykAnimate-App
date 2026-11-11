@@ -9,7 +9,7 @@ const snap=()=>page.evaluate(()=>({tick:styk.editor.tick,duration:styk.editor.to
 const cell=async(tick,layer='layer-1')=>{const box=await page.evaluate(([tick,layer])=>{const t=styk.timeline,r=t.scroll.getBoundingClientRect();const i=t.tracks.findIndex(l=>l.id===layer);return{x:r.x+(tick+.5)*t.pxPerTick,y:r.y+t.rowY(i)+t.rowSize(i)/2};},[tick,layer]);await page.mouse.click(box.x,box.y);};
 const ruler=async tick=>{const box=await page.evaluate(tick=>{const t=styk.timeline,r=t.scroll.getBoundingClientRect();return{x:r.x+(tick+.5)*t.pxPerTick,y:r.y+16};},tick);await page.mouse.click(box.x,box.y);};
 try {
- await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>styk?.ready);
+ await page.goto(process.env.STYK_URL||'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
  await page.evaluate(async()=>{const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');const r=emptyDocument();r.keyframes=[0,40].map(x=>createFrame([createObject(r.figure_types[0],1,200+x,250)],12));styk.editor.load(r);styk.editor.select(1);styk.fit();});
  await cell(5);const original=await snap();await page.keyboard.press('a');
  assert.deepEqual(await snap(),{...original,keys:[0,5,12]});

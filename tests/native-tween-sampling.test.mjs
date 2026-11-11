@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {evaluatedFrame, frameTicks, shortest} from '../src/pivot/geometry.mjs';
+import {shortest, nativeTimeline} from '../src/pivot/read-view.mjs';
+import {emptyDocument} from '../src/demo.mjs';
+import {ownedEditorFor} from './support/owned-editor.mjs';
 
-// The native-easing sampler as it was before per-object sampling: one
-// keyframe lookup, run search, tangent array and pchip per joint and channel.
+/** A stored keyframe's ticks: the displayed keyframe and its outgoing inbetweens (raw signed duration). */
+const frameTicks = frame => Math.max(0, Number(frame.duration_raw ?? 1));
+
+// The native-easing sampler as it was before per-object sampling: one keyframe lookup, run search, tangent array and pchip per
+// joint and channel, written out here as the reference the engine's evaluated frame must equal bit for bit.
 const lerp = (a, b, t) => Number(a) + (Number(b) - Number(a)) * t;
 function endpointSlope(h0, h1, d0, d1) {
   let m = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
@@ -60,13 +65,14 @@ function expected(report, index, t, uid) {
   return out;
 }
 
-/** Pivot native easing (auto_easing, unkeyed frames) with long runs, gaps where
- * an object is absent, short channel arrays and angles that wrap around. */
+/** Pivot native easing (auto_easing, unkeyed frames) with long runs, gaps where an object is absent, channels some keys do not
+ * carry (lengths and bends flagged off) and angles that wrap around. */
 function nativeDocument() {
+  const template = emptyDocument().figure_types[0].segments[0];
   const segments = [
-    {segment_id: 1, parent_id: 0, length: 30, angle_rad: 0, bend_rad: 0},
-    {segment_id: 2, parent_id: 1, length: 20, angle_rad: 1, bend_rad: .1},
-    {segment_id: 3, parent_id: 2, length: 10, angle_rad: 2, bend_rad: 0},
+    {...template, segment_id: 1, parent_id: 0, length: 30, angle_rad: 0, bend_rad: 0},
+    {...template, segment_id: 2, parent_id: 1, length: 20, angle_rad: 1, bend_rad: .1},
+    {...template, segment_id: 3, parent_id: 2, length: 10, angle_rad: 2, bend_rad: 0},
   ];
   const keyframes = [];
   for (let k = 0; k < 14; k++) {
@@ -75,30 +81,40 @@ function nativeDocument() {
       if (uid === 2 && k === 6) continue; // absent in one key: the run splits
       const wrap = k * 2.9; // consecutive angles differ by more than pi after wrapping
       const object = {unique_id: uid, figure_type_id: 1, object_slot: objects.length, root_x: 10 * k + uid, root_y: k * k, scale: 1,
-        angles: [Math.sin(k + uid) * 3, wrap + uid, -wrap], bend_flag: k % 3 ? 1 : 0, bends: [0, .05 * k, .2], field28: 0, color_override_raw: 0};
+        angles: [Math.sin(k + uid) * 3, wrap + uid, -wrap], bend_flag: k % 3 ? 1 : 0, bends: k % 3 ? [0, .05 * k, .2] : [],
+        len_flag: 0, lengths: [], field28: 0, color_override_raw: 0, join: null};
       if (uid !== 1 || k % 2) { object.len_flag = 1; object.lengths = [30 + k, 20 - k, 10 + uid]; }
-      if (uid === 3 && k === 8) object.lengths = [31]; // defined for joint 0 only: that channel's run is shorter
       objects.push(object);
     }
-    keyframes.push({duration_raw: k === 10 ? 1 : 3 + (k % 2), objects, keyframe_index: k});
+    keyframes.push({duration_raw: k === 10 ? 1 : 3 + (k % 2), background_id: 0, background_id_b: 0, background_mix: 0,
+      camera: {is_default: true, x: 0, y: 0, scale: 1, angle_rad: 0}, objects,
+      object_draw_order: objects.map((_, i) => i), object_draw_order_unique_ids: objects.map(o => o.unique_id)});
   }
-  return {version: 5, auto_easing: true, figure_types: [{figure_type_id: 1, segments, polyfills: []}], keyframes};
+  const document = emptyDocument();
+  return {...document, auto_easing: true, auto_easing_disabled_raw: 0, figure_types: [{...document.figure_types[0], figure_type_id: 1, segment_count: 3, segments}], keyframes};
 }
 
-test('per-object native-easing sampling equals the per-joint evaluation exactly', () => {
-  const report = nativeDocument();
+test('the native-easing sampling of the engine equals the per-joint evaluation exactly', () => {
+  const report = nativeDocument(), editor = ownedEditorFor({demo: false}, report), rows = nativeTimeline(report);
   let compared = 0;
-  for (let index = 0; index + 1 < report.keyframes.length; index++) for (const t of [.2, .5, .75]) {
-    const frame = evaluatedFrame(report, index, t);
-    for (const uid of [1, 2, 3]) {
-      const object = frame.objects.find(o => o.unique_id === uid);
-      if (!report.keyframes[index].objects.some(o => o.unique_id === uid) || !report.keyframes[index + 1].objects.some(o => o.unique_id === uid)) continue;
-      const want = expected(report, index, t, uid);
-      assert.ok(Object.is(object.root_x, want.root_x), `root ${index} ${t} ${uid}`);
-      for (const field of ['lengths', 'bends', 'angles']) want[field].forEach((value, i) =>
-        assert.ok(Object.is(object[field][i], value), `${field}[${i}] key ${index} t ${t} object ${uid}: ${object[field][i]} vs ${value}`));
-      compared++;
+  // Every whole tick inside a keyframe's span samples that keyframe at tick-start over the span (the last keyframe holds one tick).
+  for (const {index, start, count} of rows) {
+    if (index + 1 >= rows.length) continue;
+    for (let at = 0; at < count; at++) {
+      const t = at / count;
+      if (!t) continue;
+      editor.seek(start + at);
+      const frame = editor.evaluatedFrame;
+      for (const uid of [1, 2, 3]) {
+        const object = frame.objects.find(o => o.unique_id === uid);
+        if (!report.keyframes[index].objects.some(o => o.unique_id === uid) || !report.keyframes[index + 1].objects.some(o => o.unique_id === uid)) continue;
+        const want = expected(report, index, t, uid);
+        assert.ok(Object.is(object.root_x, want.root_x), `root ${index} ${t} ${uid}: ${object.root_x} vs ${want.root_x}`);
+        for (const field of ['lengths', 'bends', 'angles']) want[field].forEach((value, i) =>
+          assert.ok(Object.is(object[field][i], value), `${field}[${i}] key ${index} t ${t} object ${uid}: ${object[field][i]} vs ${value}`));
+        compared++;
+      }
     }
   }
-  assert.ok(compared > 60);
+  assert.ok(compared > 60, `compared ${compared} poses`);
 });

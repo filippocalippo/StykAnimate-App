@@ -144,9 +144,5 @@ export default {
   },
   "dockHost.resizePanels": "Resize {panels}",
   "rigControls.pickAnchorOnCanvas": "Pick anchor {anchor} on canvas",
-  "insertInbetweenDialog.insertFrames": {
-    "one": "Insert {count} inbetween",
-    "other": "Insert {count} inbetweens"
-  },
   "propertyControls.enterValueBetween": "Enter a value between {min} and {max}."
 };

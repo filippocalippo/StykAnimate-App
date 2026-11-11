@@ -1,0 +1,557 @@
+{
+ "name": "recolor-sheet",
+ "document": "range-colors.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "replaceFigureColor",
+   "#0d99ff",
+   "#123456"
+  ],
+  [
+   "replaceFigureColor",
+   "#00ff00",
+   "#ff00ff"
+  ],
+  [
+   "replaceFigureColor",
+   "#c82828",
+   "#204060"
+  ],
+  [
+   "replaceFigureColor",
+   "#0a141e",
+   "#ffffff",
+   {
+    "targets": {
+     "segments": [
+      {
+       "handleId": 4,
+       "stops": [
+        0,
+        2
+       ]
+      }
+     ],
+     "polygons": [
+      7
+     ]
+    }
+   }
+  ],
+  [
+   "replaceFigureColor",
+   "#999999",
+   "#000000"
+  ],
+  [
+   "replaceFigureColor",
+   "#123456",
+   "#123456"
+  ],
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "replaceFigureColor",
+   "#123456",
+   "#654321"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "setFigureColor",
+   "#ff8000"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setFigureColor",
+   "#00ff00",
+   {
+    "opacity": 0.5
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "all",
+    "opacity": 0.25
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "color": "#ff0000",
+     "opacity": 0.5,
+     "thickness": 4
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 5,
+       "stops": []
+      }
+     ],
+     "polygons": []
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "color": "#ff0000",
+     "opacity": 0.5,
+     "thickness": 4
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 5,
+       "stops": []
+      }
+     ],
+     "polygons": []
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "paint": {
+      "type": "radial",
+      "angle": 0,
+      "stops": [
+       {
+        "offset": 0,
+        "color": [
+         255,
+         0,
+         0
+        ],
+        "opacity": 1
+       },
+       {
+        "offset": 1,
+        "color": [
+         0,
+         0,
+         255
+        ],
+        "opacity": 0.5
+       }
+      ]
+     }
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 6,
+       "stops": []
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "gradient": {
+      "color": "#00ffff",
+      "opacity": 0.4
+     }
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 7,
+       "stops": []
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "gradient": null
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 3,
+       "stops": []
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "color": [
+      10,
+      20,
+      30
+     ]
+    },
+    "targets": {
+     "segments": [],
+     "polygons": [
+      1
+     ]
+    }
+   }
+  ],
+  [
+   "updatePolygon",
+   2,
+   {
+    "color": "#336699"
+   }
+  ],
+  [
+   "updatePolygon",
+   1,
+   {
+    "color": "#996633",
+    "opacity": 0.5
+   }
+  ],
+  [
+   "replaceFigureColor",
+   "#336699",
+   "#aabbcc"
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "opacity": 0.3
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 4,
+       "stops": []
+      }
+     ],
+     "polygons": []
+    }
+   }
+  ],
+  [
+   "setFigureColor",
+   "#00aa00"
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "opacity": 0.3
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 8,
+       "stops": []
+      }
+     ],
+     "polygons": []
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "gradient": {
+      "color": "#00ffff"
+     }
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 8,
+       "stops": []
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "paint": {
+      "type": "linear",
+      "angle": 0,
+      "stops": [
+       {
+        "offset": 0.75,
+        "color": [
+         250,
+         10.4,
+         10
+        ],
+        "opacity": 1
+       },
+       {
+        "offset": 0.25,
+        "color": [
+         10,
+         250,
+         10
+        ],
+        "opacity": 0.8
+       }
+      ]
+     }
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 4,
+       "stops": []
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "resetFigureColors"
+  ],
+  [
+   "@select",
+   2,
+   -1
+  ],
+  [
+   "setFigureColor",
+   "#808080"
+  ],
+  [
+   "resetFigureColors"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "updateFiguresInFrames",
+   {
+    "color_override_raw": 2164195328
+   },
+   [
+    0
+   ]
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "thickness": 3
+    },
+    "targets": {
+     "segments": [
+      {
+       "handleId": 1,
+       "stops": []
+      }
+     ],
+     "polygons": []
+    }
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setFigureColor",
+   "#abcdef",
+   {
+    "indices": {
+     "@array": [
+      0
+     ],
+     "sheetTicks": [
+      0,
+      3
+     ]
+    }
+   }
+  ],
+  [
+   "resetFigureColors",
+   {
+    "indices": [
+     0
+    ]
+   }
+  ],
+  [
+   "selectMany",
+   [
+    1,
+    2
+   ]
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "all",
+    "color": "#f80",
+    "figureTypeId": 2
+   }
+  ],
+  [
+   "undo"
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "bogus"
+   }
+  ],
+  [
+   "replaceFigureColor",
+   null,
+   "#000000"
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "replace",
+    "color": "#000000"
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "all",
+    "opacity": 2
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "bogus": 1
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "style",
+    "patch": {
+     "paint": {
+      "type": "spiral"
+     }
+    }
+   }
+  ],
+  [
+   "editFigureColors",
+   {
+    "mode": "replace",
+    "color": "#000000",
+    "targets": {
+     "segments": [
+      {
+       "handleId": 0,
+       "stops": [
+        0
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  [
+   "setFigureColor",
+   "red"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   true
+  ],
+  [
+   "setFigureColor",
+   "#000000"
+  ],
+  [
+   "setLayerLocked",
+   "layer-1",
+   false
+  ],
+  [
+   "setLayerVisible",
+   "layer-1",
+   false
+  ],
+  [
+   "setFigureColor",
+   "#000000"
+  ],
+  [
+   "setLayerVisible",
+   "layer-1",
+   true
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

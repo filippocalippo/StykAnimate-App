@@ -20,9 +20,9 @@ import {cameraMotionView,parallaxView} from '../../src/camera-motion-ui.mjs';
 import {paintCSS} from '../../src/paint.mjs';
 import {figurePalette, displayedSegmentPaint, displayedColor} from '../../src/figure-colors.mjs';
 import { icon } from "../../src/icons.mjs";
-import { isStatic } from "../../src/pivot/geometry.mjs";
+import { isStatic } from "../../src/pivot/read-view.mjs";
 import { formatPropertyValue } from "../../src/property-controls.mjs";
-import { cameraValues } from "../../src/editor-camera.mjs";
+import { cameraValues } from "../../src/pivot/model.mjs";
 import { builderDrawables } from '../../src/editor-builder-style.mjs';
 import { isBuilderContext } from '../../src/builder-aids.mjs';
 import {resolveInstanceFigure} from '../../src/animation-style.mjs';
@@ -35,7 +35,6 @@ import {drawingSetsView} from '../../src/movieclip-drawings-view.mjs';
 import {playbackSettings,movieclipAsset,movieclipTime} from '../../src/movieclips.mjs';
 // src/spatial-controls.mjs's spatialControlsView and limbControl, verbatim at 52f13960 (the 3D rig's inspector, ported in M4).
 import {spatialPerspectiveAvailable} from '../../src/spatial-projection.mjs';
-import {geometryPlans} from '../../src/pivot/geometry-pose.mjs';
 import {spatialBone,spatialPoint} from '../../src/rig-spatial.mjs';
 import {ikChain} from '../../src/ik.mjs';
 import {poseChoiceGroups} from '../../src/rig-pose-choices.mjs';
@@ -63,7 +62,7 @@ const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 function limbControl(editor){
  const f=editor.figure,index=editor.selectedJoint,s=f?.segments[index];if(!s)return null;
  const ancestors=new Set();let parent=s;while(parent?._stykRig?.spatial?.parent){ancestors.add(parent._stykRig.spatial.parent);parent=f.segments.find(n=>n.segment_id===parent._stykRig.spatial.parent);}
- for(const[id,c]of Object.entries(editor.object?._stykIK??{}))if(c.spatialTarget&&(ancestors.has(Number(id))||ikChain(f,Number(id),c.chainLength,geometryPlans(editor.geometry.objects.get(editor.selectedSlot))?.definition).includes(index)))
+ for(const[id,c]of Object.entries(editor.object?._stykIK??{}))if(c.spatialTarget&&(ancestors.has(Number(id))||ikChain(f,Number(id),c.chainLength).includes(index)))
   return{index:f.segments.findIndex(s=>s.segment_id===Number(id)),controller:c};
  return null;
 }
@@ -79,7 +78,7 @@ function spatialControlsView(editor){
  const trunk=[['Pelvis','Hips'],['Lower torso','Torso'],['Waist','Waist'],['Chest','Chest'],[bones.some(b=>b.s.name==='Head')?'Head':'Neck','Head']].flatMap(([name,label])=>{const b=bones.find(b=>b.s.name===name);return b?[choose(b.i,label)]:[];}).join('');
  const rows=pose?['pitch','turn','bend'].map((key,i)=>{const value=pose[key]*DEG,label=['Tilt','Turn','Bend'][i];return`<div class="spatial-axis spatial-${key}"><label for="spatial-${key}-number">${label}</label><input id="spatial-${key}-range" type="range" min="-180" max="180" step="0.1" value="${wrap(pose[key])*DEG}" data-spatial-axis="${key}" aria-label="${label}"><label class="field"><input id="spatial-${key}-number" type="number" step="1" value="${Math.round(value*10)/10}" data-spatial-axis="${key}" aria-label="${label} degrees"><small>°</small></label></div>`;}).join(''):'';
  const endpoint=limb?childOf(editor.figure.segments[limb.index].segment_id):null,toe=endpoint?childOf(endpoint.s.segment_id):null;
- const isFoot=/foot|ankle/i.test(endpoint?.s.name??''),chain=limb?ikChain(editor.figure,editor.figure.segments[limb.index].segment_id,ik.chainLength,geometryPlans(editor.geometry.objects.get(editor.selectedSlot))?.definition):[];
+ const isFoot=/foot|ankle/i.test(endpoint?.s.name??''),chain=limb?ikChain(editor.figure,editor.figure.segments[limb.index].segment_id,ik.chainLength):[];
  const rotations=chain.map((index,i)=>choose(index,isFoot?(i===0?'Thigh rotation':'Shin rotation'):(i===0?'Upper arm rotation':'Forearm rotation'),true)).join('')+(endpoint?choose(endpoint.i,isFoot?'Ankle rotation':'Hand rotation',true):'')+(toe?choose(toe.i,'Toe bend',true):'');
  const camera=editor.getSpatialCamera(),proportions=editor.getSpatialProportions();
  const parameter=(kind,key,label,value,min,max,step=1,unit='')=>`<div class="spatial-axis spatial-proportion"><label for="spatial-${kind}-${key}">${label}</label><input type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-spatial-${kind}="${key}" aria-label="${label}"><label class="field"><input id="spatial-${kind}-${key}" type="number" min="${min}" max="${max}" step="${step}" value="${Math.round(value*100)/100}" data-spatial-${kind}="${key}" aria-label="${label} value"><small>${unit}</small></label></div>`;

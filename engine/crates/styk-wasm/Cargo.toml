@@ -1,0 +1,27 @@
+[package]
+name = "styk-wasm"
+description = "The WebAssembly module of the StykAnimate engine: the only crate that talks to JavaScript."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+styk-alloc = { path = "../styk-alloc" }
+styk-doc = { path = "../styk-doc" }
+styk-formats = { path = "../styk-formats" }
+styk-eval = { path = "../styk-eval" }
+styk-edit = { path = "../styk-edit" }
+styk-engine = { path = "../styk-engine" }
+styk-render = { path = "../styk-render" }
+styk-export = { path = "../styk-export" }
+styk-raster = { path = "../styk-raster" }
+styk-draw = { path = "../styk-draw" }
+styk-math = { path = "../styk-math" }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "OffscreenCanvas"] }

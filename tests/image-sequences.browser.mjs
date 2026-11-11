@@ -9,19 +9,18 @@ const browser = await chromium.launch({channel: 'chrome', headless: true});
 try {
   const page = await browser.newPage({viewport: {width: 850, height: 420}}), errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${process.env.STYK_URL || 'http://127.0.0.1:47831'}/api/health`);
+  await page.goto(`${process.env.STYK_URL || 'http://127.0.0.1:47831'}/tests/fixtures/blank.html`);
   const result = await page.evaluate(async () => {
-    const [{exportAnimation}, {crc32}, {exportSVG}, {emptyDocument, createObject}, {buildGeometry, drawGeometry}] = await Promise.all([
-      import('/src/image-export.mjs'), import('/src/image-codecs.mjs'), import('/src/svg-export.mjs'), import('/src/demo.mjs'), import('/src/pivot/geometry.mjs'),
-    ]);
+    const [{exportAnimation}, {crc32}] = await Promise.all([import('/src/image-export.mjs'), import('/src/image-codecs.mjs')]);
     const checks = [], assert = (value, message) => { if (!value) throw new Error(message); checks.push(message); };
-    const report = emptyDocument(); report.canvas_width = 160; report.canvas_height = 90;
-    const figure = report.figure_types[0]; figure.segments = [{...figure.segments[0], length: 70, thickness: 10, angle_rad: 0, color_rgb: [255, 0, 0]}]; figure.segment_count = 1;
-    const frame = report.keyframes[0]; frame.objects = [createObject(figure, 1, 20, 25)]; frame.object_draw_order = [0]; frame.object_draw_order_unique_ids = [1]; frame._stykBackgroundColor = 0;
     const canvas = new OffscreenCanvas(160, 90), ctx = canvas.getContext('2d');
-    const at = index => { const sample = structuredClone(frame); sample.objects[0].root_y = 25 + index * 8; return sample; };
-    const renderFrame = index => { ctx.clearRect(0, 0, 160, 90); drawGeometry(ctx, buildGeometry(report, at(index))); return canvas; };
-    const renderSVGFrame = index => exportSVG({report, frame: at(index), width: 160, height: 90});
+    // The frames are the engine's in the app; the encoders only package what they are given: a red 10 px line that drops 8 px a frame.
+    const renderFrame = index => {
+      ctx.clearRect(0, 0, 160, 90); ctx.strokeStyle = '#f00'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(20, 25 + index * 8); ctx.lineTo(90, 25 + index * 8); ctx.stroke(); return canvas;
+    };
+    const renderSVGFrame = index => new Blob([`<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90" viewBox="0 0 160 90"><path d="M20 ${25 + index * 8}L90 ${25 + index * 8}" fill="none" stroke="#f00" stroke-width="10" stroke-linecap="round"/></svg>`], {type: 'image/svg+xml'});
     const options = {width: 160, height: 90, fps: 24, totalFrames: 4, renderFrame, renderSVGFrame};
     function unzip(data) {
       const view = new DataView(data.buffer), entries = []; let offset = 0;

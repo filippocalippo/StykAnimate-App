@@ -1,0 +1,26 @@
+{
+ "name": "branch-thickness-origin-native",
+ "document": "branch-thickness-origin-native.document.json",
+ "editor": {},
+ "steps": [
+  [
+   "@select",
+   1,
+   1
+  ],
+  [
+   "changeBranchThickness",
+   0.15
+  ],
+  [
+   "changeBranchThickness",
+   -0.15
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

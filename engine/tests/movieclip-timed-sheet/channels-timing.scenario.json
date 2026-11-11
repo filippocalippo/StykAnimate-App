@@ -1,0 +1,77 @@
+{
+ "name": "channels-timing",
+ "document": "channels-timing.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true
+ },
+ "steps": [
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "sheetApplyChannels",
+   [
+    {
+     "id": "figure:1:pose",
+     "target": {
+      "kind": "figure",
+      "uid": 1
+     },
+     "property": "pose",
+     "keys": [
+      {
+       "id": "cell-5",
+       "tick": 2,
+       "interpolation": "linear",
+       "value": {
+        "frameId": "frame-3"
+       }
+      },
+      {
+       "id": "cell-6",
+       "tick": 8,
+       "interpolation": "linear",
+       "value": {
+        "frameId": "frame-4"
+       }
+      }
+     ],
+     "movieclipCurve": true,
+     "clipEnd": 10,
+     "orderAnchor": 1
+    }
+   ],
+   "Set movieclip timing"
+  ],
+  [
+   "@seek",
+   2.75
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ],
+  [
+   "@seek",
+   8
+  ],
+  [
+   "undo"
+  ],
+  [
+   "setLayerColor",
+   [
+    "layer-1"
+   ],
+   "blue"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

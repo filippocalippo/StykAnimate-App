@@ -2,10 +2,10 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 const output = path.resolve('artifacts/export-experience');
 await mkdir(output, {recursive: true});
-const service = await backend.startBackend({appRoot: process.cwd()}); let browser;
+const service = await backend.startDesktopHost({appRoot: process.cwd()}); let browser;
 const checks = [], errors = [];
 const check = (name, ok) => {assert.ok(ok, name); checks.push(name); console.log('PASS', name);};
 try {

@@ -35,7 +35,7 @@ try {
   // Headless Chrome aborts showSaveFilePicker; without it an animation export saves through a download.
   await page.addInitScript(() => { delete window.showSaveFilePicker; });
   await page.goto(process.env.STYK_URL || "http://127.0.0.1:47831");
-  await page.waitForFunction(() => styk?.ready);
+  await page.waitForFunction(() => window.styk?.ready);
   // The demo animation: a 960 × 540 artboard with enough frames for the ranges below.
   await page.evaluate(async () => {
     const { createDemo } = await import("/src/demo.mjs");

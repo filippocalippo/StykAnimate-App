@@ -1,48 +1,51 @@
+import {chooseExport, exportDialogClosed} from './helpers/export-dialog.mjs';
 /** Actual polygon draft construction, curved overlay and native file round trips. */
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import backend from '../desktop/backend.cjs';
+import backend from '../desktop/web-host.cjs';
 const output=path.resolve('artifacts/polygon-construction');await mkdir(output,{recursive:true});
-const service=await backend.startBackend({appRoot:process.cwd()});let browser,page;
+const service=await backend.startDesktopHost({appRoot:process.cwd()});let browser,page;
 const checks=[],errors=[],check=(name,ok)=>{assert.ok(ok,name);checks.push(name);console.log('PASS',name);};
 try{
  browser=await chromium.launch({channel:'chrome',headless:true});
- page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});page.setDefaultTimeout(10000);
+ page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});page.setDefaultTimeout(10000);await page.addInitScript(()=>{delete window.showSaveFilePicker;});
  page.on('pageerror',e=>errors.push(e.message));
  await page.goto(service.origin);await page.waitForFunction(()=>window.styk?.ready);
  await page.evaluate(async()=>{const {polygonConstructionFixture}=await import('/tests/polygon-construction-fixture.mjs');const report=polygonConstructionFixture();report.keyframes.push(structuredClone(report.keyframes[0]));styk.editor.load(report,'Bent polygon');styk.editor.select(1);styk.fit();});
  const exportFile=async(format,name)=>{
-  await page.locator('.titlebar [data-action="export"]').click();const pending=page.waitForEvent('download');
-  await page.locator(`#dialog [data-action="export-${format}"]`).click();const file=await pending,target=path.join(output,name);await file.saveAs(target);await page.waitForFunction(()=>!document.querySelector('#dialog').open);return target;
+  await page.locator('.titlebar [data-action="export"]').click();await chooseExport(page,`export-${format}`);const pending=page.waitForEvent('download');
+  await page.locator('#export-dialog #export-submit').click();const file=await pending,target=path.join(output,name);await file.saveAs(target);await exportDialogClosed(page);return target;
  };
  const source=await exportFile('piv','before.piv');
  await page.locator('#file-input').setInputFiles(source);await page.waitForFunction(()=>styk.editor.report.source?.endsWith?.('before.piv')||styk.editor.name==='before');
- await page.evaluate(async()=>{styk.editor.select(styk.editor.frame.objects[0].unique_id);styk.fit();styk.editor.updateFigureStyle({name:'Existing native edit'});styk.editor.markSaved();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ await page.evaluate(async()=>{styk.editor.select(styk.editor.evaluatedFrame.objects[0].unique_id);styk.fit();styk.editor.updateFigureStyle({name:'Existing native edit'});styk.editor.markSaved();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
   window.polygonBaseline={undo:styk.editor._undo.length,redo:styk.editor._redo.length,report:JSON.stringify(styk.editor.report),revision:styk.editor.revision};
+  // Only the draft's own curve (many samples) counts: the overlay also closes a four-point rectangle in the same blue.
   const ctx=document.querySelector('#overlay').getContext('2d'),original={};let path=[];window.polygonPaths=[];window.openArcFills=0;window.openArcCloses=0;
   for(const key of ['beginPath','moveTo','lineTo','stroke','fill','closePath'])original[key]=ctx[key].bind(ctx);
   ctx.beginPath=function(){path=[];return original.beginPath();};
   ctx.moveTo=function(x,y){path.push({x,y});return original.moveTo(x,y);};
   ctx.lineTo=function(x,y){path.push({x,y});return original.lineTo(x,y);};
-  ctx.fill=function(...args){if(styk.state.polygon?.handles.length===2&&path.length>2)window.openArcFills++;return original.fill(...args);};
-  ctx.closePath=function(){if(styk.state.polygon?.handles.length===2&&path.length>2)window.openArcCloses++;return original.closePath();};
+  ctx.fill=function(...args){if(styk.state.polygon?.handles.length===2&&path.length>10)window.openArcFills++;return original.fill(...args);};
+  ctx.closePath=function(){if(styk.state.polygon?.handles.length===2&&path.length>10)window.openArcCloses++;return original.closePath();};
   ctx.stroke=function(){if(this.strokeStyle==='#0d99ff'&&this.lineWidth===2&&path.length>3)window.polygonPaths.push(path.slice());return original.stroke();};
  });
  const stable=()=>page.evaluate(()=>{const e=styk.editor,b=window.polygonBaseline;return e._undo.length===b.undo&&e._redo.length===b.redo&&JSON.stringify(e.report)===b.report&&e.revision===b.revision;});
  const handles=()=>page.evaluate(()=>styk.state.polygon?.handles??null);
  const click=async(id,ctrl=false)=>{
-  const p=await page.evaluate(async id=>{const {worldToScreen}=await import('/src/renderer.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot),r=document.querySelector('#viewport').getBoundingClientRect(),p=worldToScreen(g.joints.get(id),{report:e.report,frame:e.frame,view:styk.state.view});return{x:r.x+p.x,y:r.y+p.y};},id);
+  const p=await page.evaluate(async id=>{const {worldToScreen}=await import('/src/renderer-geometry.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot),r=document.querySelector('#viewport').getBoundingClientRect(),p=worldToScreen(g.joints.get(id),{report:e.report,frame:e.frame,view:styk.state.view});return{x:r.x+p.x,y:r.y+p.y};},id);
   if(ctrl)await page.keyboard.down('Control');try{await page.mouse.click(p.x,p.y);}finally{if(ctrl)await page.keyboard.up('Control');}
  };
- const start=()=>page.locator('[data-tool="polygon"]').click();
+ const start=async()=>{if(await page.locator('[data-tool="polygon"]').isHidden())await page.locator('[data-workspace-mode="rig"]').click();await page.locator('[data-tool="polygon"]').click();};
  await start();await click(0);await click(1);await page.waitForFunction(()=>window.polygonPaths.some(p=>p.length>10));
  check('a two-joint bent draft stays open and unfilled',await page.evaluate(()=>window.openArcFills===0&&window.openArcCloses===0));await page.keyboard.press('Control+z');await click(3,true);
  check('Ctrl click follows the shortest native segment chain',JSON.stringify(await handles())==='[0,1,2,3]');
  check('draft connections leave native document and history untouched',await stable());
  for(const key of ['Delete','Backspace','Control+d','F6','Space']){await page.keyboard.press(key);check(key+' cannot mutate the document during polygon construction',JSON.stringify(await handles())==='[0,1,2,3]'&&await stable());}
- for(const action of ['delete','play']){const button=page.locator(`[data-action="${action}"]:visible`).first();if(await button.isEnabled())await button.click();check(action+' toolbar action cannot mutate an active polygon draft',JSON.stringify(await handles())==='[0,1,2,3]'&&await stable());}
+ // Delete has no visible tile while a draft is open, so only Play may be there to press.
+ for(const action of ['delete','play']){const button=page.locator(`[data-action="${action}"]:visible`).first();if(await button.count()&&await button.isEnabled())await button.click();check(action+' toolbar action cannot mutate an active polygon draft',JSON.stringify(await handles())==='[0,1,2,3]'&&await stable());}
  await page.keyboard.press('Control+z');check('one draft Undo removes the complete Ctrl connection group',JSON.stringify(await handles())==='[0]');
  await page.keyboard.press('Enter');check('Enter cannot commit fewer than three joints',JSON.stringify(await handles())==='[0]'&&await stable());
  await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');
@@ -50,9 +53,9 @@ try{
  await page.keyboard.press('Control+y');await page.keyboard.press('Control+Shift+z');
  check('both redo shortcuts restore the grouped draft',JSON.stringify(await handles())==='[0,1,2,3]'&&await stable());
  await page.waitForFunction(()=>window.polygonPaths.some(p=>p.length>10));
- const preview=await page.evaluate(async()=>{const {polygonPreviewPoints}=await import('/src/polygon-preview.mjs'),{worldToScreen}=await import('/src/renderer.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot);const expected=polygonPreviewPoints(g,styk.state.polygon.handles).map(p=>worldToScreen(p,{report:e.report,frame:e.frame,view:styk.state.view}));const exact=window.polygonPaths.find(p=>JSON.stringify(p)===JSON.stringify(expected));window.curvedDraftPath=polygonPreviewPoints(g,styk.state.polygon.handles);return{exact:Boolean(exact),count:expected.length};});
+ const preview=await page.evaluate(async()=>{const {polygonPreviewPoints}=await import('/src/polygon-preview.mjs'),{worldToScreen}=await import('/src/renderer-geometry.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot);const expected=polygonPreviewPoints(g,styk.state.polygon.handles).map(p=>worldToScreen(p,{report:e.report,frame:e.frame,view:styk.state.view}));const exact=window.polygonPaths.find(p=>JSON.stringify(p)===JSON.stringify(expected));window.curvedDraftPath=polygonPreviewPoints(g,styk.state.polygon.handles);return{exact:Boolean(exact),count:expected.length};});
  check('actual overlay follows every evaluated bent edge sample',preview.exact&&preview.count>10);
- const markerPixels=await page.evaluate(async()=>{const {worldToScreen}=await import('/src/renderer.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot),canvas=document.querySelector('#overlay'),ctx=canvas.getContext('2d'),ratio=canvas.width/canvas.clientWidth;return[0,1].map(id=>{const p=worldToScreen(g.joints.get(id),{report:e.report,frame:e.frame,view:styk.state.view});return [...ctx.getImageData(Math.round(p.x*ratio),Math.round(p.y*ratio),1,1).data];});});
+ const markerPixels=await page.evaluate(async()=>{const {worldToScreen}=await import('/src/renderer-geometry.mjs');const e=styk.editor,g=e.geometry.objects.get(e.selectedSlot),canvas=document.querySelector('#overlay'),ctx=canvas.getContext('2d'),ratio=canvas.width/canvas.clientWidth;return[0,1].map(id=>{const p=worldToScreen(g.joints.get(id),{report:e.report,frame:e.frame,view:styk.state.view});return [...ctx.getImageData(Math.round(p.x*ratio),Math.round(p.y*ratio),1,1).data];});});
  check('construction uses a black start dot and Pivot-red selected joints',markerPixels[0].slice(0,3).every(n=>n===0)&&markerPixels[1][0]===255&&markerPixels[1][1]===0&&markerPixels[1][2]===0&&markerPixels.every(p=>p[3]===255));
  await page.screenshot({path:path.join(output,'curved-draft.png')});
  await click(0);
@@ -71,7 +74,7 @@ try{
  const exported={};for(const format of ['piv','stk'])exported[format]=await exportFile(format,`curved.${format}`);
  for(const format of ['piv','stk']){
   const bytes=[...await readFile(exported[format])];
-  const decoded=await page.evaluate(async({bytes,format})=>{const response=await fetch(`/api/import?filename=curved.${format}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:Uint8Array.from(bytes)});if(!response.ok)throw new Error(await response.text());const report=(await response.json()).document;const f=report.figure_types.find(f=>f.polyfills?.length);return{handles:f.polyfills[0].segment_ids,bend:f.segments.find(s=>s.segment_id===1).bend_rad,polyCount:f.polyfills.length};},{bytes,format});
+  const decoded=await page.evaluate(async({bytes,format})=>{const response=await (await import('/tests/support/page-codec.mjs')).codecFetch(`/api/import?filename=curved.${format}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:Uint8Array.from(bytes)});if(!response.ok)throw new Error(await response.text());const report=(await response.json()).document;const f=report.figure_types.find(f=>f.polyfills?.length);return{handles:f.polyfills[0].segment_ids,bend:f.segments.find(s=>s.segment_id===1).bend_rad,polyCount:f.polyfills.length};},{bytes,format});
   check(`actual ${format.toUpperCase()} save/reopen retains connections and curved segment`,JSON.stringify(decoded.handles)==='[0,1,2,3]'&&decoded.polyCount===1&&Math.abs(decoded.bend-Math.PI/2)<1e-6);
  }
  await page.keyboard.press('Control+z');
@@ -85,15 +88,17 @@ try{
  const cancelled=()=>page.evaluate(()=>!styk.state.polygon&&JSON.stringify(styk.editor.report)===window.cancelBaseline.report&&styk.editor._undo.length===window.cancelBaseline.undo&&styk.editor._redo.length===window.cancelBaseline.redo);
  await start();await click(0);await click(3,true);await page.keyboard.press('Escape');check('Escape discards draft and preserves existing document Redo',await cancelled());
  await start();await click(0);await click(3,true);await page.locator('[data-tool="hand"]').click();check('changing tool discards draft without a document command',await cancelled());
- await start();await click(0);await click(3,true);await page.locator('[data-action="cancel-polygon"]').click();check('Cancel button discards only the draft',await cancelled());
- await start();await click(0);await click(3,true);const fps=page.locator('#fps');if(await fps.isEnabled())await fps.focus();
- check('timing input is disabled or leaves construction before editing',await fps.isDisabled()?JSON.stringify(await handles())==='[0,1,2,3]':await cancelled());await page.keyboard.press('Escape');
- await start();await click(0);await click(3,true);await page.locator('[data-action="first-frame"]:visible').click();check('seeking a stored frame cancels the draft without changing document history',await cancelled());
+ await start();await click(0);await click(3,true);// The draft's instruction covers the header's Cancel button while it shows (Esc and the command still cancel it).
+ await page.evaluate(()=>styk.actions['cancel-polygon']());check('the cancel-polygon command discards only the draft',await cancelled());
+ // The frame-rate field is only in the Scene inspector now; the figure's opacity field stands in for it.
+ await start();await click(0);await click(3,true);const field=page.locator('[data-property="figure_opacity"]');await field.focus({timeout:2000}).catch(()=>{});await page.keyboard.type('5');
+ check('typing in an inspector field during construction changes neither the draft nor the document',JSON.stringify(await handles())==='[0,1,2,3]'?await page.evaluate(()=>JSON.stringify(styk.editor.report)===window.cancelBaseline.report&&styk.editor._undo.length===window.cancelBaseline.undo&&styk.editor._redo.length===window.cancelBaseline.redo):await cancelled());await page.keyboard.press('Escape');
+ await start();await click(0);await click(3,true);await page.evaluate(()=>styk.actions['first-frame']());check('seeking a stored frame (the First frame command: Build hides the timeline buttons and the key is held back) cancels the draft without changing document history',await cancelled());
  await start();await click(0);await click(3,true);
  await page.evaluate(()=>styk.editor.markSaved());
  await page.locator('#file-input').setInputFiles(exported.piv);await page.waitForFunction(()=>styk.editor.name==='curved');
  check('opening a PIV replaces the document and clears the pending construction',await page.evaluate(()=>!styk.state.polygon&&styk.editor._undo.length===0&&styk.editor.report.figure_types.some(f=>f.polyfills?.length===1)));
- await page.locator('#file-input').setInputFiles(exported.stk);await page.waitForFunction(()=>styk.editor.frame.objects.length===2);
+ await page.locator('#file-input').setInputFiles(exported.stk);await page.waitForFunction(()=>styk.editor.evaluatedFrame.objects.length===2);
  check('actual STK file-picker import reopens the saved polygon figure',await page.evaluate(()=>styk.editor.figure.polyfills.length===1&&styk.editor.figure.polyfills[0].segment_ids.join(',')==='0,1,2,3'));
  check('no uncaught application errors',errors.length===0);
  await writeFile(path.join(output,'report.json'),JSON.stringify({checks,preview,markerPixels,errors},null,2));console.log(JSON.stringify({checks:checks.length,errors}));

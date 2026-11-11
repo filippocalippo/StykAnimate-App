@@ -1,0 +1,55 @@
+{
+ "name": "property-autokey-sheet",
+ "document": "property-sheet.document.json",
+ "editor": {
+  "layerTimeline": true,
+  "propertyChannels": true,
+  "autoKey": true
+ },
+ "steps": [
+  [
+   "@seek",
+   3
+  ],
+  [
+   "@select",
+   1,
+   -1
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "figure",
+    "uid": 1
+   },
+   "scale"
+  ],
+  [
+   "previewAnimationEdit",
+   1.4
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "beginAnimationEdit",
+   {
+    "kind": "camera"
+   },
+   "rotation"
+  ],
+  [
+   "previewAnimationEdit",
+   0.3
+  ],
+  [
+   "commitAnimationEdit"
+  ],
+  [
+   "undo"
+  ],
+  [
+   "redo"
+  ]
+ ]
+}

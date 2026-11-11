@@ -1,21 +1,45 @@
-// Runs a Python script with an interpreter that exists on this machine.
+// Runs a Python script with an interpreter that exists on this machine: the
+// packaging scripts that stage the video encoder and the Windows codec helpers,
+// and the development-only Pivot codec oracle (codecs/, backend/).
 //
 // Stock Linux ships `python3` only, stock Windows ships `py`; the npm build
-// scripts used a bare `python` and failed on the former. The candidate list is
-// the one the desktop app uses to start the codec (desktop/backend.cjs), with
-// the repository's own virtual environment tried first because that is where
-// scripts/requirements-build.txt is installed.
+// scripts used a bare `python` and failed on the former. STYK_PYTHON and an
+// active environment come first, then the repository's own virtual environment,
+// because that is where scripts/requirements-build.txt is installed.
 //
-//   node scripts/run-python.mjs scripts/build-sidecar.py [args...]
+//   node scripts/run-python.mjs scripts/stage-video-encoder.py [args...]
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const require = createRequire(import.meta.url);
-const { pythonCandidates } = require('../desktop/backend.cjs');
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Interpreters to try, in order: STYK_PYTHON, an active virtual or conda environment, then the platform's usual names. */
+export function pythonCandidates(env = process.env, platform = process.platform, home = os.homedir()) {
+  const candidates = [];
+  const add = (command, args = []) => {
+    if (command && !candidates.some((item) => item.command === command)) candidates.push({ command, args });
+  };
+  add(env.STYK_PYTHON);
+  if (env.VIRTUAL_ENV) add(path.join(env.VIRTUAL_ENV, platform === 'win32' ? 'Scripts/python.exe' : 'bin/python'));
+  if (env.CONDA_PREFIX) add(path.join(env.CONDA_PREFIX, platform === 'win32' ? 'python.exe' : 'bin/python'));
+  if (platform === 'win32') {
+    add('py', ['-3']);
+    add('python');
+    add('python3');
+    // A conda install in the home directory is a guess, not the interpreter the machine put on PATH.
+    for (const directory of ['miniconda3', 'anaconda3', 'miniforge3']) {
+      const candidate = path.join(home, directory, 'python.exe');
+      if (existsSync(candidate)) add(candidate);
+    }
+  } else {
+    add('python3');
+    add('python');
+  }
+  return candidates;
+}
 const MINIMUM = 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)';
 
 export function venvInterpreter(root = appRoot, platform = process.platform) {
@@ -29,8 +53,8 @@ function defaultProbe(command, args) {
 }
 
 /** First candidate that runs and is Python 3.11 or newer, or null. */
-export function resolvePython({ root = appRoot, env = process.env, platform = process.platform, probe = defaultProbe } = {}) {
-  const candidates = pythonCandidates(env, platform);
+export function resolvePython({ root = appRoot, env = process.env, platform = process.platform, home = os.homedir(), probe = defaultProbe } = {}) {
+  const candidates = pythonCandidates(env, platform, home);
   if (platform === 'win32') {
     // A build machine puts the interpreter it chose first on PATH (setup-python,
     // an activated environment) and installs the build requirements into that

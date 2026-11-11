@@ -34,8 +34,6 @@ try {
     });
     styk.editor.load(report, '4K export verification'); styk.editor.markSaved(); styk.fit();
     window.exportSource = styk.editor.report; window.exportRevision = styk.editor.revision;
-    window.exportDevice = styk.state.renderer.device; window.exportDeviceLost = false;
-    exportDevice?.lost.then(() => window.exportDeviceLost = true);
   });
   for (const [format, smoothing] of [['mp4', 'sprites'], ['webm', 'edges'], ['mp4', 'none']]) {
     const file = path.join(output, `${format}-${smoothing}.${format}`);
@@ -54,7 +52,7 @@ try {
     assert.ok(bytes > 1000);
     const request = await app.evaluate(() => exportQualityRequests.at(-1));
     assert.equal(request.quality, 0.8); assert.equal(request.bitrate, undefined);
-    assert.ok(await page.evaluate(() => styk.editor.report === exportSource && styk.editor.revision === exportRevision && !exportDeviceLost));
+    assert.ok(await page.evaluate(() => styk.editor.report === exportSource && styk.editor.revision === exportRevision));
     const decoder = path.resolve('build/video-encoder/ffmpeg.exe');
     const decoded = spawnSync(decoder, ['-hide_banner', '-loglevel', 'error', '-threads', '1', '-i', file,
       '-map', '0:v:0', '-fps_mode', 'passthrough', '-f', 'framehash', '-'], {windowsHide: true, maxBuffer: 1024 * 1024});

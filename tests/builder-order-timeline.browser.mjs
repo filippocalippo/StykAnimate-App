@@ -24,7 +24,7 @@ try {
   await seek(0);
   await page.waitForFunction(max=>document.querySelector('[data-property="segment_z_order"]')?.value===String(max),max);
   await seek(10);assert.equal(await input().inputValue(),'1');
-  await page.locator('.canvas-toolbar [data-action="selection-front"]').click();await settled();
+  await page.locator('.ui-quick [data-action="selection-front"]').click();await settled();
   assert.equal(await input().inputValue(),String(max));
   await page.evaluate(()=>styk.editor.undo());await settled();assert.equal(await input().inputValue(),'1');
   await seek(0);assert.equal(await input().inputValue(),String(max));

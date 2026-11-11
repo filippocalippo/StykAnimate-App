@@ -50,9 +50,9 @@ try{
     const live=await page.evaluate(()=>{
       const r=styk.state.renderer,s=styk.drawing.gesture.surface;
       const matrix=styk.drawing.pixelMatrix(styk.drawing.gesture.target);
-      return {backend:r.stats.backend,stamp:s.stamp,smoothingScreenDistance:styk.drawing.gesture.session.settings.pixelsPerUnit*styk.drawing.gesture.session.settings.stabilization*48*Math.hypot(matrix[0],matrix[1])*styk.state.view.scale,scratches:[...(s._scratches?.values()??[])].map(c=>({stamp:c.stamp,blits:c.blits,pixels:c.canvas.width*c.canvas.height})),gpuBytes:r.stats.drawingGpuBytes,
-        // WebGPU presents live ink from the GPU brush overlay instead of a scratch.
-        gpuOverlay:r.drawingGpu?Boolean(r.drawingGpu.states.get(s)?.overlay?.size&&r.stats.drawingGpu.strokeDispatches>0):null};
+      return {backend:r.stats.backend,stamp:s.stamp,smoothingScreenDistance:styk.drawing.gesture.session.settings.pixelsPerUnit*styk.drawing.gesture.session.settings.stabilization*48*Math.hypot(matrix[0],matrix[1])*styk.state.view.scale,
+        // The engine's stage draws live ink from the tiles it holds for the cel; its frames carry the stamp they included.
+        presented:s.presentedStamp??-1,held:Boolean(r.engineSide?.live.held.includes(styk.drawing.gesture.target.figure._styk.drawing.celId))};
     });
     await page.screenshot({path:`${output}/${label}-${zoom}x-live.png`});
     await page.mouse.up();await page.waitForFunction(()=>!styk.drawing.gesture);
@@ -68,7 +68,7 @@ try{
     });
     results.push({zoom,live,...metrics});
     assert.ok(metrics.undoExact,'undo/redo restores zoomed stroke exactly');
-    if(!process.env.STYK_BENCH_BASELINE){assert.ok(live.gpuOverlay??live.scratches.some(s=>s.stamp===live.stamp),'live ink reaches a current scratch or GPU overlay before pointer release');assert.ok(Math.abs(live.smoothingScreenDistance-45.6)<1e-6,'zoom preserves the smoothing distance on screen');}
+    if(!process.env.STYK_BENCH_BASELINE){assert.ok(live.held&&live.presented>=live.stamp,'live ink reaches the stage before pointer release');assert.ok(Math.abs(live.smoothingScreenDistance-45.6)<1e-6,'zoom preserves the smoothing distance on screen');}
   }
   assert.deepEqual(errors,[]);
 }finally{

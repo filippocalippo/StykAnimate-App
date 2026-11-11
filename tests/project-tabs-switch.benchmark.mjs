@@ -29,7 +29,7 @@ const open = async file => {
   await settled();
 };
 // Editable: the scene of the playhead is drawn. Prepared: playback has the frames around the playhead.
-const settled = () => page.waitForFunction(() => !styk.state.editablePreparing && !styk.state.dirtyRender && !styk.state.importing, null, {timeout: 180000});
+const settled = () => page.waitForFunction(() => !styk.state.dirtyRender && !styk.state.importing, null, {timeout: 180000});
 const prepared = () => page.waitForFunction(() => { const s = styk.performance().playback; return s.pendingFrames === 0 && s.preparedFrames > 0; }, null, {timeout: 180000}).catch(() => null);
 
 const empty = await heap();
