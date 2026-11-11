@@ -298,11 +298,13 @@ frames a second with the interface frozen in between (tasks of up to 750 ms).
 
 Measured 2026-11-11 (desktop app, the stress document of 2,000 figures of 100
 segments, joints hidden, a pointer drag of 60 moves across 101 ticks of the ruler):
-no task over 50 ms during the drag (up to 725 ms before), paint p95 about 6 ms
-(about 210 ms), and about 15 distinct frames a second (about 5), bounded by the
-workers: a frame of that scene costs a worker about 170 ms with three at once. The
-frame under a pointer that stops shows 110 to 190 ms later. The release's editing
-frame costs about 130 ms of the interface, as a seek does.
+no task over 50 ms during the drag (265 to 750 ms before, one a tick), paint p95
+5 to 6 ms (about 190 ms), and 12 to 16 distinct frames a second (about 6), bounded
+by the workers: a frame of that scene costs a worker about 170 ms with three at
+once. The frame under a pointer that stops shows 110 to 190 ms later. The
+release's editing frame costs about 120 ms of the interface, as a seek does. With
+the joints shown the drag is the same (before: 2.9 s tasks, a 60-move drag took
+over two minutes); the release then also draws the joints (about 1.5 s on that scene).
 
 ## Recorded evidence and remaining acceptance
 
