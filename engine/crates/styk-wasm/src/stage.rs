@@ -99,6 +99,8 @@ pub struct Stage {
     pub(crate) edit: EditScene,
     /// What a click on artwork draws with ([`Stage::pick_artwork`]).
     picker: styk_export::pick::Picker,
+    /// What a pick of the frame on show needs, being worked out on a worker ([`Stage::prepare_pick`]): the frame, and where the worker puts it.
+    pick_prep: Option<(Arc<styk_eval::eval::Frame>, Arc<std::sync::Mutex<Option<styk_export::pick::PickFrame>>>)>,
     /// The onion skins drawn behind the frame ([`Stage::set_onions`]): the set the session planned and how each is drawn.
     skins: Option<(Arc<styk_edit::OnionSet>, Vec<Skin>)>,
     /// Effects are drawn (the editor's effects preview is on).
@@ -225,6 +227,7 @@ impl Stage {
             upload_bytes: 0,
             edit: EditScene::default(),
             picker: Default::default(),
+            pick_prep: None,
             skins: None,
             effects: true,
             rotation: 0.0,
@@ -461,12 +464,38 @@ impl Stage {
         };
         // The session's scene of the frame on show is the scene a pick builds: it is read, not built again. What the pick works out of
         // the frame (bounds, where each figure lies) is kept while the frame is on show, so a pointer moving over it costs the figures under it.
+        // What a worker worked out of this frame meanwhile is taken (`Stage::prepare_pick`); the worker holds its lock only to put it down.
+        let ready = self.pick_prep.as_ref().filter(|(prepared_for, _)| Arc::ptr_eq(prepared_for, &frame)).and_then(|(_, slot)| slot.try_lock().ok().and_then(|mut ready| ready.take()));
+        if let Some(prepared) = ready {
+            self.pick_prep = None;
+            if !self.picker.holds(generation.id, &frame) && let Some(replaced) = self.picker.take(prepared) {
+                self.engine.spawn(move |_| drop(replaced));
+            }
+        }
         let shapes = self.edit.shapes().filter(|(shown, _)| Arc::ptr_eq(shown, &frame)).map(|(_, scene)| scene);
         let hit = styk_export::pick::shown(&mut self.picker, &generation.prepared.doc, &generation.assets, generation.id, &frame, shapes.as_ref(), [number("x")?, number("y")?], request.get("scale").and_then(styk_doc::Value::as_f64).unwrap_or(1.0), &uids("hidden"), &uids("locked")).map_err(js_error)?;
         Ok(match hit {
             Some(hit) => format!("{{\"slot\":{},\"uid\":{}}}", hit.slot, hit.uid),
             None => "null".into(),
         })
+    }
+
+    /// Works out on an idle worker what a pick of the edit frame on show needs (its figures' bounds and where their items lie,
+    /// `styk_export::pick::prepare`), so that the first pick of the frame does not work it out on the interface thread. The interface asks once
+    /// a frame has stayed on show a moment (a pointer coming back to the stage after a seek); a frame the picker holds already, or one being
+    /// prepared, is not prepared again.
+    pub fn prepare_pick(&mut self) {
+        let (Some(generation), Some((frame, scene))) = (self.engine.generation(), self.edit.shapes()) else { return };
+        if self.picker.holds(generation.id, &frame) || self.pick_prep.as_ref().is_some_and(|(held, _)| Arc::ptr_eq(held, &frame)) {
+            return;
+        }
+        let slot = Arc::new(std::sync::Mutex::new(None));
+        let out = slot.clone();
+        self.pick_prep = Some((frame.clone(), slot));
+        self.engine.spawn_idle(move |_| {
+            let prepared = styk_export::pick::prepare(&generation.prepared.doc, generation.id, &frame, &scene);
+            *out.lock().unwrap_or_else(|error| error.into_inner()) = Some(prepared);
+        });
     }
 
     /// The camera the edit frame the stage holds was authored with (the frame drawn last): `[is_default, x, y, scale, angle]`, empty when

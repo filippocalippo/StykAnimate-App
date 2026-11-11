@@ -179,3 +179,38 @@ fn a_pick_of_the_frame_on_show_reads_the_scene_it_is_given() {
         assert!(shown(&mut kept, doc, &generation.assets, generation.id, &frame, Some(&away), shifted, 1.0, &none, &none).unwrap().is_some(), "{shifted:?}: where the scene given draws them");
     }
 }
+
+#[test]
+fn a_pick_prepared_on_a_worker_answers_as_the_pick_of_the_whole_frame() {
+    let engine = open_bytes(&dense(80, 12), "json");
+    let generation = engine.generation().unwrap();
+    let doc = &generation.prepared.doc;
+    let none = HashSet::new();
+    let frame = Arc::new(generation.prepared.evaluate(0.0));
+    let scene = Arc::new(build_shapes(doc, &frame, None));
+    // Worked out on another thread, taken by the picker: it holds the frame, and answers what a whole pick answers.
+    let (doc_w, frame_w, scene_w, id) = (generation.prepared.clone(), frame.clone(), scene.clone(), generation.id);
+    let prepared = std::thread::spawn(move || styk_export::pick::prepare(&doc_w.doc, id, &frame_w, &scene_w)).join().unwrap();
+    let mut kept = Picker::default();
+    assert!(kept.take(prepared).is_none());
+    assert!(kept.holds(generation.id, &frame));
+    for point in points(&scene, 3) {
+        let fast = shown(&mut kept, doc, &generation.assets, generation.id, &frame, Some(&scene), point, 1.0, &none, &none).unwrap();
+        assert_eq!(fast, artwork(&mut Picker::default(), doc, &generation.assets, &frame, point, 1.0, &none, &none).unwrap(), "{point:?}");
+    }
+    // Prepared for another frame, it is not used: the frame on show is worked out again.
+    let mut moved = (*frame).clone();
+    for object in &mut moved.objects {
+        let mut shifted = (**object).clone();
+        shifted.root = [shifted.root[0] + 5000.0, shifted.root[1]];
+        *object = Arc::new(shifted);
+    }
+    let moved = Arc::new(moved);
+    let elsewhere = Arc::new(build_shapes(doc, &moved, None));
+    drop(kept.take(styk_export::pick::prepare(doc, generation.id, &moved, &elsewhere)));
+    assert!(!kept.holds(generation.id, &frame));
+    for point in points(&scene, 2) {
+        let fast = shown(&mut kept, doc, &generation.assets, generation.id, &frame, Some(&scene), point, 1.0, &none, &none).unwrap();
+        assert_eq!(fast, artwork(&mut Picker::default(), doc, &generation.assets, &frame, point, 1.0, &none, &none).unwrap(), "{point:?} after a stale preparation");
+    }
+}

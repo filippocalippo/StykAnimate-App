@@ -15,9 +15,9 @@ use std::sync::Arc;
 
 use styk_eval::assets::Assets;
 use styk_eval::doc::Document;
-use styk_eval::drawlist::{Overrides, app_bounds, encode_composed, encode_composed_span, has_text};
+use styk_eval::drawlist::{Overrides, app_bounds, encode_composed, encode_composed_span};
 use styk_eval::eval::Frame;
-use styk_eval::geometry::{Scene, build_shapes_cancellable};
+use styk_eval::geometry::{ItemKind, Scene, build_shapes_cancellable};
 use styk_raster::{Edges, Images, Raster, ViewParams};
 
 /// The three-pixel surface a candidate is drawn on, the pictures that stay decoded between clicks, and what was worked out of the
@@ -25,7 +25,7 @@ use styk_raster::{Edges, Images, Raster, ViewParams};
 pub struct Picker {
     raster: Raster,
     images: Images,
-    held: Option<Held>,
+    held: Option<PickFrame>,
 }
 
 impl Default for Picker {
@@ -39,10 +39,21 @@ impl Picker {
     pub fn release(&mut self) {
         self.held = None;
     }
+
+    /// Takes what was worked out of a frame elsewhere ([`prepare`], on a worker while the frame is on show): the next pick of that frame
+    /// starts from it. Answers what it replaces (to be let go of where the caller wants).
+    pub fn take(&mut self, prepared: PickFrame) -> Option<PickFrame> {
+        self.held.replace(prepared)
+    }
+
+    /// Whether what the picker holds was worked out of `frame` of `document`.
+    pub fn holds(&self, document: u64, frame: &Arc<Frame>) -> bool {
+        self.held.as_ref().is_some_and(|held| held.document == document && Arc::ptr_eq(&held.frame, frame))
+    }
 }
 
-/// What a pick works out of a frame before it draws a candidate, kept for the frame on show ([`shown`]).
-struct Held {
+/// What a pick works out of a frame before it draws a candidate ([`prepare`]), kept for the frame on show ([`shown`]).
+pub struct PickFrame {
     /// The caller's number for the document and its pictures, and the frame (held, so its address is never another frame's).
     document: u64,
     frame: Arc<Frame>,
@@ -51,8 +62,24 @@ struct Held {
     /// (`None` for a figure that draws nothing).
     bounds: Vec<Option<[f64; 4]>>,
     spans: Vec<Option<(usize, usize)>>,
-    /// Whether the scene draws text ([`has_text`]).
+    /// Whether the scene draws text ([`styk_eval::drawlist::has_text`]).
     text: bool,
+}
+
+/// Works out what a pick of `frame` (built as `scene`, what [`styk_eval::geometry::build_shapes`] builds) of `doc` needs before it draws a
+/// candidate: the figures' measured bounds and where each figure's items lie. On any thread; `document` is the caller's number for `doc`
+/// and its pictures ([`shown`]).
+pub fn prepare(doc: &Document, document: u64, frame: &Arc<Frame>, scene: &Arc<Scene>) -> PickFrame {
+    let bounds = app_bounds(scene, doc);
+    let mut spans: Vec<Option<(usize, usize)>> = vec![None; frame.objects.len()];
+    let mut text = false;
+    for (at, item) in scene.items.iter().enumerate() {
+        text |= item.kind == ItemKind::Text;
+        if let Some(span) = spans.get_mut(item.slot as usize) {
+            *span = Some(span.map_or((at, at + 1), |(first, _)| (first, at + 1)));
+        }
+    }
+    PickFrame { document, frame: frame.clone(), scene: scene.clone(), bounds, spans, text }
 }
 
 /// What a click hit: the figure's slot in the frame and its identity.
@@ -99,15 +126,7 @@ pub fn shown(picker: &mut Picker, doc: &Document, assets: &Assets, document: u64
             Some(scene) => scene.clone(),
             None => Arc::new(build_shapes_cancellable(doc, frame, None, &|| false).expect("an uncancelled build")),
         };
-        let bounds = app_bounds(&scene, doc);
-        let mut spans: Vec<Option<(usize, usize)>> = vec![None; frame.objects.len()];
-        for (at, item) in scene.items.iter().enumerate() {
-            if let Some(span) = spans.get_mut(item.slot as usize) {
-                *span = Some(span.map_or((at, at + 1), |(first, _)| (first, at + 1)));
-            }
-        }
-        let text = has_text(&scene);
-        picker.held = Some(Held { document, frame: frame.clone(), scene, bounds, spans, text });
+        picker.held = Some(prepare(doc, document, frame, &scene));
     }
     let held = picker.held.take().expect("held above");
     let drawn: Vec<bool> = held.spans.iter().map(Option::is_some).collect();

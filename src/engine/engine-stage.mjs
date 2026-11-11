@@ -67,6 +67,9 @@ const STRIP = new Set(['runtime_segments']);
 const THUMBNAIL_WAIT_MS = 60000;
 /** How long a frame shown while its pictures decode waits for the engine's workers to finish one. */
 const PICTURE_WAIT_MS = 60000;
+/** How long an edit frame stays on show before what a pick of it needs is worked out on a worker (`Stage::prepare_pick`): not while frames follow
+ * each other (a drag, a scrub), and before a pointer comes back to the stage. */
+const PICK_PREPARE_MS = 60;
 /** How often the device is asked whether it was lost (a page that draws nothing would not notice). */
 const DEVICE_POLL_MS = 1000;
 /** A pose as JSON, without derived caches. */
@@ -148,7 +151,13 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
   // The engine keeps the document; a stage on a new device starts from empty poses.
   Object.assign(side, perStage(), {stage, live: new LiveCels(stage), failed: null, failure: null});
   /** The stage's pixels per CSS pixel (the last `resize`), and a frame the stage has drawn. */
-  let deviceRatio = 1, engineShown = false, destroyed = false, lost = '', retrying = false, redrawQueued = false, preparedError = null;
+  let deviceRatio = 1, engineShown = false, destroyed = false, lost = '', retrying = false, redrawQueued = false, preparedError = null, pickTimer = 0;
+  /** A pick of the frame drawn is prepared once no other frame follows it for a moment. */
+  const preparePickSoon = () => {
+    if (typeof stage.prepare_pick !== 'function') return;
+    clearTimeout(pickTimer);
+    pickTimer = setTimeout(() => { if (!destroyed && !lost) stage.prepare_pick(); }, PICK_PREPARE_MS);
+  };
   const warnings = [];
   /** The engine's counters, read from the stage once per frame drawn. */
   let statsAt = -1, gpuStats = null;
@@ -345,7 +354,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       try {
         const drawn = drawEdit(request);
         if (span !== 0) traceEnd(span, {drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs});
-        if (drawn) engineShown = true;
+        if (drawn) { engineShown = true; preparePickSoon(); }
         if (renderer.measureFrame) renderer.telemetryStages = {geometry: side.stats.lastSendMs, submit: side.stats.lastDrawMs};
         return drawn;
       } catch (error) {
@@ -497,7 +506,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     destroy() {
       if (destroyed) return;
       destroyed = true; engineShown = false;
-      clearInterval(poller);
+      clearInterval(poller); clearTimeout(pickTimer);
       side.pictureWait++;
       side.workerMonitor?.destroy(); side.workerMonitor = null;
       if (side.stage === stage) { side.stage = null; stage.free(); }
