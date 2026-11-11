@@ -25,6 +25,12 @@ Commands: `npm run engine:build`, `npm run engine:test` (seconds once built),
 (one benchmark run; `scripts/engine-bench-matrix.sh` for rounds) and
 `npm run engine:bench:summary <label>`.
 
+`styk-edit` and `styk-eval` build their integration tests as one binary each (`tests/suite.rs`, one module per test
+file), because linking one binary per file took longer than the tests themselves:
+`cargo test -p styk-eval --test suite -- <file>::` runs one file's tests. A new test file is added to `suite.rs`
+(a test there fails for a file that is listed nowhere). A file that needs the process to itself (its own allocator, a
+measurement) is its own `[[test]]` in the crate's `Cargo.toml`.
+
 Native measurements of an interaction, by phase (a measurement, not a check; they print and assert nothing about speed):
 `styk stepbench <file> <tick> [steps]` times a drag step (build, encode and place, with onion skins);
 `STYK_BENCH_DOC=<file> STYK_BENCH_TICK=<tick> cargo test --release -p styk-engine --test commit_bench -- --ignored --nocapture`

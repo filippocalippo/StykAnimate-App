@@ -5,6 +5,8 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
+# The integration tests are the binaries named below (tests/suite.rs holds all but those that need a process to themselves).
+autotests = false
 
 [dependencies]
 styk-doc = { path = "../styk-doc" }
@@ -18,3 +20,11 @@ sha2 = "0.10"
 
 [features]
 inspect = []
+
+[[test]]
+name = "suite"
+path = "tests/suite.rs"
+
+[[test]]
+name = "prepared_publication"
+path = "tests/prepared_publication.rs"
