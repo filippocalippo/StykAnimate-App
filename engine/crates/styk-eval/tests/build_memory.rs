@@ -515,7 +515,7 @@ fn a_list_encoded_over_another_reports_the_figure_that_changed() {
     let mut list = None;
     for _ in 0..4 {
         // What the last step reported holds the list before it: let go of, as a renderer does once it has written the changes.
-        changes = None;
+        drop(changes.take());
         next = turned(&next, slot);
         let scene = geometry::build_remembering_shared(&prepared.doc, &next, &mut built);
         let (encoded_list, reported) = encode_composed_shared(&prepared.doc, &assets, &scene, &Overrides::default(), &[], None, &mut encoded);
