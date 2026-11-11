@@ -530,4 +530,12 @@ fn a_list_encoded_over_another_reports_the_figure_that_changed() {
     let items = scene.items_of(slot).unwrap().len();
     assert!(changed <= 2 * items, "no more than the turned figure's primitives (its items and their outline): {changed} for {items} items");
     assert!(encoded.written_over() >= 2, "the lists from the third on are written over the one before last");
+    // At rest the list before the last is let go of: the next list has nothing to be written over.
+    drop(changes);
+    encoded.rest();
+    let written = encoded.written_over();
+    let scene = geometry::build_remembering_shared(&prepared.doc, &turned(&next, slot), &mut built);
+    let (after_rest, _) = encode_composed_shared(&prepared.doc, &assets, &scene, &Overrides::default(), &[], None, &mut encoded);
+    assert_eq!(encoded.written_over(), written, "a list after a rest is encoded whole");
+    same_list(&after_rest, &encode_composed(&prepared.doc, &assets, &scene, &Overrides::default(), &[], None), "after a rest");
 }
