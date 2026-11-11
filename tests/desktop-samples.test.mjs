@@ -108,12 +108,15 @@ print(json.dumps({'samples': store.samples(), 'open': answers}))`;
   assert.deepEqual(oracle.open['empty.piv'], {ok: false, status: 400, code: 'empty_file', error: 'This file is empty.'});
 });
 
-test('the list stops at 5000 files, as the codec service did', async t => {
+test('the list stops at its limit, which is 5000 files as the codec service\x27s was', async t => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'styk-samples-many-')));
   t.after(() => rm(root, {recursive: true, force: true}));
+  // Six folders of nine files with a limit of fifty: the walk stops inside the last folder, as it does at the real limit.
   for (let folder = 0; folder < 6; folder++) {
     await mkdir(path.join(root, `f${folder}`));
-    await Promise.all(Array.from({length: 900}, (_, i) => writeFile(path.join(root, `f${folder}`, `${i}.piv`), '')));
+    await Promise.all(Array.from({length: 9}, (_, i) => writeFile(path.join(root, `f${folder}`, `${i}.piv`), '')));
   }
-  assert.equal((await samples.listSamples(root)).samples.length, samples.MAX_SAMPLE_COUNT);
+  assert.equal((await samples.listSamples(root, {limit: 50})).samples.length, 50);
+  assert.equal((await samples.listSamples(root)).samples.length, 54, 'under the limit every file is listed');
+  assert.equal(samples.MAX_SAMPLE_COUNT, 5000);
 });

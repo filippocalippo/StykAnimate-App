@@ -156,11 +156,12 @@ for (const {legacy} of variants) test(`the engine owning the document gives what
     const check = (index, call, wanted) => {
       const where = `${label(index)} ${call?.[0] ?? 'start'}`;
       if (wanted.document !== undefined) recorded = wanted.document;
-      const text = json(owned.report);
       // A pose with the legacy cache is edited by materializing what it holds (lengths, bends): another
       // document than the recording's, whose poses have none. The engine's own is checked against the read view.
-      if (!legacy && sha(text) !== wanted.documentSha) sameText(text, recorded, `${where}: document`);
-      if (!legacy) same({...state(owned), layerRevision: owned.layerRevision, nextFrameIdentity: owned._nextFrameIdentity, nextUid: owned._nextUid,
+      if (legacy) return;
+      const text = json(owned.report);
+      if (sha(text) !== wanted.documentSha) sameText(text, recorded, `${where}: document`);
+      same({...state(owned), layerRevision: owned.layerRevision, nextFrameIdentity: owned._nextFrameIdentity, nextUid: owned._nextUid,
         ...Object.fromEntries(Object.entries(owned._selectionState()).filter(([key]) => ['polygonSelection', 'segmentIds', 'branch'].includes(key)))}, wanted.state, `${where}: state`);
     };
     try {
