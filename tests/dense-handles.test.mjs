@@ -7,6 +7,9 @@ import {createDemo, createFrame, createObject} from '../src/demo.mjs';
 import {isStatic} from '../src/pivot/read-view.mjs';
 import {engineBuilt} from './support/engine-node.mjs';
 import {ownedEditor} from './support/owned-editor.mjs';
+import {shownLimits} from '../src/engine/engine-shown.mjs';
+
+const EAGER_SEGMENTS = shownLimits.eagerSegments;
 
 /** The demo walker, `count` of them in a row over two keyframes that pose them differently. */
 function crowd(count) {
@@ -46,6 +49,8 @@ test('a frame\'s joints are counted from the definitions: an origin per free fig
 });
 
 test('a group of the engine\'s geometry is built on first read, the same whichever part is read first', {skip: !engineBuilt}, async () => {
+  // Small documents, read as a dense frame is: built on first read.
+  shownLimits.eagerSegments = 0;
   const {editor, owner} = await ownedEditor({demo: false}, crowd(4));
   try {
     editor.seek(2);
@@ -68,10 +73,30 @@ test('a group of the engine\'s geometry is built on first read, the same whichev
       sameGroup(group, other, `slot ${slot}`);
       assert.equal(group.segmentLength(3), group.segments[3].length, 'a built group answers its posed lengths from its segments');
     }
-  } finally { owner.release(); }
+  } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
+});
+
+test('a packet of a few segments is built at once, the same groups as built on first read', {skip: !engineBuilt}, async () => {
+  const {editor, owner} = await ownedEditor({demo: false}, crowd(4));
+  try {
+    editor.seek(2);
+    const eager = freshRead(editor);
+    assert.ok([...eager.objects.values()].every(group => built(group) && !group.segmentLength), 'a small frame is built at once');
+    shownLimits.eagerSegments = 0;
+    const lazy = freshRead(editor);
+    assert.ok([...lazy.objects.values()].every(group => !built(group)));
+    for (const [slot, group] of eager.objects) {
+      const other = lazy.objects.get(slot);
+      void other.segments;
+      for (const name of [...BUILT, 'slot', 'obj', 'fig', 'root', 'bounds', 'drawn']) assert.deepStrictEqual(other[name], group[name], `slot ${slot}: ${name}`);
+      assert.deepStrictEqual(Object.keys(other).sort(), Object.keys(group).sort());
+    }
+  } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
 });
 
 test('groups kept from older reads hold their values when they take words of their own', {skip: !engineBuilt}, async () => {
+  // Small documents, read as a dense frame is: built on first read.
+  shownLimits.eagerSegments = 0;
   const {editor, owner} = await ownedEditor({demo: false}, crowd(4));
   try {
     editor.seek(2);
@@ -91,10 +116,12 @@ test('groups kept from older reads hold their values when they take words of the
       sameGroup(group, expected.objects.get(slot), `slot ${slot}`);
     }
     editor.cancelDrag();
-  } finally { owner.release(); }
+  } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
 });
 
 test('with the figures not selected showing their origin only, a selected figure is whole, picking finds what is drawn and nothing else is built', {skip: !engineBuilt}, async () => {
+  // Small documents, read as a dense frame is: built on first read.
+  shownLimits.eagerSegments = 0;
   const {editor, owner} = await ownedEditor({demo: false}, crowd(5));
   try {
     editor.seek(1);
@@ -121,10 +148,12 @@ test('with the figures not selected showing their origin only, a selected figure
     assert.equal(hit.uid, 3); assert.equal(hit.id, joint.id);
     assert.equal(pickCanvasHandle(geometry, group(2).root, {handles}).kind, 'origin', 'an origin is picked where it is drawn');
     for (const item of geometry.objects.values()) if (item.obj.unique_id !== 3) assert.ok(!built(item), `picking did not build figure ${item.obj.unique_id}`);
-  } finally { owner.release(); }
+  } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
 });
 
 test('a zoom resizes the descriptors to what they would be built as at the new scale', {skip: !engineBuilt}, async () => {
+  // Small documents, read as a dense frame is: built on first read.
+  shownLimits.eagerSegments = 0;
   const {editor, owner} = await ownedEditor({demo: false}, crowd(3));
   try {
     editor.seek(1);
@@ -148,5 +177,5 @@ test('a zoom resizes the descriptors to what they would be built as at the new s
     assert.deepEqual(reads, []); assert.ok(far.every(handle => handle.screenRadius === 2));
     assert.deepEqual(sizes(rescalePivotHandles(far, {viewScale: 1.3, maxDiameter: 12})), sizes(getPivotHandles(fresh, {...options, showUnselected: false, viewScale: 1.3, maxDiameter: 12})), 'sizes are worked out when they matter again');
     assert.ok(reads.length > 0);
-  } finally { owner.release(); }
+  } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
 });

@@ -117,6 +117,18 @@ function defineDrawables(group, polys, segments) {
   }});
 }
 
+/** The segments up to which a geometry packet's groups are built at once rather than on first read (`EngineGroup`): about the
+ * joints up to which every figure's are shown (docs/SCENE-EDITING.md, "Joints in dense frames"), where every group is read
+ * anyway and building it later would only add to the work. An object, so a test can read a small packet lazily. */
+export const shownLimits = {eagerSegments: 12000};
+/** The segment rows of the group whose words start at `start` (the layout of `hydrate`). */
+function rowsOf(w, start) {
+  let at = start + 3;
+  at += 1 + w[at];
+  at += 1 + w[at];
+  at += 1 + w[at];
+  return w[at];
+}
 /** What a group holds that is built on first read (`EngineGroup`). */
 const BUILT = ['joints', 'segments', 'polys', 'drawables', 'solvedAngles', 'solvedLengths'];
 /** The packet each group not yet built reads its words from (`EngineGroup`), so a read can bound the packets kept. */
@@ -130,7 +142,7 @@ const unbuilt = new WeakMap();
  * of any of them (`EngineGroup`): in a dense frame the joints show each figure's origin only and the picture is the engine's, so
  * most groups are never built. `segmentCount`, `segmentLength(n)`, `segmentIndex(n)` and `segmentZ(n)` answer what the handles need without building it.
  */
-function hydrate(w, start, length, slot, frame, report, defs) {
+function hydrate(w, start, length, slot, frame, report, defs, eager) {
   const obj = frame.objects[slot];
   const fig = obj && resolveInstanceFigure(defs.get(Number(obj.figure_type_id)), obj);
   if (!obj || !fig) return null;
@@ -153,6 +165,9 @@ function hydrate(w, start, length, slot, frame, report, defs) {
     const handle = {seg: fig.segments[0], obj, fig, slot, index: 0, start: root, end, points: [root, end], angle: real(w[at + 2]), length: real(w[at + 4]),
       bend: 0, thickness: 0, opacity: 1, alpha: 1, rgb: [0, 0, 0]};
     group = {slot, obj, fig, root, joints, segments: [handle], polys: [], drawables: []};
+  } else if (eager) {
+    group = {slot, obj, fig, root, ...buildGroup({slot, obj, fig, root}, w, flags, layout, report.version)};
+    defineDrawables(group, group.polys, group.segments);
   } else group = new EngineGroup(slot, obj, fig, root, w, flags, layout, report.version);
   if (flags & BOUNDS) {
     const [minX, minY, maxX, maxY] = numbers(w, start + length - 4, 4);
@@ -389,10 +404,16 @@ export function createShown(owner) {
       warnings.push(String.fromCharCode(...words.subarray(at, at + length)));
       at += length;
     }
-    const slots = [];
+    // A packet of a few segments is built at once: with every joint shown, every group is read.
+    let segments = 0;
+    for (let n = 0, scan = at; n < words[3] && segments <= shownLimits.eagerSegments; n++) {
+      if (words[scan + 1] > 0) segments += rowsOf(words, scan + 2);
+      scan += 2 + words[scan + 1];
+    }
+    const eager = segments <= shownLimits.eagerSegments, slots = [];
     for (let n = 0; n < words[3]; n++) {
       const slot = words[at], length = words[at + 1];
-      slots.push([slot, length === 0 ? null : hydrate(words, at + 2, length, slot, frame, report, defs)]);
+      slots.push([slot, length === 0 ? null : hydrate(words, at + 2, length, slot, frame, report, defs, eager)]);
       at += 2 + length;
     }
     return {token: words[0], full: words[1] === 1, count: words[2], slots, warnings};

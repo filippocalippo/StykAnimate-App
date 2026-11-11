@@ -77,8 +77,10 @@ function painter(context, outline) {
  * for one once the view has rested a moment) repaints in full: the picture at rest is always a full repaint's.
  */
 export class CanvasHandleOverlay {
-  constructor(surface) {
+  /** `panShiftFrom`: the handles on the surface from which a pan moves the pixels; with fewer, repainting them costs less. */
+  constructor(surface, {panShiftFrom = 0} = {}) {
     this.surface = surface;
+    this.panShiftFrom = panShiftFrom;
     this.context = surface.getContext('2d');
     this.clear();
   }
@@ -101,7 +103,7 @@ export class CanvasHandleOverlay {
       const dx = (tx - this.at.x) * dpr, dy = (ty - this.at.y) * dpr;
       shiftX = Math.round(dx); shiftY = Math.round(dy);
       const exact = Math.abs(dx - shiftX) < 1e-6 && Math.abs(dy - shiftY) < 1e-6;
-      if (Math.abs(shiftX) >= physicalWidth || Math.abs(shiftY) >= physicalHeight) full = true;
+      if (Math.abs(shiftX) >= physicalWidth || Math.abs(shiftY) >= physicalHeight || (shiftX || shiftY || !exact) && (this.visible ?? 0) < this.panShiftFrom) full = true;
       // The view rests after a pan: repaint in full.
       else if (this.moved && rest && this.requested.x === tx && this.requested.y === ty) full = true;
       else if (!exact) { paintX = this.at.x + shiftX / dpr; paintY = this.at.y + shiftY / dpr; }

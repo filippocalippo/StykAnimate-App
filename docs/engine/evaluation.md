@@ -328,9 +328,10 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   (`drawlist::app_bounds`). `pack_groups` writes them as a packet of 64-bit floats, not text (`EditSession.query_packet`; the layout is documented in `styk-eval/src/geometry/interface.rs`: a segment is a row of numbers that leaves out what the reader works out: where it starts is where its parent ends, where it ends is its joint; nothing is formatted or parsed on the way, and a non-finite number stays non-finite, which the reader takes for the `null` it once was); `engine-shown.mjs` reads the words where they lie and makes them the groups the canvas, the
   handles and the pickers read (`{objects: Map<slot, group|null>, orderedObjects, drawables, token, changedSlots,
   warnings}`; a group `{slot, obj, fig, root, joints, segments, polys, bounds, solvedAngles, solvedLengths}`, `drawables`
-  built when read, with Stick Nodes shapes expanded). A group's `slot`, `obj`, `fig`, `root`, `bounds` and `drawn` are read
-  at once; its joints, segments, faces, solved values and drawables are built from the words the first time any of them is read,
-  the same values as built at once (`tests/dense-handles.test.mjs`). In a dense frame the joints of the figures not selected show
+  built when read, with Stick Nodes shapes expanded). A packet of up to 12,000 segments (`shownLimits.eagerSegments`) is built
+  at once: with every joint shown, every group is read. Above that a group's `slot`, `obj`, `fig`, `root`, `bounds` and `drawn`
+  are read at once and its joints, segments, faces, solved values and drawables are built from the words the first time any of
+  them is read, the same values as built at once (`tests/dense-handles.test.mjs`). In a dense frame the joints of the figures not selected show
   their origin only ([SCENE-EDITING.md](../SCENE-EDITING.md#joints-in-dense-frames)) and the picture is the engine's, so most groups
   are never built; what the handles need of one comes without building it (`segmentCount`, `segmentLengths()`, `segmentIndex(n)`,
   `segmentZ(n)`). A group not yet built keeps the packet it came in; past two packets kept by the groups on show, the groups of

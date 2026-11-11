@@ -30,7 +30,8 @@ function topologyInfo(g) {
   const key=g.fig||g,definition=g.fig?.segments;
   let info=topologyMetadata.get(key);
   if(info&&info.definition===definition&&info.count===segmentCount(g))return info;
-  if(g.segmentLength)return lazyTopologyInfo(g,key,definition);
+  // A group of the engine not built yet: its order from its rows. Once built, its segments say it as any group's do.
+  if(g.segmentLength&&!Object.hasOwn(g,'segments'))return lazyTopologyInfo(g,key,definition);
   const incoming=new Map(),outgoing=new Map(),allOrdered=[];
   let previous=-Infinity,ordered=true;
   for(const shape of g.segments){
@@ -71,7 +72,7 @@ function figureInfo(g) {
 }
 function incidentMinimum(g,id,info){
   let entry=info.incident.get(id);if(entry)return entry;
-  if(g.segmentLengths){entry=lazyIncidentMinimum(g,id,info);info.incident.set(id,entry);return entry;}
+  if(g.segmentLengths&&!Object.hasOwn(g,'segments')){entry=lazyIncidentMinimum(g,id,info);info.incident.set(id,entry);return entry;}
   entry={length:Infinity,thickness:Infinity};
   const candidate = index => {
     const definition = g.segments[index].seg || {}, posedLength = g.segments[index].length;
@@ -295,6 +296,8 @@ export function getPivotHandles(geometry, {
           : pivotHandleColor({ selected, nodeSelected: Boolean(builderSelection?.has(joint)), origin: kind === 'origin', joined, static: isStatic }),
         radius: screenRadius / scale, screenRadius, baseRadius });
     };
+    // Every joint of this figure is read below: its group is built first, and its topology read from the segments built.
+    void g.segments;
     const topology=figureInfo(g).topology;
     const selectedStatic = uid===selectedUid && selectedJoint>=0 && Boolean(g.segments[selectedJoint]);
     const builderSelection=selectedStatic?new Set(selectedHandleIds?.size ? g.segments.flatMap((segment,index)=>selectedHandleIds.has(segmentId(segment))?[index]:[]) : [selectedJoint]):null;

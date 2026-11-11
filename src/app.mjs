@@ -1364,30 +1364,50 @@ function boundsOf(g) {
   return b;
 }
 // Keep one surface alive to avoid deferred GPU-context destruction on input.
-const canvasHandleOverlay = new CanvasHandleOverlay(new OffscreenCanvas(1, 1));
+// A pan moves the painted joints once there are enough of them that repainting costs more than moving (measured: a few hundred).
+const canvasHandleOverlay = new CanvasHandleOverlay(new OffscreenCanvas(1, 1), {panShiftFrom: 500});
 let handleCache = null;
 const handleDescriptors = {};
 const selectionHandleCache = new WeakMap();
 const selectionHandleDescriptors = {};
-/** Whether the frame on show has too many joints to show every figure's (docs/SCENE-EDITING.md, "Joints in dense frames"):
- * counted from the figures' definitions, once per frame, hidden and locked figures and view state; announced once a document. */
-let handleDensity = {frame: null, key: '', dense: false, announced: false};
-function denseFrame(frame) {
-  const key = [state.hidden.size, state.locked.size, editor.layerViewKey, builderMode?.boundUids?.size ?? -1].join('|');
-  if (handleDensity.frame === frame && handleDensity.key === key) return handleDensity.dense;
-  const count = frameHandleCount(frame, object => findFigureType(editor.report.figure_types, object.figure_type_id),
-    {hiddenUids: renderHidden, lockedUids: {has: isLocked}});
-  const dense = denseHandles(count, handleDensity.dense);
-  if (dense && !handleDensity.announced && state.settings.showUnselectedHandles)
-    status({messageKey: "app.denseFrameShowsOrigins", messageParams: {count: {format: 'number', value: count}}});
-  handleDensity = {frame, key, dense, announced: handleDensity.announced || (dense && state.settings.showUnselectedHandles)};
-  return dense;
+/** What the joints of the frame on show depend on besides the view, worked out once per frame and per change of what hides or
+ * locks a figure: whether the frame is dense (docs/SCENE-EDITING.md, "Joints in dense frames"; counted from the figures'
+ * definitions and announced once a document) and which of its figures are hidden or locked. */
+let handleFrame = {frame: null, key: '', bound: null, dense: false, announced: false, hidden: null, locked: null};
+/** Whether each figure is hidden (1) or locked (2), and the figure types by id, kept while nothing that hides or locks a
+ * figure changes: a gesture shows a new frame each step, with the same figures. */
+let handleFigures = {key: null, bound: null, types: null, flags: new Map(), figures: new Map()};
+function frameHandles(frame) {
+  const key = `${editor.layerViewKey}|${[...state.hidden].join(',')}|${[...state.locked].join(',')}`, bound = builderMode?.boundUids ?? null;
+  if (handleFrame.frame === frame && handleFrame.key === key && handleFrame.bound === bound) return handleFrame;
+  const types = editor.report.figure_types;
+  if (handleFigures.key !== key || handleFigures.bound !== bound || handleFigures.types !== types) handleFigures = {key, bound, types, flags: new Map(), figures: new Map()};
+  const {flags, figures} = handleFigures;
+  const flagsOf = uid => {
+    let value = flags.get(uid);
+    if (value === undefined) flags.set(uid, value = (isHidden(uid) ? 1 : 0) | (isLocked(uid) ? 2 : 0));
+    return value;
+  };
+  const known = new Set();
+  for (const object of frame.objects) known.add(object.unique_id);
+  // A figure the frame does not hold (a drawing's first stroke previews one) is hidden as it says, locked only by hand.
+  const hidden = {has: uid => (flagsOf(uid) & 1) !== 0}, locked = {has: uid => known.has(uid) ? (flagsOf(uid) & 2) !== 0 : state.locked.has(uid)};
+  const figureOf = object => {
+    let figure = figures.get(object.figure_type_id);
+    if (figure === undefined) figures.set(object.figure_type_id, figure = findFigureType(types, object.figure_type_id) ?? null);
+    return figure;
+  };
+  const count = frameHandleCount(frame, figureOf, {hiddenUids: hidden, lockedUids: locked});
+  const dense = denseHandles(count, handleFrame.dense), announce = dense && !handleFrame.announced && state.settings.showUnselectedHandles;
+  if (announce) status({messageKey: "app.denseFrameShowsOrigins", messageParams: {}});
+  handleFrame = {frame, key, bound, dense, announced: handleFrame.announced || announce, hidden, locked};
+  return handleFrame;
 }
 function canvasHandles(geometry, {selectStatic = false} = {}) {
   const frame = currentFrame(),
     settings = state.settings;
   // In a dense frame the figures not selected show their origin only, as with the setting off: drawing and picking share these descriptors.
-  const showUnselected = settings.showUnselectedHandles && !denseFrame(frame);
+  const shown = frameHandles(frame), showUnselected = settings.showUnselectedHandles && !shown.dense;
   const unscaled = [
     builderMode?.active ? [...editor.selectedSegmentIds].join(',') : '',
     editor.layerViewKey,
@@ -1417,12 +1437,7 @@ function canvasHandles(geometry, {selectStatic = false} = {}) {
     handleCache = {geometry, key, unscaled, handles};
     return handles;
   }
-  const bound = builderMode?.boundUids;
-  const hidden = effectiveHidden(frame),
-    locked = new Set(state.locked);
-  for (const object of frame.objects)
-    if (layerLocked(editor.report, object.unique_id) || (bound && !bound.has(object.unique_id)))
-      locked.add(object.unique_id);
+  const {hidden, locked} = shown;
   const handles = getPivotHandles(geometry, {
     showDetailed: rigDetailsShown(editor),
     spatialMode: builderMode?.active || !['select','pose'].includes(state.tool) ? 'pose' : spatialControlMode(editor),
@@ -5652,7 +5667,7 @@ editor.addEventListener("change", (e) => {
     invalidatePivotHandleTopology();
     handleCache = null;
     canvasHandleOverlay.clear();
-    if (kind === "document") handleDensity = {frame: null, key: '', dense: false, announced: false};
+    if (kind === "document") handleFrame = {frame: null, key: '', bound: null, dense: false, announced: false, hidden: null, locked: null};
     assetLibrary?.invalidate();
   }
   if (["edit", "history", "document", "frame-draft"].includes(kind))

@@ -109,3 +109,13 @@ test('a pan moves the retained pixels, paints only the handles in the strips it 
   assert.equal(resting.full, true); assert.equal(resting.settle, false); assert.equal(overlay.spare, null, 'The spare surface goes once the view rests');
   assert.deepEqual(overlay.at, {x: 35.5, y: 0});
 });
+
+test('with few handles on the surface a pan repaints them, as before', () => {
+  const raster = new Surface(), target = new Surface(), overlay = new CanvasHandleOverlay(raster, {panShiftFrom: 3});
+  const handles = grouped([{uid: 1, handles: [handle(1, 20, 50, '#ff0000'), handle(1, 100, 50, '#00ff00')]}]);
+  const options = {width: 200, height: 100, projectionKey: 'view'};
+  overlay.draw(target.context, handles, {...options, matrix: [1, 0, 0, 1, 0, 0]});
+  const panned = overlay.draw(target.context, handles, {...options, matrix: [1, 0, 0, 1, 10, 0]});
+  assert.equal(panned.full, true); assert.equal(panned.shifted, false); assert.equal(panned.settle, false);
+  assert.equal(overlay.spare, undefined, 'no spare surface is made');
+});
