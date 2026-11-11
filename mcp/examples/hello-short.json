@@ -1,0 +1,27 @@
+{
+  "title": "Hello Short",
+  "width": 540, "height": 960, "fps": 24,
+  "background": "#f4f1ea",
+  "cast": [
+    {"id": "floor", "kind": "line", "length": 540, "thickness": 4, "color": "#3a3a3a"},
+    {"id": "bob", "kind": "stickman", "color": "#222222", "thickness": 1.2},
+    {"id": "amy", "kind": "stickman", "color": "#d6336c", "headFilled": true},
+    {"id": "ball", "kind": "circle", "radius": 18, "color": "#f08c00"},
+    {"id": "title", "kind": "text", "text": "HELLO!", "fontSize": 72, "bold": true, "color": "#1c7ed6", "outline": 4, "outlineColor": "#ffffff"}
+  ],
+  "keyframes": [
+    {"hold": 12, "figures": {
+      "floor": {"x": 0, "y": 760},
+      "bob": {"x": 120, "ground": 760, "pose": "walk_contact_a", "scale": 1.3},
+      "amy": {"x": 420, "ground": 760, "pose": "stand", "flip": true, "scale": 1.3},
+      "ball": {"x": 270, "y": 600}
+    }},
+    {"hold": 12, "figures": {"bob": {"x": 160, "pose": "walk_pass_a"}, "ball": {"y": 420}}},
+    {"hold": 12, "figures": {"bob": {"x": 200, "pose": "walk_contact_b"}, "ball": {"y": 600}}},
+    {"hold": 12, "figures": {"bob": {"x": 230, "pose": "wave_a"}, "amy": {"pose": "surprised", "flip": true}}},
+    {"hold": 12, "camera": {"x": 300, "y": 600, "zoom": 1.4}, "figures": {"bob": {"pose": "wave_b"}, "title": {"x": 270, "y": 300}}},
+    {"hold": 12, "ease": "ease-out", "figures": {"bob": {"pose": "arms_up"}, "amy": {"pose": "arms_up", "flip": true}, "title": {"scale": 1.2}}},
+    {"hold": 12, "camera": {"x": 270, "y": 480, "zoom": 1}, "figures": {"bob": {"pose": "point"}, "amy": {"pose": "think", "flip": true}}},
+    {"hold": 12, "background": "#e7f5ff", "figures": {"bob": {"pose": "shrug"}, "amy": {"pose": "hands_on_hips", "flip": true}, "title": {"hide": true}}}
+  ]
+}

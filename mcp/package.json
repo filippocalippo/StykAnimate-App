@@ -1,0 +1,19 @@
+{
+  "name": "stykanimate-mcp",
+  "version": "0.1.0",
+  "description": "Local MCP server that builds StykAnimate animations from a scene spec, previews frames and exports YouTube-ready video through the real app.",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "type": "module",
+  "bin": {"stykanimate-mcp": "src/index.mjs"},
+  "engines": {"node": ">=22"},
+  "scripts": {
+    "start": "node src/index.mjs",
+    "smoke": "node test/smoke.mjs",
+    "test:mcp": "node test/mcp-client.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  }
+}

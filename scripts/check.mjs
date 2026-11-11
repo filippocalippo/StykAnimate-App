@@ -15,7 +15,7 @@ async function discover(directory) {
     else if (/\.(mjs|cjs|js)$/.test(entry.name)) sources.push(relative);
   }
 }
-for (const directory of ['src', 'desktop', 'scripts', 'tests']) await discover(directory);
+for (const directory of ['src', 'desktop', 'scripts', 'tests', 'mcp/src', 'mcp/test']) await discover(directory);
 let failures = 0;
 for (const source of sources) {
   const result = spawnSync(process.execPath, ['--check', source], { cwd: appRoot, encoding: 'utf8', windowsHide: true });
