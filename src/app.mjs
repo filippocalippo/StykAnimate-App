@@ -1432,22 +1432,16 @@ function drawCanvasHandles(geometry) {
   const handles = canvasHandles(geometry),
     translations = state.drag?.translations;
   const d = window.devicePixelRatio || 1;
-  const key = [
-    handleCache.key,
-    state.view.x,
-    state.view.y,
-    state.view.rotation ?? 0,
-    state.view.flip ?? false,
-    editor.report.canvas_width,
-    editor.report.canvas_height,
-    currentFrame().camera?.x,
-    currentFrame().camera?.y,
-    currentFrame().camera?.angle_rad,
-  ].join("|");
-  canvasHandleOverlay.draw(ctx, handles, {project: screenPoint, projectionKey: key,
+  // The view and the camera are affine: the matrix carries the projection, and its translation alone changing is a pan.
+  const drawn = canvasHandleOverlay.draw(ctx, handles, {matrix: affineProjection(screenPoint), projectionKey: handleCache.key,
     width: overlay.width / d, height: overlay.height / d, dpr: d, translations,
-    outline: state.settings.outlineHandles});
+    outline: state.settings.outlineHandles, rest: handlesResting});
+  // A pan moves the joints' pixels: once the view has rested a moment, they are painted afresh (see CanvasHandleOverlay).
+  handlesResting = false;
+  clearTimeout(handleSettleTimer);
+  if (drawn.settle) handleSettleTimer = setTimeout(() => { handlesResting = true; requestOverlayRender(); }, 150);
 }
+let handleSettleTimer = 0, handlesResting = false;
 let onionControls;
 const onionController = new OnionController({editor,
   getSettings: () => state.settings, getEnabled: () => state.onion,
