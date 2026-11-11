@@ -94,7 +94,7 @@ function jointOrder(fig) {
 }
 
 /** The `flags` of a group, of a segment row and of a polygon (styk_eval::geometry::interface). */
-const DRAWN = 1, BOUNDS = 2, SOLVED = 4, SOLVED_LENGTHS = 8;
+const DRAWN = 1, BOUNDS = 2, SOLVED = 4, SOLVED_LENGTHS = 8, LIGHT = 16;
 const START = 1, END = 2, POINTS = 4, CONNECTOR = 8, SPATIAL = 16, SPATIAL_WORDS = 27;
 const CULLED_POLY = 1, DEPTH_POLY = 2;
 
@@ -106,7 +106,7 @@ const CULLED_POLY = 1, DEPTH_POLY = 2;
 function geometryRecord({objects, orderedObjects, token, previousToken, changedSlots, warnings}) {
   let flat;
   return {objects, orderedObjects, token, previousToken, changedSlots,
-    get drawables() { return flat ??= orderedObjects.flatMap(group => group.drawables); }, warnings};
+    get drawables() { if (!flat) { EngineGroup.wholeAll(orderedObjects); flat = orderedObjects.flatMap(group => group.drawables); } return flat; }, warnings};
 }
 
 /** Gives `group` its `drawables` (what paints, in painter order: the faces, then the visible segments, Stick Nodes shapes expanded). Outside
@@ -134,6 +134,7 @@ function defineDrawables(group, polys, segments) {
 export const shownLimits = {eagerSegments: 12000};
 /** The segment rows of the group whose words start at `start` (the layout of `hydrate`). */
 function rowsOf(w, start) {
+  if (w[start] & LIGHT) return w[start + 3];
   let at = start + 3;
   at += 1 + w[at];
   at += 1 + w[at];
@@ -153,10 +154,8 @@ const unbuilt = new WeakMap();
  * of any of them (`EngineGroup`): in a dense frame the joints show each figure's origin only and the picture is the engine's, so
  * most groups are never built. `segmentCount`, `segmentLength(n)`, `segmentIndex(n)` and `segmentZ(n)` answer what the handles need without building it.
  */
-function hydrate(w, start, length, slot, frame, report, defs, eager) {
-  const obj = frame.objects[slot];
-  const fig = obj && resolveInstanceFigure(defs.get(Number(obj.figure_type_id)), obj);
-  if (!obj || !fig) return null;
+/** The flags, root and layout of the whole group of `length` words from `start` (styk_eval::geometry::interface). */
+function layoutOf(w, start, length) {
   let at = start;
   const flags = w[at++];
   const root = {x: fin(w[at]), y: fin(w[at + 1])};
@@ -167,7 +166,26 @@ function hydrate(w, start, length, slot, frame, report, defs, eager) {
   at = rawsAt + rawsLength;
   const startRawsAt = at + 1, startRawsLength = w[at];
   at = startRawsAt + startRawsLength;
-  const layout = {endsAt, endsLength, rawsAt, rawsLength, startRawsAt, startRawsLength, rowsAt: at, from: start, to: start + length};
+  return {flags, root, layout: {endsAt, endsLength, rawsAt, rawsLength, startRawsAt, startRawsLength, rowsAt: at, from: start, to: start + length}};
+}
+
+function hydrate(w, start, length, slot, frame, report, defs, eager, source) {
+  const obj = frame.objects[slot];
+  const fig = obj && resolveInstanceFigure(defs.get(Number(obj.figure_type_id)), obj);
+  if (!obj || !fig) return null;
+  if (w[start] & LIGHT) {
+    // A figure of a dense frame that shows its origin alone: its root, bounds and rows' lengths and depths, the rest asked for when read.
+    const flags = w[start], group = new EngineGroup(slot, obj, fig, {x: fin(w[start + 1]), y: fin(w[start + 2])}, w, flags,
+      {light: true, rowsAt: start + 3, from: start, to: start + length}, report.version, source);
+    if (flags & BOUNDS) {
+      const [minX, minY, maxX, maxY] = numbers(w, start + length - 4, 4);
+      group.bounds = {minX, minY, maxX, maxY};
+    }
+    if (flags & DRAWN) group.drawn = true;
+    return group;
+  }
+  const {flags, root, layout} = layoutOf(w, start, length);
+  const at = layout.rowsAt;
   let group;
   if (isMovieclip(fig)) {
     // A movieclip instance is its handle: forty units from the root along its angle (what it draws is the engine's).
@@ -220,19 +238,42 @@ function jointsOf(w, {endsAt, endsLength, rawsAt, rawsLength}, fig, root) {
  * it once built.
  */
 class EngineGroup {
-  #words; #flags; #layout; #version; #rows;
-  // Where each row starts, found as far as a read needed: rows have no fixed length.
+  #words; #flags; #layout; #version; #rows; #source;
+  // Where each row starts, found as far as a read needed: rows have no fixed length (a light group's are three words each).
   #rowStarts = null; #scanned = 0; #next; #lengths = null;
-  constructor(slot, obj, fig, root, words, flags, layout, version) {
+  constructor(slot, obj, fig, root, words, flags, layout, version, source = null) {
     this.slot = slot; this.obj = obj; this.fig = fig; this.root = root;
-    this.#words = words; this.#flags = flags; this.#layout = layout; this.#version = version;
+    this.#words = words; this.#flags = flags; this.#layout = layout; this.#version = version; this.#source = source;
     this.#rows = words[layout.rowsAt]; this.#next = layout.rowsAt + 1;
     unbuilt.set(this, words);
   }
-  #build() {
+  /** Builds the light groups of `groups` not built yet with one request of the session for each read they came from, as a read of all
+   * of them (`drawables` of the geometry) would ask for each. */
+  static wholeAll(groups) {
+    const bySource = new Map();
+    for (const group of groups) {
+      if (!(group instanceof EngineGroup) || !group.#words || !group.#layout.light) continue;
+      let list = bySource.get(group.#source);
+      if (!list) bySource.set(group.#source, list = []);
+      list.push(group);
+    }
+    for (const [source, list] of bySource) {
+      const wholes = source?.whole(list.map(group => group.slot)) ?? new Map();
+      for (const group of list) group.#build(wholes.get(group.slot) ?? null);
+    }
+  }
+  /** Builds the group: from its words, or for a light one from its whole group (`whole`, else asked for now: `GroupSource`). */
+  #build(whole) {
     const words = this.#words;
     if (!words) return;
-    const built = buildGroup(this, words, this.#flags, this.#layout, this.#version);
+    let built;
+    if (this.#layout.light) {
+      const found = whole !== undefined ? whole : this.#source?.whole([this.slot]).get(this.slot) ?? null;
+      if (found) {
+        const {flags, layout} = layoutOf(found.words, found.start, found.length);
+        built = buildGroup(this, found.words, flags, layout, this.#version);
+      } else built = {joints: new Map([[0, this.root]]), segments: [], polys: []};
+    } else built = buildGroup(this, words, this.#flags, this.#layout, this.#version);
     unbuilt.delete(this);
     this.#words = null; this.#rowStarts = null;
     for (const name of BUILT) if (name in built) Object.defineProperty(this, name, {value: built[name], writable: true, enumerable: true, configurable: true});
@@ -260,6 +301,7 @@ class EngineGroup {
     if (!(n >= 0 && n < this.#rows)) return undefined;
     const words = this.#words;
     if (!words) return -1;
+    if (this.#layout.light) return this.#layout.rowsAt + 1 + 3 * n;
     const starts = this.#rowStarts ??= new Float64Array(this.#rows);
     let next = this.#next;
     while (this.#scanned <= n) {
@@ -280,6 +322,10 @@ class EngineGroup {
     const lengths = this.#lengths = new Float64Array(this.#rows), words = this.#words;
     if (!words) { this.segments.forEach((shape, n) => { lengths[n] = shape.length; }); return lengths; }
     let at = this.#layout.rowsAt + 1;
+    if (this.#layout.light) {
+      for (let n = 0; n < lengths.length; n++, at += 3) lengths[n] = real(words[at + 1]);
+      return lengths;
+    }
     for (let n = 0; n < lengths.length; n++) {
       lengths[n] = real(words[at + 3]);
       const rowFlags = words[at + 11];
@@ -294,7 +340,7 @@ class EngineGroup {
   /** `segments[n].length`, `.index` and `.z`, read where the row lies until the group is built. */
   segmentLength(n) {
     const at = this.#rowAt(n);
-    return at === undefined ? undefined : this.#words ? real(this.#words[at + 3]) : this.segments[n].length;
+    return at === undefined ? undefined : this.#words ? real(this.#words[at + (this.#layout.light ? 1 : 3)]) : this.segments[n].length;
   }
   segmentIndex(n) {
     const at = this.#rowAt(n);
@@ -304,7 +350,7 @@ class EngineGroup {
     const at = this.#rowAt(n);
     if (at === undefined) return undefined;
     if (!this.#words) return this.segments[n].z;
-    const index = this.#words[at], z = fin(this.#words[at + 5]);
+    const index = this.#words[at], z = fin(this.#words[at + (this.#layout.light ? 2 : 5)]);
     return Number(z ?? this.fig.segments[index].z_order ?? index + 1);
   }
   /** Gives the group words of its own, so it no longer keeps the packet it came in (`boundPackets`). */
@@ -312,10 +358,26 @@ class EngineGroup {
     if (!this.#words) return;
     const layout = this.#layout, {from, to} = layout;
     this.#words = this.#words.slice(from, to);
-    this.#layout = {...layout, endsAt: layout.endsAt - from, rawsAt: layout.rawsAt - from, startRawsAt: layout.startRawsAt - from,
-      rowsAt: layout.rowsAt - from, from: 0, to: to - from};
+    this.#layout = layout.light ? {...layout, rowsAt: layout.rowsAt - from, from: 0, to: to - from}
+      : {...layout, endsAt: layout.endsAt - from, rawsAt: layout.rawsAt - from, startRawsAt: layout.startRawsAt - from, rowsAt: layout.rowsAt - from, from: 0, to: to - from};
     this.#rowStarts = null; this.#scanned = 0; this.#next = this.#layout.rowsAt + 1;
     unbuilt.delete(this);
+  }
+}
+
+/**
+ * Where the light groups of a geometry read (`interface::LIGHT`) get the rest of them: the session's latest read of that kind of frame
+ * (`geometryGroups`). A group a read sent is its figure's in every later read that did not send it again, so the groups the interface
+ * holds are built as they were sent; one of an earlier geometry whose figure a later read sent again is built as the figure is now.
+ */
+class GroupSource {
+  #owner; #motion;
+  constructor(owner, motion) { this.#owner = owner; this.#motion = motion; }
+  /** The whole groups of `slots` by slot, `{words, start, length}` each (none for a slot the session does not answer). */
+  whole(slots) {
+    const found = new Map(), words = this.#owner.packet('geometryGroups', {slots, motion: this.#motion});
+    for (let at = 0; words && at + 1 < words.length; at += 2 + words[at + 1]) if (words[at + 1] > 0) found.set(words[at], {words, start: at + 2, length: words[at + 1]});
+    return found;
   }
 }
 
@@ -423,15 +485,16 @@ export function createShown(owner) {
       if (!object || typeof object !== 'object') continue;
       for (const key in object) {
         if (object[key] !== PACKED) continue;
-        const length = words[at++];
-        object[key] = Array.from(words.subarray(at, at + length));
-        at += length;
+        // Copied number by number: `Array.from` of a view of the words took ten times as long (a dense frame has thousands of these).
+        const length = words[at++], numbers = [];
+        for (let end = at + length; at < end; at++) numbers.push(words[at]);
+        object[key] = numbers;
       }
     }
     return frame;
   };
   /** A geometry packet: the header, then the groups of the slots the session sent, each made into the group the interface reads. `null` for an empty packet. */
-  const groupsOf = (words, frame, report, defs) => {
+  const groupsOf = (words, frame, report, defs, source = null) => {
     if (!words || words.length === 0) return null;
     const warnings = [];
     let at = 5;
@@ -449,7 +512,7 @@ export function createShown(owner) {
     const eager = segments <= shownLimits.eagerSegments, slots = [];
     for (let n = 0; n < words[3]; n++) {
       const slot = words[at], length = words[at + 1];
-      slots.push([slot, length === 0 ? null : hydrate(words, at + 2, length, slot, frame, report, defs, eager)]);
+      slots.push([slot, length === 0 ? null : hydrate(words, at + 2, length, slot, frame, report, defs, eager, source)]);
       at += 2 + length;
     }
     return {token: words[0], full: words[1] === 1, count: words[2], slots, warnings};
@@ -478,8 +541,9 @@ export function createShown(owner) {
     geometry(frame, {motion = false} = {}) {
       const previous = held[+motion];
       const report = owner.report(), defs = definitions(report);
-      const words = packet('geometry', {since: previous?.read ?? null, motion}, motion);
-      const answer = groupsOf(words, frame, report, defs);
+      // A dense frame's figures that show their origin alone come light: their root, bounds and rows' lengths and depths.
+      const words = packet('geometry', {since: previous?.read ?? null, motion, lightAbove: shownLimits.eagerSegments}, motion);
+      const answer = groupsOf(words, frame, report, defs, new GroupSource(owner, motion));
       if (!answer) return null;
       const groups = answer.full || !previous ? new Map() : new Map(previous.geometry.objects);
       const changed = new Set();

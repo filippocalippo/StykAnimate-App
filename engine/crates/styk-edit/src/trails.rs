@@ -587,7 +587,7 @@ fn ghost_json(scene: &styk_eval::geometry::Scene, slots: &[usize], root: usize) 
     use styk_eval::geometry::ItemKind;
     let mut lines: Vec<Vec<f64>> = Vec::new();
     let mut circles: Vec<[f64; 3]> = Vec::new();
-    for item in &scene.measured {
+    for item in scene.measured_items() {
         if !slots.contains(&(item.slot as usize)) || matches!(item.kind, ItemKind::Poly | ItemKind::Mesh | ItemKind::Image | ItemKind::Text) {
             continue;
         }

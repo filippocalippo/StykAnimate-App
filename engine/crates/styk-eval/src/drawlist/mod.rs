@@ -49,6 +49,10 @@ impl Out {
     fn new() -> Out {
         Out { prims: Vec::new(), paints: Vec::new(), points: Vec::new(), glyphs: Vec::new(), bounds: [f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY] }
     }
+    /// [`Out::new`] with room for `prims` primitives.
+    fn with_room(prims: usize) -> Out {
+        Out { prims: Vec::with_capacity(prims), ..Out::new() }
+    }
     fn grow(&mut self, x0: f64, y0: f64, x1: f64, y1: f64) {
         self.bounds[0] = self.bounds[0].min(x0 as f32);
         self.bounds[1] = self.bounds[1].min(y0 as f32);
@@ -1096,7 +1100,7 @@ fn bounds_of_checked(scene: &Scene, images: &impl crate::vfx::layers::ImageSizes
     if cancelled() { return None; }
     let mut acc = vec![EMPTY; scene.objects.len()];
     let fx = has_effects(scene);
-    for it in &scene.measured {
+    for it in scene.measured_items() {
         if cancelled() { return None; }
         if wanted.is_some_and(|wanted| !wanted.get(it.slot as usize).copied().unwrap_or(false)) {
             continue;
@@ -1212,7 +1216,8 @@ fn encode_scene_span(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene,
         let figure_stack = own.map_or(&[][..], |o| &o.figure[..]);
         let scale = first.scale.abs();
         let figure_pad = if figure_stack.is_empty() { 0.0 } else { crate::vfx::padding(figure_stack, scale, 0.0) };
-        let mut items = Out::new();
+        // Room for a primitive an item, what most items make (a figure of a hundred segments grew its list six times).
+        let mut items = Out::with_room(b - a);
         let mut nodes: Vec<Node> = Vec::new();
         let mut extents: Vec<(Extent, f64)> = Vec::new();
         let (mut with, mut without, mut largest) = (EMPTY, EMPTY, 0.0f64);

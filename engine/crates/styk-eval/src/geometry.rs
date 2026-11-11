@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 mod cache;
 pub mod interface;
-pub use interface::{pack_groups, packed_size};
+pub use interface::{pack_groups, pack_groups_with, packed_size, packed_size_with};
 pub(crate) use cache::{Resolved, arc_allocation};
 pub use cache::{ClipSceneCache, RetainedScene, SceneBudget};
 
@@ -337,7 +337,9 @@ pub struct Scene {
     /// Built by [`build_only_measured`]: what the app's `boundsOf` measures of each object,
     /// whether it is drawn or not ([`crate::drawlist::app_bounds`]): every segment as it stands
     /// before a Stick Nodes shape expands it, every polygon (culled ones too) and the figure's
-    /// mesh. Empty from every other build.
+    /// mesh. Empty from every other build. An object whose measured primitives are its items, in their order (segments alone, all
+    /// of them drawn, in the order of the figure's), keeps none here: its span says so ([`SPAN_MEASURED_ITEMS`]), and
+    /// [`Scene::measured_of`] and [`Scene::measured_items`] read its items in their place. Read it through those.
     pub measured: Vec<Item>,
     /// By object slot, the build ([`BuildMemory::built_in`]) that made its geometry, for a scene built with a memory (empty for any other):
     /// a number is never another build's in any memory, so an object with the same number has the same items.
@@ -372,6 +374,8 @@ pub const SPAN_MESH: u8 = 2;
 pub const SPAN_DEPTH_SURFACE: u8 = 4;
 /// Text.
 pub const SPAN_TEXT: u8 = 8;
+/// The object's measured primitives ([`Scene::measured`]) are its items: they are not copied there (its range in it is empty).
+pub const SPAN_MEASURED_ITEMS: u8 = 16;
 
 impl SlotSpan {
     fn len(range: (u32, u32)) -> usize {
@@ -433,10 +437,55 @@ impl Scene {
         self.spans.len() == self.objects.len() && self.spanned_lengths == (self.items.len(), self.measured.len())
     }
 
-    /// [`Scene::items_of`] for [`Scene::measured`].
+    /// [`Scene::items_of`] for [`Scene::measured`]: an object's measured primitives. One that shares them with its items
+    /// ([`SPAN_MEASURED_ITEMS`]) gives its items, in the figure's order of segments: [`Scene::measured_in_order`] gives them in the order
+    /// they were made, as [`Scene::measured`] would hold them.
     pub fn measured_of(&self, slot: usize) -> Option<&[Item]> {
         let span = self.spans.get(slot).filter(|_| self.spanned())?;
+        if span.flags & SPAN_MEASURED_ITEMS != 0 {
+            return self.items.get(span.items.0 as usize..span.items.1 as usize);
+        }
         self.measured.get(span.measured.0 as usize..span.measured.1 as usize)
+    }
+
+    /// The measured primitives of the object at `slot` in the order they were made (the order of the figure's plan: its roots, then the
+    /// segments of each in turn), for a reader that takes them in order.
+    pub fn measured_in_order(&self, slot: usize) -> Box<dyn Iterator<Item = &Item> + '_> {
+        // A scene that does not say where its objects lie is read item by item.
+        if !self.spanned() {
+            return Box::new(self.measured.iter().filter(move |item| item.slot as usize == slot));
+        }
+        let shared = self.spans.get(slot).filter(|span| self.spanned() && span.flags & SPAN_MEASURED_ITEMS != 0);
+        let (items, order): (&[Item], &[u32]) = match shared {
+            Some(span) => {
+                let items = &self.items[span.items.0 as usize..span.items.1 as usize];
+                let order = self.figure_for(slot).map_or(&[][..], |figure| &figure.plan.order[..]);
+                // A shared object's items are its segments, one each in the figure's order.
+                debug_assert_eq!(order.len(), items.len());
+                (items, if order.len() == items.len() { order } else { &[] })
+            }
+            None => (&[][..], &[][..]),
+        };
+        let plain = match shared {
+            Some(_) if order.is_empty() => items,
+            Some(_) => &[][..],
+            None => self.measured_of(slot).unwrap_or(&[]),
+        };
+        Box::new(plain.iter().chain(order.iter().map(move |&at| &items[at as usize])))
+    }
+
+    /// Every measured primitive of the scene, by object in draw order, each object's in the order they were made: [`Scene::measured`]
+    /// with the objects that share theirs with their items, for what reads all of them.
+    pub fn measured_items(&self) -> impl Iterator<Item = &Item> + '_ {
+        let shared = self.spanned() && self.spans.iter().any(|span| span.flags & SPAN_MEASURED_ITEMS != 0);
+        let mut slots: Vec<usize> = Vec::new();
+        if shared {
+            // Both buffers hold the objects in draw order: each object's part, ordered by where it starts in them.
+            slots = (0..self.spans.len()).collect();
+            slots.sort_by_key(|&slot| (self.spans[slot].measured.0, self.spans[slot].items.0));
+        }
+        let whole = if shared { &[][..] } else { &self.measured[..] };
+        whole.iter().chain(slots.into_iter().flat_map(move |slot| self.measured_in_order(slot)))
     }
 
     pub fn points_of(&self, item: &Item) -> &[[f64; 2]] {
@@ -522,6 +571,8 @@ struct Built {
     transitions: Vec<ColorTransition>,
     /// [`Scene::measured`] of this object.
     measured: Vec<Item>,
+    /// The object's measured primitives are its items, in their order: `measured` is empty and the splice reads `items` for both.
+    measured_is_items: bool,
 }
 
 /// What a build keeps of one object for the next build over the same document.
@@ -573,6 +624,8 @@ pub struct BuildMemory {
     over: Option<(Scene, Spliced)>,
     /// How many builds were written over an earlier scene.
     written_over: u64,
+    /// How many objects were built again in the buffers of their last build.
+    recycled: u64,
 }
 
 /// The inputs of the splice other than the objects' builds, and the stamp of the scene they gave.
@@ -644,6 +697,11 @@ impl BuildMemory {
         self.written_over
     }
 
+    /// How many objects this memory's builds made again in the buffers of the build of them it kept (a seek builds every figure again).
+    pub fn recycled(&self) -> u64 {
+        self.recycled
+    }
+
     /// The number of the last build (builds are numbered in the order they end, across every memory).
     pub fn serial(&self) -> u64 {
         self.serial
@@ -658,8 +716,39 @@ impl BuildMemory {
 
 impl Built {
     fn new(geometry: ObjectGeometry) -> Built {
-        Built { geometry, items: Vec::new(), points: Vec::new(), figures: Vec::new(), owners: Vec::new(), owner_scales: Vec::new(), chains: Vec::new(), clip_vfx: Vec::new(), meshes: Vec::new(), depths: Vec::new(), transitions: Vec::new(), measured: Vec::new() }
+        Built { geometry, items: Vec::new(), points: Vec::new(), figures: Vec::new(), owners: Vec::new(), owner_scales: Vec::new(), chains: Vec::new(), clip_vfx: Vec::new(), meshes: Vec::new(), depths: Vec::new(), transitions: Vec::new(), measured: Vec::new(), measured_is_items: false }
     }
+
+    /// The object's measured primitives, as [`Scene::measured`] holds them.
+    fn measured(&self) -> &[Item] {
+        if self.measured_is_items { &self.items } else { &self.measured }
+    }
+
+    /// Whether a scene keeps no measured primitives of this object but reads its items for them ([`SPAN_MEASURED_ITEMS`]): its items
+    /// are its measured primitives and the splice changes nothing in them that it does not change in those (no effects to export
+    /// marked on the items, no colour transition moved, no movieclip content).
+    fn shares_measured(&self, export_vfx: bool) -> bool {
+        self.measured_is_items && !export_vfx && self.transitions.is_empty() && self.figures.is_empty() && self.meshes.is_empty() && self.depths.is_empty()
+    }
+}
+
+/// `v` holding `n` copies of `value`, in the room it has.
+fn refill<T: Clone>(mut v: Vec<T>, n: usize, value: T) -> Vec<T> {
+    v.clear();
+    v.resize(n, value);
+    v
+}
+
+/// `v` emptied, with room for `n`.
+fn refill_with_room<T>(mut v: Vec<T>, n: usize) -> Vec<T> {
+    v.clear();
+    v.reserve(n);
+    v
+}
+
+/// `v`, without the room of a buffer that holds nothing: what a build keeps holds no memory it does not use.
+fn kept<T>(v: Vec<T>) -> Vec<T> {
+    if v.is_empty() { Vec::new() } else { v }
 }
 
 /// `ik` is the object's derived pose when a pinned IK controller reaches it:
@@ -681,24 +770,28 @@ pub fn segment_pose(obj: &Object, seg: &crate::doc::Segment, i: usize) -> (f64, 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, root: [f64; 2], ik: Option<&crate::ik::Solution>, measure: Measure, render_output: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Built {
+fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure_slot: u32, fig: &Figure, root: [f64; 2], ik: Option<&crate::ik::Solution>, measure: Measure, render_output: bool, cancelled: &(dyn Fn() -> bool + Sync), spare: Option<Built>) -> Built {
     let obj = &frame.objects[slot];
     let n = fig.segments.len();
     let scale = obj.scale;
     let opacity = 1.0 - obj.transparency / 255.0;
     let nan = [f64::NAN, f64::NAN];
-    let mut ends = vec![nan; n];
-    let mut starts = vec![nan; n];
-    let mut lengths = vec![f64::NAN; n];
-    let mut angles: Vec<f64> = if measure == Measure::Shapes { vec![f64::NAN; n] } else { Vec::new() };
-    let mut raw_segments = vec![RawSegment::default(); n];
-    let mut items: Vec<Item> = if render_output { Vec::with_capacity(n + fig.polyfills.len()) } else { Vec::new() };
-    let mut points: Vec<[f64; 2]> = Vec::new();
+    // What an earlier build of the object was made in, when it is built again (`BuildMemory`) or one build follows another on the same
+    // thread (`build_streamed`): its buffers hold this build, so a frame built again allocates nothing for an object of the same size.
+    let mut spare = spare.unwrap_or_else(|| Built::new(ObjectGeometry::default()));
+    let mut ends = refill(std::mem::take(&mut spare.geometry.ends), n, nan);
+    let mut starts = refill(std::mem::take(&mut spare.geometry.starts), n, nan);
+    let mut lengths = refill(std::mem::take(&mut spare.geometry.lengths), n, f64::NAN);
+    let mut angles: Vec<f64> = if measure == Measure::Shapes { refill(std::mem::take(&mut spare.geometry.angles), n, f64::NAN) } else { Vec::new() };
+    let mut raw_segments = refill(std::mem::take(&mut spare.geometry.raw_segments), n, RawSegment::default());
+    // The drawables: the segments' items once they are known to be all of them, else made room for below.
+    let mut items: Vec<Item> = Vec::new();
+    let mut points: Vec<[f64; 2]> = refill(std::mem::take(&mut spare.points), 0, [0.0; 2]);
     // Segment item index per segment (for polygon edges).
     let mut seg_item = if render_output { vec![u32::MAX; n] } else { Vec::new() };
     let plan = &fig.plan;
     let black_override = version < 5 && !fig.segment_colors;
-    let mut segment_items: Vec<Item> = if render_output { Vec::with_capacity(n) } else { Vec::new() };
+    let mut segment_items: Vec<Item> = if render_output { refill_with_room(std::mem::take(&mut spare.items), n) } else { Vec::new() };
     let (transition, transitions) = match (&obj.color_transition, render_output) {
         (Some(c), true) => (0, vec![**c]),
         _ => (NO_TRANSITION, Vec::new()),
@@ -857,7 +950,7 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
     // points, colors and drawable ordering do not change the joints just built.
     if !render_output {
         let mut built = Built::new(ObjectGeometry { slot: slot as u32, uid: obj.uid, figure: fig.id, root, scale, ends, starts, lengths, raw_segments, opacity, resolved: true, spatial: None, rig: None, extent: None, angles, solution: None });
-        built.points = points;
+        built.points = kept(points);
         return built;
     }
     let joint = |handle: u32| -> Option<[f64; 2]> {
@@ -873,11 +966,11 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
         depths.get(i)?.raw
     };
     let joint_depth = |handle: u32| -> crate::spatial::JointDepth { plan.index_of.get(&handle).and_then(|&i| depths.get(i as usize)).copied().unwrap_or_default() };
-    let mut surface_depths: Vec<f64> = Vec::new();
+    let mut surface_depths: Vec<f64> = refill(std::mem::take(&mut spare.depths), 0, 0.0);
     let mut raws: Vec<Option<[f64; 3]>> = Vec::new();
     // What a follow camera frames (`figureBounds`), only when asked for ([`build_measured`]).
     let mut bounds = Bounds::new();
-    let mut measured: Vec<Item> = Vec::new();
+    let mut measured: Vec<Item> = if matches!(measure, Measure::Shapes | Measure::Bounds) { refill_with_room(std::mem::take(&mut spare.measured), 0) } else { Vec::new() };
     if measure == Measure::Follow {
         for it in &segment_items {
             let seg = &fig.segments[it.index as usize];
@@ -885,6 +978,9 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
                 bounds.segment(it, seg.prim, &points[it.points.0 as usize..it.points.1 as usize]);
             }
         }
+    }
+    if !fig.polyfills.is_empty() {
+        items.reserve(n + fig.polyfills.len());
     }
     for (pi, poly) in fig.polyfills.iter().enumerate() {
         if cancelled() { return Built::new(ObjectGeometry::default()); }
@@ -1087,29 +1183,65 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
             meshes.push(Arc::new(mesh));
         }
     }
-    if measure == Measure::Bounds {
-        measured.extend(items.iter().cloned());
-        measured.extend(segment_items.iter().cloned());
-    } else if measure == Measure::Shapes {
-        measured.extend(items.iter().filter(|it| it.kind == ItemKind::Mesh).cloned());
-        measured.extend(segment_items.iter().cloned());
-    }
-    // Drawables: polygons, mesh faces, then visible segments in record order, stably by z.
-    sort_items(&mut segment_items, |a, b| a.index.cmp(&b.index));
-    for it in segment_items {
-        let seg = &fig.segments[it.index as usize];
-        if !seg.visible {
-            continue;
-        }
-        match crate::sticknodes::shape_for(seg, obj) {
-            Some(shape) => {
-                let own: Vec<[f64; 2]> = points[it.points.0 as usize..it.points.1 as usize].to_vec();
-                crate::sticknodes::expand(&it, shape, &own, &mut points, &mut items);
+    // Where each segment's item was made: every segment once, in the figure's order, is the common case (a figure without joins out of order).
+    let made = seg_item.iter().filter(|&&at| at != u32::MAX).count();
+    let in_order = made == segment_items.len() && seg_item.iter().enumerate().all(|(i, &at)| at == i as u32);
+    // An object of segments alone, every one made once and drawn as it was made, built in the order of its plan (not a rig's): its
+    // drawables are its segments' items in the figure's order, and its measured primitives the same items in the order they were made
+    // (before ordering by depth: they are the drawables, made in another order, while that moves none: `Scene::measured_items`).
+    let plain = made == n && segment_items.len() == n && rig_plan.is_none() && items.is_empty() && measured.is_empty()
+        && fig.segments.iter().all(|seg| seg.visible && crate::sticknodes::shape_for(seg, obj).is_none());
+    let by_depth = |a: &Item, b: &Item| a.z.total_cmp(&b.z);
+    let mut measured_is_items = false;
+    if plain {
+        // In the figure's order, moved where they belong in place: every index is there once.
+        if !in_order {
+            for at in 0..n {
+                while segment_items[at].index as usize != at {
+                    let to = segment_items[at].index as usize;
+                    segment_items.swap(at, to);
+                }
             }
-            None => items.push(it),
+        }
+        items = segment_items;
+        match measure {
+            Measure::Shapes if in_painter_order(&items, by_depth) => measured_is_items = true,
+            Measure::Shapes | Measure::Bounds => measured.extend(order.iter().map(|&i| items[i as usize])),
+            Measure::Off | Measure::Follow => {}
+        }
+    } else {
+        if measure == Measure::Bounds {
+            measured.extend(items.iter().cloned());
+            measured.extend(segment_items.iter().cloned());
+        } else if measure == Measure::Shapes {
+            measured.extend(items.iter().filter(|it| it.kind == ItemKind::Mesh).cloned());
+            measured.extend(segment_items.iter().cloned());
+        }
+        // Drawables: polygons, mesh faces, then visible segments in record order, stably by z. Each segment's item made once is put in
+        // record order where `seg_item` says it lies (a stable sort by index, without sorting).
+        if !in_order {
+            if made == segment_items.len() {
+                segment_items = seg_item.iter().filter(|&&at| at != u32::MAX).map(|&at| segment_items[at as usize]).collect();
+            } else {
+                sort_items(&mut segment_items, |a, b| a.index.cmp(&b.index));
+            }
+        }
+        items.reserve(segment_items.len());
+        for it in segment_items {
+            let seg = &fig.segments[it.index as usize];
+            if !seg.visible {
+                continue;
+            }
+            match crate::sticknodes::shape_for(seg, obj) {
+                Some(shape) => {
+                    let own: Vec<[f64; 2]> = points[it.points.0 as usize..it.points.1 as usize].to_vec();
+                    crate::sticknodes::expand(&it, shape, &own, &mut points, &mut items);
+                }
+                None => items.push(it),
+            }
         }
     }
-    sort_items(&mut items, |a, b| a.z.total_cmp(&b.z));
+    sort_items(&mut items, by_depth);
     let _ = doc;
     let spatial = has_spatial.then(|| Arc::new(ObjectSpatial { frames, depths, figure_angle, mirror: obj.image_text_flags, camera, authored, start_raws }));
     let rig = rig_plan.is_some().then(|| {
@@ -1130,12 +1262,13 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
     });
     let extent = bounds.extent();
     let mut built = Built::new(ObjectGeometry { slot: slot as u32, uid: obj.uid, figure: fig.id, root, scale, ends, starts, lengths, raw_segments, opacity, resolved: true, spatial, rig, extent, angles, solution: ik.filter(|_| measure == Measure::Shapes).map(|solution| Arc::new(solution.clone())) });
-    built.items = items;
-    built.points = points;
+    built.items = kept(items);
+    built.points = kept(points);
     built.meshes = meshes;
-    built.depths = surface_depths;
+    built.depths = kept(surface_depths);
     built.transitions = transitions;
-    built.measured = measured;
+    built.measured = kept(measured);
+    built.measured_is_items = measured_is_items;
     built
 }
 
@@ -1326,10 +1459,15 @@ fn rotated_drawing(clip: &Movieclip, obj: &Object, parent: &JoinedParent<'_>) ->
     })
 }
 
+/// Whether [`sort_items`] by `order` leaves `items` as they are.
+fn in_painter_order(items: &[Item], order: impl Fn(&Item, &Item) -> std::cmp::Ordering) -> bool {
+    items.windows(2).all(|pair| order(&pair[0], &pair[1]) != std::cmp::Ordering::Greater)
+}
+
 /// Sorts `items` stably by `order`, as `sort_by` does: an object's items are put in order by sorting their positions (four bytes each)
 /// and copying each item once, not by moving the items about (a dense frame sorts hundreds of thousands of them on every build).
 fn sort_items(items: &mut [Item], order: impl Fn(&Item, &Item) -> std::cmp::Ordering) {
-    if items.windows(2).all(|pair| order(&pair[0], &pair[1]) != std::cmp::Ordering::Greater) {
+    if in_painter_order(items, &order) {
         return;
     }
     let mut positions: Vec<u32> = (0..items.len() as u32).collect();
@@ -1523,7 +1661,11 @@ fn patch(over: &mut Scene, spliced: &Spliced, scene: &mut Scene, built: &[Option
         match built[slot].as_deref().filter(|_| placed[slot]) {
             None => SlotSpan { flags: 0, ..span } == SlotSpan::default(),
             Some(b) => b.figures.is_empty() && b.owners.is_empty() && b.owner_scales.is_empty() && b.chains.is_empty() && b.clip_vfx.is_empty() && b.meshes.is_empty() && b.depths.is_empty() && b.transitions.is_empty()
-                && b.items.len() == SlotSpan::len(span.items) && b.measured.len() == SlotSpan::len(span.measured) && b.points.len() == SlotSpan::len(span.points),
+                && b.items.len() == SlotSpan::len(span.items) && b.points.len() == SlotSpan::len(span.points)
+                && match b.shares_measured(object_export_vfx(frame, &scene.figures, fig_of, slot)) {
+                    true => span.flags & SPAN_MEASURED_ITEMS != 0,
+                    false => span.flags & SPAN_MEASURED_ITEMS == 0 && b.measured().len() == SlotSpan::len(span.measured),
+                },
         }
     });
     if !fits {
@@ -1539,17 +1681,20 @@ fn patch(over: &mut Scene, spliced: &Spliced, scene: &mut Scene, built: &[Option
         let base = span.points.0;
         over.points[span.points.0 as usize..span.points.1 as usize].copy_from_slice(&b.points);
         over.objects[slot].assign_from(&b.geometry, base);
-        for (place, it) in over.measured[span.measured.0 as usize..span.measured.1 as usize].iter_mut().zip(&b.measured) {
-            *place = *it;
-            place.points = (it.points.0 + base, it.points.1 + base);
-        }
         let export_vfx = object_export_vfx(frame, &scene.figures, fig_of, slot);
+        let shared = b.shares_measured(export_vfx);
+        if !shared {
+            for (place, it) in over.measured[span.measured.0 as usize..span.measured.1 as usize].iter_mut().zip(b.measured()) {
+                *place = *it;
+                place.points = (it.points.0 + base, it.points.1 + base);
+            }
+        }
         for (place, it) in over.items[span.items.0 as usize..span.items.1 as usize].iter_mut().zip(&b.items) {
             *place = *it;
             place.export_vfx |= export_vfx;
             place.points = (it.points.0 + base, it.points.1 + base);
         }
-        over.spans[slot].flags = SlotSpan::flags_of(&over.figures, &over.items[span.items.0 as usize..span.items.1 as usize]);
+        over.spans[slot].flags = SlotSpan::flags_of(&over.figures, &over.items[span.items.0 as usize..span.items.1 as usize]) | if shared { SPAN_MEASURED_ITEMS } else { 0 };
     }
     over.built_in = std::mem::take(&mut scene.built_in);
     over.warnings = std::mem::take(&mut scene.warnings);
@@ -1559,9 +1704,20 @@ fn patch(over: &mut Scene, spliced: &Spliced, scene: &mut Scene, built: &[Option
     true
 }
 
+/// Whether a build for no memory of a frame without joins is made one object at a time in draw order, in buffers it reuses (`build_core_checked`):
+/// where objects are not built in parallel, as in the WebAssembly build, whose parallelism is whole frames on workers.
+const STREAM: bool = cfg!(target_arch = "wasm32");
+
+/// [`build`] (with `shapes`, [`build_shapes`] of every object) one object at a time in draw order, as the WebAssembly build makes it
+/// ([`STREAM`]): for the tests that hold it to the build made in parallel.
+#[doc(hidden)]
+pub fn build_streamed(doc: &Document, frame: &Frame, shapes: bool) -> Scene {
+    build_core_checked(doc, frame, None, if shapes { Measure::Shapes } else { Measure::Off }, true, None, None, &|| false, true).expect("an uncancelled build gives a scene")
+}
+
 /// Worker build carrying cancellation into nested clips.
 pub fn build_cancellable(doc: &Document, frame: &Frame, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
-    build_core_checked(doc, frame, None, Measure::Off, true, None, None, cancelled)
+    build_core_checked(doc, frame, None, Measure::Off, true, None, None, cancelled, STREAM)
 }
 
 /// Builds the scene for an evaluated frame.
@@ -1630,7 +1786,7 @@ fn build_filtered(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measur
 }
 
 fn build_core(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, memory: Option<&mut BuildMemory>, same_as: Option<&Scene>) -> Option<Scene> {
-    build_core_checked(doc, frame, needed, measure, render_output, memory, same_as, &|| false)
+    build_core_checked(doc, frame, needed, measure, render_output, memory, same_as, &|| false, STREAM)
 }
 
 /// Query geometry with checkpoints in every parallel object and join level.
@@ -1643,7 +1799,7 @@ pub fn build_shapes_cancellable(doc: &Document, frame: &Frame, slots: Option<&[u
         }
         needed
     });
-    build_core_checked(doc, frame, needed.as_deref(), Measure::Shapes, true, None, None, cancelled)
+    build_core_checked(doc, frame, needed.as_deref(), Measure::Shapes, true, None, None, cancelled, STREAM)
 }
 
 /// Query geometry with checkpoints in every parallel object and join level.
@@ -1658,10 +1814,10 @@ pub fn build_only_measured_cancellable(doc: &Document, frame: &Frame, slots: &[u
             at = frame.objects[i].join.map(|j| j.slot as usize);
         }
     }
-    build_core_checked(doc, frame, Some(&needed), Measure::Bounds, true, None, None, cancelled)
+    build_core_checked(doc, frame, Some(&needed), Measure::Bounds, true, None, None, cancelled, STREAM)
 }
 
-fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
+fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>, cancelled: &(dyn Fn() -> bool + Sync), stream: bool) -> Option<Scene> {
     let count = frame.objects.len();
     if let Some(memory) = memory.as_deref_mut() {
         memory.begin(count, measure, doc.version);
@@ -1739,186 +1895,173 @@ fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, me
     // IK across joined figures solves once per assembly, before its objects build (`solveJoinedIK`).
     let joined_ik = crate::ik::joined::solve(frame, &|slot| fig_of.get(slot).filter(|&&s| s != u32::MAX).map(|&s| &scene.figures[s as usize]));
     let mut built: Vec<Option<Arc<Built>>> = (0..count).map(|_| None).collect();
+    // An object whose node of the typed frame is not the one the build the memory kept was made from is built again: the buffers of
+    // that build, which nothing else holds, hold the new one (a seek builds every figure again without allocating for any).
+    let spares: Vec<std::sync::Mutex<Option<Built>>> = match memory.as_deref_mut() {
+        Some(memory) => (0..count).map(|slot| {
+            let stale = memory.slots[slot].as_ref().is_some_and(|kept| kept.object.as_ptr() != Arc::as_ptr(&frame.objects[slot]));
+            std::sync::Mutex::new(stale.then(|| memory.slots[slot].take()).flatten().and_then(|kept| Arc::try_unwrap(kept.built).ok()))
+        }).collect(),
+        None => Vec::new(),
+    };
+    if let Some(memory) = memory.as_deref_mut() {
+        memory.recycled += spares.iter().filter(|spare| spare.try_lock().is_ok_and(|spare| spare.is_some())).count() as u64;
+    }
     // What the last build of this document kept of each object, and what this one builds anew.
     let previous = memory.as_deref().map(|memory| &memory.slots[..]);
     let mut anew: Vec<(usize, Kept)> = Vec::new();
-    // Publication still follows draw order.
-    for slots in order.iter().map(Vec::as_slice) {
+    let resolve_root = |i: usize, built: &[Option<Arc<Built>>]| -> Option<[f64; 2]> {
+        let o = &frame.objects[i];
+        let mut root = [o.root[0], o.root[1]];
+        if let Some(j) = o.join {
+            let parent = built.get(j.slot as usize)?.as_ref()?;
+            let pfig = doc.figure(frame.objects[j.slot as usize].figure)?;
+            if let Some(p) = parent.geometry.joint(pfig, j.handle) {
+                root = p;
+            }
+        }
+        Some(root)
+    };
+    // Builds object `i` over the objects of the levels before its own (`built`), in the buffers of `spare` where it has one.
+    let make_with = |i: usize, built: &[Option<Arc<Built>>], figures: &[Arc<Figure>], spare: Option<Built>| -> Option<(usize, Arc<Built>, Option<Kept>)> {
         if cancelled() { return None; }
-        let filtered: Vec<usize>;
-        let slots = match needed {
-            Some(needed) => {
-                filtered = slots.iter().copied().filter(|&i| needed[i]).collect();
-                &filtered
-            }
-            _ => slots,
-        };
-        let resolve_root = |i: usize, built: &[Option<Arc<Built>>]| -> Option<[f64; 2]> {
-            let o = &frame.objects[i];
-            let mut root = [o.root[0], o.root[1]];
-            if let Some(j) = o.join {
-                let parent = built.get(j.slot as usize)?.as_ref()?;
-                let pfig = doc.figure(frame.objects[j.slot as usize].figure)?;
-                if let Some(p) = parent.geometry.joint(pfig, j.handle) {
-                    root = p;
-                }
-            }
-            Some(root)
-        };
-        let make = |&i: &usize| -> Option<(usize, Arc<Built>, Option<Kept>)> {
-            if cancelled() { return None; }
-            let fig = &scene.figures[*fig_of.get(i)? as usize];
-            let root = resolve_root(i, &built).unwrap_or(frame.objects[i].root);
-            if let Some(clip) = &fig.movieclip {
-                // An attached mesh, or drawings a bone turns, read the bone the instance is
-                // joined to from its parent's geometry.
-                let parent = frame.objects[i].join.filter(|_| clip.meshes.is_some() || clip.drawing_rotation.is_some()).and_then(|j| {
-                    let geometry = &built.get(j.slot as usize)?.as_ref()?.geometry;
-                    let figure = scene.figures.get(*fig_of.get(j.slot as usize)? as usize)?;
-                    Some(JoinedParent { object: &frame.objects[j.slot as usize], figure, geometry })
-                });
-                // What an instance reads of its parent's geometry is not part of what a kept build is checked against.
-                let remembered = previous.filter(|_| parent.is_none());
-                if let Some(kept) = reuse(remembered, i, &frame.objects[i], fig, fig_of[i], root, None) {
-                    return Some((i, kept, None));
-                }
-                let built = if let Some(meshes) = &clip.meshes {
-                    build_clip_mesh(frame, i, fig_of[i], fig, clip, meshes, root, parent, measure, cancelled)?
-                } else {
-                    build_clip(frame, i, fig, clip, root, parent, cancelled)?
-                };
-                let built = Arc::new(built);
-                // Kept whether or not it can be reused, so that the build is numbered: what reads the scene learns the instance changed.
-                return Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, None, built))));
-            }
-            // IK: a pinned object draws its derived pose, from its assembly or solved on its own (`evaluateIKPose`).
-            let local;
-            let ik = match joined_ik.get(&i) {
-                Some(solution) => Some(solution),
-                None => {
-                    local = crate::ik::solve_local(fig, &frame.objects[i], root);
-                    local.as_ref()
-                }
-            };
-            if let Some(kept) = reuse(previous, i, &frame.objects[i], fig, fig_of[i], root, ik) {
+        let fig = &figures[*fig_of.get(i)? as usize];
+        let root = resolve_root(i, built).unwrap_or(frame.objects[i].root);
+        if let Some(clip) = &fig.movieclip {
+            // An attached mesh, or drawings a bone turns, read the bone the instance is
+            // joined to from its parent's geometry.
+            let parent = frame.objects[i].join.filter(|_| clip.meshes.is_some() || clip.drawing_rotation.is_some()).and_then(|j| {
+                let geometry = &built.get(j.slot as usize)?.as_ref()?.geometry;
+                let figure = figures.get(*fig_of.get(j.slot as usize)? as usize)?;
+                Some(JoinedParent { object: &frame.objects[j.slot as usize], figure, geometry })
+            });
+            // What an instance reads of its parent's geometry is not part of what a kept build is checked against.
+            let remembered = previous.filter(|_| parent.is_none());
+            if let Some(kept) = reuse(remembered, i, &frame.objects[i], fig, fig_of[i], root, None) {
                 return Some((i, kept, None));
             }
-            let built = Arc::new(build_object(doc, doc.version, frame, i, fig_of[i], fig, root, ik, measure, render_output, cancelled));
-            Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, ik.cloned(), built))))
+            let built = if let Some(meshes) = &clip.meshes {
+                build_clip_mesh(frame, i, fig_of[i], fig, clip, meshes, root, parent, measure, cancelled)?
+            } else {
+                build_clip(frame, i, fig, clip, root, parent, cancelled)?
+            };
+            let built = Arc::new(built);
+            // Kept whether or not it can be reused, so that the build is numbered: what reads the scene learns the instance changed.
+            return Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, None, built))));
+        }
+        // IK: a pinned object draws its derived pose, from its assembly or solved on its own (`evaluateIKPose`).
+        let local;
+        let ik = match joined_ik.get(&i) {
+            Some(solution) => Some(solution),
+            None => {
+                local = crate::ik::solve_local(fig, &frame.objects[i], root);
+                local.as_ref()
+            }
         };
-        let results: Vec<(usize, Arc<Built>, Option<Kept>)> = crate::par::map(&slots, 32, make).into_iter().flatten().collect();
-        if cancelled() { return None; }
-        for (i, b, fresh) in results {
-            built[i] = Some(b);
-            if let Some(fresh) = fresh {
-                anew.push((i, fresh));
+        if let Some(kept) = reuse(previous, i, &frame.objects[i], fig, fig_of[i], root, ik) {
+            return Some((i, kept, None));
+        }
+        let built = Arc::new(build_object(doc, doc.version, frame, i, fig_of[i], fig, root, ik, measure, render_output, cancelled, spare));
+        Some((i, built.clone(), previous.map(|_| Kept::new(&frame.objects[i], fig, fig_of[i], root, ik.cloned(), built))))
+    };
+    // A frame without joins built for no memory and not in parallel is built and spliced one object at a time, in draw order: each object
+    // is built in the buffers the one before it was built in, once its parts are in the scene.
+    let streamed = stream && memory.is_none() && needed.is_none() && order.len() <= 1;
+    if !streamed {
+        // Publication still follows draw order.
+        for slots in order.iter().map(Vec::as_slice) {
+            if cancelled() { return None; }
+            let filtered: Vec<usize>;
+            let slots = match needed {
+                Some(needed) => {
+                    filtered = slots.iter().copied().filter(|&i| needed[i]).collect();
+                    &filtered
+                }
+                _ => slots,
+            };
+            let make = |&i: &usize| make_with(i, &built, &scene.figures, spares.get(i).and_then(|spare| spare.try_lock().ok().and_then(|mut spare| spare.take())));
+            let results: Vec<(usize, Arc<Built>, Option<Kept>)> = crate::par::map(slots, 32, make).into_iter().flatten().collect();
+            if cancelled() { return None; }
+            for (i, b, fresh) in results {
+                built[i] = Some(b);
+                if let Some(fresh) = fresh {
+                    anew.push((i, fresh));
+                }
             }
         }
     }
+    drop(spares);
     for (i, l) in level.iter().enumerate() {
         if *l == u32::MAX {
             scene.warnings.push(format!("Cyclic join or unresolved target at object {i}"));
         }
     }
-    if let Some(memory) = memory.as_deref_mut() {
-        let nothing_new = anew.is_empty();
-        memory.finish(&built, anew);
-        scene.built_in = (0..count).map(|slot| memory.built_in(slot)).collect();
-        if nothing_new && same_as.is_some_and(|previous| memory.spliced_as(previous, &scene, &fig_of, frame)) {
-            return None;
+    if streamed {
+        scene.spans = vec![SlotSpan::default(); count];
+        // Room for what the figures drawn usually make: a segment or a polygon an item (Stick Nodes shapes and movieclips make more).
+        let estimate: usize = frame.draw_order.iter().filter_map(|&slot| scene.figures.get(*fig_of.get(slot as usize)? as usize)).map(|fig| fig.segments.len() + fig.polyfills.len()).sum();
+        scene.items.reserve(estimate);
+        let mut placed = vec![false; count];
+        let mut scratch: Option<Built> = None;
+        for &slot in &frame.draw_order {
+            if cancelled() { return None; }
+            let slot = slot as usize;
+            // As the levels would: an object is built once, if a level holds it (not one in a cycle of joins).
+            if level[slot] != 0 || std::mem::replace(&mut placed[slot], true) {
+                continue;
+            }
+            let Some((_, b, _)) = make_with(slot, &built, &scene.figures, scratch.take()) else { continue };
+            if cancelled() { return None; }
+            let export_vfx = object_export_vfx(frame, &scene.figures, &fig_of, slot);
+            let mut b = Arc::try_unwrap(b).ok().expect("a build for no memory is held by nothing else");
+            let geometry = std::mem::take(&mut b.geometry);
+            splice_object(&mut scene, &mut figure_slot, slot, &b, geometry, export_vfx);
+            scratch = Some(b);
         }
-        // A scene of an earlier build that nothing else holds any more is this one where its objects lie as this build's do: the objects built
-        // since it are written in their places, and the rest of it is not copied.
-        if let Some((mut over, spliced)) = memory.over.take()
-            && patch(&mut over, &spliced, &mut scene, &built, &fig_of, frame)
-        {
-            over.stamp = Stamp(STAMPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
-            over.account_buffers();
-            memory.spliced = Some(Spliced { stamp: over.stamp.get(), draw_order: frame.draw_order.clone(), export_vfx: frame.export_vfx.clone() });
-            memory.written_over += 1;
-            return Some(over);
-        }
-    }
-    // Splice in draw order.
-    let total_items: usize = built.iter().flatten().map(|b| b.items.len()).sum();
-    let total_points: usize = built.iter().flatten().map(|b| b.points.len()).sum();
-    let total_measured: usize = built.iter().flatten().map(|b| b.measured.len()).sum();
-    scene.items.reserve(total_items);
-    scene.measured.reserve(total_measured);
-    scene.points.reserve(total_points);
-    scene.spans = vec![SlotSpan::default(); count];
-    for &slot in &frame.draw_order {
-        if cancelled() { return None; }
-        // Read in place: a build the memory also holds is shared, and only the parts the scene owns are copied.
-        let Some(b) = built[slot as usize].take() else { continue };
-        let starts = (scene.items.len() as u32, scene.measured.len() as u32, scene.points.len() as u32);
-        let base = scene.points.len() as u32;
-        scene.points.extend_from_slice(&b.points);
-        let mut geometry = b.geometry.clone();
-        for raw in &mut geometry.raw_segments {
-            raw.points = (raw.points.0 + base, raw.points.1 + base);
-        }
-        // Movieclip content brings its own figures, owners and chains.
-        let figure_map: Vec<u32> = b
-            .figures
-            .iter()
-            .map(|f| {
-                let key = Arc::as_ptr(f) as usize;
-                let len = scene.figures.len() as u32;
-                *figure_slot.entry(key).or_insert_with(|| {
-                    scene.figures.push(f.clone());
-                    len
-                })
-            })
-            .collect();
-        let owner_base = scene.owners.len() as u32;
-        scene.owners.extend_from_slice(&b.owners);
-        scene.owner_scales.extend_from_slice(&b.owner_scales);
-        scene.clip_vfx.extend_from_slice(&b.clip_vfx);
-        let chain_base = scene.chains.len() as u32;
-        for c in &b.chains {
-            scene.chains.push(c.iter().map(|&(o, p)| (o + owner_base, p)).collect());
-        }
-        let mesh_base = scene.meshes.len() as u32;
-        scene.meshes.extend_from_slice(&b.meshes);
-        let depth_base = scene.depths.len() as u32;
-        scene.depths.extend_from_slice(&b.depths);
-        let transition_base = scene.transitions.len() as u32;
-        scene.transitions.extend_from_slice(&b.transitions);
-        let export_vfx = object_export_vfx(frame, &scene.figures, &fig_of, slot as usize);
-        // Copied whole, then the numbers that are offsets into the scene's buffers are moved.
-        let first = scene.measured.len();
-        scene.measured.extend_from_slice(&b.measured);
-        for it in &mut scene.measured[first..] {
-            it.points = (it.points.0 + base, it.points.1 + base);
-            it.depth = (it.depth.0 + depth_base, it.depth.1 + depth_base);
-            if it.mesh != NO_MESH {
-                it.mesh += mesh_base;
+    } else {
+        if let Some(memory) = memory.as_deref_mut() {
+            let nothing_new = anew.is_empty();
+            memory.finish(&built, anew);
+            scene.built_in = (0..count).map(|slot| memory.built_in(slot)).collect();
+            if nothing_new && same_as.is_some_and(|previous| memory.spliced_as(previous, &scene, &fig_of, frame)) {
+                return None;
+            }
+            // A scene of an earlier build that nothing else holds any more is this one where its objects lie as this build's do: the objects built
+            // since it are written in their places, and the rest of it is not copied.
+            if let Some((mut over, spliced)) = memory.over.take()
+                && patch(&mut over, &spliced, &mut scene, &built, &fig_of, frame)
+            {
+                over.stamp = Stamp(STAMPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
+                over.account_buffers();
+                memory.spliced = Some(Spliced { stamp: over.stamp.get(), draw_order: frame.draw_order.clone(), export_vfx: frame.export_vfx.clone() });
+                memory.written_over += 1;
+                return Some(over);
             }
         }
-        let first = scene.items.len();
-        scene.items.extend_from_slice(&b.items);
-        for it in &mut scene.items[first..] {
-            it.export_vfx |= export_vfx;
-            it.points = (it.points.0 + base, it.points.1 + base);
-            it.depth = (it.depth.0 + depth_base, it.depth.1 + depth_base);
-            if it.mesh != NO_MESH {
-                it.mesh += mesh_base;
-            }
-            if !figure_map.is_empty() {
-                it.figure = figure_map[it.figure as usize];
-            }
-            if it.chain != NO_CHAIN {
-                it.chain += chain_base;
-            }
-            if it.transition != NO_TRANSITION {
-                it.transition += transition_base;
-            }
-        }
-        scene.objects[slot as usize] = geometry;
-        let flags = SlotSpan::flags_of(&scene.figures, &scene.items[starts.0 as usize..]);
-        if let Some(span) = scene.spans.get_mut(slot as usize) {
-            *span = SlotSpan { items: (starts.0, scene.items.len() as u32), measured: (starts.1, scene.measured.len() as u32), points: (starts.2, scene.points.len() as u32), flags };
+        // Splice in draw order.
+        scene.spans = vec![SlotSpan::default(); count];
+        let total_items: usize = built.iter().flatten().map(|b| b.items.len()).sum();
+        let total_points: usize = built.iter().flatten().map(|b| b.points.len()).sum();
+        let total_measured: usize = built.iter().flatten().filter(|b| !b.shares_measured(false)).map(|b| b.measured().len()).sum();
+        scene.items.reserve(total_items);
+        scene.measured.reserve(total_measured);
+        scene.points.reserve(total_points);
+        for &slot in &frame.draw_order {
+            if cancelled() { return None; }
+            let Some(b) = built[slot as usize].take() else { continue };
+            let export_vfx = object_export_vfx(frame, &scene.figures, &fig_of, slot as usize);
+            // A build the memory also holds is read in place, and only the parts the scene owns are copied; one that nothing else holds gives
+            // the scene its geometry.
+            let mut b = Arc::try_unwrap(b);
+            let geometry = match &mut b {
+                Ok(b) => std::mem::take(&mut b.geometry),
+                Err(b) => b.geometry.clone(),
+            };
+            let b: &Built = match &b {
+                Ok(b) => b,
+                Err(b) => b,
+            };
+            splice_object(&mut scene, &mut figure_slot, slot as usize, b, geometry, export_vfx);
         }
     }
     scene.figure_of = fig_of;
@@ -1929,4 +2072,81 @@ fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, me
         memory.spliced = Some(Spliced { stamp: scene.stamp.get(), draw_order: frame.draw_order.clone(), export_vfx: frame.export_vfx.clone() });
     }
     Some(scene)
+}
+
+/// Appends the build `b` of the object at `slot` to `scene`, after the objects before it in draw order: its parts copied whole, then the
+/// numbers in them that are offsets into the scene's buffers moved, with `geometry` (the build's, its raw segments' points moved here) as the
+/// object's. `figure_slot` is the scene's figure table by figure; `export_vfx`, whether the object has effects for an export to draw.
+fn splice_object(scene: &mut Scene, figure_slot: &mut std::collections::HashMap<usize, u32>, slot: usize, b: &Built, mut geometry: ObjectGeometry, export_vfx: bool) {
+    let starts = (scene.items.len() as u32, scene.measured.len() as u32, scene.points.len() as u32);
+    let base = scene.points.len() as u32;
+    scene.points.extend_from_slice(&b.points);
+    for raw in &mut geometry.raw_segments {
+        raw.points = (raw.points.0 + base, raw.points.1 + base);
+    }
+    // Movieclip content brings its own figures, owners and chains.
+    let figure_map: Vec<u32> = b
+        .figures
+        .iter()
+        .map(|f| {
+            let key = Arc::as_ptr(f) as usize;
+            let len = scene.figures.len() as u32;
+            *figure_slot.entry(key).or_insert_with(|| {
+                scene.figures.push(f.clone());
+                len
+            })
+        })
+        .collect();
+    let owner_base = scene.owners.len() as u32;
+    scene.owners.extend_from_slice(&b.owners);
+    scene.owner_scales.extend_from_slice(&b.owner_scales);
+    scene.clip_vfx.extend_from_slice(&b.clip_vfx);
+    let chain_base = scene.chains.len() as u32;
+    for c in &b.chains {
+        scene.chains.push(c.iter().map(|&(o, p)| (o + owner_base, p)).collect());
+    }
+    let mesh_base = scene.meshes.len() as u32;
+    scene.meshes.extend_from_slice(&b.meshes);
+    let depth_base = scene.depths.len() as u32;
+    scene.depths.extend_from_slice(&b.depths);
+    let transition_base = scene.transitions.len() as u32;
+    scene.transitions.extend_from_slice(&b.transitions);
+    // Copied whole, then the numbers that are offsets into the scene's buffers are moved.
+    // An object whose items are its measured primitives keeps none of them in `measured` (`SPAN_MEASURED_ITEMS`).
+    let shared = b.shares_measured(export_vfx);
+    let first = scene.measured.len();
+    if !shared {
+        scene.measured.extend_from_slice(b.measured());
+    }
+    for it in &mut scene.measured[first..] {
+        it.points = (it.points.0 + base, it.points.1 + base);
+        it.depth = (it.depth.0 + depth_base, it.depth.1 + depth_base);
+        if it.mesh != NO_MESH {
+            it.mesh += mesh_base;
+        }
+    }
+    let first = scene.items.len();
+    scene.items.extend_from_slice(&b.items);
+    for it in &mut scene.items[first..] {
+        it.export_vfx |= export_vfx;
+        it.points = (it.points.0 + base, it.points.1 + base);
+        it.depth = (it.depth.0 + depth_base, it.depth.1 + depth_base);
+        if it.mesh != NO_MESH {
+            it.mesh += mesh_base;
+        }
+        if !figure_map.is_empty() {
+            it.figure = figure_map[it.figure as usize];
+        }
+        if it.chain != NO_CHAIN {
+            it.chain += chain_base;
+        }
+        if it.transition != NO_TRANSITION {
+            it.transition += transition_base;
+        }
+    }
+    scene.objects[slot] = geometry;
+    let flags = SlotSpan::flags_of(&scene.figures, &scene.items[starts.0 as usize..]) | if shared { SPAN_MEASURED_ITEMS } else { 0 };
+    if let Some(span) = scene.spans.get_mut(slot) {
+        *span = SlotSpan { items: (starts.0, scene.items.len() as u32), measured: (starts.1, scene.measured.len() as u32), points: (starts.2, scene.points.len() as u32), flags };
+    }
 }

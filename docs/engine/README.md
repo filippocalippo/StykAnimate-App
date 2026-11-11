@@ -32,7 +32,10 @@ times a pose drag, its commit, an undo and a redo as the stage shows them (the s
 draw), with `STYK_EDIT_PROFILE=1` adding where the session call spends its time (`styk_edit::prof`). `styk prims <file> [tick…]` lists
 what a frame is made of.
 `STYK_BENCH_DOC=<file> cargo test --release -p styk-export --test seek_bench -- --ignored --nocapture` times a seek as the stage shows it
-(the interface's read of the frame, the session's frame, the draw list, the same frame drawn again, and clicks on artwork).
+(the interface's read of the frame, the session's frame, its geometry read, the draw list, the same frame drawn again, and clicks on artwork;
+`STYK_BENCH_ROUNDS=<n>` repeats the ticks and prints the minimum and median of each phase, which says more on a busy machine, and
+`RAYON_NUM_THREADS=1` builds on one thread as the app's interface does); its `a_prepared_frame` times a frame as a preparation worker makes
+it (evaluation, scene, draw list, cull), on `STYK_BENCH_THREADS=<n>` threads at once.
 `STYK_BENCH_DOC=<file> cargo test --release -p styk-engine --test dense_bench -- --ignored --nocapture` times a joint drag move, a figure
 move, their release, an undo and single seeks on the interface's side (the session's call and frame, the geometry read since the last, the
 frame's text, the onion skins, the draw list), with and without onion skins (natively the frame's builds run in parallel, which the

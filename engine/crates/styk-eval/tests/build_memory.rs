@@ -148,7 +148,7 @@ fn a_plain_build_over_the_last_is_the_build_whole() {
 fn scene_hash(scene: &geometry::Scene) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for text in [format!("{:?}", scene.items), format!("{:?}", scene.measured), format!("{:?}", scene.points), format!("{:?}", scene.objects), format!("{:?}", (&scene.owners, &scene.owner_scales, &scene.chains, &scene.depths, &scene.transitions, &scene.figure_of))] {
+    for text in [format!("{:?}", scene.items), format!("{:?}", scene.measured_items().collect::<Vec<_>>()), format!("{:?}", scene.points), format!("{:?}", scene.objects), format!("{:?}", (&scene.owners, &scene.owner_scales, &scene.chains, &scene.depths, &scene.transitions, &scene.figure_of))] {
         text.hash(&mut hasher);
     }
     hasher.finish()

@@ -441,7 +441,8 @@ impl Session {
         self.editor.rest();
     }
 
-    /// The geometry of the frame on show (`geometry`: `args` `{since, motion}`; empty where a motion-path edit shows the document) or of
+    /// The geometry of the frame on show (`geometry`: `args` `{since, motion, lightAbove}`; empty where a motion-path edit shows the document), the
+    /// whole groups of figures its latest read sent light (`geometryGroups`: `{slots, motion}`) or the geometry of
     /// a frame the document does not hold (`previewGeometry`), as a packet of words (`interface.rs`), at `view` (its playhead). Errors are
     /// those of [`Session::query`].
     pub fn query_packet(&mut self, kind: &str, args: &str, view: &str) -> Result<Vec<f64>, String> {
@@ -450,6 +451,7 @@ impl Session {
         let packet = match kind {
             "geometry" => self.editor.interface_geometry(&args),
             "previewGeometry" => self.editor.interface_preview_geometry(&args),
+            "geometryGroups" => self.editor.interface_geometry_groups(&args),
             "frameNumbers" => Ok(self.editor.take_frame_numbers()),
             other => Err(EditError::Invalid(format!("the session answers no packet '{other}'"))),
         };
