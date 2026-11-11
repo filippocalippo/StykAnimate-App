@@ -316,7 +316,12 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   keeps on show, else the document at the playhead (`Records::evaluated_editor_with`). `document` is the document's
   own frame under any of them, the base a gesture's draft is composed on. Each carries the time the document's effect clips are
   read at when it has any (`_vfxTimelineTick`, the playhead), which the effect gizmos compose the figures' effects at. The camera is read as the
-  shot (`shot` below), not from a time on the frame.
+  shot (`shot` below), not from a time on the frame. `engine-shown.mjs` reads both packed (`{packed: true}`,
+  `Editor::interface_frame_packed`): each array of finite numbers at the top of an object (a pose's angles, lengths and bends, most of a
+  dense frame's text: 2.9 MB for 2,000 figures of 100 segments) is the string `"\u0000"` in the text, and its numbers follow as words in the
+  `frameNumbers` packet (per object, per such key in key order, a length and the numbers; a negative zero as the zero the text would
+  write); the reader puts each array back where the text leaves it out, so the frame is the frame the whole text gives
+  (`tests/engine-shown-packed-frame.test.mjs`).
 - `motion` is the pose a motion-path edit shows at the playhead while it changes it
   (`Editor::motion_display_frame_worker`), `null` outside the ticks it changes.
 - `timeline` is the rows (`[[start, count], …]`, `timeline::rows`).
