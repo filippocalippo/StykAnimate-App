@@ -238,8 +238,9 @@ export class SheetFilmstrip {
     return indices.filter(i => Number.isInteger(i) && i >= 0 && i < this.times.length)
       .map(i => ({index: i, start: this.times[i], end: this.times[i + 1] ?? this.editor.totalTicks}));
   }
-  selectFrame(index, {extend = false} = {}) {
-    const wait=this.beforeCommand?.();if(wait)return wait.then(()=>this.selectFrame(index,{extend})).catch(error=>this.onError?.(error));
+  /** `evaluate: false`: a step of a run of steps in a dense scene, which shows prepared frames (docs/TIMELINE.md). */
+  selectFrame(index, {extend = false, evaluate = true} = {}) {
+    const wait=this.beforeCommand?.();if(wait)return wait.then(()=>this.selectFrame(index,{extend,evaluate})).catch(error=>this.onError?.(error));
     index = Math.max(0, Math.min(this.times.length - 1, index));
     if (extend) this.selected = new Set(Array.from({length: Math.abs(index - this.anchor) + 1}, (_, i) => Math.min(index, this.anchor) + i));
     else { this.selected = new Set([index]); this.anchor = index; }
@@ -247,7 +248,7 @@ export class SheetFilmstrip {
     // Frame navigation never changes which figures are selected.
     this.editor.keepSelectionOnSeek?.();
     this.selecting = true;
-    try { this.editor.seek(this.times[index]); } finally { this.selecting = false; }
+    try { this.editor.seek(this.times[index], {evaluate}); } finally { this.selecting = false; }
     this.ensureVisible(index);
     this.onRangeChange?.(this.selectedFrameIndices);
     this.update();

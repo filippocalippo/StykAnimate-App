@@ -11,6 +11,8 @@ import {tuned} from '../trace.mjs';
  * `createSeekCosts` is the rule that says which scene is dear: what the last editing paints that showed a new tick of the document
  * cost the interface thread. `createScrubPreview` is the drag itself: which ticks the workers prepare and which prepared frame
  * the stage shows. Neither reads the document or a frame: they ask the playback adapter (engine-playback.mjs) for tickets.
+ * `createStepRun` makes a run of frame steps (a held key) such a scrub: from its second step to its end the steps steer the playhead
+ * as a drag does, and the exact frame is drawn once at the end.
  */
 
 /**
@@ -54,11 +56,19 @@ export function createSeekCosts({dearMs = DEAR_SEEK_MS, samples = SEEK_SAMPLES} 
  */
 const IN_FLIGHT_SPEC = Object.freeze({min: 1, max: 16, description: 'Frames being prepared at once while a dense scene is scrubbed'});
 const inFlightLimit = () => tuned('scrub.framesInFlight', 3, IN_FLIGHT_SPEC);
+/**
+ * A run of frame steps moves the playhead one tick at a time: of three frames asked for together, the two that finish just behind the
+ * playhead are passed over for the third, and they still hold the workers when the run ends and its exact frame is made beside them.
+ * Measured on 2,000 figures of 100 segments (a held key, 30 steps a second): two at once showed 14.7 distinct frames a second against
+ * 12.6 with three, and the exact frame after the key up took 150 ms against 232. A drag, whose pointer jumps, shows fewer with two.
+ */
+const STEP_IN_FLIGHT_SPEC = Object.freeze({min: 1, max: 16, description: 'Frames being prepared at once while frame steps are held in a dense scene'});
+const stepInFlightLimit = () => tuned('scrub.stepFramesInFlight', 2, STEP_IN_FLIGHT_SPEC);
 /** How many ticks past the pointer, in the drag's direction, fill the places the pointer's own tick leaves free (a slow drag, a pause). */
 const AHEAD_SPEC = Object.freeze({min: 0, max: 32, description: 'Ticks past the pointer prepared while a dense scene is scrubbed'});
 const aheadCount = () => tuned('scrub.aheadFrames', 2, AHEAD_SPEC);
 // Registered as the module loads, so the developer tools list them before a first drag.
-inFlightLimit(); aheadCount();
+inFlightLimit(); stepInFlightLimit(); aheadCount();
 /** At most this many ticks of one jump are marked as passed (the ones nearest the pointer), and at most this many kept. */
 const MARKED = 64, KEPT = 256;
 /** Ready reads a paint makes at most, newest first: each is one nonblocking read of the engine's frame cache. */
@@ -76,7 +86,7 @@ const STALE_MS = 2000;
  *   says a frame is done
  */
 export function createScrubPreview({playback, prepare, total, engine, now = () => performance.now()}) {
-  let active = false, serial = 0, pointer = null, direction = 1, shown = null, seen, watching = false, lifetime = 0;
+  let active = false, serial = 0, pointer = null, direction = 1, shown = null, seen, watching = false, lifetime = 0, steps = false;
   /** Each tick the pointer passed, with the serial of when it last passed it: a higher serial is a newer place of the pointer. */
   const passed = new Map();
   /** The ticks asked for and not seen ready yet, with when they were asked for. */
@@ -97,7 +107,7 @@ export function createScrubPreview({playback, prepare, total, engine, now = () =
     if (!active || pointer === null) return;
     const time = now();
     for (const [tick, at] of asked) if (!wanted(tick, floor) || time - at > STALE_MS || playback.get(tick)) asked.delete(tick);
-    const fresh = [], end = last(), limit = inFlightLimit();
+    const fresh = [], end = last(), limit = steps ? stepInFlightLimit() : inFlightLimit();
     for (let k = 0, count = aheadCount(); k <= count && asked.size + fresh.length < limit; k++) {
       const tick = pointer + k * direction;
       if (tick < 0 || tick > end) break;
@@ -119,9 +129,12 @@ export function createScrubPreview({playback, prepare, total, engine, now = () =
     get shown() { return shown?.packet ?? null; },
     /** Whether the pointer passed a tick newer than the one on show, whose frame is not shown yet. */
     get waiting() { return active && newerThanShown(); },
-    /** A drag starts at `tick`: nothing is shown from it until a frame of a tick the pointer passes is ready. */
-    begin(tick) {
-      active = true; serial = 0; shown = null; passed.clear(); asked.clear(); direction = 1; lifetime++; watching = false;
+    /**
+     * A drag starts at `tick` (`steps`: a run of frame steps): nothing is shown from it until a frame of a tick the pointer passes
+     * is ready.
+     */
+    begin(tick, {steps: stepping = false} = {}) {
+      active = true; serial = 0; shown = null; passed.clear(); asked.clear(); direction = 1; lifetime++; watching = false; steps = stepping;
       pointer = Number.isFinite(tick) ? Math.min(Math.max(0, Math.floor(tick)), last()) : null;
     },
     /** The release (or a cancel): the editing frame takes over. */
@@ -184,4 +197,64 @@ export function createScrubPreview({playback, prepare, total, engine, now = () =
     },
   };
   return preview;
+}
+
+/**
+ * Steps closer together than this are one run (docs/TIMELINE.md, "Stepping through a dense scene"), and a run of taps with no step
+ * for this long has ended. An exact step in a dense scene costs the interface 105 to 180 ms: steps a quarter of a second apart leave
+ * it a few display frames between them, closer ones leave it frozen; and a person who looks at each frame (to pose it, to check it)
+ * steps more slowly than four a second. A key's auto-repeat is a run whatever its rate: the keyboard says so.
+ */
+export const STEP_RUN_MS = 250;
+
+/**
+ * Whether a frame step is one of a run, which in a scene whose editing frame is dear moves the playhead without evaluating and shows
+ * prepared frames, as a playhead drag does, until the run ends. The first step of a run is always exact: a run starts at its second
+ * step (a key's auto-repeat, or a step within `gapMs` of the one before), when `begin()` says the scene scrubs from prepared frames.
+ * A held key's run ends when the key is released; a run of taps ends `gapMs` after its last step. `end()` then draws the exact
+ * editing frame of the tick the run reached.
+ * @param {{begin(): boolean, end(): void, gapMs?: number, now?(): number, setTimer?: typeof setTimeout, clearTimer?: typeof clearTimeout}} options
+ */
+export function createStepRun({begin, end, gapMs = STEP_RUN_MS, now = () => performance.now(), setTimer = setTimeout, clearTimer = clearTimeout}) {
+  let active = false, last = -Infinity, held = null, repeated = false, timer = null;
+  const disarm = () => { if (timer !== null) clearTimer(timer); timer = null; };
+  const settle = () => { disarm(); timer = setTimer(() => { timer = null; run.finish(); }, gapMs); };
+  const run = {
+    get active() { return active; },
+    /**
+     * A step is about to move the playhead; `event` is the key's keydown (`{code, repeat}`), or nothing for another source.
+     * True when it is a step of a run: the step then seeks without evaluating and the run's preview shows the new tick.
+     */
+    step(event = {}) {
+      const time = now(), close = time - last < gapMs;
+      last = time;
+      if (event.code) held = event.code;
+      if (!active) {
+        if (!event.repeat && !close) return false;
+        if (!begin()) return false;
+        active = true; repeated = false;
+      }
+      if (event.repeat) repeated = true;
+      // While its key is down a run waits for the key; a run of taps (or of steps from elsewhere) settles on its own.
+      if (held) disarm(); else settle();
+      return true;
+    },
+    /** A key went up: the held key of a run ends it at once; a tap's leaves the run to settle, for the next tap to join. */
+    keyup(event) {
+      if (!event?.code || event.code !== held) return;
+      held = null;
+      if (!active) return;
+      if (repeated) run.finish(); else settle();
+    },
+    /** The run ends now (its key up, the window losing focus): `end()` draws the exact frame. */
+    finish() {
+      disarm(); held = null;
+      if (!active) return;
+      active = false; repeated = false;
+      end();
+    },
+    /** A playhead drag takes the scrub over: the run ends without its `end()`, which the drag's release does. */
+    cancel() { disarm(); active = false; repeated = false; },
+  };
+  return run;
 }

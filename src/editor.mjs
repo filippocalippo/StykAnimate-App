@@ -120,7 +120,7 @@ export class Editor extends EventTarget {
   _emit(kind, detail = {}) {
     if(kind==='document')this.clearLayerFocus({notify:false});
     else if(detail.layers||detail.structural||kind==='history')this.reconcileLayerFocus();
-    if(kind==='seek')this._followSheetSelection();
+    if(kind==='seek'){if(this._sheetFollowHeld)this._sheetFollowPending=true;else this._followSheetSelection();}
     if(kind==='selection'&&!detail.sheetSelection)this._sheetSelection=null;
     if (kind === 'document' || detail.definition || (detail.structural && !detail.layerSheet)) this._definitionRevision = this.definitionRevision + 1;
     if (this._layerEventPending && ['edit', 'history', 'document'].includes(kind)) {
