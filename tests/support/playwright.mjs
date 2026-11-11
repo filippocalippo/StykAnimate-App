@@ -32,6 +32,9 @@ import { gpuSwitches } from '../../desktop/gpu-switches.cjs';
 export * from 'playwright';
 
 export const LINUX_WEBGPU_ARGS = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan'];
+// On a machine without a GPU the browser's GPU process sometimes fails under several editors; after a few failures
+// Chromium stops offering any adapter ("No available adapters") and a later editor never starts. Tests keep the GPU.
+export const KEEP_GPU_ARG = '--disable-gpu-process-crash-limit';
 
 /** Adds the Linux GPU switches, merging any --enable-features the caller passed. */
 export function chromiumArguments(args = [], { platform = process.platform, env = process.env } = {}) {
@@ -88,6 +91,7 @@ export function electronArguments(args = [], {platform = process.platform, env =
  */
 export async function launchChromium(options = {}, { browserType = playwright.chromium, platform = process.platform, env = process.env, exists = existsSync } = {}) {
   const requested = { ...options, args: chromiumArguments(options.args, { platform, env }) };
+  if (!requested.args.includes(KEEP_GPU_ARG)) requested.args.push(KEEP_GPU_ARG);
   if (env.STYK_BROWSER_PATH) { requested.executablePath = env.STYK_BROWSER_PATH; delete requested.channel; }
   else if (env.STYK_BROWSER_CHANNEL) { requested.channel = env.STYK_BROWSER_CHANNEL; delete requested.executablePath; }
   if (requested.executablePath && !exists(requested.executablePath)) delete requested.executablePath;
