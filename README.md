@@ -66,7 +66,7 @@ npm test             # unit tests
 python -m unittest discover -s backend -p "test_*.py"   # the Python codec oracle (development only)
 ```
 
-Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or Playwright Chromium, for example `node tests/timeline.browser.mjs`. Some tests read a local corpus of Pivot projects that is not distributed; they skip and name the missing file. Desktop tests and scripts (`tests/*.desktop.mjs`, `scripts/smoke-*.mjs`) open the app in a window; set `STYK_BACKGROUND_WINDOW=1` to open it off-screen without taking focus (packaged builds too). [`.github/workflows/ci.yml`](.github/workflows/ci.yml) shows what runs on every pull request.
+Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or Playwright Chromium, for example `node tests/timeline.browser.mjs`. `npm run test:browser` starts the server and runs them all, or those whose names contain the words you give it (`npm run test:browser -- timeline hotkeys`), and lists which pass. Some tests read a local corpus of Pivot projects that is not distributed; they skip and name the missing file. Desktop tests and scripts (`tests/*.desktop.mjs`, `scripts/smoke-*.mjs`) open the app in a window; set `STYK_BACKGROUND_WINDOW=1` to open it off-screen without taking focus (packaged builds too). [`.github/workflows/ci.yml`](.github/workflows/ci.yml) shows what runs on every pull request.
 
 ## How the code is organized
 
