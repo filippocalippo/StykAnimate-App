@@ -185,6 +185,11 @@ goes through the counting route and is remembered in `localStorage`, later ones 
 The 1.2 candidate workflow runs real browsers through
 `tests/support/cross-browser.mjs`, using the locked Playwright version:
 
+Since the Rust engine (2026-11), the workflow runs the storage, library and editor suites (`npm run test:web:browsers`)
+in Chrome on Windows only: the Linux runner has no GPU, and its browsers either offer no WebGPU or WebGL 2 (Firefox,
+WebKit) or stop offering an adapter partway through. The Firefox and WebKit columns below describe the 1.2 candidate
+run and are not checked by the workflow today; run them by hand with `STYK_BROWSER=firefox|webkit` on a machine with a GPU.
+
 | Check | Chromium on Windows/Linux | Firefox on Linux | WebKit on Linux |
 | --- | --- | --- | --- |
 | Editor starts and unsupported features are explained | yes | yes | yes |
