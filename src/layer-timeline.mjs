@@ -577,14 +577,14 @@ export class Timeline{
     const row=y<layout.header?-1:layout.pinned&&y<layout.contentTop?layout.at(y-layout.header):layout.at(y-layout.header+this._offsetY());
     return {tick:clamp(Math.floor((x+this._offsetX())/this.pxPerTick),0,9999999),row,x,y};}
   _contains(hit){return hit.row>=0&&this.selectedLayers.has(this.tracks[hit.row]?.id)&&hit.tick>=this.start&&hit.tick<=this.end;}
-  _selectCell(hit,{extend=false,notify=true}={}){
-    const wait=this.beforeCommand?.();if(wait)return wait.then(()=>this._selectCell(hit,{extend,notify})).catch(error=>this.onError?.(error));
+  _selectCell(hit,{extend=false,notify=true,evaluate=true}={}){
+    const wait=this.beforeCommand?.();if(wait)return wait.then(()=>this._selectCell(hit,{extend,notify,evaluate})).catch(error=>this.onError?.(error));
     const layer=this.tracks[hit.row];if(!layer||layer.kind==='folder')return;if(layer.kind.startsWith('vfx'))return this._selectVfxRow(layer);if(layer.kind==='motion')return this._selectMotionRow(layer,hit.tick);this.editor._selectedCameraMotion=null;const changed=this.selectedTrackId!==layer.id,anchor=this.anchor??={tick:this.start,id:this.selectedTrackId};
     if(extend){this.start=Math.min(anchor.tick,hit.tick);this.end=Math.max(anchor.tick,hit.tick);this.selectedLayers=this._layerRange(anchor.id,layer.id);}
     else{this.start=this.end=hit.tick;this.selectedLayers=new Set([layer.id]);this.anchor={tick:hit.tick,id:layer.id};}
     this.selectedTrackId=layer.id;
     if(this.editor._sheetSelection?.id!==layer.id)this.editor.selectSheetLayer(layer.id,{contents:layer.id!=='camera'});
-    this.selecting=true;try{if(this.editor.tick!==hit.tick)this.editor.seek(hit.tick,{allowBeyondEnd:true});}finally{this.selecting=false;}
+    this.selecting=true;try{if(this.editor.tick!==hit.tick)this.editor.seek(hit.tick,{allowBeyondEnd:true,evaluate});}finally{this.selecting=false;}
     if(notify||changed)this.onTrackSelect?.(this.trackById.get(layer.id));
     if(this.end>this.start)localizedText(this.live,'layerTimeline.frameRange',{name:layer.name,first:this.start+1,last:this.end+1});
     else localizedText(this.live,'layerTimeline.frame',{name:layer.name,value:this.start+1,value2:''});
@@ -702,9 +702,10 @@ export class Timeline{
     this.onRangeChange?.(this.selectedFrameIndices);this.update();this._centerSoon();
   }
   _cancelGesture(){this._edge=this._edgeClock=null;if(this.motionTip)this.motionTip.hidden=true;if(this.gesture?.kind==='scrub')this.onScrubEnd?.();if(this.gesture?.kind==='camera-motion')this.onCameraMotionPreview?.(null);this.gesture=null;this.pendingScrub=null;this.pendingCell=null;this.update();}
-  seek(tick){if(!Number.isInteger(tick)||tick<0)throw messageError(new Error(''), "errors.layerTimeline.chooseAValidFrame", {});this.onSeek?.();this.start=this.end=tick;this.editor.seek(tick,{allowBeyondEnd:true});this.update();}
+  /** `evaluate: false`: a step of a run of steps in a dense scene, which shows prepared frames (docs/TIMELINE.md). */
+  seek(tick,{evaluate=true}={}){if(!Number.isInteger(tick)||tick<0)throw messageError(new Error(''), "errors.layerTimeline.chooseAValidFrame", {});this.onSeek?.();this.start=this.end=tick;this.editor.seek(tick,{allowBeyondEnd:true,evaluate});this.update();}
   revealPlayhead(){if(this._touch())return this.centerTick(undefined,{smooth:true});const x=this.editor.tick*this.pxPerTick,left=this._offsetX();if(x<left)this._scrollToX(x);else if(x>left+this.width-30)this._scrollToX(x-this.width+60);}
-  jumpKey(direction){const keys=this.editor.layerFrameKeys(this.selectedTrackId),tick=direction<0?[...keys].reverse().find(k=>k.tick<this.editor.tick)?.tick:keys.find(k=>k.tick>this.editor.tick)?.tick;if(tick!==undefined){this.seek(tick);this.revealPlayhead();}}
+  jumpKey(direction,{evaluate=true}={}){const keys=this.editor.layerFrameKeys(this.selectedTrackId),tick=direction<0?[...keys].reverse().find(k=>k.tick<this.editor.tick)?.tick:keys.find(k=>k.tick>this.editor.tick)?.tick;if(tick!==undefined){this.seek(tick,{evaluate});this.revealPlayhead();}}
   /** Add Frame inserts a key at the selected cell. When every selected layer
    * already holds a key there, it instead duplicates the current pose into the
    * following cell, shifting later keys. */

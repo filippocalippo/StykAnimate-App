@@ -41,5 +41,10 @@ export const editorLayerSheetMethods={
     if(objects.length!==this.selectedUids.size||objects.some(o=>!this.selectedUids.has(o.unique_id)))this.selectedUids=new Set(objects.map(o=>o.unique_id));
     this._selectedUid=objects.find(o=>!o.join)?.unique_id??objects[0]?.unique_id??null;this.selectedJoint=-1;this._branchSelection=null;
   },
+  /**
+   * While a dense scene's playhead is steered (a drag of it, a run of frame steps) a selected layer's contents are followed once, when
+   * it is released: following reads the frame at every tick (docs/TIMELINE.md, "Scrubbing a dense scene").
+   */
+  holdSheetFollow(held){this._sheetFollowHeld=Boolean(held);if(!held&&this._sheetFollowPending){this._sheetFollowPending=false;this._followSheetSelection();}},
   layerFrameKeys(id=this.activeLayerId){return this.report._styk.layerSheet?.tracks[id]?.keys??[];},
 };

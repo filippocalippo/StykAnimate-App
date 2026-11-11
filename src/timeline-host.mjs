@@ -22,7 +22,7 @@ import {t as interfaceText, messageText as sayTimeline} from './localization.mjs
  * cancelPolygonDraft, interruptRecovery, cancelWarmPlayback, warmPlayback,
  * scheduleRecovery, requestRender, queueUI, renderInspector,
  * syncSelectionControls, rangeFrames(all), selectTrack, previewScrub,
- * scrubStarted(), scrubEnded(), scrubAudio(tick), stopAudioScrub(), changeFigureLayer,
+ * scrubStarted({steps}), scrubEnded(), scrubDear(), scrubAudio(tick), stopAudioScrub(), changeFigureLayer,
  * confirmDiscardFrame, simpleFrameCount, fail,
  * setTimelineMode(mode), onMount(timeline), and getters for what app.mjs
  * creates later: propertyControls(), cameraMotionControls(), drawing(),
@@ -38,6 +38,7 @@ import {setAttr, setMarkup, setProp, setText} from './ui/dom-write.mjs';
 import {createTimelineHeader} from './timeline-header.mjs';
 import {normalizePlaybackRange} from './playback-window.mjs';
 import {TimelineLayerView} from './timeline-layer-view.mjs';
+import {createStepRun} from './engine/engine-scrub.mjs';
 
 export function createTimelineHost(ctx) {
   const {editor, state, $, actions} = ctx;
@@ -96,6 +97,47 @@ export function createTimelineHost(ctx) {
       storedFrames: !editor.report._styk?.layerSheet && state.settings.timelineMode === "simple",
     });
 
+  /**
+   * The playhead is steered (a drag of it, or a run of frame steps) until `endSteering`: the chrome waits for the end, and a scene
+   * whose editing frame is dear shows prepared frames meanwhile (docs/TIMELINE.md, "Scrubbing a dense scene").
+   */
+  function startSteering({steps: stepping = false} = {}) {
+    ctx.pause();
+    ctx.interruptRecovery();
+    ctx.cancelWarmPlayback();
+    state.scrubbing = true;
+    // A scene whose editing frame is dear scrubs from prepared frames until the release (docs/TIMELINE.md).
+    ctx.scrubStarted?.({steps: stepping});
+    const drawing=drawingResourcesFor(editor.report);if(drawing)drawing.busy=true;
+    ctx.requestRender();
+  }
+  function steerTo(tick) {
+    ctx.previewScrub(tick);
+    ctx.scrubAudio(tick);
+  }
+  function endSteering() {
+    ctx.stopAudioScrub();
+    state.scrubbing = false;
+    ctx.scrubEnded?.();
+    const drawing=drawingResourcesFor(editor.report);if(drawing)drawing.busy=false;
+    ctx.queueUI();
+    ctx.requestRender();
+    ctx.warmPlayback();
+    if (editor.dirty) ctx.scheduleRecovery();
+  }
+  // A run of frame steps (a held key) in a scene whose editing frame is dear steers the playhead as a drag does, from its second step
+  // to its end (docs/TIMELINE.md, "Stepping through a dense scene"); elsewhere, and during a drag, every step is exact.
+  const steps = createStepRun({
+    begin: () => {
+      if (state.scrubbing || !ctx.scrubDear?.()) return false;
+      startSteering({steps: true});
+      return true;
+    },
+    end: endSteering,
+  });
+  /** The playhead moved: a step of a run shows its tick as a drag's move does. */
+  function stepped() { if (steps.active) steerTo(editor.tick); }
+
   /** Replaces the timeline with a new one for the current mode; returns it. */
   function mount() {
     ctx.pause();
@@ -151,35 +193,18 @@ export function createTimelineHost(ctx) {
       // The timeline retains only the latest pointer target during this interval.
       canScrub: () => !state.dirtyRender,
       onScrubStart: () => {
-        ctx.pause();
-        ctx.interruptRecovery();
-        ctx.cancelWarmPlayback();
-        state.scrubbing = true;
-        // A scene whose editing frame is dear scrubs from prepared frames until the release (docs/TIMELINE.md).
-        ctx.scrubStarted?.();
-        const drawing=drawingResourcesFor(editor.report);if(drawing)drawing.busy=true;
-        ctx.requestRender();
+        // The drag takes over a run of frame steps; its release draws the exact frame.
+        steps.cancel();
+        startSteering();
       },
-      onScrub: tick => {
-        ctx.previewScrub(tick);
-        ctx.scrubAudio(tick);
-      },
-      onScrubEnd: () => {
-        ctx.stopAudioScrub();
-        state.scrubbing = false;
-        ctx.scrubEnded?.();
-        const drawing=drawingResourcesFor(editor.report);if(drawing)drawing.busy=false;
-        ctx.queueUI();
-        ctx.requestRender();
-        ctx.warmPlayback();
-        if (editor.dirty) ctx.scheduleRecovery();
-      },
+      onScrub: steerTo,
+      onScrubEnd: endSteering,
       onError: ctx.fail,
       onRangeChange: (indices) => {
         state.rangeIndices = indices;
         if (!ctx.rangeFrames(true)) state.applyRange = false;
-        ctx.syncSelectionControls();
-        if (!state.scrubbing) ctx.renderInspector();
+        // While the playhead is steered (a run of Simple frame steps) the chrome waits for the end, whose pass syncs it.
+        if (!state.scrubbing) { ctx.syncSelectionControls(); ctx.renderInspector(); }
         localizedText($("selection-summary"), "timelineHost.keyframeSelected", {count: indices.length});
       },
     });
@@ -265,7 +290,7 @@ export function createTimelineHost(ctx) {
 
   return {
     get timeline() { return timeline; },
-    header,
+    header, steps, stepped,
     mount, attach, updateTransport, syncPlayButton, syncRangeEdit, syncMode, goToFrame,
   };
 }

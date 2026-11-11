@@ -656,11 +656,13 @@ const scrubPreview = createScrubPreview({
   playback, total: () => editor.totalTicks, engine: () => state.renderer?.engineSide?.engine ?? null,
   prepare: (ticks, playhead) => { syncPlayback(); void playback.prepareRange(ticks, {playhead}).catch(error => { if (error.name !== "AbortError") fail(error); }); },
 });
-function scrubStarted() {
-  // Decided once for the drag. The prepared frames have the scene's background: Build's canvas colour keeps the editing scrub.
-  if (seekCosts.dear(editor.report) && builderBackgroundColor(state.settings, state) === undefined) scrubPreview.begin(editor.tick);
+/** Whether steering the playhead shows prepared frames. The prepared frames have the scene's background: Build's canvas colour keeps the editing scrub. */
+const scrubDear = () => seekCosts.dear(editor.report) && builderBackgroundColor(state.settings, state) === undefined;
+function scrubStarted({steps = false} = {}) {
+  // Decided once for the drag (or a run of frame steps). A selected layer's figures are found in the frame of the tick it ends on.
+  if (scrubDear()) { scrubPreview.begin(editor.tick, {steps}); editor.holdSheetFollow(true); }
 }
-function scrubEnded() { scrubPreview.end(); }
+function scrubEnded() { scrubPreview.end(); editor.holdSheetFollow(false); }
 function previewScrub() {
   if (scrubPreview.active) scrubPreview.point(editor.tick);
   // Scrubbing is editing: render the current pose with selection and onions.
@@ -4527,17 +4529,18 @@ const actions = {
       return timelineUI.selectFrame(0);
     editor.seek(0, { evaluate: false });
   },
-  "previous-frame": () => {
+  // `evaluate: false`: a step of a run of steps in a dense scene (runKeyboardCommand), which shows prepared frames.
+  "previous-frame": ({evaluate = true} = {}) => {
     pause();
     if (state.settings.timelineMode === "simple")
-      return timelineUI.selectFrame(Math.max(0, timelineUI.selectedIndex - 1));
+      return timelineUI.selectFrame(Math.max(0, timelineUI.selectedIndex - 1), {evaluate});
     editor.seek(Math.max(0, editor.tick - 1), { evaluate: false });
   },
-  "next-frame": () => {
+  "next-frame": ({evaluate = true} = {}) => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(
-        Math.min(timelineUI.frameCount - 1, timelineUI.selectedIndex + 1),
+        Math.min(timelineUI.frameCount - 1, timelineUI.selectedIndex + 1), {evaluate},
       );
     editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1), { evaluate: false });
   },
@@ -4547,8 +4550,8 @@ const actions = {
       return timelineUI.selectFrame(timelineUI.frameCount - 1);
     editor.seek(Math.max(0, editor.totalTicks - 1), { evaluate: false });
   },
-  "previous-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'previous-keyframe'); },
-  "next-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'next-keyframe'); },
+  "previous-keyframe": ({evaluate = true} = {}) => { pause(); runTimelineHotkey(timelineUI, 'previous-keyframe', {evaluate}); },
+  "next-keyframe": ({evaluate = true} = {}) => { pause(); runTimelineHotkey(timelineUI, 'next-keyframe', {evaluate}); },
   "add-frame": () => addFrameKeepingDrag(() => {
     if(editor.getLayer(editor.activeLayerId)?.drawing)return editor.addDrawingFrame();
     if(state.settings.timelineMode !== 'simple')
@@ -5310,6 +5313,8 @@ function cancelKeyboardCommand() {
   if (state.tool === 'attach') setTool('select');
   closeMenu("cancel");
 }
+/** The commands that step the playhead, which a held key repeats. */
+const FRAME_STEPS = new Set(['previous-frame', 'next-frame', 'previous-keyframe', 'next-keyframe', 'previous-exposure', 'next-exposure']);
 function runKeyboardCommand(id, event, modifiers = {shift: event.shiftKey}) {
   if(id!=='cancel'&&id!=='play-pan'&&(drawingController?.gesture?.kind==='stroke'||drawingController?.loading||drawingController?.selection?.committing||drawingController?.operation))
     return drawingController.afterGesture(()=>runKeyboardCommand(id,event,modifiers));
@@ -5364,10 +5369,12 @@ function runKeyboardCommand(id, event, modifiers = {shift: event.shiftKey}) {
     return setTool(id.slice(5));
   }
   if (id === 'segment-values') return showSegmentValues({hover: true});
+  // From the second step of a run (a held key) a dense scene's steps seek without evaluating and show prepared frames (docs/TIMELINE.md).
+  const evaluate = !(FRAME_STEPS.has(id) && timelineHost?.steps.step(event));
   if (id === 'previous-exposure' || id === 'next-exposure')
-    return timelineUI.selectFrame(timelineUI.selectedIndex + (id === 'previous-exposure' ? -1 : 1), {extend: modifiers.shift});
-  if (event.target.closest?.('.layer-timeline,.sheet-filmstrip') && runTimelineHotkey(timelineUI, id, {shiftKey:modifiers.shift})) return;
-  return actions[id]?.();
+    return timelineUI.selectFrame(timelineUI.selectedIndex + (id === 'previous-exposure' ? -1 : 1), {extend: modifiers.shift, evaluate});
+  if (event.target.closest?.('.layer-timeline,.sheet-filmstrip') && runTimelineHotkey(timelineUI, id, {shiftKey:modifiers.shift, evaluate})) return;
+  return FRAME_STEPS.has(id) ? actions[id]?.({evaluate}) : actions[id]?.();
 }
 function releaseKeyboardCommand(id, event) {
   if (id === 'handle-edit-hold') { state.handleEditHeld = false; requestRender(); }
@@ -5391,7 +5398,7 @@ overlays.hotkeys = hotkeys;
 timelineHost = createTimelineHost({
   editor, state, $, actions, guarded, audioEngine, onionController, hotkeys, overlays, play, pause, finishKeyboardHandle,
   cancelPolygonDraft, interruptRecovery, cancelWarmPlayback: () => clearTimeout(warmTimer), warmPlayback, scheduleRecovery,
-  requestRender, queueUI, renderInspector, syncSelectionControls, rangeFrames, selectTrack, previewScrub, scrubStarted, scrubEnded, scrubAudio, stopAudioScrub,
+  requestRender, queueUI, renderInspector, syncSelectionControls, rangeFrames, selectTrack, previewScrub, scrubStarted, scrubEnded, scrubDear, scrubAudio, stopAudioScrub,
   changeFigureLayer, confirmDiscardFrame: dialogs.confirmDiscardFrame, simpleFrameCount, fail,
   setTimelineMode: (mode) => editorSettings?.commit({ timelineMode: mode }),
   onMount: (timeline) => { timelineUI = timeline; window.styk.timeline = timeline; },
@@ -5592,10 +5599,17 @@ document.addEventListener('keyup', guarded(event => {
   state.builderShiftHeld = event.shiftKey;
   refreshOriginDragModifiers(event);
   if(!event.shiftKey && state.tool==='polygon'){state.bucketPreview=null;overlay.style.cursor='';requestRender();}
+  // A held frame step's run ends with its key: the exact frame is drawn.
+  timelineHost?.steps.keyup(event);
   hotkeys.keyup(event);
 }), true);
+// Any other key or press ends a run of frame steps first: every other command acts on the exact frame and its selection.
+document.addEventListener('keydown', event => {
+  if (timelineHost?.steps.active && !FRAME_STEPS.has(hotkeys.resolve(event, hotkeyScopes(event))?.id)) guarded(() => timelineHost.steps.finish())();
+}, true);
+document.addEventListener('pointerdown', () => { if (timelineHost?.steps.active) guarded(() => timelineHost.steps.finish())(); }, true);
 window.addEventListener('blur', () => {
-  hotkeys.releaseAll(); finishKeyboardHandle();
+  hotkeys.releaseAll(); finishKeyboardHandle(); timelineHost?.steps.finish();
   if (state.drag) cancelDrag();
   state.builderShiftHeld = false;
 });
@@ -5741,7 +5755,7 @@ editor.addEventListener("change", (e) => {
       warmPlayback();
     }
     // A scrub's readout follows the playhead; the rest of the chrome waits for the release (it reads the frame on show).
-    else if (state.scrubbing) ui.update("transport");
+    else if (state.scrubbing) { ui.update("transport"); timelineHost?.stepped(); }
     return;
   }
   if (kind === "preview" || e.detail?.live || state.drag || state.scrubbing) {

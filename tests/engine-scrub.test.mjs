@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createScrubPreview, createSeekCosts, DEAR_SEEK_MS} from '../src/engine/engine-scrub.mjs';
+import {createScrubPreview, createSeekCosts, createStepRun, DEAR_SEEK_MS, STEP_RUN_MS} from '../src/engine/engine-scrub.mjs';
 
 test('a scene scrubs from prepared frames when its paints at a new tick cost over 12 ms, by the median of the last three', () => {
   const costs = createSeekCosts(), dense = {}, light = {};
@@ -147,4 +147,107 @@ test('a jump marks only the ticks nearest the pointer, and what is kept stays bo
   for (let tick = 0; tick < 2000; tick += 3) preview.point(tick);
   ready.add(1998);
   assert.equal(preview.next()?.tick, 1998);
+});
+
+/** A run of steps on a clock and timers the test moves; `dear` says whether the scene scrubs from prepared frames. */
+function stepSide({dear = true} = {}) {
+  let time = 0, serial = 0;
+  const timers = new Map(), log = [];
+  const run = createStepRun({
+    begin: () => { log.push('begin'); return side.dear; }, end: () => log.push('end'),
+    now: () => time, setTimer: (callback, ms) => { timers.set(++serial, {at: time + ms, callback}); return serial; }, clearTimer: id => timers.delete(id),
+  });
+  const side = {run, log, dear,
+    /** The clock moves on `ms`; the timers due fire. */
+    wait(ms) { time += ms; for (const [id, timer] of [...timers]) if (timer.at <= time) { timers.delete(id); timer.callback(); } },
+    /** A step `ms` after the one before, from the key `code` (its auto-repeat when `repeat`); true when it is a step of a run. */
+    step(ms, {code = 'Period', repeat = false} = {}) { side.wait(ms); return run.step({code, repeat}); },
+    get timers() { return timers.size; }};
+  return side;
+}
+
+test('a held key: the first step is exact, the run starts at the first auto-repeat and ends with the key up', () => {
+  const side = stepSide(), {run, log} = side;
+  assert.equal(STEP_RUN_MS, 250);
+  assert.equal(side.step(0), false, 'one press is an exact step');
+  assert.deepEqual(log, []);
+  // The keyboard's repeat delay (half a second) is longer than the gap: the repeat says it is a run.
+  assert.equal(side.step(500, {repeat: true}), true);
+  assert.deepEqual(log, ['begin']);
+  for (let i = 0; i < 60; i++) assert.equal(side.step(33, {repeat: true}), true);
+  assert.deepEqual(log, ['begin'], 'the run is begun once');
+  // While the key is down the run waits for it, however long the interface keeps the next repeat.
+  side.wait(1000);
+  assert.equal(run.active, true);
+  assert.equal(side.timers, 0);
+  run.keyup({code: 'Comma'});
+  assert.equal(run.active, true, 'another key going up does not end it');
+  run.keyup({code: 'Period'});
+  assert.deepEqual(log, ['begin', 'end'], 'the key up ends the run at once: the exact frame is drawn');
+  assert.equal(run.active, false);
+  // The next press is a single exact step again.
+  assert.equal(side.step(400), false);
+});
+
+test('taps closer than the gap are one run, which ends a gap after the last tap', () => {
+  const side = stepSide(), {run, log} = side;
+  assert.equal(side.step(0), false);
+  run.keyup({code: 'Period'});
+  assert.equal(side.step(STEP_RUN_MS + 1), false, 'steps a quarter of a second apart are each exact');
+  run.keyup({code: 'Period'});
+  assert.equal(side.step(180), true, 'a tap within the gap starts a run');
+  run.keyup({code: 'Period'});
+  assert.equal(run.active, true, "a tap's key up leaves the run for the next tap");
+  side.wait(200);
+  assert.equal(side.step(0), true, 'the next tap joins it');
+  run.keyup({code: 'Period'});
+  side.wait(STEP_RUN_MS - 1);
+  assert.equal(run.active, true);
+  side.wait(1);
+  assert.deepEqual(log, ['begin', 'end'], 'no step for the gap ends the run');
+  // A run of taps that becomes a held key ends with the key.
+  side.step(0); side.step(100); side.step(500, {repeat: true});
+  run.keyup({code: 'Period'});
+  assert.deepEqual(log, ['begin', 'end', 'begin', 'end']);
+});
+
+test('steps in an ordinary scene, during a drag or after losing focus are as before', () => {
+  const side = stepSide({dear: false}), {run, log} = side;
+  side.step(0);
+  for (let i = 0; i < 5; i++) assert.equal(side.step(33, {repeat: true}), false, 'a scene whose frame keeps up steps exactly, every step');
+  assert.equal(run.active, false);
+  assert.deepEqual(log, ['begin', 'begin', 'begin', 'begin', 'begin'], 'asked at each step whether it scrubs from prepared frames');
+  side.dear = true;
+  assert.equal(side.step(33, {repeat: true}), true);
+  // A playhead drag takes the run over: its release draws the exact frame, the run's end does not.
+  run.cancel();
+  run.keyup({code: 'Period'});
+  assert.equal(log.at(-1), 'begin');
+  assert.equal(run.active, false);
+  // The window losing focus ends a run whose key up it will never see.
+  side.step(33, {repeat: true});
+  run.finish();
+  assert.equal(log.at(-1), 'end');
+  run.finish();
+  assert.equal(log.filter(entry => entry === 'end').length, 1, 'a run ends once');
+  // A step from no key (a source that has no key up) settles on its own.
+  side.wait(1000); side.step(0, {code: ''}); assert.equal(side.step(100, {code: ''}), true);
+  side.wait(STEP_RUN_MS);
+  assert.equal(run.active, false);
+});
+
+test('a run of frame steps keeps two frames being prepared, a drag three', () => {
+  const {preview, requests, ready} = preparedSide();
+  preview.begin(10, {steps: true});
+  preview.point(11);
+  assert.deepEqual(requests.at(-1), {ticks: [11, 12], playhead: 11}, 'the playhead\'s tick and the next in the run\'s direction');
+  preview.point(12); preview.point(13);
+  assert.equal(requests.length, 1, 'two being made: the next steps wait for one of them');
+  ready.add(12);
+  assert.equal(preview.next()?.tick, 12);
+  assert.deepEqual(requests.at(-1).ticks, [13, 14], 'what the run passed is dropped; its place goes to the playhead');
+  preview.end();
+  preview.begin(30);
+  preview.point(31);
+  assert.deepEqual(requests.at(-1).ticks, [31, 32, 33], 'the next drag prepares three again');
 });
