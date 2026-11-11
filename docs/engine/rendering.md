@@ -563,7 +563,8 @@ to hidden figures, so the list is the one the whole scene's encoding gives but f
 the point, not the frame. `pick::artwork` works everything out on each call and is what `shown` answers (`styk-export/tests/pick_shown.rs`
 compares the two on ordinary documents and on a dense frame of overlapping figures). What a pick works out of a frame is worked out
 on an idle engine worker once the frame has stayed on show for 60 ms (`Stage::prepare_pick`, `pick::prepare`; never while frames follow
-each other, as in a drag or a scrub), and the first pick of the frame takes it; a pick that comes sooner works it out itself. Measured on
+each other, as in a drag or a scrub), and the first pick of the frame takes it; a pick that comes sooner works it out itself. What picks
+kept of a frame (its scene is a dense frame's worth of memory) is let go of, on a worker, as soon as another frame is drawn. Measured on
 2,000 figures of 100 segments: a pick fell from about 370 ms to about 35 ms when it works the frame out, and to 4 to 10 ms (the
 rasterization of the figures under the point) when the frame was prepared.
 

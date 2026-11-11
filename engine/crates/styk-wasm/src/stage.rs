@@ -460,7 +460,12 @@ impl Stage {
         let uids = |key: &str| -> std::collections::HashSet<u32> { request.get(key).and_then(styk_doc::Value::elements).map(|list| list.iter().filter_map(|uid| uid.as_f64()).map(|uid| uid as u32).collect()).unwrap_or_default() };
         let (generation, frame) = match (self.engine.generation(), self.edit.frame()) {
             (Some(generation), Some(frame)) => (generation, frame),
-            _ => { self.picker.release(); return Ok("null".into()) }
+            _ => {
+                if let Some(released) = self.picker.release() {
+                    self.engine.spawn(move |_| drop(released));
+                }
+                return Ok("null".into());
+            }
         };
         // The session's scene of the frame on show is the scene a pick builds: it is read, not built again. What the pick works out of
         // the frame (bounds, where each figure lies) is kept while the frame is on show, so a pointer moving over it costs the figures under it.
@@ -478,6 +483,18 @@ impl Stage {
             Some(hit) => format!("{{\"slot\":{},\"uid\":{}}}", hit.slot, hit.uid),
             None => "null".into(),
         })
+    }
+
+    /// What picks kept of a frame that is no longer on show (its scene is a dense frame's worth of memory) is let go of, on a worker, once
+    /// another frame is drawn.
+    fn release_picks(&mut self) {
+        let (Some(generation), Some(frame)) = (self.engine.generation(), self.edit.frame()) else { return };
+        if !self.picker.holds(generation.id, &frame) && let Some(released) = self.picker.release() {
+            self.engine.spawn(move |_| drop(released));
+        }
+        if self.pick_prep.as_ref().is_some_and(|(prepared_for, _)| !Arc::ptr_eq(prepared_for, &frame)) && let Some(released) = self.pick_prep.take() {
+            self.engine.spawn(move |_| drop(released));
+        }
     }
 
     /// Works out on an idle worker what a pick of the edit frame on show needs (its figures' bounds and where their items lie,
@@ -550,6 +567,7 @@ impl Stage {
         let scene_camera = if camera { self.edit.camera() } else { None };
         let drawn = self.draw(&generation, &list, scene_camera, zoom, [pan_x, pan_y], clip_to_artboard)?;
         if drawn {
+            self.release_picks();
             self.shown = Shown::Edit { generation: generation.id, edits: self.edits, effects: self.effects, scene: std::sync::Arc::new(self.edit.snapshot()), hidden: hidden.to_vec(), translations };
         }
         Ok(drawn)

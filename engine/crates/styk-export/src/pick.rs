@@ -35,9 +35,9 @@ impl Default for Picker {
 }
 
 impl Picker {
-    /// Lets go of what was worked out of the frame picked last (its scene with it).
-    pub fn release(&mut self) {
-        self.held = None;
+    /// Lets go of what was worked out of the frame picked last (its scene with it), answering it for the caller to drop where it wants.
+    pub fn release(&mut self) -> Option<PickFrame> {
+        self.held.take()
     }
 
     /// Takes what was worked out of a frame elsewhere ([`prepare`], on a worker while the frame is on show): the next pick of that frame
