@@ -121,9 +121,10 @@ missing file fails at once with that instruction. Tests that need the Pivot samp
 corpus beside the repository skip with the reason unless it is there or
 `STYK_REQUIRE_FIXTURES=1`.
 
-Known gaps on Linux, all outside the shipping editor's runtime: a share of
-the `tests/*.browser.mjs` scripts are not run by CI and no longer match the current
-interface on any platform.
+Known gaps on Linux, all outside the shipping editor's runtime: most of
+the `tests/*.browser.mjs` scripts are not run by CI. `npm run test:browser` runs them all and
+lists which pass (on Windows with a GPU, 189 of 219 on 2026-11-12; the rest need local sample
+files or no longer match the interface).
 
 ## Shutdown and processes
 
