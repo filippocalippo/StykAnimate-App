@@ -34,8 +34,16 @@ const rawAt = (w, at, n, index) => 3 * index + 2 < n && fin(w[at + 3 * index]) !
 /** A number as `fin` gives it, but not finite is NaN. */
 const real = value => Number.isFinite(value) ? value + 0 : NaN;
 
-/** The figure definitions of a report by type id: the ones the objects drawn use are the ones fetched. */
-const definitions = report => ({get: id => findFigureType(report.figure_types ?? [], id)});
+/** The figure definitions of a report by type id: the ones the objects drawn use are the ones fetched, each once a read (a
+ * lookup in the read view's table costs microseconds, and a dense frame has thousands of figures of a few types). */
+const definitions = report => {
+  const found = new Map();
+  return {get(id) {
+    let figure = found.get(id);
+    if (figure === undefined && !found.has(id)) found.set(id, figure = findFigureType(report.figure_types ?? [], id));
+    return figure;
+  }};
+};
 
 /** The image or text asset a segment draws (`segmentAt` in the editor's geometry). */
 function assetOf(fig, seg, obj) {
