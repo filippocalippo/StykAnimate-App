@@ -2,10 +2,13 @@ use styk_render::{Renderer, ViewParams, native_gpu, read_frame, wgpu};
 
 #[test]
 fn detached_presentation_composites_premultiplied_pixels_and_surface_presentation_copies() {
-    let gpu = native_gpu::native_gpu(true, "host compositing regression", |a| {
+    // A machine without a graphics adapter (a Linux runner) has nothing to composite.
+    let Ok(gpu) = native_gpu::native_gpu(true, "host compositing regression", |a| {
         wgpu::Limits::default().using_resolution(a.limits())
-    })
-    .unwrap();
+    }) else {
+        eprintln!("skipped: no graphics adapter");
+        return;
+    };
     let mut renderer = Renderer::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
     let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("opaque host"),

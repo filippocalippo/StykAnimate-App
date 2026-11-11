@@ -46,4 +46,6 @@ runs:
         CARGO_PROFILE_DEV_DEBUG: '0'
         CARGO_PROFILE_TEST_DEBUG: '0'
         CARGO_INCREMENTAL: '0'
-      run: npm run engine:test
+        # The runners have no GPU: the tests that need one say so and pass (engine/crates/styk-render/tests/support/gpu.rs).
+        STYK_ALLOW_NO_GPU: '1'
+      run: npm run engine:test -- --no-fail-fast
