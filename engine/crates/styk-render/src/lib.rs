@@ -163,6 +163,8 @@ pub struct Renderer {
     pub(crate) output: Option<(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, [u32; 2])>,
     pub(crate) list: Option<Arc<DrawList>>,
     pub(crate) list_prims: u32,
+    /// A list to be set next that holds what another list holds but in some ranges of primitives ([`Renderer::note_changes`]).
+    pub(crate) changes: Option<(Arc<DrawList>, Arc<DrawList>, Vec<(u32, u32)>)>,
     /// Of the current list: each group's first and past-last primitive (`u32::MAX, 0` for none), and where its composites are, worked
     /// out when the list is set rather than at every frame drawn of it (a dense list is hundreds of thousands of primitives).
     pub(crate) group_runs: Vec<(u32, u32)>,
@@ -232,9 +234,47 @@ impl Renderer {
     /// effect source at the root. Ordinary views leave this receipt false.
     pub fn root_gpu_source(&self) -> bool { self.root_gpu_source }
 
+    /// Says that `list`, to be set next, holds the primitives `since` holds but in the ranges `prims` (each `start..end`, in order) and as many
+    /// of them: when `since` is the list this renderer holds, [`Renderer::set_list`] writes only those ranges. What else a list holds (paints,
+    /// points, groups) is written as for any list. Forgotten at the next `set_list`, whatever it sets.
+    pub fn note_changes(&mut self, list: &Arc<DrawList>, since: &Arc<DrawList>, prims: Vec<(u32, u32)>) {
+        self.changes = Some((list.clone(), since.clone(), prims));
+    }
+
     /// Uploads a draw list unless it is already resident.
     pub fn set_list(&mut self, list: &Arc<DrawList>) {
         if self.list.as_ref().is_some_and(|l| Arc::ptr_eq(l, list)) {
+            return;
+        }
+        let changes = self.changes.take();
+        // A list that is the one held but in some primitives (a gesture that moves a figure of a dense frame): only those are written, and
+        // what is worked out of a list's primitives stays unless one of them composites, draws faces or adds light.
+        if let Some((next, since, ranges)) = changes
+            && Arc::ptr_eq(&next, list)
+            && self.list.as_ref().is_some_and(|held| Arc::ptr_eq(held, &since))
+            && since.prims.len() == list.prims.len()
+            && since.groups.len() == list.groups.len()
+            && ranges.iter().all(|&(start, end)| start <= end && end as usize <= list.prims.len())
+        {
+            let structural = |p: &styk_draw::Prim| p.kind & (styk_draw::F_DEPTH | styk_draw::F_ADD) != 0 || p.kind & 255 == styk_draw::K_COMPOSITE;
+            let mut same = true;
+            for &(start, end) in &ranges {
+                let (start, end) = (start as usize, end as usize);
+                same &= !list.prims[start..end].iter().any(structural) && !since.prims[start..end].iter().any(structural) && list.prims[start..end].iter().zip(&since.prims[start..end]).all(|(a, b)| a.group == b.group);
+                self.queue.write_buffer(&self.prims, (start * std::mem::size_of::<GpuPrim>()) as u64, prims_bytes(&list.prims[start..end]));
+            }
+            let mut rebind = self.bind0.is_none();
+            rebind |= self.paints.write(&self.device, &self.queue, bytemuck::cast_slice(&list.paints));
+            rebind |= self.points.write(&self.device, &self.queue, bytemuck::cast_slice(&list.points));
+            if rebind {
+                self.rebind();
+            }
+            self.list = Some(list.clone());
+            if same {
+                self.ensure_materials(list.materials);
+            } else {
+                self.derive(list);
+            }
             return;
         }
         let prims: &[GpuPrim] = bytemuck::cast_slice(prims_bytes(&list.prims));
@@ -256,6 +296,11 @@ impl Renderer {
         }
         self.list_prims = list.prims.len() as u32;
         self.list = Some(list.clone());
+        self.derive(list);
+    }
+
+    /// What is worked out of a list's primitives when it is set: each group's run, where its composites, faces and additive draws are.
+    fn derive(&mut self, list: &Arc<DrawList>) {
         self.group_runs.clear();
         self.group_runs.resize(list.groups.len(), (u32::MAX, 0));
         self.composites.clear();

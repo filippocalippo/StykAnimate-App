@@ -37,6 +37,8 @@ const perStage = () => ({
   pictureWait: 0,
   /** Frames in a row the engine did not yet hold the editor's revision for. */
   waiting: 0,
+  /** The session of the edit frame drawn last, told when the frame stays on show (`EditSession.rest`). */
+  restSession: null,
   monitor: undefined, monitorCanvas: null, workerMonitor: null,
   thumbnails: undefined, thumbnailCanvas: null,
 });
@@ -68,7 +70,8 @@ const THUMBNAIL_WAIT_MS = 60000;
 /** How long a frame shown while its pictures decode waits for the engine's workers to finish one. */
 const PICTURE_WAIT_MS = 60000;
 /** How long an edit frame stays on show before what a pick of it needs is worked out on a worker (`Stage::prepare_pick`): not while frames follow
- * each other (a drag, a scrub), and before a pointer comes back to the stage. */
+ * each other (a drag, a scrub), and before a pointer comes back to the stage. Then too the session and the stage let go of the frame before
+ * it, which they keep while frames follow each other to build and encode the next one over (`Stage::rest`, `EditSession.rest`). */
 const PICK_PREPARE_MS = 60;
 /** How often the device is asked whether it was lost (a page that draws nothing would not notice). */
 const DEVICE_POLL_MS = 1000;
@@ -156,7 +159,14 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
   const preparePickSoon = () => {
     if (typeof stage.prepare_pick !== 'function') return;
     clearTimeout(pickTimer);
-    pickTimer = setTimeout(() => { if (!destroyed && !lost) stage.prepare_pick(); }, PICK_PREPARE_MS);
+    pickTimer = setTimeout(() => {
+      if (destroyed || lost) return;
+      stage.prepare_pick();
+      stage.rest?.();
+      // The session may have been closed meanwhile (another document): nothing of it is kept then.
+      try { side.restSession?.rest?.(); } catch { /* a session already freed holds nothing */ }
+      side.restSession = null;
+    }, PICK_PREPARE_MS);
   };
   const warnings = [];
   /** The engine's counters, read from the stage once per frame drawn. */
@@ -271,6 +281,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     if (source) {
       // The session publishes what it changed after the call; a frame asked for before that landed is drawn when the engine holds it.
       if (!stage.edit_session(source.session, source.view, source.motion)) notYet('the engine does not hold the document the session edits yet');
+      side.restSession = source.session;
       // The poses the engine holds are the session's: the next frame sent as poses is sent whole.
       side.groups = []; side.count = -1; side.fields = null;
     } else {

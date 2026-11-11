@@ -21,6 +21,9 @@ import {sticknodesDrawables, sticknodesSpriteAsset} from '../sticknodes/geometry
 
 /** A number the session wrote, as JSON text gave it: not finite is `null`, and `-0` is `0` (`+ 0`), so the sign of a zero never reaches the interface's arithmetic. */
 const fin = value => Number.isFinite(value) ? value + 0 : null;
+/** Where a packed frame read leaves an array of numbers out of its text (`frameOf`). */
+const PACKED = '\u0000';
+
 /** `n` words of the packet from `at` as numbers (`null` where not finite). */
 const numbers = (w, at, n) => { const out = new Array(n); for (let k = 0; k < n; k++) out[k] = fin(w[at + k]); return out; };
 /** `[x0, y0, x1, y1, …]` (`n` numbers from `at`) as points. */
@@ -403,6 +406,30 @@ export function createShown(owner) {
     if (text === null) throw Object.assign(new Error('The engine does not hold this document.'), {name: 'EngineUnavailable'});
     return JSON.parse(text);
   };
+  /**
+   * A frame read whole (`frame`, `document`): the session leaves the numbers of its objects' arrays (a pose's angles, lengths and bends,
+   * most of a dense frame's text) out of the text, as the string "\u0000" in their place, and sends them as words (`frameNumbers`): each
+   * array is put back where the text leaves it out, with the values the whole text would give.
+   */
+  const frameOf = kind => {
+    const text = owner.ask(kind, {packed: true});
+    if (text === null) throw Object.assign(new Error('The engine does not hold this document.'), {name: 'EngineUnavailable'});
+    const frame = JSON.parse(text);
+    const objects = frame?.objects;
+    if (!Array.isArray(objects)) return frame;
+    const words = owner.packet('frameNumbers', {});
+    let at = 0;
+    for (const object of objects) {
+      if (!object || typeof object !== 'object') continue;
+      for (const key in object) {
+        if (object[key] !== PACKED) continue;
+        const length = words[at++];
+        object[key] = Array.from(words.subarray(at, at + length));
+        at += length;
+      }
+    }
+    return frame;
+  };
   /** A geometry packet: the header, then the groups of the slots the session sent, each made into the group the interface reads. `null` for an empty packet. */
   const groupsOf = (words, frame, report, defs) => {
     if (!words || words.length === 0) return null;
@@ -436,8 +463,8 @@ export function createShown(owner) {
   return {
     /** Whether the engine answers (the session holds the open document). */
     get active() { return owner.ask('active', {}) !== null; },
-    frame: () => required('frame'),
-    documentFrame: () => required('document'),
+    frame: () => frameOf('frame'),
+    documentFrame: () => frameOf('document'),
     /** The motion-path edit's display frame, or `null` where it shows the document. */
     motionFrame: () => read('motion'),
     /** `editor.timeline`: one `{index, start, count}` per row. */

@@ -45,6 +45,32 @@ impl Editor {
         Ok(styk_doc::json::to_string(&self.with_effect_time(record)))
     }
 
+    /// [`Editor::interface_frame`] with the numbers of its objects' arrays (a pose's angles, lengths, bends: most of a dense frame's text)
+    /// left out of the text: each such array is the string `"\u0000"` there, and its numbers wait, as words, for the next
+    /// [`Editor::take_frame_numbers`]. Only arrays of finite numbers are left out (a non-finite number is `null` as text), and a negative zero
+    /// is a zero, as the text gives it: the interface puts back the values the whole text holds.
+    pub(crate) fn interface_frame_packed(&self, kind: &str) -> Result<String, EditError> {
+        let record = match kind {
+            "frame" => self.shown_frame()?,
+            "document" => self.document_frame()?,
+            "motion" => match self.motion_display_frame_worker()? {
+                Some(record) => record,
+                None => return Ok("null".into()),
+            },
+            other => return Err(EditError::Invalid(format!("the interface has no frame '{other}'"))),
+        };
+        let mut numbers = Vec::new();
+        let record = pack_object_numbers(self.with_effect_time(record), &mut numbers);
+        *self.frame_numbers.borrow_mut() = numbers;
+        Ok(styk_doc::json::to_string(&record))
+    }
+
+    /// The numbers the last [`Editor::interface_frame_packed`] left out of its text, as words: for each object of the frame in order, for each
+    /// array left out in the order of its keys, its length and then its numbers. Taken once.
+    pub(crate) fn take_frame_numbers(&self) -> Vec<f64> {
+        std::mem::take(&mut *self.frame_numbers.borrow_mut())
+    }
+
     /// `record` with the playhead as the time the document's effect clips are read at (`_vfxTimelineTick`, which the
     /// effect gizmos compose the figures' effects at); a document with no effect clips leaves the frame as it is.
     fn with_effect_time(&self, record: Value) -> Value {
@@ -240,17 +266,19 @@ impl Editor {
         let reuse = since.is_some() && since == Some(cache.token) && cache.count == count;
         let slots: Vec<usize> = (0..count).filter(|&slot| !reuse || shown.built_in[slot] > cache.through).collect();
         let full = slots.len() == count;
-        let mut groups = Vec::new();
-        if !slots.is_empty() {
-            let bounds = styk_eval::drawlist::app_bounds_of(&shown.scene, shown.prepared.doc.as_ref(), &slots);
-            styk_eval::geometry::pack_groups(&shown.scene, &slots, &bounds, &mut groups);
-        }
         cache.token += 1;
         cache.count = count;
         cache.through = shown.serial;
         // A read that changed nothing says nothing of the scene's warnings, which the interface holds.
         let warnings = if slots.is_empty() { &[][..] } else { &shown.scene.warnings[..] };
-        Ok(geometry_packet(cache.token, full, count, slots.len(), warnings, &groups))
+        // The groups are written after the header, in the packet itself (a dense frame's are megabytes): room for them is made once.
+        let mut packet = geometry_packet(cache.token, full, count, slots.len(), warnings, &[]);
+        if !slots.is_empty() {
+            packet.reserve(styk_eval::geometry::packed_size(&shown.scene, &slots));
+            let bounds = styk_eval::drawlist::app_bounds_of(&shown.scene, shown.prepared.doc.as_ref(), &slots);
+            styk_eval::geometry::pack_groups(&shown.scene, &slots, &bounds, &mut packet);
+        }
+        Ok(packet)
     }
 
     /// The geometry of a frame that is not the document's: `frame` (the frame on show with a drawing cel the document does not hold yet
@@ -288,6 +316,36 @@ impl Editor {
         styk_eval::geometry::pack_groups(&scene, &slots, &bounds, &mut groups);
         Ok(geometry_packet(0, true, count, slots.len(), &scene.warnings, &groups))
     }
+}
+
+/// `record` (a frame) with each array of finite numbers at the top of its objects (at least four of them) replaced by the string `"\u0000"`,
+/// its length and numbers appended to `out` ([`Editor::interface_frame_packed`]).
+fn pack_object_numbers(record: Value, out: &mut Vec<f64>) -> Value {
+    let Some(frame) = record.as_obj() else { return record };
+    let Some(objects) = frame.get("objects").and_then(Value::elements) else { return record };
+    let marker = Value::str("\u{0}");
+    let mut packed = Vec::with_capacity(objects.len());
+    for object in objects {
+        let Some(fields) = object.as_obj() else {
+            packed.push(object);
+            continue;
+        };
+        let mut copy: Option<styk_doc::Obj> = None;
+        for (key, value) in fields.iter() {
+            let Value::Nums(numbers) = value else { continue };
+            if numbers.len() < 4 || !numbers.iter().all(f64::is_finite) {
+                continue;
+            }
+            out.push(numbers.len() as f64);
+            // As the text gives it: a negative zero is written `0`.
+            out.extend(numbers.iter().map(|value| if value == 0.0 { 0.0 } else { value }));
+            copy.get_or_insert_with(|| fields.clone()).set(key, marker.clone());
+        }
+        packed.push(copy.map_or(object, Value::object));
+    }
+    let mut frame = frame.clone();
+    frame.set("objects", Value::array(packed));
+    Value::object(frame)
 }
 
 /// A geometry read as the interface takes it: words, `token, full (0 or 1), count (of objects), groups (how many follow), warnings` (how

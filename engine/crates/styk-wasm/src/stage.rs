@@ -497,6 +497,12 @@ impl Stage {
         }
     }
 
+    /// The edit frame on show stays on show (nothing else was drawn for a moment): what is kept to encode the next frame over is let go of,
+    /// so that a frame at rest holds one draw list.
+    pub fn rest(&mut self) {
+        self.edit.rest();
+    }
+
     /// Works out on an idle worker what a pick of the edit frame on show needs (its figures' bounds and where their items lie,
     /// `styk_export::pick::prepare`), so that the first pick of the frame does not work it out on the interface thread. The interface asks once
     /// a frame has stayed on show a moment (a pointer coming back to the stage after a seek); a frame the picker holds already, or one being
@@ -564,6 +570,10 @@ impl Stage {
             // publish a camera path for the wrong document.
             return Ok(false);
         };
+        // A list encoded over the one before it: the renderer, holding that one, writes the primitives that changed.
+        if let Some(changes) = self.edit.take_changes() {
+            self.renderer.note_changes(&list, &changes.since, changes.prims);
+        }
         let scene_camera = if camera { self.edit.camera() } else { None };
         let drawn = self.draw(&generation, &list, scene_camera, zoom, [pan_x, pan_y], clip_to_artboard)?;
         if drawn {

@@ -226,6 +226,14 @@ impl EditSession {
         answer
     }
 
+    /// The frame on show stays on show (the stage has drawn nothing else for a moment): what the session keeps to build the next frame over is
+    /// let go of (`styk_edit::session::Session::rest`).
+    pub fn rest(&mut self) {
+        if let Some(session) = self.session.as_mut() {
+            session.rest();
+        }
+    }
+
     /// The geometry packet of the frame on show (`geometry`) or of a frame the document does not hold (`previewGeometry`): words, not text
     /// (`styk_edit::session::Session::query_packet`). Empty where a motion-path edit shows the document.
     pub fn query_packet(&mut self, kind: &str, args: &str, view: &str) -> Result<Vec<f64>, JsError> {

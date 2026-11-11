@@ -282,6 +282,10 @@ pictures arrive. Not done.
   whose address is unknown is hashed (length and a 64-bit hash, then compared byte for byte) and found
   among the images before it is added. Three undo and redo cycles of tdd2 now stay at 330 and 427 MiB
   live (before: +100 MiB each cycle, 1,136 MiB after three).
+- **The frame before the last** (`BuildMemory::rest`, `EncodeMemory::rest`): while frames follow each other (a drag, a run of seeks) the
+  session keeps the scene before the one on show and the stage keeps the draw list before the one drawn, to write the next frame over them
+  in place; both are let go of once the frame stays on show for 60 ms (when the stage prepares a pick), so a frame at rest holds one scene
+  and one list, as before. A dense frame of 2,000 figures of 100 segments is about 70 MB of scene and 13 MB of list.
 - **History** keeps its byte limit (`HistoryLimits`, 48 MiB by default): an entry larger than the limit
   retires the older ones (testingupload's movieclip edit weighs 100 MiB by the history's accounting and
   holds 3 MiB of memory).

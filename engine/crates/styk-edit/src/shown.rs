@@ -67,6 +67,13 @@ impl Scenes {
 }
 
 impl Editor {
+    /// The frame on show stays on show: the scenes kept to build the next frame over are let go of ([`BuildMemory::rest`]).
+    pub fn rest(&self) {
+        for cache in self.shown.borrow_mut().iter_mut() {
+            cache.scenes.memory.rest();
+        }
+    }
+
     /// The frame on show (the motion-path edit's display with `motion`; `None` where it shows nothing), typed and built, in the
     /// effects of `flavor`.
     pub fn shown_scene(&self, motion: bool, flavor: Flavor) -> Result<Option<Arc<ShownScene>>, EditError> {
@@ -82,13 +89,17 @@ impl Editor {
         if let Some(held) = self.shown.borrow()[usize::from(motion)].scenes.find(&source, self.tick, &prepared, flavor) {
             return Ok(Some(held));
         }
+        let convert = crate::prof::scope("shown::convert");
         let mut frame = self.eval.borrow_mut().edit_frame(&source, &prepared).map_err(|error| EditError::Invalid(error.to_string()))?;
         frame.tick = self.tick;
+        drop(convert);
+        let keep = crate::prof::scope("shown::keep");
         // An object whose record holds the data the held frame's did is that frame's object: what a scene built of it was, it still is.
         let held = self.shown.borrow()[usize::from(motion)].scenes.latest();
         if let Some(held) = held {
             frame.keep_unchanged(&source, &held.frame, &held.record, &held.prepared.doc, &prepared.doc);
         }
+        drop(keep);
         let fields = frame.pose_vfx.is_some() || frame.objects.iter().any(|object| object.vfx.is_some() || object.vfx_connected.is_some());
         let plain = !(fields || prepared.has_vfx);
         if !plain {
@@ -99,13 +110,19 @@ impl Editor {
         }
         let mut caches = self.shown.borrow_mut();
         let scenes = &mut caches[usize::from(motion)].scenes;
-        let scene = styk_eval::geometry::build_remembering(&prepared.doc, &frame, &mut scenes.memory);
+        let build = crate::prof::scope("shown::build");
+        let scene = styk_eval::geometry::build_remembering_shared(&prepared.doc, &frame, &mut scenes.memory);
+        drop(build);
         let moving_camera = self.report.path(&["_styk", "cameraMotion", "clips"]).and_then(Value::array_len).unwrap_or(0) > 0;
         let times = (source.get("_vfxTimelineTick").and_then(Value::as_f64), moving_camera.then_some(self.tick));
         let built_in = (0..frame.objects.len()).map(|slot| scenes.memory.built_in(slot)).collect();
         let shown = Arc::new(ShownScene {
-            prepared, record: source, tick: self.tick, frame: Arc::new(frame), scene: Arc::new(scene), times, serial: scenes.memory.serial(), built_in, flavor, plain,
+            prepared, record: source, tick: self.tick, frame: Arc::new(frame), scene, times, serial: scenes.memory.serial(), built_in, flavor, plain,
         });
+        // A frame with no effects is both flavors: an older one of the other flavor would only keep its scene from being built over.
+        if plain {
+            scenes.held = [None, None];
+        }
         scenes.held[usize::from(flavor == Flavor::Sampled)] = Some(shown.clone());
         Ok(Some(shown))
     }
