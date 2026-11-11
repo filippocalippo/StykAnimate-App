@@ -29,6 +29,7 @@ jobs:
     outputs:
       engine: ${{ steps.scope.outputs.engine }}
       app: ${{ steps.scope.outputs.app }}
+      oracle: ${{ steps.scope.outputs.oracle }}
       unit-os: ${{ steps.scope.outputs.unit-os }}
     steps:
       - name: Decide which checks this change needs
@@ -39,6 +40,7 @@ jobs:
         run: |
           engine=true
           app=true
+          oracle=true
           # The list holds at most 3000 files: a larger change, or a list that cannot be read, runs everything.
           if [ -n "$PR" ] && files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename') \
             && [ "$(wc -l <<< "$files")" -lt 3000 ]; then
@@ -46,13 +48,16 @@ jobs:
             grep -qE '^(engine/|tests/fixtures/|\.github/(workflows|actions)/|package\.json$)' <<< "$files" || engine=false
             # Documentation alone cannot change the Windows, browser or packaged results.
             grep -qvE '(\.md$|^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|CODEOWNERS$))' <<< "$files" || app=false
+            # The Python codec is a development oracle the app does not run (backend/README.md): its own tests follow its files.
+            grep -qE '^(backend/|codecs/|\.github/(workflows|actions)/)' <<< "$files" || oracle=false
           fi
           # The unit tests always run on Linux, and on Windows too unless only documentation changed.
           if [ "$app" = true ]; then unit_os='["ubuntu-24.04","windows-latest"]'; else unit_os='["ubuntu-24.04"]'; fi
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
           echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "oracle=$oracle" >> "$GITHUB_OUTPUT"
           echo "unit-os=$unit_os" >> "$GITHUB_OUTPUT"
-          echo "Rust tests: $engine. Windows, browser and packaged checks: $app." >> "$GITHUB_STEP_SUMMARY"
+          echo "Rust tests: $engine. Windows, browser and packaged checks: $app. Python oracle tests: $oracle." >> "$GITHUB_STEP_SUMMARY"
 
   engine-wasm:
     # The engine's WebAssembly modules, built once for every job below. Unchanged engine sources reuse the build
@@ -105,7 +110,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+      # Only for the oracle's own tests. A unit test that compares with the oracle uses the Python of the runner
+      # image, or skips where that is older than it needs.
       - uses: actions/setup-python@v7
+        if: needs.changes.outputs.oracle == 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install locked dependencies
@@ -124,7 +132,8 @@ jobs:
           npm run changelog:check
       - name: Application unit tests
         run: npm test
-      - name: Codec service tests
+      - name: Codec oracle tests
+        if: needs.changes.outputs.oracle == 'true'
         run: python -m unittest discover -s backend -p "test_*.py"
 
   engine:

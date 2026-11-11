@@ -75,7 +75,7 @@ Scripts and agents that launch the app set `STYK_BACKGROUND_WINDOW=1`: the windo
 
 Run `npm run check` after JavaScript changes and tests covering affected behavior. `npm test` covers root unit tests; desktop smoke scripts and browser tests are separate. Inspect rendered results for visual changes. Run relevant Python tests for backend/codec changes and representative benchmarks for performance changes. Rebuild native components when their source changes. Report missing prerequisites or unrelated failures accurately.
 
-The Tests workflow runs `npm run check`, `npm test` and the Python tests on Linux and Windows, the Rust tests when `engine/` or `tests/fixtures/` changed, the browser build with its tests, and a packaged Linux app. It does not run `npm run engine:parity`, the desktop smoke scripts, or the `tests/*.browser.mjs` scripts outside `test:web` and `test:web:browsers`: run the ones a change affects and name them in the report.
+The Tests workflow runs `npm run check` and `npm test` on Linux and Windows, the Rust tests when `engine/` or `tests/fixtures/` changed, the Python oracle's tests when `backend/` or `codecs/` changed, the browser build with its tests, and a packaged Linux app. It does not run `npm run engine:parity`, the desktop smoke scripts, or the `tests/*.browser.mjs` scripts outside `test:web` and `test:web:browsers`: run the ones a change affects and name them in the report.
 
 ## Changelog and shipping
 

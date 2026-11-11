@@ -31,7 +31,7 @@ Before writing code, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the d
 
 Only the maintainer can merge into `main`. Every pull request needs the maintainer's approval and a green **Tests passed** check; workflows from first-time contributors start after a maintainer approves them.
 
-The Tests workflow runs only what a change can affect: the unit tests always, the Rust engine's tests when `engine/` or `tests/fixtures/` changed, and the Windows, browser and packaged-app checks unless only documentation changed. The engine is compiled once per run, and not at all when its sources are unchanged.
+The Tests workflow runs only what a change can affect: the unit tests always, the Rust engine's tests when `engine/` or `tests/fixtures/` changed, the Python oracle's tests when `backend/` or `codecs/` changed, and the Windows, browser and packaged-app checks unless only documentation changed. The engine is compiled once per run, and not at all when its sources are unchanged.
 
 ### What we look after in review
 
