@@ -518,6 +518,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Mnogokotniki se pritrdijo na sklepe. Kliknite rdeč, oranžen ali siv sklep.",
   "app.chooseAtLeastThreeDifferentJoints": "Izberite vsaj tri različne sklepe.",
   "app.polygonAdded": "Mnogokotnik dodan",
+  "app.denseFrameShowsOrigins": "Sklepov je preveč za hkraten prikaz: neizbrane figure kažejo le svoje izhodišče. Izberite figuro, da vidite njene sklepe.",
   "app.spriteAttached": "Sprite pritrjen",
   "app.camera": "Kamera: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Izberite sklep na tej figuri. Escape prekliče.",

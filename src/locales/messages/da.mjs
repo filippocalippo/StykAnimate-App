@@ -514,6 +514,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Polygoner fastgøres til led. Klik på et rødt, orange eller gråt led.",
   "app.chooseAtLeastThreeDifferentJoints": "Vælg mindst tre forskellige led.",
   "app.polygonAdded": "Polygon tilføjet",
+  "app.denseFrameShowsOrigins": "For mange led til at vise på én gang: figurer, der ikke er valgt, viser kun deres udgangspunkt. Vælg en figur for at se dens led.",
   "app.spriteAttached": "Sprite fastgjort",
   "app.camera": "Kamera: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Vælg et led på denne figur. Escape annullerer.",

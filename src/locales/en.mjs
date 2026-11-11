@@ -546,6 +546,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Polygons attach to joints. Click a red, orange, or gray joint.",
   "app.chooseAtLeastThreeDifferentJoints": "Choose at least three different joints.",
   "app.polygonAdded": "Polygon added",
+  "app.denseFrameShowsOrigins": "Too many joints to show at once: figures that aren't selected show only their origin. Select a figure to see its joints.",
   "app.spriteAttached": "Sprite attached",
   "app.camera": "{value} camera",
   "app.chooseAJointOnThisFigureEscapeCancels": "Choose a joint on this figure. Escape cancels.",
