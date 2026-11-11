@@ -277,6 +277,8 @@ export async function profile(options) {
       const documentName = await serveDocument(app.page, options.file);
       const tools = driver(app.page), results = {};
       for (const scenario of options.scenarios) {
+        // A dialog over the stage (the release notes on a fresh profile) would take the scenario's input.
+        if (scenario !== 'open') for (let attempt = 0; attempt < 20 && await app.page.evaluate(() => Boolean(document.querySelector('dialog[open]'))); attempt++) { await app.page.keyboard.press('Escape'); await sleep(250); }
         const result = await runScenario(scenario, app.page, tools, `document${path.extname(options.file)}`, app.mode === 'app' ? {pid: app.pid, file: options.file} : null);
         results[scenario] = measures(scenario, result);
         if (result.dropped) unusual.push(`${scenario}, run ${run + 1}: ${result.dropped} events dropped (the ring filled)`);
