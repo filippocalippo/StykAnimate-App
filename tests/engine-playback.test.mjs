@@ -400,3 +400,16 @@ test('frames someone waits for start the engine\'s remaining threads; the idle w
   await playback.prepareRange([0, 1]);
   assert.equal(grown, 1);
 });
+
+test('a range request can name where the engine\'s cache counts from, and counts from its first tick otherwise', async () => {
+  const {playback, requests} = playbackSide();
+  playback.load({}, {revision: 1});
+  await playback.prepareRange([5, 6, 7]);
+  assert.equal(requests.at(-1).playhead, 5);
+  // A forward scrub keeps the frames from the one on show onward: the cache counts from it, not from the pointer.
+  await playback.prepareRange([5, 6, 7], {playhead: 3});
+  assert.equal(requests.at(-1).playhead, 3);
+  assert.deepEqual([...requests.at(-1).samples], [5, 6, 7]);
+  await playback.prepareRange([5, 6], {playhead: -1});
+  assert.equal(requests.at(-1).playhead, 5, 'a playhead that is not a sample is not sent');
+});

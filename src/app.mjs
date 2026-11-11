@@ -31,6 +31,7 @@ import { Editor } from "./editor.mjs";
 import { worldToScreen, screenToWorld, objectBounds } from "./renderer-geometry.mjs";
 import { createStage } from "./engine/engine-stage.mjs";
 import { createStagePlayback } from "./engine/engine-playback.mjs";
+import { createScrubPreview, createSeekCosts } from "./engine/engine-scrub.mjs";
 import { installEngineOwner } from "./engine/engine-owner.mjs";
 import { loadEngine } from "./engine/engine.mjs";
 import { useEngine, prepareOpen } from "./engine/engine-open.mjs";
@@ -648,7 +649,20 @@ function warmPlayback({immediate = false} = {}) {
     if(current())await prepareAhead(tick,lookahead(),{bidirectional:true,idle:true});
   }, immediate||playback.report!==report ? 0 : 150);
 }
+// A playhead drag in a scene whose editing frame is dear shows the engine's prepared frames; elsewhere scrubbing is editing
+// (docs/TIMELINE.md, "Scrubbing a dense scene").
+const seekCosts = createSeekCosts();
+const scrubPreview = createScrubPreview({
+  playback, total: () => editor.totalTicks, engine: () => state.renderer?.engineSide?.engine ?? null,
+  prepare: (ticks, playhead) => { syncPlayback(); void playback.prepareRange(ticks, {playhead}).catch(error => { if (error.name !== "AbortError") fail(error); }); },
+});
+function scrubStarted() {
+  // Decided once for the drag. The prepared frames have the scene's background: Build's canvas colour keeps the editing scrub.
+  if (seekCosts.dear(editor.report) && builderBackgroundColor(state.settings, state) === undefined) scrubPreview.begin(editor.tick);
+}
+function scrubEnded() { scrubPreview.end(); }
 function previewScrub() {
+  if (scrubPreview.active) scrubPreview.point(editor.tick);
   // Scrubbing is editing: render the current pose with selection and onions.
   requestRender();
 }
@@ -1768,9 +1782,14 @@ function loop(now) {
     const sampled=telemetry.isForeground&&telemetry.performance.sampleFrame(),stages=sampled?{}:null;
     state.renderer.measureFrame=sampled;state.renderer.telemetryStages=null;
     let stageStarted=sampled?performance.now():0;
+    // A dense scene's scrub shows the prepared frame of the newest tick the pointer passed, in the editing view; until one is ready the picture stays.
+    const scrubFrame = scrubPreview.active && !state.playing ? scrubPreview.next() : null;
     const packet = state.playing ? state.playbackPacket : previewPacket();
     let preparedPresented = false;
-    if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
+    if (scrubFrame) {
+      preparedPresented = state.renderer.renderPrepared(scrubFrame.packet.key, {view: state.view, cameraEnabled: false}) === true;
+      if (preparedPresented) { scrubPreview.presented(scrubFrame); ctx.clearRect(0, 0, overlay.width, overlay.height); }
+    } else if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
       preparedPresented = state.renderer.renderPrepared(packet.key, {view: state.view, cameraEnabled: !state.scrubbing}) === true;
       if (preparedPresented) {
         if (playbackAwaitsDraw) recordPlaybackPresentation();
@@ -1779,7 +1798,8 @@ function loop(now) {
       } else if (state.playing) state.dirtyRender = true; // The picture on show stays and the frame is drawn on the next animation frame.
     }
     // Playback shows prepared frames only: the editing view is unclipped and would blink at the artboard's edge.
-    if (!preparedPresented && !state.playing) {
+    if (!preparedPresented && !state.playing && !scrubPreview.active) {
+      const editStarted = performance.now();
       const drawingPreview=drawingController?.renderPreview;
       // The geometry the overlay reads. The engine draws from its session, so the picture does not wait for it: it is read after the picture.
       const heldGeometry = drawingPreview?.geometry || motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
@@ -1812,6 +1832,8 @@ function loop(now) {
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
       overlayRender(() => heldGeometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
+      // What a paint at a new tick costs the interface decides how the next playhead drag of this document scrubs.
+      if (editingDrawn && !drawingPreview) seekCosts.record(editor.report, editor.tick, performance.now() - editStarted);
       setHidden($('preview-quality'), !(images.reduced || state.previewGovernor?.index));
     }
     if(pendingColorSample && (!state.playing || !state.buffering || preparedPresented)){
@@ -1830,8 +1852,8 @@ function loop(now) {
       requestRender(); // The joints left out of the picture come back.
     }
     if(sampled){stages.scene=performance.now()-stageStarted;stageStarted=performance.now();Object.assign(stages,state.renderer.telemetryStages);}
-    // Final editor overlay pass: keep the actual camera above artwork and tool feedback.
-    drawFinalOverlay();
+    // Final editor overlay pass: keep the actual camera above artwork and tool feedback (over a picture drawn in this paint).
+    if (!scrubPreview.active || preparedPresented) drawFinalOverlay();
     if(sampled){stages.overlay=performance.now()-stageStarted;stageStarted=performance.now();}
     state.dirtyMonitor = false;
     paintCameraMonitor();
@@ -1860,9 +1882,10 @@ function loop(now) {
   if (prepareFrom !== null) prepareAhead(prepareFrom, lookahead());
   // Hover, previews and path sampling change only tool feedback. Keep the
   // displayed artwork intact; document edits still request a scene render.
+  if (scrubPreview.active) scrubPreview.watch(requestRender);
   if (state.dirtyOverlay && !scenePainted) {
     state.dirtyOverlay = false;
-    if (!state.playing && !state.previewing) {
+    if (!state.playing && !state.previewing && !scrubPreview.active) {
       overlayRender(() => drawingController?.renderPreview?.geometry ?? motionDisplay()?.geometry ??
         state.drag?.geometry ?? keyboardHandleGesture?.geometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
@@ -1894,7 +1917,8 @@ function loop(now) {
 }
 /** The camera inspector's readouts and monitor, for the frame on show. */
 function paintCameraMonitor() {
-  if (state.inspectorContext !== 'camera') return;
+  // A dense scene's scrub reads no frame: the monitor follows on release, as the inspector does.
+  if (state.inspectorContext !== 'camera' || scrubPreview.active) return;
   const frame = currentFrame();
   syncCameraControls($('inspector'), frame, {activeKey:propertyControls?.activeKey,guides:state.cameraGuides});
   drawCameraMonitor($('inspector').querySelector('[data-camera-monitor]'), {
@@ -1905,6 +1929,8 @@ function paintCameraMonitor() {
 /** What the camera outline is drawn from: only its camera is read, and the edit frame the stage drew holds it, so the overlay after a seek
  * does not read the whole frame for it. */
 function cameraOutlineFrame() {
+  // A dense scene's scrub: the camera of the prepared frame on show, else of the editing frame still on show.
+  if (scrubPreview.active) return { camera: editor.report._styk?.layers?.fixed?.camera?.visible === false ? null : scrubPreview.shown?.frame.camera ?? state.renderer?.shownCamera?.() ?? null };
   if (state.playing || state.previewing || motionDisplay() || drawingController?.renderPreview) return currentFrame();
   const camera = state.renderer?.shownCamera?.();
   if (!camera) return currentFrame();
@@ -5365,7 +5391,7 @@ overlays.hotkeys = hotkeys;
 timelineHost = createTimelineHost({
   editor, state, $, actions, guarded, audioEngine, onionController, hotkeys, overlays, play, pause, finishKeyboardHandle,
   cancelPolygonDraft, interruptRecovery, cancelWarmPlayback: () => clearTimeout(warmTimer), warmPlayback, scheduleRecovery,
-  requestRender, queueUI, renderInspector, syncSelectionControls, rangeFrames, selectTrack, previewScrub, scrubAudio, stopAudioScrub,
+  requestRender, queueUI, renderInspector, syncSelectionControls, rangeFrames, selectTrack, previewScrub, scrubStarted, scrubEnded, scrubAudio, stopAudioScrub,
   changeFigureLayer, confirmDiscardFrame: dialogs.confirmDiscardFrame, simpleFrameCount, fail,
   setTimelineMode: (mode) => editorSettings?.commit({ timelineMode: mode }),
   onMount: (timeline) => { timelineUI = timeline; window.styk.timeline = timeline; },
@@ -5714,6 +5740,8 @@ editor.addEventListener("change", (e) => {
       queueUI();
       warmPlayback();
     }
+    // A scrub's readout follows the playhead; the rest of the chrome waits for the release (it reads the frame on show).
+    else if (state.scrubbing) ui.update("transport");
     return;
   }
   if (kind === "preview" || e.detail?.live || state.drag || state.scrubbing) {
@@ -5916,6 +5944,8 @@ window.styk = {
   actions,
   // The playback adapter: tools drive exports and playback through the app's own objects.
   playback,
+  // How a playhead drag scrubs: the rule's measurements and the prepared-frame presenter (docs/TIMELINE.md).
+  scrub: { costs: seekCosts, preview: scrubPreview },
   importFiles,
   acceptImport,
   fit,
@@ -6267,7 +6297,7 @@ async function init() {
   // The desktop app keeps the library in its Documents folder; in a browser it lives in that browser's own storage.
   window.styk.library = new UserLibrary({editor, desktop: desktop ?? createBrowserLibraryApi({library: new LocalLibrary(),
     community: new CommunityLibrary({downloads: new DownloadLedger(localStorageLedgerStorage())})}), exporter:documentExporter, importer, pause, finishEdit:finishCurrentEdit, setTool, vfxInspector, hotkeys,
-    activate: id => shell.showPanel(id, {focus: false})});
+    activate: id => shell.showPanel(id, {focus: false}), playheadHeld: () => state.scrubbing});
   shell.define({id: 'library', root: () => $('user-library'), onVisibility: visible => window.styk.library.panelVisible(visible)});
   const libraryInsert = (asset, point) =>
     builderMode?.active ? toast(interfaceText("app.finishTheFigureOrReturnToAnimateTo2"), "app.finishTheFigureOrReturnToAnimateTo2", {}) : window.styk.library.insert(asset, point);

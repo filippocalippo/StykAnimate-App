@@ -38,9 +38,9 @@ export class UserLibrary {
    * stykanimate.com, desktop/public-library.cjs). Cards insert on double-click,
    * Enter or a drag to the stage; everything else is in a card's ⋯ menu.
    */
-  constructor({editor, desktop, exporter, importer, pause, finishEdit, setTool, vfxInspector, activate, hotkeys = new HotkeyManager()}) {
+  constructor({editor, desktop, exporter, importer, pause, finishEdit, setTool, vfxInspector, activate, playheadHeld, hotkeys = new HotkeyManager()}) {
     this.hotkeys = hotkeys;
-    Object.assign(this, {editor, desktop, exporter, importer, pause, finishEdit, setTool, vfxInspector, activate});
+    Object.assign(this, {editor, desktop, exporter, importer, pause, finishEdit, setTool, vfxInspector, activate, playheadHeld});
     this.source = 'mine'; this.folder = ''; this.entries = []; this.selected = null; this.generation = 0; this.busy = false; this.thumbnails = new Map();
     this.publicCatalog = null; this.publicState = 'idle'; this.publicError = ''; this.publicSelected = null; this.publicGeneration = 0;
     this.filterValue = 'all'; this.background = 'auto'; this.menu = null;
@@ -193,11 +193,15 @@ export class UserLibrary {
   setFilter(value) { this.filterValue = value; this.kindSelect.value = value; this.render(); }
   setBackground(value) { this.background = value; this.container.dataset.background = value; }
   /** A playhead move changes only which selected figures the frame on show holds, and finding out builds that frame: playback moves
-   * the playhead on every tick, so these wait for the playhead to rest. Any other change is shown at once. */
+   * the playhead on every tick, so these wait for the playhead to rest, and for its release while it is dragged (`playheadHeld`). Any
+   * other change is shown at once. */
   editorChanged(event) {
     if (event.detail?.kind !== 'seek') return this.syncSelection();
+    this.syncWhenRested();
+  }
+  syncWhenRested() {
     clearTimeout(this.selectionTimer);
-    this.selectionTimer = setTimeout(() => this.syncSelection(), 250);
+    this.selectionTimer = setTimeout(() => this.playheadHeld?.() ? this.syncWhenRested() : this.syncSelection(), 250);
   }
   syncSelection() {
     const count = this.editor.selectedObjects.length, available = Boolean(this.desktop?.listLibrary);

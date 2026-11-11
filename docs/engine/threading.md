@@ -254,6 +254,15 @@ caches' refills go through the one lock, so neither gains: interface time per se
 later. The approach was dropped. It would pay with workers that allocate from heaps of their own and with an interface that reads only
 the objects it shows of a dense frame (the inspector's `figureDescriptor` and `joinedDrawingSetsView` read the whole frame).
 
+A playhead drag in such a scene does not make the editing frame at all until the release: it shows the frames the preparation
+workers make for playback, and nothing on the interface thread evaluates or reads a frame meanwhile (the inspector, the library's
+selection and the camera monitor wait for the release; a seek queued a pass of the chrome through the drawing controller until
+then). `src/engine/engine-scrub.mjs` keeps at most three of those frames being made at once and shows the newest one ready; the
+rule, the order and the measurements are in [TIMELINE.md](../TIMELINE.md#scrubbing-a-dense-scene). The request names where the
+cache counts from when it is full (`playhead` of `try_request_samples`, `prepareRange(ticks, {playhead})` in
+`engine-playback.mjs`): the cache drops first the frames furthest forward from it, which in a forward drag counted from the
+pointer were the frames finished just behind it.
+
 ## Testing
 
 `cargo test -p styk-engine` (scheduler, opening and publishing documents, export frames prepared ahead, thumbnail frames never

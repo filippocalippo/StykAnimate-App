@@ -22,7 +22,7 @@ import {t as interfaceText, messageText as sayTimeline} from './localization.mjs
  * cancelPolygonDraft, interruptRecovery, cancelWarmPlayback, warmPlayback,
  * scheduleRecovery, requestRender, queueUI, renderInspector,
  * syncSelectionControls, rangeFrames(all), selectTrack, previewScrub,
- * scrubAudio(tick), stopAudioScrub(), changeFigureLayer,
+ * scrubStarted(), scrubEnded(), scrubAudio(tick), stopAudioScrub(), changeFigureLayer,
  * confirmDiscardFrame, simpleFrameCount, fail,
  * setTimelineMode(mode), onMount(timeline), and getters for what app.mjs
  * creates later: propertyControls(), cameraMotionControls(), drawing(),
@@ -155,6 +155,8 @@ export function createTimelineHost(ctx) {
         ctx.interruptRecovery();
         ctx.cancelWarmPlayback();
         state.scrubbing = true;
+        // A scene whose editing frame is dear scrubs from prepared frames until the release (docs/TIMELINE.md).
+        ctx.scrubStarted?.();
         const drawing=drawingResourcesFor(editor.report);if(drawing)drawing.busy=true;
         ctx.requestRender();
       },
@@ -165,6 +167,7 @@ export function createTimelineHost(ctx) {
       onScrubEnd: () => {
         ctx.stopAudioScrub();
         state.scrubbing = false;
+        ctx.scrubEnded?.();
         const drawing=drawingResourcesFor(editor.report);if(drawing)drawing.busy=false;
         ctx.queueUI();
         ctx.requestRender();
