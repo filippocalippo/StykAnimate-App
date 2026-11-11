@@ -179,7 +179,8 @@ test('entering and leaving a clip twenty times returns the memory of the engine 
     editor.enterMovieclip(clipId);
     editor.leaveMovieclip();
   }
-  await settle();
+  // The slices run when this thread is free, so a busy machine needs longer: wait for the level (five seconds at most), not for a fixed time.
+  for (let turn = 0; turn < 100 && engine.memory().liveBytes - level >= 4 * MiB; turn++) await new Promise(resolve => setTimeout(resolve, 50));
   const grown = engine.memory().liveBytes - level;
   assert.ok(grown < 4 * MiB, `the engine holds ${(grown / MiB).toFixed(1)} MiB more than before the twenty cycles`);
 });
