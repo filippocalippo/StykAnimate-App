@@ -17,6 +17,9 @@
 //! - `polys`: a count, then the polygons ([`poly`]);
 //! - when `flags` say so, `solved` (a count and the angles, then, for [`SOLVED_LENGTHS`], a count and the lengths) and `bounds`
 //!   (four numbers).
+//!
+//! A [`LIGHT`] group ([`pack_groups_with`], a dense frame's figure that shows its origin alone) is `flags`, `root`, a count of rows and the
+//! `index`, `length` and `z` of each row, then `bounds` when `flags` say so.
 
 use std::collections::HashMap;
 
@@ -29,6 +32,9 @@ pub const DRAWN: u32 = 1;
 pub const BOUNDS: u32 = 2;
 pub const SOLVED: u32 = 4;
 pub const SOLVED_LENGTHS: u32 = 8;
+/// A light group ([`pack_groups_with`]): `flags`, `root`, a count of rows and three words a row (`index`, `length`, `z`, the words of
+/// the full row), then `bounds` when `flags` say so. What the joints of a dense frame read of a figure that shows its origin alone.
+pub const LIGHT: u32 = 16;
 
 /// The `flags` of a segment row.
 pub const START: u32 = 1;
@@ -153,10 +159,15 @@ fn poly(out: &mut Vec<f64>, scene: &Scene, item: &Item) {
 /// About how many words [`pack_groups`] writes for `slots` (what a packet makes room for at once): the joints and a row of the usual
 /// size for each segment and polygon; a curve's points or a bone's frame grow it beyond that.
 pub fn packed_size(scene: &Scene, slots: &[usize]) -> usize {
+    packed_size_with(scene, slots, &|_| false)
+}
+
+/// [`packed_size`] of [`pack_groups_with`]: a light group is its root, its bounds and three words a row.
+pub fn packed_size_with(scene: &Scene, slots: &[usize], light: &dyn Fn(usize) -> bool) -> usize {
     slots.iter().map(|&slot| {
         let ends = scene.objects.get(slot).map_or(0, |object| object.ends.len());
         let measured = scene.measured_of(slot).map_or(ends, <[Item]>::len);
-        16 + 2 * ends + 14 * measured
+        if light(slot) { 10 + 3 * measured } else { 16 + 2 * ends + 14 * measured }
     }).sum()
 }
 
@@ -165,44 +176,67 @@ pub fn packed_size(scene: &Scene, slots: &[usize]) -> usize {
 /// as JSON, so nothing is formatted: a row names nothing and holds nothing the reader works out (where a segment starts and ends are the
 /// joints of its parent and of itself unless it says otherwise). `bounds` is [`crate::drawlist::app_bounds`] of the scene, by slot.
 pub fn pack_groups(scene: &Scene, slots: &[usize], bounds: &[Option<[f64; 4]>], out: &mut Vec<f64>) {
+    pack_groups_with(scene, slots, bounds, &|_| false, out);
+}
+
+/// [`pack_groups`], writing a [`LIGHT`] group for each slot `light` names that is a figure (a movieclip instance is its handle, a
+/// group of one row, and is written whole).
+pub fn pack_groups_with(scene: &Scene, slots: &[usize], bounds: &[Option<[f64; 4]>], light: &dyn Fn(usize) -> bool, out: &mut Vec<f64>) {
+    // A scene that says where each object's parts lie is read object by object; another is gathered by object first.
+    let spanned = scene.spanned();
     let mut by_slot: HashMap<u32, Vec<&Item>> = HashMap::new();
-    let wanted: std::collections::HashSet<u32> = slots.iter().map(|&slot| slot as u32).collect();
-    // The objects that have artwork to draw (the others keep their handles only).
-    let mut drawn: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    if scene.spanned() {
-        // A built scene says where each object's parts lie: only the objects asked for are read.
-        for &slot in &wanted {
-            let measured = scene.measured_of(slot as usize).unwrap_or(&[]);
-            if !measured.is_empty() {
-                by_slot.insert(slot, measured.iter().collect());
-            }
-            if scene.items_of(slot as usize).is_some_and(|items| !items.is_empty()) {
-                drawn.insert(slot);
-            }
-        }
-    } else {
-        for item in &scene.measured {
+    let mut drawn_items: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    if !spanned {
+        let wanted: std::collections::HashSet<u32> = slots.iter().map(|&slot| slot as u32).collect();
+        for item in scene.measured_items() {
             if wanted.contains(&item.slot) {
                 by_slot.entry(item.slot).or_default().push(item);
             }
         }
-        drawn = scene.items.iter().map(|item| item.slot).filter(|slot| wanted.contains(slot)).collect();
+        drawn_items = scene.items.iter().map(|item| item.slot).filter(|slot| wanted.contains(slot)).collect();
     }
+    // Rows and polygons of the object being written, in buffers every object reuses.
+    let (mut items, mut shapes): (Vec<&Item>, Vec<&Item>) = (Vec::new(), Vec::new());
     for &slot in slots {
         out.push(slot as f64);
         let length_at = out.len();
         out.push(0.0);
         let (Some(object), Some(fig)) = (scene.objects.get(slot).filter(|object| object.resolved), scene.figure_for(slot)) else { continue };
-        let items = by_slot.get(&(slot as u32)).map(Vec::as_slice).unwrap_or(&[]);
+        items.clear();
+        // The objects that have artwork to draw (the others keep their handles only).
+        let drawn = if spanned {
+            items.extend(scene.measured_of(slot).unwrap_or(&[]));
+            scene.items_of(slot).is_some_and(|items| !items.is_empty())
+        } else {
+            items.extend(by_slot.get(&(slot as u32)).map(Vec::as_slice).unwrap_or(&[]));
+            drawn_items.contains(&(slot as u32))
+        };
         let start = out.len();
         let solved = object.solution.as_ref();
         let mut flags = 0;
-        if drawn.contains(&(slot as u32)) {
+        if drawn {
             flags |= DRAWN;
         }
         let rect = bounds.get(slot).copied().flatten();
         if rect.is_some() {
             flags |= BOUNDS;
+        }
+        shapes.clear();
+        shapes.extend(items.iter().copied().filter(|item| !matches!(item.kind, ItemKind::Poly | ItemKind::Mesh)));
+        shapes.sort_by_key(|item| item.index);
+        if light(slot) && fig.movieclip.is_none() {
+            // The rows' index, length and depth, as the full rows hold them.
+            out.push((flags | LIGHT) as f64);
+            out.extend_from_slice(&object.root);
+            count(out, shapes.len());
+            for item in &shapes {
+                out.extend_from_slice(&[item.index as f64, item.length, item.z]);
+            }
+            if let Some(rect) = rect {
+                out.extend_from_slice(&rect);
+            }
+            out[length_at] = (out.len() - start) as f64;
+            continue;
         }
         if let Some(solution) = solved {
             flags |= SOLVED;
@@ -232,16 +266,13 @@ pub fn pack_groups(scene: &Scene, slots: &[usize], bounds: &[Option<[f64; 4]>], 
             count(out, 1);
             out.extend_from_slice(&[0.0, object.angles.first().copied().unwrap_or(0.0), 0.0, object.lengths.first().copied().unwrap_or(0.0), 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0]);
         } else {
-            let mut shapes: Vec<&Item> = items.iter().copied().filter(|item| !matches!(item.kind, ItemKind::Poly | ItemKind::Mesh)).collect();
-            shapes.sort_by_key(|item| item.index);
             count(out, shapes.len());
-            for item in shapes {
+            for item in &shapes {
                 segment(out, scene, slot, fig, item);
             }
         }
-        let polys: Vec<&&Item> = items.iter().filter(|item| item.kind == ItemKind::Poly).collect();
-        count(out, polys.len());
-        for item in polys {
+        count(out, items.iter().filter(|item| item.kind == ItemKind::Poly).count());
+        for item in items.iter().filter(|item| item.kind == ItemKind::Poly) {
             poly(out, scene, item);
         }
         if let Some(solution) = solved {

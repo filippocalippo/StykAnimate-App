@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 mod cache;
 pub mod interface;
-pub use interface::{pack_groups, packed_size};
+pub use interface::{pack_groups, pack_groups_with, packed_size, packed_size_with};
 pub(crate) use cache::{Resolved, arc_allocation};
 pub use cache::{ClipSceneCache, RetainedScene, SceneBudget};
 
