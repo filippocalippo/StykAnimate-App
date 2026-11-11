@@ -6233,7 +6233,7 @@ async function init() {
   // The desktop app keeps the library in its Documents folder; in a browser it lives in that browser's own storage.
   window.styk.library = new UserLibrary({editor, desktop: desktop ?? createBrowserLibraryApi({library: new LocalLibrary(),
     community: new CommunityLibrary({downloads: new DownloadLedger(localStorageLedgerStorage())})}), exporter:documentExporter, importer, pause, finishEdit:finishCurrentEdit, setTool, vfxInspector, hotkeys,
-    activate: id => shell.showPanel(id, {focus: false})});
+    activate: id => shell.showPanel(id, {focus: false}), playheadHeld: () => state.scrubbing});
   shell.define({id: 'library', root: () => $('user-library'), onVisibility: visible => window.styk.library.panelVisible(visible)});
   const libraryInsert = (asset, point) =>
     builderMode?.active ? toast(interfaceText("app.finishTheFigureOrReturnToAnimateTo2"), "app.finishTheFigureOrReturnToAnimateTo2", {}) : window.styk.library.insert(asset, point);

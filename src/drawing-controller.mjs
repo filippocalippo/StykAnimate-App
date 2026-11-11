@@ -823,7 +823,8 @@ export class DrawingController {
   selectionContains(point){const s=this.selection;if(!s)return false;const angle=-s.angle*Math.PI/180,x=point.x-s.cx-s.dx,y=point.y-s.cy-s.dy,px=Math.floor(s.cx+(Math.cos(angle)*x-Math.sin(angle)*y)/(s.scale*(s.fx??1))),py=Math.floor(s.cy+(Math.sin(angle)*x+Math.cos(angle)*y)/(s.scale*(s.fy??1)));return s.mask?Boolean(maskValue(s.mask,px,py)):lassoContains(s.points,px,py);}
   applySelection(){const s=this.selection;if(!s)return;if(s.committing)return s.committing;if(!moved(s)){this.cancelSelection();return;}return this.commitSelection(s,'Transform selected pixels',{labelKey:'drawingController.transformSelection'});}
   endSelection(cancel=true){const s=this.selection;if(!s)return;this.selection=null;if(cancel)s.abort?.abort();s.presenter?.dispose();s.surface.pinned=false;this.owner.surfaceVersion++;this.owner.present(s.surface);this.onRender();}
-  cancelSelection(){this.endSelection(true);this.marquee=null;this.onUI();this.onRender();}
+  // Every seek and history step cancels: with nothing selected nothing changes, and a pass of the chrome on every tick of a scrub would read the frame for the inspector.
+  cancelSelection(){const held=Boolean(this.selection||this.marquee);this.endSelection(true);this.marquee=null;if(held)this.onUI();this.onRender();}
   async applyFilter(kind){
     if(!FILTER_LABELS[kind])throw messageError(new Error(''), "errors.drawingController.unknownDrawingFilter", {});await this.settleFloating();
     const e=this.editor,target=e.drawingTarget();if(!target.figure)throw messageError(new Error(''), "errors.drawingController.paintADrawingBeforeFilteringIt", {});
