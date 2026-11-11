@@ -1,12 +1,8 @@
 name: Build the Rust engine
 description: >
-  Builds the engine's WebAssembly module into src/engine/pkg with the pinned
+  Builds the engine's WebAssembly modules into src/engine/pkg with the pinned
   toolchain (docs/engine/decisions/0006-pinned-nightly-wasm.md) and fails when
   the output is missing, so no web or desktop artifact ships without it.
-inputs:
-  test:
-    description: Also run the engine's Rust tests (npm run engine:test).
-    default: 'false'
 runs:
   using: composite
   steps:
@@ -16,16 +12,19 @@ runs:
         rustup toolchain install nightly-2026-09-15 --profile minimal --component rust-src --target wasm32-unknown-unknown
         rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
         rustc +nightly-2026-09-15 --version
-    - name: Cache cargo registry, tools and engine build
-      uses: actions/cache@v4
+    # Only the downloads and the wasm-bindgen binary are kept. The build folder is not: the module links with
+    # whole-program optimisation, so a kept folder saved no build time and took minutes to restore.
+    - name: Cache cargo downloads and wasm-bindgen
+      uses: actions/cache@v6
       with:
         path: |
-          ~/.cargo/registry
-          ~/.cargo/git
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
           ~/.cargo/bin/wasm-bindgen*
-          engine/target
-        key: engine-${{ runner.os }}-${{ hashFiles('engine/Cargo.lock', 'scripts/engine-build.mjs') }}
-        restore-keys: engine-${{ runner.os }}-
+          ~/.cargo/bin/wasm2es6js*
+        key: engine-tools-${{ runner.os }}-wasm-bindgen-0.2.129-${{ hashFiles('engine/Cargo.lock') }}
+        restore-keys: engine-tools-${{ runner.os }}-wasm-bindgen-0.2.129-
     - name: wasm-bindgen 0.2.129
       shell: bash
       run: |
@@ -34,18 +33,7 @@ runs:
         fi
     - name: Build the engine
       shell: bash
-      run: npm run engine:build
+      run: node scripts/engine-build.mjs
     - name: Require the engine build output
       shell: bash
       run: node scripts/engine-verify-pkg.mjs
-    - name: Engine tests
-      if: inputs.test == 'true'
-      shell: bash
-      # Without debug information: with it the test binaries of the workspace fill the Linux runner's disk and slow the Windows link.
-      env:
-        CARGO_PROFILE_DEV_DEBUG: '0'
-        CARGO_PROFILE_TEST_DEBUG: '0'
-        CARGO_INCREMENTAL: '0'
-        # The runners have no GPU: the tests that need one say so and pass (engine/crates/styk-render/tests/support/gpu.rs).
-        STYK_ALLOW_NO_GPU: '1'
-      run: npm run engine:test -- --no-fail-fast

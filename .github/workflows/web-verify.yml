@@ -1,6 +1,12 @@
 name: Verify browser release
 on:
   workflow_call:
+    inputs:
+      engine-artifact:
+        description: >
+          Name of an artifact of this run that holds src/engine/pkg. Empty builds the engine here.
+        type: string
+        default: ''
 permissions:
   contents: read
 defaults:
@@ -22,17 +28,36 @@ jobs:
       # unsupported response as well as real Opus export.
       STYK_REQUIRE_AAC: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.11.0'
           cache: npm
-      - name: Install locked dependencies and browsers
+      - name: Install locked dependencies
         run: |
           npm ci --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-          npx playwright install --with-deps chromium
-      - uses: ./.github/actions/engine-build
+          # The Cloudflare tooling is only used by the configuration check on Linux.
+          if [ "$RUNNER_OS" = Linux ]; then npm ci --prefix web --no-audit --no-fund; fi
+      # The tests drive the Google Chrome of the runner image (tests/support/playwright.mjs). Playwright's own browser
+      # is fetched only where the image has none, and without --with-deps: the images already hold Chromium's
+      # libraries, and the font packages that flag added made every run depend on the Ubuntu package mirrors.
+      - name: Test browser
+        run: |
+          if [ -x /opt/google/chrome/chrome ] || [ -f "${PROGRAMFILES:-}/Google/Chrome/Application/chrome.exe" ] \
+            || [ -f "${LOCALAPPDATA:-}/Google/Chrome/Application/chrome.exe" ]; then
+            echo "Google Chrome is installed."
+          else
+            npx playwright install chromium
+          fi
+      - name: Engine build (from this run)
+        if: inputs.engine-artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.engine-artifact }}
+          path: src/engine/pkg
+      - name: Engine build
+        if: inputs.engine-artifact == ''
+        uses: ./.github/actions/engine-build
       - name: Build and verify the browser release
         run: |
           npm run web:build
@@ -47,7 +72,7 @@ jobs:
           npm run web:deploy -- --dry-run
       - name: Preserve deployable browser files
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-release
           path: build/web

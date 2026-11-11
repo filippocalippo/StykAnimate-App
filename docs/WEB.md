@@ -40,8 +40,9 @@ in `robots.txt`. Deploy the verified editor before deploying the site's launch l
 
 The reusable `web-verify.yml` workflow builds and tests the production files on
 Windows and Linux. Windows must export real MP4/AAC sound; Linux verifies a clear
-AAC-unavailable result where necessary and real WebM/Opus sound. Firefox and WebKit
-run the storage, library and browser-support checks on Linux. The release workflow
+AAC-unavailable result where necessary and real WebM/Opus sound. The storage, library
+and editor suites run in Chrome on Windows only (see Browsers below). In the Tests
+workflow it takes the engine build of the same run; a release builds its own. The release workflow
 retains the exact deployable `browser-release` artifact for 30 days; it does not
 deploy it automatically. Record the deployed build hash from `build-info.json`
 and run the live checks after an authorized deployment.
