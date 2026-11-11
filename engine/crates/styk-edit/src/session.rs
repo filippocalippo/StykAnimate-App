@@ -436,6 +436,11 @@ impl Session {
         styk_doc::json::to_string(&answer)
     }
 
+    /// The frame on show stays on show: what is kept to build the next frame over a dense one is let go of ([`Editor::rest`]).
+    pub fn rest(&mut self) {
+        self.editor.rest();
+    }
+
     /// The geometry of the frame on show (`geometry`: `args` `{since, motion}`; empty where a motion-path edit shows the document) or of
     /// a frame the document does not hold (`previewGeometry`), as a packet of words (`interface.rs`), at `view` (its playhead). Errors are
     /// those of [`Session::query`].
@@ -445,6 +450,7 @@ impl Session {
         let packet = match kind {
             "geometry" => self.editor.interface_geometry(&args),
             "previewGeometry" => self.editor.interface_preview_geometry(&args),
+
             other => Err(EditError::Invalid(format!("the session answers no packet '{other}'"))),
         };
         packet.map_err(|error| match error {

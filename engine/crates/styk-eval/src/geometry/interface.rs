@@ -150,6 +150,16 @@ fn poly(out: &mut Vec<f64>, scene: &Scene, item: &Item) {
     }
 }
 
+/// About how many words [`pack_groups`] writes for `slots` (what a packet makes room for at once): the joints and a row of the usual
+/// size for each segment and polygon; a curve's points or a bone's frame grow it beyond that.
+pub fn packed_size(scene: &Scene, slots: &[usize]) -> usize {
+    slots.iter().map(|&slot| {
+        let ends = scene.objects.get(slot).map_or(0, |object| object.ends.len());
+        let measured = scene.measured_of(slot).map_or(ends, <[Item]>::len);
+        16 + 2 * ends + 14 * measured
+    }).sum()
+}
+
 /// The groups of `slots` of a scene built by [`super::build_shapes`], appended to `out` one after the other as `slot, length, words`
 /// (a length of 0 is an object the scene could not resolve): see the module for a group's words. A dense frame is megabytes of text
 /// as JSON, so nothing is formatted: a row names nothing and holds nothing the reader works out (where a segment starts and ends are the
@@ -157,13 +167,27 @@ fn poly(out: &mut Vec<f64>, scene: &Scene, item: &Item) {
 pub fn pack_groups(scene: &Scene, slots: &[usize], bounds: &[Option<[f64; 4]>], out: &mut Vec<f64>) {
     let mut by_slot: HashMap<u32, Vec<&Item>> = HashMap::new();
     let wanted: std::collections::HashSet<u32> = slots.iter().map(|&slot| slot as u32).collect();
-    for item in &scene.measured {
-        if wanted.contains(&item.slot) {
-            by_slot.entry(item.slot).or_default().push(item);
-        }
-    }
     // The objects that have artwork to draw (the others keep their handles only).
-    let drawn: std::collections::HashSet<u32> = scene.items.iter().map(|item| item.slot).filter(|slot| wanted.contains(slot)).collect();
+    let mut drawn: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    if scene.spanned() {
+        // A built scene says where each object's parts lie: only the objects asked for are read.
+        for &slot in &wanted {
+            let measured = scene.measured_of(slot as usize).unwrap_or(&[]);
+            if !measured.is_empty() {
+                by_slot.insert(slot, measured.iter().collect());
+            }
+            if scene.items_of(slot as usize).is_some_and(|items| !items.is_empty()) {
+                drawn.insert(slot);
+            }
+        }
+    } else {
+        for item in &scene.measured {
+            if wanted.contains(&item.slot) {
+                by_slot.entry(item.slot).or_default().push(item);
+            }
+        }
+        drawn = scene.items.iter().map(|item| item.slot).filter(|slot| wanted.contains(slot)).collect();
+    }
     for &slot in slots {
         out.push(slot as f64);
         let length_at = out.len();

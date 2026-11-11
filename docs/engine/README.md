@@ -33,6 +33,10 @@ draw), with `STYK_EDIT_PROFILE=1` adding where the session call spends its time 
 what a frame is made of.
 `STYK_BENCH_DOC=<file> cargo test --release -p styk-export --test seek_bench -- --ignored --nocapture` times a seek as the stage shows it
 (the interface's read of the frame, the session's frame, the draw list, the same frame drawn again, and clicks on artwork).
+`STYK_BENCH_DOC=<file> cargo test --release -p styk-engine --test dense_bench -- --ignored --nocapture` times a joint drag move, a figure
+move, their release, an undo and single seeks on the interface's side (the session's call and frame, the geometry read since the last, the
+frame's text, the onion skins, the draw list), with and without onion skins (natively the frame's builds run in parallel, which the
+interface thread of the app does not).
 `node scripts/engine-build.mjs --names` builds the release WebAssembly with its function names kept, for a CPU profile of the app.
 
 ## Fixtures

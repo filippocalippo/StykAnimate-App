@@ -66,6 +66,7 @@ What's new in each version of StykAnimate.
 - Drawing for a long time no longer keeps growing the memory StykAnimate uses.
 - Stepping through frames with the keyboard shows the next frame sooner on large animations.
 - Panning, zooming and clicking on figures stay smooth in scenes with thousands of figures.
+- Dragging joints and moving figures stay smooth in scenes with thousands of figures.
 
 ### Removed
 

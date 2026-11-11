@@ -922,9 +922,24 @@ pub struct EncodeMemory {
     objects: std::collections::HashMap<u32, (u64, usize, Arc<ObjectOut>)>,
     /// The onion skins the last frame was drawn with, encoded: a ghost is the same scene every step of a gesture.
     ghosts: Vec<(GhostKey, Arc<Encoded>)>,
+    /// The lists [`encode_composed_shared`] returned last, oldest first, with what each was put together from.
+    lists: Vec<(Arc<DrawList>, Layout)>,
+    /// How many lists were written over an earlier one.
+    written_over: u64,
 }
 
 impl EncodeMemory {
+    /// Lets go of the lists kept to write over ([`encode_composed_shared`]) but the last one returned: the frame stays on show.
+    pub fn rest(&mut self) {
+        let keep = self.lists.len().saturating_sub(1);
+        self.lists.drain(..keep);
+    }
+
+    /// How many of the lists [`encode_composed_shared`] returned were written over an earlier one in place.
+    pub fn written_over(&self) -> u64 {
+        self.written_over
+    }
+
     /// How many objects are kept for the next frame.
     pub fn kept(&self) -> usize {
         self.objects.len()
@@ -1051,6 +1066,25 @@ pub fn app_bounds_of_cancellable(scene: &Scene, images: &impl crate::vfx::layers
             *flag = true;
         }
     }
+    // A built scene says where each object's measured primitives lie: only the wanted objects' are read.
+    if scene.spanned() {
+        let fx = has_effects(scene);
+        let mut bounds = vec![None; scene.objects.len()];
+        for slot in (0..wanted.len()).filter(|&slot| wanted[slot]) {
+            if cancelled() { return None; }
+            if !scene.objects[slot].resolved {
+                continue;
+            }
+            let mut acc = EMPTY;
+            for it in scene.measured_of(slot).unwrap_or(&[]) {
+                let Some(extent) = item_extent(scene, images, it) else { continue };
+                extent.include(&mut acc, if fx { item_padding(scene, it) } else { 0.0 });
+            }
+            let [x, y, width, height] = rounded(acc);
+            bounds[slot] = Some([x, y, x + width, y + height]);
+        }
+        return (!cancelled()).then_some(bounds);
+    }
     bounds_of_checked(scene, images, Some(&wanted), cancelled)
 }
 
@@ -1096,7 +1130,21 @@ fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidd
 
 /// Whether any item of `scene` is text (its objects are then measured as they are encoded): what [`encode_composed_span`] is told.
 pub fn has_text(scene: &Scene) -> bool {
+    if scene.spanned() {
+        return scene.spans.iter().any(|span| span.flags & crate::geometry::SPAN_TEXT != 0);
+    }
     scene.items.iter().any(|it| it.kind == ItemKind::Text)
+}
+
+/// The runs of a whole scene that holds no movieclip content, from where its objects lie ([`Scene::spans`]): each object's items, in their
+/// order. `None` for a scene that does not say where they lie, or holds movieclip content (runs of one object then follow its clips' chains).
+fn runs_of_spans(scene: &Scene, span: (usize, usize)) -> Option<Vec<(usize, usize)>> {
+    if !scene.spanned() || !scene.chains.is_empty() || span != (0, scene.items.len()) {
+        return None;
+    }
+    let mut runs: Vec<(usize, usize)> = scene.spans.iter().filter(|span| span.items.1 > span.items.0).map(|span| (span.items.0 as usize, span.items.1 as usize)).collect();
+    runs.sort_unstable();
+    Some(runs)
 }
 
 /// [`encode_scene`] of the items in `span` alone: every item outside it must be of a hidden object, so the objects encoded are the ones
@@ -1106,7 +1154,16 @@ fn encode_scene_span(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene,
     let ctx = Ctx { scene, assets, live, tint };
     let mut runs: Vec<(usize, usize)> = Vec::new();
     let mut of_slot: std::collections::HashMap<u32, (usize, usize)> = std::collections::HashMap::new();
-    let mut i = span.0;
+    // A scene that says where its objects lie is not read item by item to find them (a dense frame's items are tens of megabytes).
+    if let Some(spanned) = runs_of_spans(scene, span) {
+        of_slot.reserve(spanned.len());
+        for (k, &(a, b)) in spanned.iter().enumerate() {
+            of_slot.insert(scene.items[a].slot, (k, k + 1));
+            debug_assert!(scene.items[a..b].iter().all(|it| it.slot == scene.items[a].slot && it.chain == crate::geometry::NO_CHAIN));
+        }
+        runs = spanned;
+    }
+    let mut i = if runs.is_empty() { span.0 } else { span.1 };
     while i < span.1 {
         let (slot, chain) = (scene.items[i].slot, scene.items[i].chain);
         let mut j = i + 1;
@@ -1616,7 +1673,146 @@ pub fn encode_composed_remembering(doc: &Document, assets: &Assets, scene: &Scen
 }
 
 fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, memory: Option<&mut EncodeMemory>) -> DrawList {
-    encode_composed_span_over(doc, assets, scene, overrides, ghosts, order, memory, (0, scene.items.len()), has_text(scene))
+    assemble_composed(doc, assets, scene, overrides, ghosts, order, memory, (0, scene.items.len()), has_text(scene)).into_list()
+}
+
+/// [`encode_composed_remembering`], shared: the memory keeps the list it returns and the one before it, and puts the next list together over
+/// the older one in place when nothing else holds it any more and the new list is laid out as it was (the same pieces of the same lengths in the
+/// same groups): only the primitives of the objects encoded since it are written. Also says how the list differs from the one `memory` returned
+/// last, for a renderer that holds that one ([`ListChanges`]). The list is the list encoded whole. The older list is kept only between frames
+/// that follow each other: let it go with [`EncodeMemory::rest`] once the frame stays on show.
+pub fn encode_composed_shared(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, memory: &mut EncodeMemory) -> (Arc<DrawList>, Option<ListChanges>) {
+    let assembled = assemble_composed(doc, assets, scene, overrides, ghosts, order, Some(memory), (0, scene.items.len()), has_text(scene));
+    let layout = assembled.layout();
+    let spare = if memory.lists.len() >= 2 {
+        let (list, held) = memory.lists.remove(0);
+        Arc::try_unwrap(list).ok().map(|list| (list, held))
+    } else {
+        None
+    };
+    let list = match spare {
+        Some((list, held)) if held.same_shape(&layout) && list.prims.len() == assembled.total => {
+            memory.written_over += 1;
+            assembled.over(list, &held)
+        }
+        _ => assembled.into_list(),
+    };
+    let list = Arc::new(list);
+    let changes = memory.lists.last().filter(|(_, held)| held.same_shape(&layout)).map(|(last, held)| ListChanges { since: last.clone(), prims: layout.changed_since(held, &list.prims, &last.prims) });
+    memory.lists.push((list.clone(), layout));
+    (list, changes)
+}
+
+/// How a list differs from the one encoded before it ([`encode_composed_shared`]): it holds the primitives `since` holds but in the ranges
+/// `prims` (each `start..end`, in order), and as many of them. Its other tables (paints, points, groups, layers, glyphs) are its own.
+pub struct ListChanges {
+    pub since: Arc<DrawList>,
+    pub prims: Vec<(u32, u32)>,
+}
+
+/// What a list was put together from, piece by piece in its order: a part of an encoded object (held, so that it is never another object's)
+/// or primitives made for the list, each with its group and length.
+struct Layout {
+    pieces: Vec<Placed>,
+}
+
+struct Placed {
+    group: u32,
+    len: u32,
+    part: Option<(Arc<ObjectOut>, u32, (u32, u32), (u32, u32, u32))>,
+}
+
+impl Placed {
+    /// The same part of the same encoded object, in the same group at the same bases: the same primitives.
+    fn same(&self, other: &Placed) -> bool {
+        self.group == other.group && self.len == other.len && match (&self.part, &other.part) {
+            (Some((a, out_a, range_a, bases_a)), Some((b, out_b, range_b, bases_b))) => Arc::ptr_eq(a, b) && out_a == out_b && range_a == range_b && bases_a == bases_b,
+            _ => false,
+        }
+    }
+}
+
+impl Layout {
+    /// The same pieces, of the same lengths in the same groups: every piece lies where it lay.
+    fn same_shape(&self, other: &Layout) -> bool {
+        self.pieces.len() == other.pieces.len() && self.pieces.iter().zip(&other.pieces).all(|(a, b)| a.group == b.group && a.len == b.len)
+    }
+
+    /// The ranges of primitives of a list laid out as this one (`prims`) that differ from those of a list laid out as `held` (`before`), which
+    /// has [`Layout::same_shape`]: the pieces that are not the same part, unless their primitives are equal.
+    fn changed_since(&self, held: &Layout, prims: &[Prim], before: &[Prim]) -> Vec<(u32, u32)> {
+        let mut ranges: Vec<(u32, u32)> = Vec::new();
+        let mut at = 0u32;
+        for (piece, old) in self.pieces.iter().zip(&held.pieces) {
+            let end = at + piece.len;
+            if !piece.same(old) && prims[at as usize..end as usize] != before[at as usize..end as usize] {
+                match ranges.last_mut() {
+                    Some(last) if last.1 == at => last.1 = end,
+                    _ => ranges.push((at, end)),
+                }
+            }
+            at = end;
+        }
+        ranges
+    }
+}
+
+/// A list's pieces in its order and the rest of it, before its primitives are written ([`Builder::finish`]).
+struct Assembled {
+    pieces: Vec<(u32, Piece)>,
+    total: usize,
+    paints: Vec<[f32; 4]>,
+    points: Vec<[f32; 2]>,
+    groups: Vec<Group>,
+    passes: Vec<Pass>,
+    layers: Vec<EffectLayer>,
+    glyphs: Vec<GlyphInstance>,
+    composited_export: bool,
+    background_prims: u32,
+    materials: u32,
+}
+
+impl Assembled {
+    fn layout(&self) -> Layout {
+        let pieces = self.pieces.iter().map(|(group, piece)| Placed {
+            group: *group,
+            len: piece.len() as u32,
+            part: match piece {
+                Piece::Part { object, out, range, bases } => Some((object.clone(), *out, *range, *bases)),
+                Piece::Own(_) => None,
+            },
+        }).collect();
+        Layout { pieces }
+    }
+
+    /// The list, its primitives written once.
+    fn into_list(self) -> DrawList {
+        let mut prims = Vec::with_capacity(self.total);
+        for (group, piece) in &self.pieces {
+            piece.extend(*group, &mut prims);
+        }
+        self.list(prims)
+    }
+
+    /// The list written over `list`, which was laid out as `held` ([`Layout::same_shape`]): only the pieces that are not the parts it holds.
+    fn over(self, mut list: DrawList, held: &Layout) -> DrawList {
+        let mut prims = std::mem::take(&mut list.prims);
+        let mut at = 0;
+        for ((group, piece), old) in self.pieces.iter().zip(&held.pieces) {
+            let end = at + piece.len();
+            let kept = matches!((piece, &old.part), (Piece::Part { object, out, range, bases }, Some((held, held_out, held_range, held_bases)))
+                if old.group == *group && Arc::ptr_eq(object, held) && out == held_out && range == held_range && bases == held_bases);
+            if !kept {
+                piece.write(*group, &mut prims[at..end]);
+            }
+            at = end;
+        }
+        self.list(prims)
+    }
+
+    fn list(self, prims: Vec<Prim>) -> DrawList {
+        DrawList { composited_export: self.composited_export, prims, paints: self.paints, points: self.points, groups: self.groups, passes: self.passes, background_prims: self.background_prims, layers: self.layers, materials: self.materials, glyphs: self.glyphs }
+    }
 }
 
 /// [`encode_composed`] of a frame whose objects outside the items in `span` are all hidden (`overrides.hidden`): only those items are
@@ -1628,11 +1824,11 @@ pub fn encode_composed_span(doc: &Document, assets: &Assets, scene: &Scene, over
     let span = (span.0.min(scene.items.len()), span.1.min(scene.items.len()));
     debug_assert!(scene.items[..span.0].iter().chain(&scene.items[span.1..]).all(|it| overrides.hidden.get(it.slot as usize).copied().unwrap_or(false)), "an object outside the span is drawn");
     debug_assert_eq!(text, has_text(scene));
-    encode_composed_span_over(doc, assets, scene, overrides, &[], None, None, (span.0, span.1.max(span.0)), text)
+    assemble_composed(doc, assets, scene, overrides, &[], None, None, (span.0, span.1.max(span.0)), text).into_list()
 }
 
 #[allow(clippy::too_many_arguments)]
-fn encode_composed_span_over(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, mut memory: Option<&mut EncodeMemory>, span: (usize, usize), text: bool) -> DrawList {
+fn assemble_composed(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, mut memory: Option<&mut EncodeMemory>, span: (usize, usize), text: bool) -> Assembled {
     let bypass = overrides.bypass_effects;
     let current = encode_scene_span(assets, overrides.live, scene, overrides.hidden, overrides.translations, None, bypass, true, memory.as_deref_mut(), span, text);
     let camera_stack = if bypass { None } else { scene.vfx.as_ref().map(|v| &v.scene).filter(|s| !s.is_empty()) };
@@ -1642,12 +1838,19 @@ fn encode_composed_span_over(doc: &Document, assets: &Assets, scene: &Scene, ove
     // The exportSVG predicate runs on visible source drawables, not on emitted
     // GPU primitives: active unused effect scopes and a truthy zero-output
     // generator batch still require the whole-frame Canvas export branch.
-    let composited_export = camera_stack.is_some() || batch.is_some() || scene.items[span.0..span.1].iter().any(|it| {
-        !overrides.hidden.get(it.slot as usize).copied().unwrap_or(false) && (
-            (!bypass && it.export_vfx) || it.kind == ItemKind::Mesh ||
-            (it.kind == ItemKind::Poly && scene.figures[it.figure as usize].polyfills.get(it.index as usize).and_then(|poly| poly.surface.as_ref()).is_some_and(|surface| surface.depth_test))
-        )
-    });
+    let shown = |slot: usize| !overrides.hidden.get(slot).copied().unwrap_or(false);
+    let composited_export = camera_stack.is_some() || batch.is_some() || if scene.spanned() && span == (0, scene.items.len()) {
+        // Where each object's items lie says what they hold, without reading them.
+        let wanted = crate::geometry::SPAN_MESH | crate::geometry::SPAN_DEPTH_SURFACE | if bypass { 0 } else { crate::geometry::SPAN_EXPORT_VFX };
+        scene.spans.iter().enumerate().any(|(slot, span)| span.flags & wanted != 0 && shown(slot))
+    } else {
+        scene.items[span.0..span.1].iter().any(|it| {
+            shown(it.slot as usize) && (
+                (!bypass && it.export_vfx) || it.kind == ItemKind::Mesh ||
+                (it.kind == ItemKind::Poly && scene.figures[it.figure as usize].polyfills.get(it.index as usize).and_then(|poly| poly.surface.as_ref()).is_some_and(|surface| surface.depth_test))
+            )
+        })
+    };
     let (generator_outs, materials) = batch.map(generators::encode).unwrap_or_default();
     let hidden_uids: std::collections::HashSet<u32> = match batch {
         Some(_) => overrides.hidden.iter().enumerate().filter(|&(_, &h)| h).filter_map(|(slot, _)| scene.objects.get(slot).map(|o| o.uid)).collect(),
@@ -1656,8 +1859,8 @@ fn encode_composed_span_over(doc: &Document, assets: &Assets, scene: &Scene, ove
     let walker = |outs| batch.map(|batch| generators::Walker::new(batch, outs, &hidden_uids)).filter(|w| !w.is_empty());
     let mut frame_walker = walker(&generator_outs);
     let mut b = Builder::new();
-    // Most frames place every object at the top level: room for all their primitives at once, not grown a push at a time.
-    b.prims[0].reserve(current.objects.iter().flatten().map(|o| o.items.prims.len() + o.outline.prims.len()).sum());
+    // Most frames place every object at the top level: room for all their pieces (an outline and items each) at once.
+    b.prims[0].reserve(2 * current.objects.len() + 1);
     let mut root = Out::new();
     background(doc, assets, scene, overrides.background, &mut root);
     let background_prims = root.prims.len() as u32;
@@ -1728,8 +1931,7 @@ fn encode_composed_span_over(doc: &Document, assets: &Assets, scene: &Scene, ove
         }
         close_ghost(&mut b, &mut open, ghosts);
     }
-    let (prims, paints, points, groups, passes, layers, glyphs) = b.finish();
-    DrawList { composited_export, prims, paints, points, groups, passes, background_prims, layers, materials, glyphs }
+    Assembled { composited_export, background_prims, materials, ..b.finish() }
 }
 
 /// The ghosts encoded, each as the last frame encoded it when it is the same scene under the same settings. A live cel is drawn in
@@ -1776,10 +1978,76 @@ fn place_ghost(b: &mut Builder, open: &mut Option<(u32, usize)>, ghosts: &[Ghost
     place(b, source.scene, &scenes[ghost as usize], range, open.expect("opened above").1, source.hidden, None);
 }
 
+/// What a group's primitives are made of until the list is put together ([`Builder::finish`]): primitives made for this list
+/// (backgrounds, composites, generated effects), or a part of an encoded object, as it was encoded, its tables at `bases`.
+enum Piece {
+    Own(Vec<Prim>),
+    Part { object: Arc<ObjectOut>, out: u32, range: (u32, u32), bases: (u32, u32, u32) },
+}
+
+impl Piece {
+    fn len(&self) -> usize {
+        match self {
+            Piece::Own(prims) => prims.len(),
+            Piece::Part { range, .. } => (range.1 - range.0) as usize,
+        }
+    }
+
+    /// Appends the piece's primitives, in group `group`, to `to`.
+    fn extend(&self, group: u32, to: &mut Vec<Prim>) {
+        match self {
+            Piece::Own(prims) => to.extend(prims.iter().map(|p| Prim { group, ..*p })),
+            Piece::Part { object, out, range, bases } => to.extend(object_part(object, *out).prims[range.0 as usize..range.1 as usize].iter().map(|p| Prim { group, ..placed(p, *bases) })),
+        }
+    }
+
+    /// Writes the piece's primitives, in group `group`, to `to` (as long as the piece).
+    fn write(&self, group: u32, to: &mut [Prim]) {
+        match self {
+            Piece::Own(prims) => {
+                for (to, p) in to.iter_mut().zip(prims) {
+                    *to = Prim { group, ..*p };
+                }
+            }
+            Piece::Part { object, out, range, bases } => {
+                for (to, p) in to.iter_mut().zip(&object_part(object, *out).prims[range.0 as usize..range.1 as usize]) {
+                    *to = Prim { group, ..placed(p, *bases) };
+                }
+            }
+        }
+    }
+}
+
+/// Part `out` of an encoded object: its outline (0), its items (1) or the items of node `out - 2`.
+fn object_part(object: &ObjectOut, out: u32) -> &Out {
+    match out {
+        0 => &object.outline,
+        1 => &object.items,
+        n => &object.nodes[n as usize - 2].out,
+    }
+}
+
+/// A primitive of an `Out` whose tables were appended at `bases` (paints, polyline points, glyphs), pointing at them.
+fn placed(p: &Prim, (paint_base, point_base, glyph_base): (u32, u32, u32)) -> Prim {
+    let mut p = *p;
+    if p.paint != NO_PAINT {
+        p.paint += paint_base;
+    }
+    if p.kind & 255 == K_POLYLINE {
+        p.b[1] = f32::from_bits(p.b[1].to_bits() + point_base);
+    }
+    if p.kind & 255 == K_GLYPH {
+        p.b[0] = f32::from_bits(p.b[0].to_bits() + glyph_base);
+    } else if p.kind & F_GLYPH_VECTOR != 0 {
+        p.b[2] = f32::from_bits(p.b[2].to_bits() + glyph_base);
+    }
+    p
+}
+
 /// Collects prims per isolation group, then orders them deepest first.
 struct Builder {
     groups: Vec<Group>,
-    prims: Vec<Vec<Prim>>,
+    prims: Vec<Vec<Piece>>,
     paints: Vec<[f32; 4]>,
     points: Vec<[f32; 2]>,
     glyphs: Vec<GlyphInstance>,
@@ -1850,7 +2118,7 @@ impl Builder {
         };
         self.groups[target].bounds = bounds;
         let parent = g.parent as usize;
-        self.prims[parent].push(composite(target as u32, opacity, bounds));
+        self.own(parent, composite(target as u32, opacity, bounds));
         self.grow(parent, bounds);
     }
 
@@ -1877,26 +2145,39 @@ impl Builder {
         base
     }
 
+    /// A primitive made for this list, at the end of `target`'s.
+    fn own(&mut self, target: usize, p: Prim) {
+        match self.prims[target].last_mut() {
+            Some(Piece::Own(prims)) => prims.push(p),
+            _ => self.prims[target].push(Piece::Own(vec![p])),
+        }
+    }
+
     /// Adds primitives `range` of `out`, whose tables start at the given bases.
-    fn add_part(&mut self, target: usize, out: &Out, range: std::ops::Range<usize>, (paint_base, point_base, glyph_base): (u32, u32, u32)) {
+    fn add_part(&mut self, target: usize, out: &Out, range: std::ops::Range<usize>, bases: (u32, u32, u32)) {
         // A part of an object grows its group by the whole object's bounds, which cover it.
         if (!range.is_empty() || out.prims.is_empty()) && out.bounds[0] <= out.bounds[2] {
             self.grow(target, out.bounds);
         }
         for p in &out.prims[range] {
-            let mut p = *p;
-            if p.paint != NO_PAINT {
-                p.paint += paint_base;
-            }
-            if p.kind & 255 == K_POLYLINE {
-                p.b[1] = f32::from_bits(p.b[1].to_bits() + point_base);
-            }
-            if p.kind & 255 == K_GLYPH {
-                p.b[0] = f32::from_bits(p.b[0].to_bits() + glyph_base);
-            } else if p.kind & F_GLYPH_VECTOR != 0 {
-                p.b[2] = f32::from_bits(p.b[2].to_bits() + glyph_base);
-            }
-            self.prims[target].push(p);
+            self.own(target, placed(p, bases));
+        }
+    }
+
+    /// [`Builder::add_ref`] of part `out` of an encoded object ([`object_part`]): its primitives are not copied until the list is put together.
+    fn add_object_ref(&mut self, target: usize, object: &Arc<ObjectOut>, out: u32) {
+        let bases = self.tables(object_part(object, out));
+        self.add_object_part(target, object, out, 0..object_part(object, out).prims.len(), bases);
+    }
+
+    /// [`Builder::add_part`] of part `out` of an encoded object.
+    fn add_object_part(&mut self, target: usize, object: &Arc<ObjectOut>, out: u32, range: std::ops::Range<usize>, bases: (u32, u32, u32)) {
+        let part = object_part(object, out);
+        if (!range.is_empty() || part.prims.is_empty()) && part.bounds[0] <= part.bounds[2] {
+            self.grow(target, part.bounds);
+        }
+        if !range.is_empty() {
+            self.prims[target].push(Piece::Part { object: object.clone(), out, range: (range.start as u32, range.end as u32), bases });
         }
     }
 
@@ -1904,7 +2185,7 @@ impl Builder {
     /// layer, then its items with filtered nodes in their place. An `entry`
     /// holding effects is drawn on a raster of its own even when opaque, and so is
     /// a `raster` entry, which holds depth-tested faces or text.
-    fn object(&mut self, parent: usize, o: &ObjectOut, entry: bool, raster: bool) {
+    fn object(&mut self, parent: usize, o: &Arc<ObjectOut>, entry: bool, raster: bool) {
         let fx = o.figure.as_deref();
         let filtered = fx.is_some_and(|f| !f.stack.is_empty());
         let layered = filtered || (entry && fx.is_some());
@@ -1926,51 +2207,53 @@ impl Builder {
         if !o.outline.prims.is_empty() {
             if o.outline_alpha < 1.0 {
                 let id = self.open(target, o.outline_alpha);
-                self.add_ref(id, &o.outline);
+                self.add_object_ref(id, o, 0);
                 self.close(id, o.outline_alpha, true);
             } else {
-                self.add_ref(target, &o.outline);
+                self.add_object_ref(target, o, 0);
             }
         }
         if o.nodes.is_empty() {
-            self.add_ref(target, &o.items);
+            self.add_object_ref(target, o, 1);
         } else {
             let bases = self.tables(&o.items);
             let mut from = 0;
-            for node in &o.nodes {
-                self.add_part(target, &o.items, from..node.at, bases);
+            for (n, node) in o.nodes.iter().enumerate() {
+                self.add_object_part(target, o, 1, from..node.at, bases);
                 let f = &node.fx;
                 let id = self.open_layer(target, 1.0, f.stack.clone(), LayerKind::Nested { bounds: f.bounds, domain: f.domain, scale: f.scale });
-                self.add_ref(id, &node.out);
+                self.add_object_ref(id, o, n as u32 + 2);
                 self.close(id, 1.0, true);
                 from = node.at;
             }
-            self.add_part(target, &o.items, from..o.items.prims.len(), bases);
+            self.add_object_part(target, o, 1, from..o.items.prims.len(), bases);
         }
         if isolate {
             self.close(target, o.opacity, true);
         }
     }
 
-    #[allow(clippy::type_complexity)]
-    fn finish(mut self) -> (Vec<Prim>, Vec<[f32; 4]>, Vec<[f32; 2]>, Vec<Group>, Vec<Pass>, Vec<EffectLayer>, Vec<GlyphInstance>) {
+    /// The groups' pieces in the list's order (deepest groups first, each group's in the order placed) and the passes over them; the
+    /// primitives are written when the list is put together ([`Assembled`]).
+    fn finish(mut self) -> Assembled {
         let max_depth = self.groups.iter().map(|g| g.depth).max().unwrap_or(0);
-        let mut prims = Vec::with_capacity(self.prims.iter().map(Vec::len).sum());
+        let mut pieces = Vec::with_capacity(self.prims.iter().map(Vec::len).sum());
         let mut passes = Vec::new();
+        let mut total = 0usize;
         for depth in (0..=max_depth).rev() {
-            let start = prims.len() as u32;
+            let start = total as u32;
             for (gi, list) in self.prims.iter_mut().enumerate() {
                 if self.groups[gi].depth != depth {
                     continue;
                 }
-                for mut p in list.drain(..) {
-                    p.group = gi as u32;
-                    prims.push(p);
+                for piece in list.drain(..) {
+                    total += piece.len();
+                    pieces.push((gi as u32, piece));
                 }
             }
-            passes.push(Pass { depth, start, end: prims.len() as u32 });
+            passes.push(Pass { depth, start, end: total as u32 });
         }
-        (prims, self.paints, self.points, self.groups, passes, self.layers, self.glyphs)
+        Assembled { pieces, total, paints: self.paints, points: self.points, groups: self.groups, passes, layers: self.layers, glyphs: self.glyphs, composited_export: false, background_prims: 0, materials: 0 }
     }
 }
 
@@ -2039,8 +2322,8 @@ mod tests {
                     let (mut a, mut b) = (Builder::new(), Builder::new());
                     place(&mut a, &scene, &encoded, whole, 0, &hidden, None);
                     place_general(&mut b, &scene, &encoded, whole, 0, &hidden, None);
-                    let (a, b) = (a.finish(), b.finish());
-                    assert_eq!(format!("{:?}", (&a.0, &a.1, &a.2, &a.3, &a.4)), format!("{:?}", (&b.0, &b.1, &b.2, &b.3, &b.4)), "{name} tick {tick}");
+                    let (a, b) = (a.finish().into_list(), b.finish().into_list());
+                    assert_eq!(format!("{:?}", (&a.prims, &a.paints, &a.points, &a.groups, &a.passes)), format!("{:?}", (&b.prims, &b.paints, &b.points, &b.groups, &b.passes)), "{name} tick {tick}");
                 }
             }
         }

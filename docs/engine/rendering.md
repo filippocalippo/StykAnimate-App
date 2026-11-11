@@ -514,6 +514,25 @@ every such list with the list encoded whole. A pose kept for an onion skin is al
 objects are resolved again against a figure that was redefined (`Loader::restyle_frame`; `styk-engine/tests/ghost_scenarios.rs` draws every
 step of the recorded editing scenarios with a kept stage and a fresh one and compares them).
 
+A list is put together from pieces (`Builder` keeps, per group, the parts of the encoded objects it places, `Arc<ObjectOut>` with the
+bases of their tables, and the primitives made for the list: backgrounds, composites, generated effects), and its primitives are written
+once, when it is put together, not copied into groups and again into the list. The edit frame's lists are shared
+(`encode_composed_shared`): the memory keeps the list it returned and the one before it, and the next list is written over the one before
+it in place when nothing else holds that one any more (the renderer and the stage hold the newer) and it is laid out as the new one (the
+same pieces of the same lengths in the same groups): only the pieces that are not the same parts of the same encoded objects are written.
+The list also says how it differs from the list before it (`ListChanges`: ranges of primitives), and the stage tells the renderer
+(`Renderer::note_changes`): a renderer that holds that list writes only those ranges of its primitive buffer, and keeps what it worked out of
+the list's primitives unless a changed one composites, draws faces or adds light (`styk-render` `lifetime_tests`, drawn against the list set
+whole). An encoder that finds an object's items reads where they lie (`Scene::spans`) rather than every item of the frame. The list before
+the last is let go of once the frame stays on show (`Stage::rest`, with the session's `rest` when the stage prepares a pick), so a frame at
+rest holds one list. `styk-eval/tests/build_memory.rs` compares every list, written over or not, with and without onion skins, with the list
+encoded whole, and the ranges it reports applied to the list before it with the list.
+
+Measured on 2,000 figures of 100 segments in the desktop app (2026-11-11, medians of three runs, same sitting): a joint drag frame fell from
+about 41 ms to about 6 ms of the interface thread (the stage's part from about 33 ms to about 3.4 ms), a figure move frame from about 18 ms to
+about 4 ms; natively (`styk-engine/tests/dense_bench.rs`) the drag step's session frame fell from 21 ms to under 1 ms, its geometry read from
+6 ms to under 0.1 ms and its list from 19 ms to under 1 ms.
+
 ## In the app
 
 `src/engine/engine-stage.mjs` draws the page's scene canvas (`#scene`) with the

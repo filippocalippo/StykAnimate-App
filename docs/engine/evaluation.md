@@ -345,7 +345,15 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   Each build is made over the one before it (`BuildMemory`): an object whose typed node, figure, root and inverse-kinematics
   solution are the ones its last build had is not built again, so a gesture builds the figure it changes and the figures that hang
   from what moved, not the frame. The scene is the same scene whether objects were built or kept
-  (`styk-eval/tests/build_memory.rs`).
+  (`styk-eval/tests/build_memory.rs`). A built scene says where each object's items, measured primitives and points lie
+  (`Scene::spans`, with what they hold that an encoder asks of the whole frame: text, meshes, faces, effects for an export), so a reader
+  of a few figures (the geometry read, `app_bounds_of`, the encoder finding its runs) does not pass over the frame's items. The session's
+  builds are shared (`build_remembering_shared`): the memory keeps the scene it returned and the one before it, and the next scene is
+  written over the one before it, in place, when nothing else holds that one any more (the stage and the interface have moved to the
+  newer one) and every object built since holds as many items, measured primitives and points as before, nothing in the frame being
+  movieclip content, meshes, faces or colour transitions: only those objects' parts are written. A drag step of one figure of 2,000 so
+  writes that figure, not the 200,000 items of the frame. The older scene is let go of once the frame stays on show (`EditSession.rest`,
+  called by the stage when it prepares a pick, `BuildMemory::rest`), so a frame at rest holds one scene.
 - A geometry read names the read the interface holds (`since`). The session sends the groups of the objects built since that
   read, or all of them when the read named is not the one the session last answered. The groups held stay as they are, so the
   descriptors the canvas keeps by their identity stay valid while a gesture moves other figures. Unchanged: the same

@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use styk_doc::Value;
-use styk_eval::drawlist::{DrawList, EncodeMemory, Ghost, Overrides, encode_composed_remembering};
+use styk_eval::drawlist::{DrawList, EncodeMemory, Ghost, Overrides, encode_composed_shared};
 use styk_eval::eval::Frame;
 use styk_eval::geometry::{BuildMemory, Scene, build_remembering_plain, build_remembering_plain_over};
 use styk_eval::load::Loader;
@@ -175,6 +175,8 @@ pub struct EditScene {
     /// The last draw list and everything it was encoded from: a frame drawn again with nothing of that changed (a pan, a zoom, a
     /// redraw for the overlay) is that list, not encoded again, and the renderer does not upload it again (`Renderer::set_list`).
     last: Option<(ListKey, Arc<DrawList>)>,
+    /// How the list encoded last differs from the one before it, for a renderer that holds that one ([`EditScene::take_changes`]).
+    changes: Option<styk_eval::drawlist::ListChanges>,
 }
 
 /// What a draw list was encoded from. The scenes, frames, batch and views are held, so an address compared here is never another
@@ -375,6 +377,18 @@ impl EditScene {
         Ok(())
     }
 
+    /// How the list [`EditScene::draw_list`] encoded last differs from the list encoded before it (`None` when it was not encoded over it, or
+    /// was drawn again as it was): a renderer that holds that list writes only those primitives ([`styk_render::Renderer::note_changes`]).
+    pub fn take_changes(&mut self) -> Option<styk_eval::drawlist::ListChanges> {
+        self.changes.take()
+    }
+
+    /// The frame stays on show: what is kept to encode the next frame over (the list before the last) is let go of.
+    pub fn rest(&mut self) {
+        self.encoded.rest();
+        self.changes = None;
+    }
+
     /// Whether ghost `id` is kept and was made from `record` (the same node: the session's frame has not changed).
     pub fn has_ghost(&self, id: u32, record: &Value) -> bool {
         self.ghosts.get(&id).and_then(|pose| pose.record.as_ref()).is_some_and(|held| held.same_node(record))
@@ -516,9 +530,11 @@ impl EditScene {
             return Ok(Some(list));
         }
         self.last = None;
+        self.changes = None;
         if options.onions.is_empty() {
             let frame_scene = scene;
-            let list = Arc::new(encode_composed_remembering(doc, &generation.assets, &frame_scene, &overrides, &[], None, &mut self.encoded));
+            let (list, changes) = encode_composed_shared(doc, &generation.assets, &frame_scene, &overrides, &[], None, &mut self.encoded);
+            self.changes = changes;
             self.release_idle_ghosts();
             self.last = key.map(|key| (key, list.clone()));
             return Ok(Some(list));
@@ -542,7 +558,8 @@ impl EditScene {
             .zip(&scenes)
             .map(|(onion, (ghost_scene, ghost_hidden))| Ghost { scene: ghost_scene, opacity: onion.opacity, tint: onion.tint, hidden: ghost_hidden })
             .collect();
-        let list = Arc::new(encode_composed_remembering(doc, &generation.assets, &scene, &overrides, &ghosts, Some(&order), &mut self.encoded));
+        let (list, changes) = encode_composed_shared(doc, &generation.assets, &scene, &overrides, &ghosts, Some(&order), &mut self.encoded);
+        self.changes = changes;
         drop(places);
         self.release_idle_ghosts();
         self.last = key.map(|key| (key, list.clone()));

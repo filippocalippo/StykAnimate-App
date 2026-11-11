@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 mod cache;
 pub mod interface;
-pub use interface::pack_groups;
+pub use interface::{pack_groups, packed_size};
 pub(crate) use cache::{Resolved, arc_allocation};
 pub use cache::{ClipSceneCache, RetainedScene, SceneBudget};
 
@@ -267,6 +267,25 @@ pub struct ObjectSpatial {
 }
 
 impl ObjectGeometry {
+    /// Makes this `source` as a scene places it, its raw segments' points moved by `base` (where the object's points start in the scene),
+    /// in the buffers this one holds: a scene written over in place ([`build_remembering_shared`]) allocates nothing for an object whose
+    /// parts are as long as they were.
+    fn assign_from(&mut self, source: &ObjectGeometry, base: u32) {
+        let ObjectGeometry { slot, uid, figure, root, scale, ends, starts, lengths, raw_segments, opacity, resolved, spatial, rig, extent, angles, solution } = source;
+        (self.slot, self.uid, self.figure, self.root, self.scale, self.opacity, self.resolved, self.extent) = (*slot, *uid, *figure, *root, *scale, *opacity, *resolved, *extent);
+        self.ends.clone_from(ends);
+        self.starts.clone_from(starts);
+        self.lengths.clone_from(lengths);
+        self.angles.clone_from(angles);
+        self.raw_segments.clone_from(raw_segments);
+        for raw in &mut self.raw_segments {
+            raw.points = (raw.points.0 + base, raw.points.1 + base);
+        }
+        self.spatial.clone_from(spatial);
+        self.rig.clone_from(rig);
+        self.solution.clone_from(solution);
+    }
+
     pub fn joint(&self, fig: &Figure, handle: u32) -> Option<[f64; 2]> {
         if handle == 0 {
             return Some(self.root);
@@ -323,9 +342,58 @@ pub struct Scene {
     /// By object slot, the build ([`BuildMemory::built_in`]) that made its geometry, for a scene built with a memory (empty for any other):
     /// a number is never another build's in any memory, so an object with the same number has the same items.
     pub built_in: Vec<u64>,
+    /// By object slot, where its items, measured primitives and points lie in [`Scene::items`], [`Scene::measured`] and
+    /// [`Scene::points`] (an object's are contiguous in a built scene): what reads one figure's parts without a pass over the frame's.
+    /// Empty for a scene the builder did not make.
+    pub spans: Vec<SlotSpan>,
+    /// How many items and measured primitives [`Scene::spans`] were made for: a scene whose buffers were changed since (a test that
+    /// adds an item) is read item by item.
+    pub spanned_lengths: (usize, usize),
     /// Which scene this is: every build is numbered, and a scene is never changed once built, so what was made of a stamp is what
     /// the scene still gives. Unlike an address, a stamp is never another scene's.
     pub stamp: Stamp,
+}
+
+/// Where one object's parts lie in a built scene's buffers, each `start..end` ([`Scene::spans`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SlotSpan {
+    pub items: (u32, u32),
+    pub measured: (u32, u32),
+    pub points: (u32, u32),
+    /// `SPAN_*`: what the object's items hold that an encoder asks of the whole frame.
+    pub flags: u8,
+}
+
+/// [`SlotSpan::flags`]: an item an export draws with effects ([`Item::export_vfx`]).
+pub const SPAN_EXPORT_VFX: u8 = 1;
+/// A mesh.
+pub const SPAN_MESH: u8 = 2;
+/// A polygon that is a depth-tested surface.
+pub const SPAN_DEPTH_SURFACE: u8 = 4;
+/// Text.
+pub const SPAN_TEXT: u8 = 8;
+
+impl SlotSpan {
+    fn len(range: (u32, u32)) -> usize {
+        (range.1 - range.0) as usize
+    }
+
+    /// The flags of an object whose items in the scene are `items`.
+    fn flags_of(figures: &[Arc<Figure>], items: &[Item]) -> u8 {
+        let mut flags = 0;
+        for it in items {
+            if it.export_vfx {
+                flags |= SPAN_EXPORT_VFX;
+            }
+            match it.kind {
+                ItemKind::Mesh => flags |= SPAN_MESH,
+                ItemKind::Text => flags |= SPAN_TEXT,
+                ItemKind::Poly if figures.get(it.figure as usize).and_then(|figure| figure.polyfills.get(it.index as usize)).and_then(|poly| poly.surface.as_ref()).is_some_and(|surface| surface.depth_test) => flags |= SPAN_DEPTH_SURFACE,
+                _ => {}
+            }
+        }
+        flags
+    }
 }
 
 /// The number a build gives its scene (0: a scene that was not built, which nothing is remembered of).
@@ -352,6 +420,23 @@ impl Scene {
     /// The actual styled/pose-choice figure of this object's geometry.
     pub fn figure_for(&self, slot: usize) -> Option<&Figure> {
         self.figures.get(*self.figure_of.get(slot)? as usize).map(|f| &**f)
+    }
+
+    /// The items of the object at `slot`, when the scene says where they lie ([`Scene::spans`]); `None` for a scene that does not.
+    pub fn items_of(&self, slot: usize) -> Option<&[Item]> {
+        let span = self.spans.get(slot).filter(|_| self.spanned())?;
+        self.items.get(span.items.0 as usize..span.items.1 as usize)
+    }
+
+    /// Whether the scene says where each object's parts lie ([`Scene::spans`]).
+    pub fn spanned(&self) -> bool {
+        self.spans.len() == self.objects.len() && self.spanned_lengths == (self.items.len(), self.measured.len())
+    }
+
+    /// [`Scene::items_of`] for [`Scene::measured`].
+    pub fn measured_of(&self, slot: usize) -> Option<&[Item]> {
+        let span = self.spans.get(slot).filter(|_| self.spanned())?;
+        self.measured.get(span.measured.0 as usize..span.measured.1 as usize)
     }
 
     pub fn points_of(&self, item: &Item) -> &[[f64; 2]] {
@@ -482,6 +567,12 @@ pub struct BuildMemory {
     serial: u64,
     /// What the scene the last build returned was spliced of besides its objects, for [`build_remembering_plain_over`].
     spliced: Option<Spliced>,
+    /// The scenes [`build_remembering_shared`] returned last, oldest first, with what each was spliced of.
+    shared: Vec<(Arc<Scene>, Spliced)>,
+    /// The scene the build in progress may be written over ([`build_remembering_shared`]).
+    over: Option<(Scene, Spliced)>,
+    /// How many builds were written over an earlier scene.
+    written_over: u64,
 }
 
 /// The inputs of the splice other than the objects' builds, and the stamp of the scene they gave.
@@ -500,6 +591,8 @@ impl BuildMemory {
             self.slots.clear();
             self.slots.resize_with(count, || None);
             self.spliced = None;
+            self.shared.clear();
+            self.over = None;
             self.measure = Some((measure, version));
         }
     }
@@ -537,6 +630,18 @@ impl BuildMemory {
                 (Some(a), Some(b)) => Arc::ptr_eq(a, b),
                 _ => false,
             }
+    }
+
+    /// Lets go of the scenes kept to build over ([`build_remembering_shared`]) but the last one returned: the frame stays on show, and the
+    /// scene before it is a frame's worth of memory that no build needs until the next gesture or seek.
+    pub fn rest(&mut self) {
+        let keep = self.shared.len().saturating_sub(1);
+        self.shared.drain(..keep);
+    }
+
+    /// How many of this memory's builds were written over an earlier scene in place ([`build_remembering_shared`]).
+    pub fn written_over(&self) -> u64 {
+        self.written_over
     }
 
     /// The number of the last build (builds are numbered in the order they end, across every memory).
@@ -1354,6 +1459,106 @@ pub fn build_remembering_plain_over(doc: &Document, frame: &Frame, memory: &mut 
     build_core(doc, frame, None, Measure::Off, true, Some(memory), Some(previous))
 }
 
+/// [`build_remembering`], shared: the memory keeps the scene it returns and the one before it, and builds the next over the older one in place
+/// when nothing else holds it any more and its objects lie where this build's do (a gesture that changes a few figures of a dense frame writes
+/// those, not the frame). The scene is the scene built whole. The older scene is kept only between builds that follow each other: let it go
+/// with [`BuildMemory::rest`] once the frame stays on show.
+pub fn build_remembering_shared(doc: &Document, frame: &Frame, memory: &mut BuildMemory) -> Arc<Scene> {
+    memory.over = if memory.shared.len() >= 2 {
+        let (scene, spliced) = memory.shared.remove(0);
+        Arc::try_unwrap(scene).ok().map(|scene| (scene, spliced))
+    } else {
+        None
+    };
+    let scene = Arc::new(build_filtered(doc, frame, None, Measure::Shapes, true, Some(memory)));
+    memory.over = None;
+    if let Some(spliced) = memory.spliced.clone() {
+        memory.shared.push((scene.clone(), spliced));
+    }
+    scene
+}
+
+/// Whether the object at `slot` has effects for an export to draw (`hasDrawableVfx`): what each of its items is marked with.
+fn object_export_vfx(frame: &Frame, figures: &[Arc<Figure>], fig_of: &[u32], slot: usize) -> bool {
+    frame.export_vfx.get(slot).copied().unwrap_or_else(|| {
+        // Editor-composed frames already carry sampled clips in their typed
+        // pose scopes; no timeline sampling is needed here.
+        let object = &frame.objects[slot];
+        let container = figures[fig_of[slot] as usize].movieclip.is_some();
+        object.vfx.as_ref().is_some_and(|pose| {
+            if container { crate::vfx::active(pose.figure()).next().is_some() }
+            else { pose.entries.iter().any(|(_, stack)| crate::vfx::active(stack).next().is_some()) }
+        }) || frame.vfx.as_ref().and_then(|vfx| vfx.object(slot as u32)).is_some_and(|vfx| !vfx.figure.is_empty() || vfx.attached.is_some() || !vfx.segments.is_empty())
+    })
+}
+
+/// Makes `over`, a scene an earlier build of this memory spliced (`spliced`), the scene of this build (`scene`, not spliced yet, its objects
+/// `built`), writing in place the objects whose build is not the one `over` holds: `false`, with `over` unchanged, unless it can. It can when the
+/// frame is spliced as `over` was (the draw order, the figures, the scene-level inputs), no object brings movieclip content, meshes, faces or
+/// colour transitions, and every object built since holds as many items, measured primitives and points as the one it replaces: then every
+/// other object's parts lie where they lay, and are what a splice would write there.
+fn patch(over: &mut Scene, spliced: &Spliced, scene: &mut Scene, built: &[Option<Arc<Built>>], fig_of: &[u32], frame: &Frame) -> bool {
+    let count = built.len();
+    let plain_scene = over.owners.is_empty() && over.owner_scales.is_empty() && over.chains.is_empty() && over.clip_vfx.is_empty() && over.meshes.is_empty() && over.depths.is_empty() && over.transitions.is_empty();
+    let same_vfx = match (&over.vfx, &scene.vfx) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        _ => false,
+    };
+    if !plain_scene || !same_vfx || spliced.draw_order != frame.draw_order || spliced.export_vfx != frame.export_vfx
+        || over.objects.len() != count || over.spans.len() != count || over.built_in.len() != count || scene.built_in.len() != count
+        || over.figure_of != fig_of || over.figures.len() != scene.figures.len() || !over.figures.iter().zip(&scene.figures).all(|(a, b)| Arc::ptr_eq(a, b))
+    {
+        return false;
+    }
+    let mut placed = vec![false; count];
+    for &slot in &frame.draw_order {
+        if let Some(flag) = placed.get_mut(slot as usize) {
+            *flag = true;
+        }
+    }
+    let changed: Vec<usize> = (0..count).filter(|&slot| over.built_in[slot] != scene.built_in[slot]).collect();
+    let fits = changed.iter().all(|&slot| {
+        let span = over.spans[slot];
+        match built[slot].as_deref().filter(|_| placed[slot]) {
+            None => SlotSpan { flags: 0, ..span } == SlotSpan::default(),
+            Some(b) => b.figures.is_empty() && b.owners.is_empty() && b.owner_scales.is_empty() && b.chains.is_empty() && b.clip_vfx.is_empty() && b.meshes.is_empty() && b.depths.is_empty() && b.transitions.is_empty()
+                && b.items.len() == SlotSpan::len(span.items) && b.measured.len() == SlotSpan::len(span.measured) && b.points.len() == SlotSpan::len(span.points),
+        }
+    });
+    if !fits {
+        return false;
+    }
+    for &slot in &changed {
+        let span = over.spans[slot];
+        let Some(b) = built[slot].as_deref().filter(|_| placed[slot]) else {
+            over.objects[slot] = ObjectGeometry::default();
+            continue;
+        };
+        // As the splice places them, over buffers that hold no movieclip content, meshes, faces or transitions: only points move.
+        let base = span.points.0;
+        over.points[span.points.0 as usize..span.points.1 as usize].copy_from_slice(&b.points);
+        over.objects[slot].assign_from(&b.geometry, base);
+        for (place, it) in over.measured[span.measured.0 as usize..span.measured.1 as usize].iter_mut().zip(&b.measured) {
+            *place = *it;
+            place.points = (it.points.0 + base, it.points.1 + base);
+        }
+        let export_vfx = object_export_vfx(frame, &scene.figures, fig_of, slot);
+        for (place, it) in over.items[span.items.0 as usize..span.items.1 as usize].iter_mut().zip(&b.items) {
+            *place = *it;
+            place.export_vfx |= export_vfx;
+            place.points = (it.points.0 + base, it.points.1 + base);
+        }
+        over.spans[slot].flags = SlotSpan::flags_of(&over.figures, &over.items[span.items.0 as usize..span.items.1 as usize]);
+    }
+    over.built_in = std::mem::take(&mut scene.built_in);
+    over.warnings = std::mem::take(&mut scene.warnings);
+    over.camera = scene.camera;
+    over.background = scene.background;
+    over.background_color = scene.background_color;
+    true
+}
+
 /// Worker build carrying cancellation into nested clips.
 pub fn build_cancellable(doc: &Document, frame: &Frame, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
     build_core_checked(doc, frame, None, Measure::Off, true, None, None, cancelled)
@@ -1622,6 +1827,17 @@ fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, me
         if nothing_new && same_as.is_some_and(|previous| memory.spliced_as(previous, &scene, &fig_of, frame)) {
             return None;
         }
+        // A scene of an earlier build that nothing else holds any more is this one where its objects lie as this build's do: the objects built
+        // since it are written in their places, and the rest of it is not copied.
+        if let Some((mut over, spliced)) = memory.over.take()
+            && patch(&mut over, &spliced, &mut scene, &built, &fig_of, frame)
+        {
+            over.stamp = Stamp(STAMPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
+            over.account_buffers();
+            memory.spliced = Some(Spliced { stamp: over.stamp.get(), draw_order: frame.draw_order.clone(), export_vfx: frame.export_vfx.clone() });
+            memory.written_over += 1;
+            return Some(over);
+        }
     }
     // Splice in draw order.
     let total_items: usize = built.iter().flatten().map(|b| b.items.len()).sum();
@@ -1630,10 +1846,12 @@ fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, me
     scene.items.reserve(total_items);
     scene.measured.reserve(total_measured);
     scene.points.reserve(total_points);
+    scene.spans = vec![SlotSpan::default(); count];
     for &slot in &frame.draw_order {
         if cancelled() { return None; }
         // Read in place: a build the memory also holds is shared, and only the parts the scene owns are copied.
         let Some(b) = built[slot as usize].take() else { continue };
+        let starts = (scene.items.len() as u32, scene.measured.len() as u32, scene.points.len() as u32);
         let base = scene.points.len() as u32;
         scene.points.extend_from_slice(&b.points);
         let mut geometry = b.geometry.clone();
@@ -1667,16 +1885,7 @@ fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, me
         scene.depths.extend_from_slice(&b.depths);
         let transition_base = scene.transitions.len() as u32;
         scene.transitions.extend_from_slice(&b.transitions);
-        let export_vfx = frame.export_vfx.get(slot as usize).copied().unwrap_or_else(|| {
-            // Editor-composed frames already carry sampled clips in their typed
-            // pose scopes; no timeline sampling is needed here.
-            let object = &frame.objects[slot as usize];
-            let container = scene.figures[fig_of[slot as usize] as usize].movieclip.is_some();
-            object.vfx.as_ref().is_some_and(|pose| {
-                if container { crate::vfx::active(pose.figure()).next().is_some() }
-                else { pose.entries.iter().any(|(_, stack)| crate::vfx::active(stack).next().is_some()) }
-            }) || frame.vfx.as_ref().and_then(|vfx| vfx.object(slot)).is_some_and(|vfx| !vfx.figure.is_empty() || vfx.attached.is_some() || !vfx.segments.is_empty())
-        });
+        let export_vfx = object_export_vfx(frame, &scene.figures, &fig_of, slot as usize);
         // Copied whole, then the numbers that are offsets into the scene's buffers are moved.
         let first = scene.measured.len();
         scene.measured.extend_from_slice(&b.measured);
@@ -1707,8 +1916,13 @@ fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, me
             }
         }
         scene.objects[slot as usize] = geometry;
+        let flags = SlotSpan::flags_of(&scene.figures, &scene.items[starts.0 as usize..]);
+        if let Some(span) = scene.spans.get_mut(slot as usize) {
+            *span = SlotSpan { items: (starts.0, scene.items.len() as u32), measured: (starts.1, scene.measured.len() as u32), points: (starts.2, scene.points.len() as u32), flags };
+        }
     }
     scene.figure_of = fig_of;
+    scene.spanned_lengths = (scene.items.len(), scene.measured.len());
     scene.stamp = Stamp(STAMPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
     scene.account_buffers();
     if let Some(memory) = memory {

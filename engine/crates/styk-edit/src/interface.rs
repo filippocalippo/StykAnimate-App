@@ -240,17 +240,19 @@ impl Editor {
         let reuse = since.is_some() && since == Some(cache.token) && cache.count == count;
         let slots: Vec<usize> = (0..count).filter(|&slot| !reuse || shown.built_in[slot] > cache.through).collect();
         let full = slots.len() == count;
-        let mut groups = Vec::new();
-        if !slots.is_empty() {
-            let bounds = styk_eval::drawlist::app_bounds_of(&shown.scene, shown.prepared.doc.as_ref(), &slots);
-            styk_eval::geometry::pack_groups(&shown.scene, &slots, &bounds, &mut groups);
-        }
         cache.token += 1;
         cache.count = count;
         cache.through = shown.serial;
         // A read that changed nothing says nothing of the scene's warnings, which the interface holds.
         let warnings = if slots.is_empty() { &[][..] } else { &shown.scene.warnings[..] };
-        Ok(geometry_packet(cache.token, full, count, slots.len(), warnings, &groups))
+        // The groups are written after the header, in the packet itself (a dense frame's are megabytes): room for them is made once.
+        let mut packet = geometry_packet(cache.token, full, count, slots.len(), warnings, &[]);
+        if !slots.is_empty() {
+            packet.reserve(styk_eval::geometry::packed_size(&shown.scene, &slots));
+            let bounds = styk_eval::drawlist::app_bounds_of(&shown.scene, shown.prepared.doc.as_ref(), &slots);
+            styk_eval::geometry::pack_groups(&shown.scene, &slots, &bounds, &mut packet);
+        }
+        Ok(packet)
     }
 
     /// The geometry of a frame that is not the document's: `frame` (the frame on show with a drawing cel the document does not hold yet
