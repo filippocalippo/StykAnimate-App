@@ -110,14 +110,16 @@ export class CanvasHandleOverlay {
     }
     // Past a few dozen changed groups (a seek changes them all) the pass is full: merging their damage is quadratic and would
     // cover most of the surface.
-    if (!full) for (let index = 0, changed = 0; index < groups.length; index++)
-      if (this.groups[index]?.handles !== groups[index].handles && ++changed > 64) { full = true; break; }
+    let changed = 0, changedHandles = 0, allHandles = 0;
+    for (let index = 0; index < groups.length; index++) {
+      const group = groups[index], count = translations?.has(group.uid) ? 0 : group.handles.length;
+      allHandles += count;
+      if (this.groups[index]?.handles !== group.handles) { changed++; changedHandles += count; }
+    }
+    if (changed > 64) full = true;
     if (full) { paintX = tx; paintY = ty; shiftX = shiftY = 0; }
     // The handles projected in this pass share one array: a group of a dense frame is often a single origin.
-    let total = 0;
-    for (let index = 0; index < groups.length; index++)
-      if ((full || this.groups[index]?.handles !== groups[index].handles) && !translations?.has(groups[index].uid)) total += groups[index].handles.length;
-    const coords = new Float64Array(2 * total), next = [], dirty = [];
+    const coords = new Float64Array(2 * (full ? allHandles : changedHandles)), next = [], dirty = [];
     let filled = 0;
     for (let index = 0; index < groups.length; index++) {
       const group = groups[index], previous = this.groups[index];
@@ -188,15 +190,10 @@ export class CanvasHandleOverlay {
         context.drawImage(surface, shiftX, shiftY);
         context.globalCompositeOperation = 'source-over';
       }
-      // A clip's edge changes the antialiasing of the pixels beside it, so a region is not repainted under a clip: the
-      // handles that reach into it are painted whole on a spare surface of the same pixels (what that holds elsewhere does
-      // not matter) and the region's pixels are copied over, the full repaint's exactly. The spare goes on the next draw
-      // that repaints no region and leaves the picture where asked.
-      const regions = [...strips, ...merged.map(rect => {
-        const px = Math.round(rect.x * dpr), py = Math.round(rect.y * dpr), pw = Math.round((rect.x + rect.width) * dpr) - px, ph = Math.round((rect.y + rect.height) * dpr) - py;
-        return {px, py, pw, ph, x: px / dpr, y: py / dpr, width: pw / dpr, height: ph / dpr};
-      })];
-      for (const rect of regions) {
+      // A clip's edge changes the antialiasing of the pixels beside it, so a strip is not painted under a clip: the handles
+      // that reach into it are painted whole on a spare surface of the same pixels (what that holds elsewhere does not matter)
+      // and the strip's pixels are copied over, the full repaint's exactly. The spare goes once the view rests.
+      for (const rect of strips) {
         // Made like the surface, so both paint the same way (a browser may paint a canvas it reads back on the CPU).
         const spare = this.spare ??= new surface.constructor(physicalWidth, physicalHeight);
         const scratch = spare.getContext('2d', context.getContextAttributes?.());
@@ -207,11 +204,18 @@ export class CanvasHandleOverlay {
         context.setTransform(1, 0, 0, 1, 0, 0); context.clearRect(rect.px, rect.py, rect.pw, rect.ph);
         context.drawImage(spare, rect.px, rect.py, rect.pw, rect.ph, rect.px, rect.py, rect.pw, rect.ph);
       }
-      if (regions.length) visible = this.count(next, paintX, paintY, width, height);
+      // A pose change repaints its damage under a clip, as it always has: copying from a spare surface would make it exact at
+      // the clip's edge too, but the copy costs more than the repaint in an ordinary document, frame after frame of a drag.
+      for (const rect of merged) {
+        context.save(); context.setTransform(dpr, 0, 0, dpr, 0, 0);
+        context.beginPath(); context.rect(rect.x, rect.y, rect.width, rect.height); context.clip();
+        context.clearRect(rect.x, rect.y, rect.width, rect.height); paint(rect); context.restore();
+      }
+      if (strips.length || merged.length) visible = this.count(next, paintX, paintY, width, height);
     }
     this.groups = next; this.key = key; this.visible = visible;
     this.moved = !full && (this.moved || Boolean(shiftX || shiftY) || paintX !== tx || paintY !== ty);
-    if (!this.moved && (full || !strips.length && !merged.length) && this.spare) { this.spare.width = this.spare.height = 1; this.spare = null; }
+    if (!this.moved && this.spare) { this.spare.width = this.spare.height = 1; this.spare = null; }
     this.at = {x: paintX, y: paintY}; this.requested = {x: tx, y: ty};
     target.drawImage(surface, 0, 0, width, height);
     // Keep translated figures in the existing foreground pass. The retained

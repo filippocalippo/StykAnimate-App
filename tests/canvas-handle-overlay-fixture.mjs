@@ -1,13 +1,5 @@
 import {CanvasHandleOverlay, paintCanvasHandle} from '../src/canvas-handle-overlay.mjs';
 
-/** A canvas read back often. Every canvas compared is one, so all paint the same way: a browser may paint a canvas it
- * does not read on the GPU, which blends some pixels apart from the CPU (Electron does, by up to a whole channel). */
-function readable(width, height) {
-  const canvas = new OffscreenCanvas(width, height);
-  canvas.getContext('2d', {willReadFrequently: true});
-  return canvas;
-}
-
 /** Browser-callable exact-pixel comparison of local damage against the former
  * full handle pass. No renderer, document caches or application UI required.
  */
@@ -20,9 +12,9 @@ export function verifyCanvasHandleOverlay() {
     Object.defineProperty(handles, 'groups', {value: groups}); return handles;
   };
   for (const dpr of [1, 1.5, 2]) for (const outline of [false, true]) {
-    const width = 240, height = 140, surface = readable(width * dpr, height * dpr);
-    const overlay = new CanvasHandleOverlay(readable(1, 1)), context = surface.getContext('2d');
-    const reference = readable(width * dpr, height * dpr), expected = reference.getContext('2d');
+    const width = 240, height = 140, surface = new OffscreenCanvas(width * dpr, height * dpr);
+    const overlay = new CanvasHandleOverlay(new OffscreenCanvas(1, 1)), context = surface.getContext('2d');
+    const reference = new OffscreenCanvas(width * dpr, height * dpr), expected = reference.getContext('2d');
     let projected = 0, transform = point => point;
     const project = point => { projected++; return transform(point); };
     const draw = (groups, name, {projectionKey = 'view', translations} = {}) => {
@@ -69,13 +61,20 @@ export function verifyCanvasHandleOverlay() {
     overlay.clear(); check(draw([small, top], 'document/style invalidation releases retained groups').full,
       'An invalidated overlay must rebuild');
   }
-  checks.push(...verifyPans());
   return {checks};
+}
+
+/** A canvas read back often. Every canvas the pan checks compare is one, so all paint the same way: a browser may paint a
+ * canvas it does not read on the GPU, which blends some pixels apart from the CPU (Electron does, by up to a whole channel). */
+function readable(width, height) {
+  const canvas = new OffscreenCanvas(width, height);
+  canvas.getContext('2d', {willReadFrequently: true});
+  return canvas;
 }
 
 /** A pan moves the retained pixels and paints the strips that came into view: the picture must be the full repaint's, pixel
  * for pixel, at the translation the overlay says it painted at (the one asked for, after an exact pan or once the view rests). */
-function verifyPans() {
+export function verifyCanvasHandlePans() {
   const check = (condition, message) => { if (!condition) throw new Error(message); };
   const checks = [];
   let seed = 7;

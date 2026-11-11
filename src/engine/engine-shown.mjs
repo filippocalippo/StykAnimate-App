@@ -166,7 +166,7 @@ function hydrate(w, start, length, slot, frame, report, defs, eager) {
       bend: 0, thickness: 0, opacity: 1, alpha: 1, rgb: [0, 0, 0]};
     group = {slot, obj, fig, root, joints, segments: [handle], polys: [], drawables: []};
   } else if (eager) {
-    group = {slot, obj, fig, root, ...buildGroup({slot, obj, fig, root}, w, flags, layout, report.version)};
+    group = buildGroup({slot, obj, fig, root}, w, flags, layout, report.version);
     defineDrawables(group, group.polys, group.segments);
   } else group = new EngineGroup(slot, obj, fig, root, w, flags, layout, report.version);
   if (flags & BOUNDS) {
@@ -308,7 +308,8 @@ class EngineGroup {
   }
 }
 
-/** What `EngineGroup` builds of a group on first read: its joints, segments, faces and solved values. */
+/** What `EngineGroup` builds of a group on first read, and what a small packet builds at once: `{slot, obj, fig, root}` with its
+ * joints, segments, faces and solved values, as one object (the group built at once is it). */
 function buildGroup({slot, obj, fig, root}, w, flags, layout, version) {
   const {startRawsAt, startRawsLength} = layout;
   const joints = jointsOf(w, layout, fig, root);
@@ -365,7 +366,7 @@ function buildGroup({slot, obj, fig, root}, w, flags, layout, version) {
     if (polyFlags & DEPTH_POLY) { const depths = w[at++]; poly.depthValues = numbers(w, at, depths); at += depths; }
     polys[n] = poly;
   }
-  const built = {joints, segments, polys};
+  const built = {slot, obj, fig, root, joints, segments, polys};
   if (flags & SOLVED) {
     const angles = w[at++];
     built.solvedAngles = numbers(w, at, angles);

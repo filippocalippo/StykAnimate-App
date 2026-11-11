@@ -28,7 +28,7 @@ test('unchanged overlays retain projected groups and offscreen handles issue no 
 });
 
 test('local pose damage restores overlapping groups in painter order and skips unrelated handles', () => {
-  const raster = new Surface(), target = surface(), overlay = new CanvasHandleOverlay(raster);
+  const raster = surface(), target = surface(), overlay = new CanvasHandleOverlay(raster);
   const bottom = {uid: 1, handles: [handle(1, 20, 20, '#ff0000')]},
     top = {uid: 2, handles: [handle(2, 22, 20, '#0000ff'), handle(2, 180, 80, '#0000ff')]};
   let projects = 0;
@@ -38,11 +38,7 @@ test('local pose damage restores overlapping groups in painter order and skips u
   const changed = {uid: 1, handles: [handle(1, 21, 21, '#ff8800')]};
   const result = overlay.draw(target.getContext(), grouped([changed, top]), options);
   assert.equal(result.full, false); assert.equal(result.regions, 1); assert.equal(projects, 1);
-  // The region is repainted on the spare surface, then its pixels are copied over.
-  assert.deepEqual(raster.fills, []); assert.deepEqual(overlay.spare.fills, ['#ff8800', '#0000ff']);
-  assert.equal(raster.copies.at(-1)[0], overlay.spare);
-  overlay.draw(target.getContext(), grouped([changed, top]), options);
-  assert.equal(overlay.spare, null, 'A draw that repaints nothing lets the spare surface go');
+  assert.deepEqual(raster.fills, ['#ff8800', '#0000ff']);
 });
 
 test('rotation, DPR, style, native order and document lifetime invalidate the retained layer', () => {

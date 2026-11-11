@@ -213,10 +213,11 @@ The joint overlay keeps what it painted (`src/canvas-handle-overlay.mjs`). With 
 moves those pixels by whole backing pixels and paints only the strips that came into view, and the joints are painted afresh
 once the view rests, so the picture at rest is always a full repaint's; with fewer, repainting them is cheaper and a pan does
 that, as before. A zoom resizes the joints' descriptors instead of building them again, and when the zoom
-makes every joint the smallest (or largest) size the segments' lengths are not read at all. Regions a pose change damages
-and the strips a pan brings in are painted unclipped on a spare surface and copied over, because a clip's antialiased edge
-changes the pixels beside it; `tests/canvas-handle-overlay.browser.mjs` compares every case with a full repaint, pixel for
-pixel.
+makes every joint the smallest (or largest) size the segments' lengths are not read at all. The strips a pan brings in are
+painted unclipped on a spare surface and copied over, because a clip's antialiased edge changes the pixels beside it
+(`tests/canvas-handle-overlay.browser.mjs` compares every pan with a full repaint, pixel for pixel). A pose change repaints
+its damage under a clip as it always has: the copy would make the clip's edge exact too, but it costs more than the repaint,
+on every frame of a drag in an ordinary document.
 
 ## Joining and node selection
 

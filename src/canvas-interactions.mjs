@@ -74,8 +74,8 @@ function incidentMinimum(g,id,info){
   let entry=info.incident.get(id);if(entry)return entry;
   if(g.segmentLengths&&!Object.hasOwn(g,'segments')){entry=lazyIncidentMinimum(g,id,info);info.incident.set(id,entry);return entry;}
   entry={length:Infinity,thickness:Infinity};
-  const candidate = index => {
-    const definition = g.segments[index].seg || {}, posedLength = g.segments[index].length;
+  const candidate = segment => {
+    const index = segment.index, definition = segment.seg || {}, posedLength = segment.length;
     const length = Number.isFinite(posedLength) && info.scale > 0 ? Math.abs(posedLength) / info.scale
       : Number(g.obj.len_flag ? g.obj.lengths?.[index] ?? definition.length ?? 0
         : g.obj.runtime_segments?.[index]?.length ?? definition.length ?? 0);
@@ -85,9 +85,9 @@ function incidentMinimum(g,id,info){
   const topology=info.topology,index=topology.incoming.get(id);
   if(index!==undefined){
     const segment=g.segments[index],parentIndex=topology.incoming.get(Number(segment.seg?.parent_id??0));
-    if(parentIndex===undefined||!g.segments[parentIndex].static)candidate(index);
+    if(parentIndex===undefined||!g.segments[parentIndex].static)candidate(segment);
   }
-  for(const child of topology.outgoing.get(id)||[]){candidate(child);if(entry.length===0&&entry.thickness===0)break;}
+  for(const child of topology.outgoing.get(id)||[]){candidate(g.segments[child]);if(entry.length===0&&entry.thickness===0)break;}
   info.incident.set(id,entry);return entry;
 }
 /** `incidentMinimum` of a group read from the engine, from its posed lengths alone (`segmentLengths`, engine-shown.mjs): the
