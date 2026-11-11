@@ -406,7 +406,7 @@ impl Editor {
         let (prepared, frame) = self.evaluate_frame()?;
         let scene = styk_eval::geometry::build_shapes(&prepared.doc, &frame, Some(&[slot]));
         let mut posed = vec![None; scene.objects.get(slot).map_or(0, |g| g.ends.len())];
-        for item in scene.measured.iter().filter(|item| item.slot as usize == slot && !matches!(item.kind, styk_eval::geometry::ItemKind::Poly | styk_eval::geometry::ItemKind::Mesh)) {
+        for item in scene.measured_in_order(slot).filter(|item| !matches!(item.kind, styk_eval::geometry::ItemKind::Poly | styk_eval::geometry::ItemKind::Mesh)) {
             if let Some(place) = posed.get_mut(item.index as usize) {
                 *place = Some(PosedSegment { angle: item.angle, bend: item.bend, length: item.length, start: item.start });
             }

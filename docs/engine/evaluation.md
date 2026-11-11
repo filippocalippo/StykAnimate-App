@@ -359,6 +359,16 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   movieclip content, meshes, faces or colour transitions: only those objects' parts are written. A drag step of one figure of 2,000 so
   writes that figure, not the 200,000 items of the frame. The older scene is let go of once the frame stays on show (`EditSession.rest`,
   called by the stage when it prepares a pick, `BuildMemory::rest`), so a frame at rest holds one scene.
+- **Building a whole frame.** A seek builds every figure again; what it costs is mostly writing items (160 bytes a segment) and
+  allocating. An object that is built again is built in the buffers of the build the memory kept of it (`BuildMemory::recycled`):
+  a seek of 2,000 figures allocates nothing for figures of the same size. A figure of segments alone, every one drawn in the
+  figure's order, has measured primitives that are its items: the scene keeps none of them in `Scene::measured` and reads its
+  items in their place (`SPAN_MEASURED_ITEMS`; read through `Scene::measured_of` and `Scene::measured_items`, never the field).
+  Where nothing is built in parallel (the WebAssembly build: its parallelism is whole frames on workers), a frame without joins
+  built for no memory (a worker's frame, a movieclip's scene) is built and spliced one object at a time in draw order, each in
+  the buffers of the one before (`build_streamed` in the tests), and a build nothing else holds gives the scene its geometry
+  rather than a copy. The scenes, the draw lists and every read are the ones the plain builds give
+  (`styk-eval/tests/build_throughput.rs`).
 - A geometry read names the read the interface holds (`since`). The session sends the groups of the objects built since that
   read, or all of them when the read named is not the one the session last answered. The groups held stay as they are, so the
   descriptors the canvas keeps by their identity stay valid while a gesture moves other figures. Unchanged: the same
