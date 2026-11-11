@@ -343,9 +343,10 @@ A run of steps in a dense scene is a scrub (`createStepRun` in
   of three asked for together, the two finished just behind it were passed over for
   the third, and they still held the workers when the run ended. A drag keeps three.
 - **The end:** the key up ends a held key's run at once; a run of taps ends 250 ms
-  after its last step; the window losing focus ends it too. The end draws the exact
-  editing frame of the tick the run reached, and the inspector updates. A drag that
-  starts during a run takes it over.
+  after its last step; another key or a press ends it first, so every other
+  command acts on the exact frame and its selection; the window losing focus ends it
+  too. The end draws the exact editing frame of the tick the run reached, and the
+  inspector updates. A drag that starts during a run takes it over.
 
 Measured 2026-11-11 (desktop app, the stress document of 2,000 figures of 100
 segments, joints hidden; a key held through the page: one key down, after 500 ms
