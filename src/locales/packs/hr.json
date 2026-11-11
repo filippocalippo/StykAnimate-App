@@ -525,6 +525,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Mnogokuti se vežu na zglobove. Kliknite crveni, narančasti ili sivi zglob.",
     "app.chooseAtLeastThreeDifferentJoints": "Odaberite najmanje tri različita zgloba.",
     "app.polygonAdded": "Mnogokut dodan",
+    "app.denseFrameShowsOrigins": "Previše je zglobova za istodobni prikaz: neodabrane figure prikazuju samo svoje ishodište. Odaberite figuru da biste vidjeli njezine zglobove.",
     "app.spriteAttached": "Sprite priključen",
     "app.camera": "Kamera: {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Odaberite zglob na ovoj figuri. Escape za odustajanje.",

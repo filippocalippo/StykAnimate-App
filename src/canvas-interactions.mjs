@@ -3,6 +3,7 @@
  * Joined origins do not exist as handles: the parent's endpoint owns the joint.
  */
 import {rigControlIsDetail} from './rig-control-details.mjs';
+import {isStatic} from './pivot/read-view.mjs';
 export const PIVOT_HANDLE_COLORS = Object.freeze({
   segment: '#ff0000', origin: '#ff8800', unselected: '#0000ff', unselectedOrigin: '#0080ff',
   joined: '#ffffff', unselectedJoined: '#d3d3d3', static: '#808080', selectedStatic: '#b04040',
@@ -23,10 +24,13 @@ export function invalidatePivotHandleTopology(figure) {
   figureMetadata=new WeakMap();
 }
 
+// A group read from the engine counts its segments without building them (`segmentCount`, engine-shown.mjs).
+const segmentCount = g => g.segmentCount ?? g.segments.length;
 function topologyInfo(g) {
   const key=g.fig||g,definition=g.fig?.segments;
   let info=topologyMetadata.get(key);
-  if(info&&info.definition===definition&&info.count===g.segments.length)return info;
+  if(info&&info.definition===definition&&info.count===segmentCount(g))return info;
+  if(g.segmentLength)return lazyTopologyInfo(g,key,definition);
   const incoming=new Map(),outgoing=new Map(),allOrdered=[];
   let previous=-Infinity,ordered=true;
   for(const shape of g.segments){
@@ -41,6 +45,22 @@ function topologyInfo(g) {
   topologyMetadata.set(key,info);return info;
 }
 
+/** `topologyInfo` of a group read from the engine, from its definition and its rows' posed order, without building its
+ * segments (`segmentIndex`, `segmentZ`, engine-shown.mjs). */
+function lazyTopologyInfo(g,key,definition){
+  const incoming=new Map(),outgoing=new Map(),allOrdered=[],zs=new Map(),count=g.segmentCount;
+  let previous=-Infinity,ordered=true;
+  for(let n=0;n<count;n++){
+    const index=g.segmentIndex(n),seg=g.fig.segments[index],id=Number(seg?.segment_id??index+1),parent=Number(seg?.parent_id??0);
+    incoming.set(id,index);let children=outgoing.get(parent);
+    if(!children)outgoing.set(parent,children=[]);children.push(index);allOrdered.push(index);
+    const z=g.segmentZ(n);zs.set(index,z);if(z<previous)ordered=false;previous=z;
+  }
+  if(!ordered)allOrdered.sort((a,b)=>zs.get(a)-zs.get(b));
+  const info={definition,count,incoming,outgoing,allOrdered,dynamicOrdered:allOrdered.filter(index=>!isStatic(g.fig.segments[index]))};
+  topologyMetadata.set(key,info);return info;
+}
+
 // Topology is shared by every pose of a definition. Per-pose minima are lazy:
 // a 15,000-segment scene with 1,000 exposed handles resolves only those vertices.
 function figureInfo(g) {
@@ -51,9 +71,10 @@ function figureInfo(g) {
 }
 function incidentMinimum(g,id,info){
   let entry=info.incident.get(id);if(entry)return entry;
+  if(g.segmentLengths){entry=lazyIncidentMinimum(g,id,info);info.incident.set(id,entry);return entry;}
   entry={length:Infinity,thickness:Infinity};
-  const candidate = segment => {
-    const index = segment.index, definition = segment.seg || {}, posedLength = segment.length;
+  const candidate = index => {
+    const definition = g.segments[index].seg || {}, posedLength = g.segments[index].length;
     const length = Number.isFinite(posedLength) && info.scale > 0 ? Math.abs(posedLength) / info.scale
       : Number(g.obj.len_flag ? g.obj.lengths?.[index] ?? definition.length ?? 0
         : g.obj.runtime_segments?.[index]?.length ?? definition.length ?? 0);
@@ -63,10 +84,39 @@ function incidentMinimum(g,id,info){
   const topology=info.topology,index=topology.incoming.get(id);
   if(index!==undefined){
     const segment=g.segments[index],parentIndex=topology.incoming.get(Number(segment.seg?.parent_id??0));
-    if(parentIndex===undefined||!g.segments[parentIndex].static)candidate(segment);
+    if(parentIndex===undefined||!g.segments[parentIndex].static)candidate(index);
   }
-  for(const child of topology.outgoing.get(id)||[]){candidate(g.segments[child]);if(entry.length===0&&entry.thickness===0)break;}
+  for(const child of topology.outgoing.get(id)||[]){candidate(child);if(entry.length===0&&entry.thickness===0)break;}
   info.incident.set(id,entry);return entry;
+}
+/** `incidentMinimum` of a group read from the engine, from its posed lengths alone (`segmentLengths`, engine-shown.mjs): the
+ * same candidates in the same order, the definition's part of them kept per definition. An origin can have a hundred. */
+function lazyIncidentMinimum(g,id,info){
+  const topology=info.topology,segments=g.fig.segments;
+  let shape=(topology.incidentShapes??=new Map()).get(id);
+  if(!shape){
+    const indices=[],index=topology.incoming.get(id);
+    if(index!==undefined){
+      const parentIndex=topology.incoming.get(Number(segments[index]?.parent_id??0));
+      if(parentIndex===undefined||!isStatic(segments[parentIndex]))indices.push(index);
+    }
+    // 'children': where the children start (the original stops early only after one of them).
+    shape={indices,children:indices.length,thickness:null};
+    indices.push(...(topology.outgoing.get(id)||[]));
+    shape.thickness=indices.map(i=>Number((segments[i]||{}).thickness??0));
+    topology.incidentShapes.set(id,shape);
+  }
+  const lengths=g.segmentLengths(),scale=info.scale,{indices,thickness,children}=shape;
+  let length=Infinity,thin=Infinity;
+  for(let k=0;k<indices.length;k++){
+    const index=indices[k],posed=lengths[index];
+    let value;
+    if(Number.isFinite(posed)&&scale>0)value=Math.abs(posed)/scale;
+    else{const definition=segments[index]||{};value=Number(g.obj.len_flag?g.obj.lengths?.[index]??definition.length??0:g.obj.runtime_segments?.[index]?.length??definition.length??0);}
+    length=Math.min(length,value);thin=Math.min(thin,thickness[k]);
+    if(length===0&&thin===0&&k>=children)break;
+  }
+  return {length,thickness:thin};
 }
 
 function attachments(geometry) {
@@ -91,11 +141,44 @@ function attachments(geometry) {
 export function getPivotHandleRadius(g, id, {
   viewScale = 1, autoSize = true, minDiameter = 4, maxDiameter = 10,
 } = {}) {
+  return scaledHandleRadius(baseHandleRadius(g, id, {autoSize, minDiameter, maxDiameter}), viewScale, minDiameter, maxDiameter);
+}
+/** The first clamp of `getPivotHandleRadius`, which the view's scale does not change. */
+function baseHandleRadius(g, id, {autoSize, minDiameter, maxDiameter}) {
   const info = figureInfo(g), entry = incidentMinimum(g,Number(id),info);
   const length = entry?.length ?? Infinity, thickness = entry?.thickness ?? Infinity;
   const diameter = (autoSize ? .7 * length : Math.max(.7 * length, 1.4 * thickness)) * info.scale;
-  const baseRadius = .5 * clamp(Number.isNaN(diameter) ? maxDiameter : diameter, minDiameter, maxDiameter);
-  return clamp(baseRadius * Math.abs(viewScale), minDiameter / 2, maxDiameter / 2);
+  return .5 * clamp(Number.isNaN(diameter) ? maxDiameter : diameter, minDiameter, maxDiameter);
+}
+const scaledHandleRadius = (baseRadius, viewScale, minDiameter, maxDiameter) =>
+  clamp(baseRadius * Math.abs(viewScale), minDiameter / 2, maxDiameter / 2);
+/** The screen radius every handle has at `viewScale` whatever its own size, or `undefined`: the first clamp keeps a size
+ * between the two diameters, so when the view's scale takes that whole range past one end of the second clamp, the size of
+ * the segments around a joint cannot change its radius and need not be read (a dense frame seen whole). */
+function pinnedHandleRadius(viewScale, minDiameter, maxDiameter) {
+  if (!(minDiameter <= maxDiameter)) return undefined;
+  const scale = Math.abs(viewScale);
+  if (maxDiameter / 2 * scale <= minDiameter / 2) return scaledHandleRadius(maxDiameter / 2, viewScale, minDiameter, maxDiameter);
+  if (minDiameter / 2 * scale >= maxDiameter / 2) return scaledHandleRadius(minDiameter / 2, viewScale, minDiameter, maxDiameter);
+  return undefined;
+}
+
+/** `handles` (from `getPivotHandles`) as `getPivotHandles` gives them at another view scale, all else the same: only the
+ * sizes change, so a zoom resizes the descriptors in one pass instead of building them again. New arrays and descriptors;
+ * `baseRadius` (the size before the view's scale, see `pinnedHandleRadius`) is worked out where it was not and now matters. */
+export function rescalePivotHandles(handles, {viewScale = 1, autoSize = true, minDiameter = 4, maxDiameter = 10} = {}) {
+  const scale = Math.max(1e-9, Math.abs(viewScale)), result = new Array(handles.length), pinned = pinnedHandleRadius(viewScale, minDiameter, maxDiameter);
+  for (let i = 0; i < handles.length; i++) {
+    const handle = handles[i];
+    let baseRadius = handle.baseRadius, screenRadius;
+    if (handle.connector) screenRadius = maxDiameter / 2;
+    else if (pinned !== undefined) screenRadius = pinned;
+    else screenRadius = scaledHandleRadius(baseRadius ??= baseHandleRadius(handle.g, handle.id, {autoSize, minDiameter, maxDiameter}), viewScale, minDiameter, maxDiameter);
+    result[i] = {...handle, radius: screenRadius / scale, screenRadius, baseRadius};
+  }
+  const groups = (handles.groups ?? []).map(group => ({uid: group.uid, offset: group.offset, handles: result.slice(group.offset, group.offset + group.handles.length)}));
+  Object.defineProperty(result, 'groups', {value: groups});
+  return result;
 }
 
 export function pivotHandleColor({ selected = false, nodeSelected = false, origin = false, joined = false, static: isStatic = false } = {}) {
@@ -105,6 +188,41 @@ export function pivotHandleColor({ selected = false, nodeSelected = false, origi
   if (isStatic) return selected ? PIVOT_HANDLE_COLORS.selectedStatic : PIVOT_HANDLE_COLORS.static;
   if (!selected) return origin ? PIVOT_HANDLE_COLORS.unselectedOrigin : PIVOT_HANDLE_COLORS.unselected;
   return origin ? PIVOT_HANDLE_COLORS.origin : PIVOT_HANDLE_COLORS.segment;
+}
+
+/** Joints in a frame on show above which figures that are not selected show their origin only (docs/SCENE-EDITING.md,
+ * "Joints in dense frames"): at about half a microsecond a joint to paint and a fifth to describe, a frame of this many
+ * redraws in under ten milliseconds when the view zooms. Above it the canvas's own cost per joint climbs steeply. */
+export const DENSE_HANDLE_BUDGET = 12000;
+/** Once in force the rule holds until the frame has fewer joints than this share of the budget, so a scene near the
+ * budget does not switch it on and off from one frame to the next. */
+export const DENSE_HANDLE_RELEASE = .75;
+const definitionHandleCounts = new WeakMap();
+/** The joints a figure of `figure`'s definition shows with all of them shown: its moving joints, from the definition alone. */
+export function definitionHandleCount(figure) {
+  const segments = figure?.segments;
+  if (!segments) return 0;
+  let count = definitionHandleCounts.get(segments);
+  if (count === undefined) {
+    count = 0;
+    for (const segment of segments) if (!isStatic(segment)) count++;
+    definitionHandleCounts.set(segments, count);
+  }
+  return count;
+}
+/** The joints `frame` would show with every figure's shown (`figureOf(object)` gives an object's definition): a free
+ * origin each and the moving joints of its definition, for the figures neither hidden nor locked. No geometry is read. */
+export function frameHandleCount(frame, figureOf, {hiddenUids, lockedUids} = {}) {
+  let count = 0;
+  for (const object of frame?.objects ?? []) {
+    if (!object || hiddenUids?.has(object.unique_id) || lockedUids?.has(object.unique_id)) continue;
+    count += (object.join ? 0 : 1) + definitionHandleCount(figureOf(object));
+  }
+  return count;
+}
+/** Whether a frame of `count` joints is dense, given whether the frame shown before was. */
+export function denseHandles(count, wasDense = false, budget = DENSE_HANDLE_BUDGET) {
+  return count > (wasDense ? budget * DENSE_HANDLE_RELEASE : budget);
 }
 
 /** Native painter-order descriptors, shared by drawing and pointer picking.
@@ -129,6 +247,7 @@ export function getPivotHandles(geometry, {
   const targets = attachments(geometry), result = [], groups = [];
   Object.defineProperty(result,'groups',{value:groups});
   const options = { viewScale, autoSize, minDiameter, maxDiameter }, scale = Math.max(1e-9, Math.abs(viewScale));
+  const pinned = pinnedHandleRadius(viewScale, minDiameter, maxDiameter);
   const settingsKey = [topologyEpoch,spatialMode,showUnselected,showStatic,showDetailed,attaching,allowStaticManipulation,selectStatic,viewScale,autoSize,minDiameter,maxDiameter,builder,selectedJoint,selectedBranch,[...(selectedHandleIds??[])].join(',')].join('|');
   if(descriptorCache && descriptorCache.key!==settingsKey){descriptorCache.key=settingsKey;descriptorCache.objects=new WeakMap();}
   for (const g of objects) {
@@ -139,17 +258,34 @@ export function getPivotHandles(geometry, {
     const selected = uid === selectedUid || Boolean(selectedUids?.has(uid));
     const allEndpoints = selected || showUnselected || Boolean(g.obj.join) || attaching;
     const joinedVertices = targets.get(g.slot ?? g.obj.object_slot);
-    const objectKey = `${selected}|${uid===selectedUid}|${[...(joinedVertices||[])].join(',')}`;
+    const objectKey = joinedVertices ? `${selected}|${uid===selectedUid}|${[...joinedVertices].join(',')}` : selected ? uid === selectedUid ? 'true|true|' : 'true|false|' : 'false|false|';
     const cached=descriptorCache?.objects.get(g);
     if(cached?.key===objectKey){groups.push({uid,offset:result.length,handles:cached.handles});for(const handle of cached.handles)result.push(handle);continue;}
     const first=result.length;
+    // A figure showing its origin only reads none of its segments (in a dense frame, most of them): its descriptor is the one
+    // `add` below makes for an origin of a figure not selected, made without the closure and, at a pinned size, the topology.
+    if (!allEndpoints && !joinedVertices?.size && !selectStatic) {
+      const ownHandles = [];
+      if (!g.obj.join) {
+        const baseRadius = pinned !== undefined ? undefined : baseHandleRadius(g, 0, options), screenRadius = pinned ?? scaledHandleRadius(baseRadius, viewScale, minDiameter, maxDiameter);
+        const ik = !builder && Boolean(g.obj._stykIK?.[0]?.enabled);
+        ownHandles.push({ g, uid, joint: -1, id: 0, kind: 'origin', point: g.root, selected, joined: false, static: false, ik, connector: false, action: 'move',
+          color: pivotHandleColor({ selected, nodeSelected: false, origin: true, joined: false, static: false }),
+          radius: screenRadius / scale, screenRadius, baseRadius });
+        result.push(ownHandles[0]);
+      }
+      groups.push({uid, offset: first, handles: ownHandles});
+      descriptorCache?.objects.set(g, {key: objectKey, handles: ownHandles});
+      continue;
+    }
     const rotateSpatial = !builder && selected && (spatialMode === 'rotate' || spatialMode === 'figure');
     const add = (point, joint, id, kind, isStatic = false, joined = false) => {
       const spatial = rotateSpatial && Boolean(g.segments[joint]?.spatialFrame);
       if(spatial)point=g.segments[joint].start;
       const connector=joint>=0&&Boolean(g.segments[joint]?.connector);
       // A slider's stored length is a fraction, not a physical segment length.
-      const screenRadius = connector ? (options.maxDiameter??10)/2 : getPivotHandleRadius(g, id, options);
+      const baseRadius = connector || pinned !== undefined ? undefined : baseHandleRadius(g, id, options);
+      const screenRadius = connector ? (options.maxDiameter??10)/2 : pinned ?? scaledHandleRadius(baseRadius, viewScale, minDiameter, maxDiameter);
       const ik = !builder && Boolean(g.obj._stykIK?.[id]?.enabled);
       result.push({ g, uid, joint, id, kind, point, selected, joined, static: isStatic, ik,
         connector,
@@ -157,7 +293,7 @@ export function getPivotHandles(geometry, {
         // Join targets: dynamic nodes keep their pose colours, static nodes are white.
         color: attaching ? isStatic ? PIVOT_HANDLE_COLORS.joined : kind === 'origin' ? PIVOT_HANDLE_COLORS.origin : PIVOT_HANDLE_COLORS.segment : builder && isStatic && !joined && !builderSelection?.has(joint) ? '#999999'
           : pivotHandleColor({ selected, nodeSelected: Boolean(builderSelection?.has(joint)), origin: kind === 'origin', joined, static: isStatic }),
-        radius: screenRadius / scale, screenRadius });
+        radius: screenRadius / scale, screenRadius, baseRadius });
     };
     const topology=figureInfo(g).topology;
     const selectedStatic = uid===selectedUid && selectedJoint>=0 && Boolean(g.segments[selectedJoint]);
@@ -245,9 +381,10 @@ export function pickCanvasSegment(geometry, point, {handles = getPivotHandles(ge
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
   const pad = padding / Math.max(.01, Math.abs(scale));
   for (let i = handles.length - 1; i >= 0; i--) {
-    const handle = handles[i], shape = handle.g.segments[handle.joint];
-    if (uid !== undefined && handle.uid !== uid || handle.action !== 'pose' ||
-        !shape || shape.type !== 'line' || shape.seg.visible === false ||
+    const handle = handles[i];
+    if (uid !== undefined && handle.uid !== uid || handle.action !== 'pose') continue;
+    const shape = handle.g.segments[handle.joint];
+    if (!shape || shape.type !== 'line' || shape.seg.visible === false ||
         !(shape.thickness > 0) || !(shape.alpha > 0) || !(shape.opacity > 0)) continue;
     const points = shape.points, radius = shape.thickness / 2 + pad;
     for (let j = 1; j < points.length; j++) {

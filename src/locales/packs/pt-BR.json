@@ -528,6 +528,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Os polígonos se conectam às articulações. Clique em uma articulação vermelha, laranja ou cinza.",
     "app.chooseAtLeastThreeDifferentJoints": "Escolha pelo menos três articulações diferentes.",
     "app.polygonAdded": "Polígono adicionado",
+    "app.denseFrameShowsOrigins": "Há articulações demais para mostrar todas de uma vez: figuras não selecionadas mostram apenas sua origem. Selecione uma figura para ver as articulações dela.",
     "app.spriteAttached": "Sprite conectado",
     "app.camera": "Câmera · {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Escolha uma articulação nesta figura. Escape cancela.",

@@ -523,6 +523,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Көпбұрыштар буындарға жалғанады. Қызыл, қызғылт сары немесе сұр буынды шертіңіз.",
     "app.chooseAtLeastThreeDifferentJoints": "Кемінде үш түрлі буынды таңдаңыз.",
     "app.polygonAdded": "Көпбұрыш қосылды",
+    "app.denseFrameShowsOrigins": "Буындар бірден көрсету үшін тым көп: таңдалмаған фигуралар тек бастапқы нүктесін көрсетеді. Буындарын көру үшін фигураны таңдаңыз.",
     "app.spriteAttached": "Спрайт жалғанды",
     "app.camera": "Камера: {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Осы фигураның буынын таңдаңыз. Escape болдырмайды.",

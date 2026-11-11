@@ -525,6 +525,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Les polygones sont attachés aux articulations. Cliquez sur une articulation rouge, orange ou grise.",
     "app.chooseAtLeastThreeDifferentJoints": "Choisissez au moins trois articulations différentes.",
     "app.polygonAdded": "Polygone ajouté",
+    "app.denseFrameShowsOrigins": "Trop d’articulations pour les afficher toutes à la fois : les figures non sélectionnées n’affichent que leur origine. Sélectionnez une figure pour voir ses articulations.",
     "app.spriteAttached": "Sprite attaché",
     "app.camera": "Caméra : {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Choisissez une articulation de cette figure. Escape pour annuler.",

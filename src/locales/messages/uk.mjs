@@ -518,6 +518,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Багатокутники кріпляться до вузлів. Натисніть червоний, помаранчевий або сірий вузол.",
   "app.chooseAtLeastThreeDifferentJoints": "Виберіть щонайменше три різні вузли.",
   "app.polygonAdded": "Багатокутник додано",
+  "app.denseFrameShowsOrigins": "Вузлів забагато, щоб показати всі одразу: невибрані фігури показують лише свій початок. Виберіть фігуру, щоб побачити її вузли.",
   "app.spriteAttached": "Спрайт прикріплено",
   "app.camera": "Камера: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Виберіть вузол цієї фігури. Escape: скасувати.",

@@ -516,6 +516,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Poligoanele se atașează de articulații. Fă clic pe o articulație roșie, portocalie sau gri.",
   "app.chooseAtLeastThreeDifferentJoints": "Alege cel puțin trei articulații diferite.",
   "app.polygonAdded": "Poligon adăugat",
+  "app.denseFrameShowsOrigins": "Prea multe articulații pentru a fi afișate toate odată: figurile neselectate își arată doar originea. Selectează o figură pentru a-i vedea articulațiile.",
   "app.spriteAttached": "Sprite atașat",
   "app.camera": "Cameră: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Alege o articulație pe această figură. Escape anulează.",

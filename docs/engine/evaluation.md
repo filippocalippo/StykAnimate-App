@@ -328,7 +328,13 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   (`drawlist::app_bounds`). `pack_groups` writes them as a packet of 64-bit floats, not text (`EditSession.query_packet`; the layout is documented in `styk-eval/src/geometry/interface.rs`: a segment is a row of numbers that leaves out what the reader works out: where it starts is where its parent ends, where it ends is its joint; nothing is formatted or parsed on the way, and a non-finite number stays non-finite, which the reader takes for the `null` it once was); `engine-shown.mjs` reads the words where they lie and makes them the groups the canvas, the
   handles and the pickers read (`{objects: Map<slot, group|null>, orderedObjects, drawables, token, changedSlots,
   warnings}`; a group `{slot, obj, fig, root, joints, segments, polys, bounds, solvedAngles, solvedLengths}`, `drawables`
-  built when read, with Stick Nodes shapes expanded). The groups carry no drawables for a 3D mesh or a movieclip's contents: the
+  built when read, with Stick Nodes shapes expanded). A group's `slot`, `obj`, `fig`, `root`, `bounds` and `drawn` are read
+  at once; its joints, segments, faces, solved values and drawables are built from the words the first time any of them is read,
+  the same values as built at once (`tests/dense-handles.test.mjs`). In a dense frame the joints of the figures not selected show
+  their origin only ([SCENE-EDITING.md](../SCENE-EDITING.md#joints-in-dense-frames)) and the picture is the engine's, so most groups
+  are never built; what the handles need of one comes without building it (`segmentCount`, `segmentLengths()`, `segmentIndex(n)`,
+  `segmentZ(n)`). A group not yet built keeps the packet it came in; past two packets kept by the groups on show, the groups of
+  the older ones copy their own words out. The groups carry no drawables for a 3D mesh or a movieclip's contents: the
   stage draws them in the engine, and a click on artwork asks the engine which figure the stage's frame paints at the point ([rendering.md](rendering.md#picking-artwork)).
 - **One scene for every reader.** The typed frame of the record on show and the scene built from it are one `ShownScene`
   (`styk-edit/src/shown.rs`), kept for as long as the record, the playhead and the document's views are what it was made

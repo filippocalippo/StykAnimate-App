@@ -125,6 +125,9 @@ import {
 } from "./native-property-edit.mjs";
 import {
   getPivotHandles,
+  rescalePivotHandles,
+  frameHandleCount,
+  denseHandles,
   PIVOT_HANDLE_COLORS,
   pickCanvasHandle,
   pickCanvasSegment,
@@ -1366,10 +1369,26 @@ let handleCache = null;
 const handleDescriptors = {};
 const selectionHandleCache = new WeakMap();
 const selectionHandleDescriptors = {};
+/** Whether the frame on show has too many joints to show every figure's (docs/SCENE-EDITING.md, "Joints in dense frames"):
+ * counted from the figures' definitions, once per frame, hidden and locked figures and view state; announced once a document. */
+let handleDensity = {frame: null, key: '', dense: false, announced: false};
+function denseFrame(frame) {
+  const key = [state.hidden.size, state.locked.size, editor.layerViewKey, builderMode?.boundUids?.size ?? -1].join('|');
+  if (handleDensity.frame === frame && handleDensity.key === key) return handleDensity.dense;
+  const count = frameHandleCount(frame, object => findFigureType(editor.report.figure_types, object.figure_type_id),
+    {hiddenUids: renderHidden, lockedUids: {has: isLocked}});
+  const dense = denseHandles(count, handleDensity.dense);
+  if (dense && !handleDensity.announced && state.settings.showUnselectedHandles)
+    status({messageKey: "app.denseFrameShowsOrigins", messageParams: {count: {format: 'number', value: count}}});
+  handleDensity = {frame, key, dense, announced: handleDensity.announced || (dense && state.settings.showUnselectedHandles)};
+  return dense;
+}
 function canvasHandles(geometry, {selectStatic = false} = {}) {
   const frame = currentFrame(),
     settings = state.settings;
-  const key = [
+  // In a dense frame the figures not selected show their origin only, as with the setting off: drawing and picking share these descriptors.
+  const showUnselected = settings.showUnselectedHandles && !denseFrame(frame);
+  const unscaled = [
     builderMode?.active ? [...editor.selectedSegmentIds].join(',') : '',
     editor.layerViewKey,
     showStaticHandles(),
@@ -1380,19 +1399,24 @@ function canvasHandles(geometry, {selectStatic = false} = {}) {
     editor.selectedJoint,
     spatialControlMode(editor),
     rigDetailsShown(editor),
-    settings.showUnselectedHandles,
+    showUnselected,
     settings.handleSize,
     settings.autoSizeHandles,
     settings.outlineHandles,
-    state.view.scale,
     frame.camera?.scale,
     builderMode?.session?.typeId ?? "none",
     ...selection(),
     ...state.hidden,
     ...state.locked,
-  ].join("|");
+  ].join("|"), key = `${unscaled}|${state.view.scale}`;
   const cached = selectStatic ? selectionHandleCache.get(geometry) : handleCache;
   if (cached?.key === key && (selectStatic || cached.geometry === geometry)) return cached.handles;
+  // A zoom changes the joints' sizes alone: the descriptors are resized, not built again.
+  if (!selectStatic && cached?.unscaled === unscaled && cached.geometry === geometry) {
+    const handles = rescalePivotHandles(cached.handles, {viewScale: state.view.scale, autoSize: settings.autoSizeHandles, minDiameter: 4, maxDiameter: settings.handleSize * 2});
+    handleCache = {geometry, key, unscaled, handles};
+    return handles;
+  }
   const bound = builderMode?.boundUids;
   const hidden = effectiveHidden(frame),
     locked = new Set(state.locked);
@@ -1410,7 +1434,7 @@ function canvasHandles(geometry, {selectStatic = false} = {}) {
     selectedUids: selection(),
     hiddenUids: hidden,
     lockedUids: locked,
-    showUnselected: settings.showUnselectedHandles,
+    showUnselected,
     showStatic: showStaticHandles(),
     selectedJoint: editor.selectedJoint,
     selectedHandleIds: builderMode?.active ? editor.selectedSegmentIds : undefined,
@@ -1425,7 +1449,7 @@ function canvasHandles(geometry, {selectStatic = false} = {}) {
     maxDiameter: settings.handleSize * 2,
   });
   if (selectStatic) selectionHandleCache.set(geometry, {key, handles});
-  else handleCache = { geometry, key, handles };
+  else handleCache = { geometry, key, unscaled, handles };
   return handles;
 }
 function drawCanvasHandles(geometry) {
@@ -5628,6 +5652,7 @@ editor.addEventListener("change", (e) => {
     invalidatePivotHandleTopology();
     handleCache = null;
     canvasHandleOverlay.clear();
+    if (kind === "document") handleDensity = {frame: null, key: '', dense: false, announced: false};
     assetLibrary?.invalidate();
   }
   if (["edit", "history", "document", "frame-draft"].includes(kind))

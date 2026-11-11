@@ -525,6 +525,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "מצולעים מחוברים למפרקים. יש ללחוץ על מפרק אדום, כתום או אפור.",
     "app.chooseAtLeastThreeDifferentJoints": "יש לבחור לפחות שלושה מפרקים שונים.",
     "app.polygonAdded": "נוסף מצולע",
+    "app.denseFrameShowsOrigins": "יש יותר מדי מפרקים להצגה בבת אחת: דמויות שלא נבחרו מציגות רק את נקודת המוצא שלהן. יש לבחור דמות כדי לראות את המפרקים שלה.",
     "app.spriteAttached": "הספרייט חובר",
     "app.camera": "מצלמה: {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "יש לבחור מפרק בדמות זו. Escape לביטול.",

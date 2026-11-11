@@ -194,6 +194,29 @@ tests/canvas-interactions.test.mjs, tests/hotkeys.test.mjs, and the existing
 multi-figure, joining and tablet browser tests. Performance comparison:
 node scripts/benchmark-selection-workflow.mjs <baseline-ref>.
 
+## Joints in dense frames
+
+When the frame on show has more than 12,000 joints, figures that are not selected show their origin joint only, exactly
+as with Settings → **Show unselected figures** off. A selected figure always shows all its joints, and figures joined to
+another keep theirs (they have no origin of their own). Drawing and picking read one list of joints, so a joint that is not
+drawn cannot be grabbed; select a figure (click its artwork or its origin) to pose it.
+
+The count is every joint the frame would show with all figures' shown (each free figure's origin and the moving joints of
+its definition), over the whole frame, not only what is in view, so panning and zooming never change it; hidden and locked
+figures do not count. Once in force the rule holds until the frame has fewer than 9,000 joints, so a scene near the limit
+does not switch it on and off from one frame to the next. The status line says so once per document when it first applies.
+The numbers are `DENSE_HANDLE_BUDGET` and `DENSE_HANDLE_RELEASE` in `src/canvas-interactions.mjs`: about half a
+microsecond a joint to paint and a fifth to describe, so a frame at the limit redraws in under ten milliseconds on a zoom;
+above it the canvas's own cost per joint climbs steeply (8 µs a joint at 200,000).
+
+The joint overlay keeps what it painted (`src/canvas-handle-overlay.mjs`). A pan moves those pixels by whole backing
+pixels and paints only the strips that came into view; the joints are painted afresh once the view rests, so the picture at
+rest is always a full repaint's. A zoom resizes the joints' descriptors instead of building them again, and when the zoom
+makes every joint the smallest (or largest) size the segments' lengths are not read at all. Regions a pose change damages
+and the strips a pan brings in are painted unclipped on a spare surface and copied over, because a clip's antialiased edge
+changes the pixels beside it; `tests/canvas-handle-overlay.browser.mjs` compares every case with a full repaint, pixel for
+pixel.
+
 ## Joining and node selection
 
 Joint Properties keeps Static in Transform and gives IK its own section. Enabling

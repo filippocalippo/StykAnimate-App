@@ -521,6 +521,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Poligon terikat pada sendi. Klik sendi merah, oranye, atau abu-abu.",
     "app.chooseAtLeastThreeDifferentJoints": "Pilih setidaknya tiga sendi yang berbeda.",
     "app.polygonAdded": "Poligon ditambahkan",
+    "app.denseFrameShowsOrigins": "Terlalu banyak sendi untuk ditampilkan sekaligus: figur yang tidak dipilih hanya menampilkan titik asalnya. Pilih figur untuk melihat sendinya.",
     "app.spriteAttached": "Sprite diikatkan",
     "app.camera": "Kamera: {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Pilih sendi pada figur ini. Escape untuk batal.",

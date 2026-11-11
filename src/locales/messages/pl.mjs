@@ -518,6 +518,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Wielokąty są mocowane do przegubów. Kliknij czerwony, pomarańczowy lub szary przegub.",
   "app.chooseAtLeastThreeDifferentJoints": "Wybierz co najmniej trzy różne przeguby.",
   "app.polygonAdded": "Dodano wielokąt",
+  "app.denseFrameShowsOrigins": "Przegubów jest zbyt wiele, by pokazać je wszystkie naraz: niezaznaczone figury pokazują tylko swój punkt początkowy. Zaznacz figurę, aby zobaczyć jej przeguby.",
   "app.spriteAttached": "Zamocowano sprite",
   "app.camera": "Kamera: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Wybierz przegub tej figury. Escape anuluje.",

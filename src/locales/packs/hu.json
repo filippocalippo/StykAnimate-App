@@ -523,6 +523,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "A sokszögek csuklópontokhoz kapcsolódnak. Kattints egy piros, narancssárga vagy szürke csuklópontra.",
     "app.chooseAtLeastThreeDifferentJoints": "Válassz legalább három különböző csuklópontot.",
     "app.polygonAdded": "Sokszög hozzáadva",
+    "app.denseFrameShowsOrigins": "Túl sok csuklópont van ahhoz, hogy egyszerre mind látszódjon: a nem kijelölt figurák csak az origójukat mutatják. Jelölj ki egy figurát a csuklópontjai megtekintéséhez.",
     "app.spriteAttached": "Sprite csatlakoztatva",
     "app.camera": "Kamera: {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Válassz egy csuklópontot ezen a figurán. Escape: megszakítás.",
