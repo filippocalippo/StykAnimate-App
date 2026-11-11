@@ -38,4 +38,8 @@ process.stderr.write(css.stderr || (css.error ? `${css.error.message}\n` : ''));
 const locales = spawnSync(process.execPath, ['scripts/build-locales.mjs', '--check'], { cwd: appRoot, encoding: 'utf8', windowsHide: true });
 process.stdout.write(locales.stdout ?? '');
 process.stderr.write(locales.stderr ?? '');
-process.exitCode = failures || css.status !== 0 || locales.status !== 0 ? 1 : 0;
+// Every source module has a row in engine/inventory.tsv (scripts/engine-inventory.mjs): only its problems are printed here.
+const inventory = spawnSync(process.execPath, ['scripts/engine-inventory.mjs'], { cwd: appRoot, encoding: 'utf8', windowsHide: true });
+if (inventory.status !== 0) process.stderr.write(`${inventory.stdout ?? ''}${inventory.stderr || (inventory.error ? `${inventory.error.message}\n` : '')}`);
+else console.log('Engine inventory: every source module has a row.');
+process.exitCode = failures || css.status !== 0 || locales.status !== 0 || inventory.status !== 0 ? 1 : 0;

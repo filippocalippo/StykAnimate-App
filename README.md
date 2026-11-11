@@ -61,7 +61,7 @@ The browser build: `npm run web:build`, then `npm run web:preview`. See [Web bui
 ## Tests
 
 ```sh
-npm run check        # syntax, stylesheet lint
+npm run check        # syntax, stylesheet lint, locales, engine inventory
 npm test             # unit tests
 python -m unittest discover -s backend -p "test_*.py"   # the Python codec oracle (development only)
 ```
