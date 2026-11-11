@@ -1091,14 +1091,26 @@ fn node_stack<'s>(fx: &'s ObjectVfx, fig: &Figure, it: &Item) -> Option<&'s [Arc
 }
 
 fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidden: &[bool], translations: &[(u32, [f64; 2])], tint: Option<[u8; 3]>, bypass: bool, current_drawing: bool, memory: Option<&mut EncodeMemory>) -> Encoded {
+    encode_scene_span(assets, live, scene, hidden, translations, tint, bypass, current_drawing, memory, (0, scene.items.len()), has_text(scene))
+}
+
+/// Whether any item of `scene` is text (its objects are then measured as they are encoded): what [`encode_composed_span`] is told.
+pub fn has_text(scene: &Scene) -> bool {
+    scene.items.iter().any(|it| it.kind == ItemKind::Text)
+}
+
+/// [`encode_scene`] of the items in `span` alone: every item outside it must be of a hidden object, so the objects encoded are the ones
+/// the whole scene's encoding gives.
+#[allow(clippy::too_many_arguments)]
+fn encode_scene_span(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidden: &[bool], translations: &[(u32, [f64; 2])], tint: Option<[u8; 3]>, bypass: bool, current_drawing: bool, memory: Option<&mut EncodeMemory>, span: (usize, usize), text: bool) -> Encoded {
     let ctx = Ctx { scene, assets, live, tint };
     let mut runs: Vec<(usize, usize)> = Vec::new();
     let mut of_slot: std::collections::HashMap<u32, (usize, usize)> = std::collections::HashMap::new();
-    let mut i = 0;
-    while i < scene.items.len() {
+    let mut i = span.0;
+    while i < span.1 {
         let (slot, chain) = (scene.items[i].slot, scene.items[i].chain);
         let mut j = i + 1;
-        while j < scene.items.len() && scene.items[j].slot == slot && scene.items[j].chain == chain {
+        while j < span.1 && scene.items[j].slot == slot && scene.items[j].chain == chain {
             j += 1;
         }
         let entry = of_slot.entry(slot).or_insert((runs.len(), runs.len()));
@@ -1116,7 +1128,7 @@ fn encode_scene(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene, hidd
     }
     let fx = !bypass && (scene.vfx.is_some() || scene.clip_vfx.iter().any(Option::is_some));
     // Objects with depth-tested faces or text are drawn on rasters of their own, sized by their bounds.
-    let measured = fx || !scene.meshes.is_empty() || !scene.depths.is_empty() || scene.items.iter().any(|it| it.kind == ItemKind::Text);
+    let measured = fx || !scene.meshes.is_empty() || !scene.depths.is_empty() || text;
     let encode_run = |&(a, b): &(usize, usize)| -> Option<ObjectOut> {
         let first = &scene.items[a];
         let opacity = first.opacity;
@@ -1603,9 +1615,26 @@ pub fn encode_composed_remembering(doc: &Document, assets: &Assets, scene: &Scen
     encode_composed_over(doc, assets, scene, overrides, ghosts, order, Some(memory))
 }
 
-fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, mut memory: Option<&mut EncodeMemory>) -> DrawList {
+fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, memory: Option<&mut EncodeMemory>) -> DrawList {
+    encode_composed_span_over(doc, assets, scene, overrides, ghosts, order, memory, (0, scene.items.len()), has_text(scene))
+}
+
+/// [`encode_composed`] of a frame whose objects outside the items in `span` are all hidden (`overrides.hidden`): only those items are
+/// looked at, so encoding one figure of a dense frame costs that figure, not the frame. The list is the one [`encode_composed`]
+/// gives but for the empty runs of the hidden objects outside `span`, which draw nothing (a click on artwork draws each candidate
+/// so: `styk_export::pick`). `span` is a range of [`Scene::items`]; `text` is [`has_text`] of the scene, which a caller encoding many
+/// spans of one scene works out once.
+pub fn encode_composed_span(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, span: (usize, usize), text: bool) -> DrawList {
+    let span = (span.0.min(scene.items.len()), span.1.min(scene.items.len()));
+    debug_assert!(scene.items[..span.0].iter().chain(&scene.items[span.1..]).all(|it| overrides.hidden.get(it.slot as usize).copied().unwrap_or(false)), "an object outside the span is drawn");
+    debug_assert_eq!(text, has_text(scene));
+    encode_composed_span_over(doc, assets, scene, overrides, &[], None, None, (span.0, span.1.max(span.0)), text)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode_composed_span_over(doc: &Document, assets: &Assets, scene: &Scene, overrides: &Overrides<'_>, ghosts: &[Ghost<'_>], order: Option<&[Layer]>, mut memory: Option<&mut EncodeMemory>, span: (usize, usize), text: bool) -> DrawList {
     let bypass = overrides.bypass_effects;
-    let current = encode_scene(assets, overrides.live, scene, overrides.hidden, overrides.translations, None, bypass, true, memory.as_deref_mut());
+    let current = encode_scene_span(assets, overrides.live, scene, overrides.hidden, overrides.translations, None, bypass, true, memory.as_deref_mut(), span, text);
     let camera_stack = if bypass { None } else { scene.vfx.as_ref().map(|v| &v.scene).filter(|s| !s.is_empty()) };
     let ghost_scenes = encode_ghosts(assets, overrides.live, ghosts, bypass, memory);
     // Generated effects: each draw encoded once, placed in the frame and in the camera image.
@@ -1613,7 +1642,7 @@ fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, override
     // The exportSVG predicate runs on visible source drawables, not on emitted
     // GPU primitives: active unused effect scopes and a truthy zero-output
     // generator batch still require the whole-frame Canvas export branch.
-    let composited_export = camera_stack.is_some() || batch.is_some() || scene.items.iter().any(|it| {
+    let composited_export = camera_stack.is_some() || batch.is_some() || scene.items[span.0..span.1].iter().any(|it| {
         !overrides.hidden.get(it.slot as usize).copied().unwrap_or(false) && (
             (!bypass && it.export_vfx) || it.kind == ItemKind::Mesh ||
             (it.kind == ItemKind::Poly && scene.figures[it.figure as usize].polyfills.get(it.index as usize).and_then(|poly| poly.surface.as_ref()).is_some_and(|surface| surface.depth_test))
@@ -1627,6 +1656,8 @@ fn encode_composed_over(doc: &Document, assets: &Assets, scene: &Scene, override
     let walker = |outs| batch.map(|batch| generators::Walker::new(batch, outs, &hidden_uids)).filter(|w| !w.is_empty());
     let mut frame_walker = walker(&generator_outs);
     let mut b = Builder::new();
+    // Most frames place every object at the top level: room for all their primitives at once, not grown a push at a time.
+    b.prims[0].reserve(current.objects.iter().flatten().map(|o| o.items.prims.len() + o.outline.prims.len()).sum());
     let mut root = Out::new();
     background(doc, assets, scene, overrides.background, &mut root);
     let background_prims = root.prims.len() as u32;

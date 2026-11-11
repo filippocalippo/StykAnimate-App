@@ -1090,12 +1090,15 @@ function previewPacket() {
   const packet = playback.has(editor.tick) ? playback.get(editor.tick) : null;
   return packet && packet.cameraEnabled !== false ? packet : null;
 }
+// The frame is read only through the scene camera: the editing view does not depend on it (`effectiveCamera`).
 function screenPoint(p) {
-  return worldToScreen(p,{report:editor.report,frame:currentFrame(),view:state.view,cameraEnabled:state.playing||state.previewing});
+  const cameraEnabled = state.playing || state.previewing;
+  return worldToScreen(p,{report:editor.report,frame:cameraEnabled?currentFrame():null,view:state.view,cameraEnabled});
 }
 function worldPoint(event) {
   const r = viewport.getBoundingClientRect();
-  return screenToWorld({x:(event.clientX-r.left)*viewport.clientWidth/r.width,y:(event.clientY-r.top)*viewport.clientHeight/r.height},{report:editor.report,frame:currentFrame(),view:state.view,cameraEnabled:state.playing||state.previewing});
+  const cameraEnabled = state.playing || state.previewing;
+  return screenToWorld({x:(event.clientX-r.left)*viewport.clientWidth/r.width,y:(event.clientY-r.top)*viewport.clientHeight/r.height},{report:editor.report,frame:cameraEnabled?currentFrame():null,view:state.view,cameraEnabled});
 }
 function cameraSelected() {
   return state.inspectorContext === 'camera' && state.selectedTrackId === 'camera';
@@ -1866,9 +1869,17 @@ function paintCameraMonitor() {
     stage:state.renderer,report:editor.report,frame,
   });
 }
+/** What the camera outline is drawn from: only its camera is read, and the edit frame the stage drew holds it, so the overlay after a seek
+ * does not read the whole frame for it. */
+function cameraOutlineFrame() {
+  if (state.playing || state.previewing || motionDisplay() || drawingController?.renderPreview) return currentFrame();
+  const camera = state.renderer?.shownCamera?.();
+  if (!camera) return currentFrame();
+  return { camera: editor.report._styk?.layers?.fixed?.camera?.visible === false ? null : camera };
+}
 function drawFinalOverlay() {
   ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
-  drawCameraOutline(ctx, cameraViewport(editor.report, currentFrame(), state.view), screenPoint);
+  drawCameraOutline(ctx, cameraViewport(editor.report, cameraOutlineFrame(), state.view), screenPoint);
   vfxGizmos?.draw(ctx);
 }
 async function play() {

@@ -498,7 +498,13 @@ A gesture changes a few objects of a frame of hundreds. The edit frame is the se
 ([evaluation.md](evaluation.md#the-interfaces-frame)), built over the one before it, and its scene says which build made each
 object's geometry (`Scene::built_in`, numbered across every memory). `EditScene` keeps what the last frame was encoded as
 (`drawlist::EncodeMemory`), and `encode_composed_remembering` encodes only the objects whose build is not the one it kept; the list
-is the list encoded whole (`styk-eval/tests/build_memory.rs`). Only a plain frame is kept: nothing in it draws effects, 3D faces or
+is the list encoded whole (`styk-eval/tests/build_memory.rs`). A frame drawn again with nothing it is encoded from changed (a pan, a zoom, a redraw for the overlay) is the list
+drawn last (`EditScene` keeps it with what it was encoded from: the document, its pictures and how many drawing cels a decode has
+resolved the bounds of, the frame and scene, the hidden slots, drags, background, effects, camera and onion skins; live drawing cels are
+always encoded), so nothing is encoded or uploaded again (`Renderer::set_list` keeps a list it holds; what the renderer works out of a
+list, each group's primitives and where its composites are, is worked out when the list is set). On 2,000 figures of 100 segments a
+pan frame fell from about 20 ms to under 1 ms of the interface thread, a zoom step from about 76 ms to about 5 ms
+(`styk-engine/tests/edit_session_frames.rs`). Only a plain frame is kept: nothing in it draws effects, 3D faces or
 text, no drawing cel is live, and an object being dragged is encoded afresh (its translation is applied after encoding).
 What the encoder keeps is judged by numbers, never by addresses: the assets by `Assets::id` (an `Assets::extended` that adds a picture, cel or glyph is numbered anew; one that adds nothing keeps the number, so a pose commit does not forget what was encoded) and a
 scene by its `Scene::stamp` (each build is numbered, and a built scene is never changed). The onion skins are kept the same way: a ghost
@@ -548,6 +554,15 @@ locked left out, and each whose measured bounds reach the point (a movieclip's c
 background or effects, into a three-pixel surface centred on the point at the view's scale by the CPU rasterizer. The first
 whose centre pixel has any coverage is the answer, `{slot, uid}`. A click hits what is painted: fills, curves, pictures,
 meshes, movieclip contents and transparency. The pictures it samples stay decoded between clicks within the rasterizer's budget.
+
+The stage asks on every pointer move over the stage, so what a pick works out of the frame is kept while the frame is on show
+(`styk_export::pick::shown`): the scene is the session's scene of the frame (`EditScene::shapes`, the kind `build_shapes` builds, not
+built again), and the figures' measured bounds and where each figure's items lie in the scene are worked out at the first pick of a
+frame. Each candidate is then encoded from its own items alone (`drawlist::encode_composed_span`: the items outside the span all belong
+to hidden figures, so the list is the one the whole scene's encoding gives but for their empty runs), so a pick costs the figures under
+the point, not the frame. `pick::artwork` works everything out on each call and is what `shown` answers (`styk-export/tests/pick_shown.rs`
+compares the two on ordinary documents and on a dense frame of overlapping figures). Measured on 2,000 figures of 100 segments: a pick
+fell from about 370 ms to about 35 ms for the first on a frame (bounds and spans) and a few milliseconds for the next ones.
 
 ### Every document
 

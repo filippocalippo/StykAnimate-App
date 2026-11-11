@@ -163,6 +163,10 @@ pub struct Renderer {
     pub(crate) output: Option<(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, [u32; 2])>,
     pub(crate) list: Option<Arc<DrawList>>,
     pub(crate) list_prims: u32,
+    /// Of the current list: each group's first and past-last primitive (`u32::MAX, 0` for none), and where its composites are, worked
+    /// out when the list is set rather than at every frame drawn of it (a dense list is hundreds of thousands of primitives).
+    pub(crate) group_runs: Vec<(u32, u32)>,
+    pub(crate) composites: Vec<u32>,
     /// Atlas page size, and the frame size it grew from (pages fit the largest layer).
     pub(crate) page: [u32; 2],
     pub(crate) page_frame: [u32; 2],
@@ -252,6 +256,18 @@ impl Renderer {
         }
         self.list_prims = list.prims.len() as u32;
         self.list = Some(list.clone());
+        self.group_runs.clear();
+        self.group_runs.resize(list.groups.len(), (u32::MAX, 0));
+        self.composites.clear();
+        for (i, p) in list.prims.iter().enumerate() {
+            if let Some(run) = self.group_runs.get_mut(p.group as usize) {
+                run.0 = run.0.min(i as u32);
+                run.1 = i as u32 + 1;
+            }
+            if p.kind & 255 == styk_draw::K_COMPOSITE {
+                self.composites.push(i as u32);
+            }
+        }
         // Generated effects: the materials their sprites sample.
         self.ensure_materials(list.materials);
         // Where the depth-tested faces are and where generated effects add light: passes

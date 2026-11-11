@@ -79,7 +79,8 @@ export class Editor extends EventTarget {
   set selectedUid(uid) { this._polygonSelection = null; this._segmentSelection = null; this._branchSelection = null; this._selectedUid = uid ?? null; this.selectedUids = new Set(uid === null || uid === undefined ? [] : [uid]); }
   // With nothing selected there is nothing to look up: the frame on show is not built for it (the library reads this on every tick of playback).
   get selectedObjects() { return this.selectedUids?.size ? this.selectionFrame?.objects.filter(o => this.selectedUids.has(o.unique_id)) ?? [] : []; }
-  get object() { return this.selectionFrame?.objects.find(o => o.unique_id === this.selectedUid) ?? this.selectedObjects.at(-1) ?? null; }
+  // With nothing selected there is no object to find: the frame on show is not read for it (the inspector asks on every update).
+  get object() { if (!this.selectedUids?.size) return null; return this.selectionFrame?.objects.find(o => o.unique_id === this.selectedUid) ?? this.selectedObjects.at(-1) ?? null; }
   get figure() { const typeId = this.object?.figure_type_id; return findFigureType(this.report.figure_types, typeId) ?? null; }
   get selectedSlot() { return this.selectionFrame?.objects.findIndex(o => o.unique_id === this.selectedUid) ?? -1; }
   get timeline() {

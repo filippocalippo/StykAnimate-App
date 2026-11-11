@@ -365,6 +365,15 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       try { return JSON.parse(stage.pick_artwork(JSON.stringify({x: point.x, y: point.y, scale, hidden: [...hiddenUids], locked: [...lockedUids]}))); }
       catch (error) { options.onError?.(error); return null; }
     },
+    /**
+     * The camera of the edit frame the stage drew last, as a frame record holds it (`{is_default, x, y, scale, angle_rad}`), or null when it
+     * holds none: what the camera outline reads, without a read of the whole frame.
+     */
+    shownCamera() {
+      if (destroyed || lost || !engineShown || typeof stage.edit_camera !== 'function') return null;
+      const [isDefault, x, y, scale, angle] = stage.edit_camera();
+      return isDefault === undefined ? null : {is_default: isDefault === 1, x, y, scale, angle_rad: angle};
+    },
     // Prepared playback frames: a packet is a ticket for a tick the engine has ready.
     hasPreparedFrame(key) {
       const ticket = engineTicket(key);

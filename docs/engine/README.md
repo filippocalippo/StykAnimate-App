@@ -31,6 +31,9 @@ Native measurements of an interaction, by phase (a measurement, not a check; the
 times a pose drag, its commit, an undo and a redo as the stage shows them (the session call, the frame and the onion skins after it, the
 draw), with `STYK_EDIT_PROFILE=1` adding where the session call spends its time (`styk_edit::prof`). `styk prims <file> [tick…]` lists
 what a frame is made of.
+`STYK_BENCH_DOC=<file> cargo test --release -p styk-export --test seek_bench -- --ignored --nocapture` times a seek as the stage shows it
+(the interface's read of the frame, the session's frame, the draw list, the same frame drawn again, and clicks on artwork).
+`node scripts/engine-build.mjs --names` builds the release WebAssembly with its function names kept, for a CPU profile of the app.
 
 ## Fixtures
 

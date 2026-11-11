@@ -64,6 +64,7 @@ What's new in each version of StykAnimate.
 - Undoing and redoing big movieclip edits is much faster.
 - Drawing for a long time no longer keeps growing the memory StykAnimate uses.
 - Stepping through frames with the keyboard shows the next frame sooner on large animations.
+- Panning, zooming and clicking on figures stay smooth in scenes with thousands of figures.
 
 ### Removed
 

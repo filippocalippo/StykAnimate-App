@@ -85,3 +85,51 @@ fn a_frame_built_over_the_last_is_the_frame_built_whole() {
     assert!(fresh.update_shown(&generation, &whole));
     assert_eq!(delta.prims, fresh.draw_list(&generation, &EditOptions::default()).unwrap().unwrap().prims, "building a frame over the last is building it whole");
 }
+
+/// What a list is made of, to compare two lists.
+fn parts(list: &styk_eval::drawlist::DrawList) -> String {
+    format!("{:?}", (&list.prims, &list.paints, &list.points, &list.groups, &list.passes, list.background_prims))
+}
+
+#[test]
+fn a_frame_drawn_again_unchanged_is_the_list_drawn_last_and_any_change_is_encoded_afresh() {
+    let (engine, opened, mut session) = open("eval/follow-figures.json");
+    let generation = engine.generation().unwrap();
+    let mut scene = EditScene::default();
+    let at = view(&mut session, 3);
+    let shown = session.show(&at, false).unwrap();
+    assert!(scene.update_shown(&generation, &shown));
+    let first = scene.draw_list(&generation, &EditOptions::default()).unwrap().unwrap();
+    // A pan or a zoom draws the same frame: the list is the one drawn last, so nothing is encoded or uploaded again.
+    let again = scene.draw_list(&generation, &EditOptions::default()).unwrap().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&first, &again), "an unchanged frame is the list drawn last");
+    // Each change to what the list is made of is encoded afresh, and is the list a stage that never drew the frame before encodes.
+    let hidden = [0u32];
+    let translations = [(1u32, [12.5, -3.0])];
+    let changes: [EditOptions<'_>; 4] = [
+        EditOptions { hidden: &hidden, ..Default::default() },
+        EditOptions { translations: &translations, ..Default::default() },
+        EditOptions { background: Some(0xff20_4060), ..Default::default() },
+        EditOptions { bypass_effects: true, ..Default::default() },
+    ];
+    let mut last = first.clone();
+    for (n, options) in changes.iter().enumerate() {
+        let drawn = scene.draw_list(&generation, options).unwrap().unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&drawn, &last), "change {n} is encoded afresh");
+        let mut fresh = EditScene::default();
+        let mut fresh_session = opened.start_session(STATE).unwrap();
+        assert!(fresh.update_shown(&generation, &fresh_session.show(&at, false).unwrap()));
+        assert_eq!(parts(&drawn), parts(&fresh.draw_list(&generation, options).unwrap().unwrap()), "change {n}");
+        last = drawn;
+    }
+    // Back to the first options: encoded again (the last list was another's), and the same picture as the first.
+    let back = scene.draw_list(&generation, &EditOptions::default()).unwrap().unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&back, &first));
+    assert_eq!(parts(&back), parts(&first));
+    // Another frame (another tick) is another list.
+    let later = view(&mut session, 9);
+    assert!(scene.update_shown(&generation, &session.show(&later, false).unwrap()));
+    let moved = scene.draw_list(&generation, &EditOptions::default()).unwrap().unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&moved, &back));
+    assert_ne!(parts(&moved), parts(&back), "the figures moved between the ticks");
+}

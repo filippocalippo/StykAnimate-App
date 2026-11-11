@@ -990,7 +990,7 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
         measured.extend(segment_items.iter().cloned());
     }
     // Drawables: polygons, mesh faces, then visible segments in record order, stably by z.
-    segment_items.sort_by_key(|it| it.index);
+    sort_items(&mut segment_items, |a, b| a.index.cmp(&b.index));
     for it in segment_items {
         let seg = &fig.segments[it.index as usize];
         if !seg.visible {
@@ -1004,7 +1004,7 @@ fn build_object(doc: &Document, version: u32, frame: &Frame, slot: usize, figure
             None => items.push(it),
         }
     }
-    items.sort_by(|a, b| a.z.total_cmp(&b.z));
+    sort_items(&mut items, |a, b| a.z.total_cmp(&b.z));
     let _ = doc;
     let spatial = has_spatial.then(|| Arc::new(ObjectSpatial { frames, depths, figure_angle, mirror: obj.image_text_flags, camera, authored, start_raws }));
     let rig = rig_plan.is_some().then(|| {
@@ -1219,6 +1219,18 @@ fn rotated_drawing(clip: &Movieclip, obj: &Object, parent: &JoinedParent<'_>) ->
         scale: obj.scale * bone.stretch * depth_scale,
         flip: (if obj.image_text_flags { -1.0 } else { 1.0 }) * inherited,
     })
+}
+
+/// Sorts `items` stably by `order`, as `sort_by` does: an object's items are put in order by sorting their positions (four bytes each)
+/// and copying each item once, not by moving the items about (a dense frame sorts hundreds of thousands of them on every build).
+fn sort_items(items: &mut [Item], order: impl Fn(&Item, &Item) -> std::cmp::Ordering) {
+    if items.windows(2).all(|pair| order(&pair[0], &pair[1]) != std::cmp::Ordering::Greater) {
+        return;
+    }
+    let mut positions: Vec<u32> = (0..items.len() as u32).collect();
+    positions.sort_by(|&a, &b| order(&items[a as usize], &items[b as usize]));
+    let sorted: Vec<Item> = positions.iter().map(|&at| items[at as usize]).collect();
+    items.copy_from_slice(&sorted);
 }
 
 /// `Math.floor(yaw / (2π) * steps + .5)`: the nearest of `steps` directions.

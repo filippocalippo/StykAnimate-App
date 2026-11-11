@@ -204,6 +204,8 @@ impl Renderer {
             output: None,
             list: None,
             list_prims: 0,
+            group_runs: Vec::new(),
+            composites: Vec::new(),
             page: [0, 0],
             page_frame: [0, 0],
             exact_sizes: false,

@@ -457,13 +457,26 @@ impl Stage {
         let uids = |key: &str| -> std::collections::HashSet<u32> { request.get(key).and_then(styk_doc::Value::elements).map(|list| list.iter().filter_map(|uid| uid.as_f64()).map(|uid| uid as u32).collect()).unwrap_or_default() };
         let (generation, frame) = match (self.engine.generation(), self.edit.frame()) {
             (Some(generation), Some(frame)) => (generation, frame),
-            _ => return Ok("null".into()),
+            _ => { self.picker.release(); return Ok("null".into()) }
         };
-        let hit = styk_export::pick::artwork(&mut self.picker, &generation.prepared.doc, &generation.assets, &frame, [number("x")?, number("y")?], request.get("scale").and_then(styk_doc::Value::as_f64).unwrap_or(1.0), &uids("hidden"), &uids("locked")).map_err(js_error)?;
+        // The session's scene of the frame on show is the scene a pick builds: it is read, not built again. What the pick works out of
+        // the frame (bounds, where each figure lies) is kept while the frame is on show, so a pointer moving over it costs the figures under it.
+        let shapes = self.edit.shapes().filter(|(shown, _)| Arc::ptr_eq(shown, &frame)).map(|(_, scene)| scene);
+        let hit = styk_export::pick::shown(&mut self.picker, &generation.prepared.doc, &generation.assets, generation.id, &frame, shapes.as_ref(), [number("x")?, number("y")?], request.get("scale").and_then(styk_doc::Value::as_f64).unwrap_or(1.0), &uids("hidden"), &uids("locked")).map_err(js_error)?;
         Ok(match hit {
             Some(hit) => format!("{{\"slot\":{},\"uid\":{}}}", hit.slot, hit.uid),
             None => "null".into(),
         })
+    }
+
+    /// The camera the edit frame the stage holds was authored with (the frame drawn last): `[is_default, x, y, scale, angle]`, empty when
+    /// the stage holds no edit frame. What the camera outline is drawn from, without a read of the whole frame.
+    pub fn edit_camera(&self) -> Vec<f64> {
+        let Some(frame) = self.edit.frame() else { return Vec::new() };
+        match frame.camera {
+            Some(camera) => vec![if camera.is_default { 1.0 } else { 0.0 }, camera.x, camera.y, camera.scale, camera.angle],
+            None => vec![1.0, 0.0, 0.0, 1.0, 0.0],
+        }
     }
 
     /// The unique ids of the objects of the edit frame the stage holds, by slot: what the interface needs to say which figures are hidden or
