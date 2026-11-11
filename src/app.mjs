@@ -5706,6 +5706,8 @@ editor.addEventListener("change", (e) => {
       queueUI();
       warmPlayback();
     }
+    // A scrub's readout follows the playhead; the rest of the chrome waits for the release (it reads the frame on show).
+    else if (state.scrubbing) ui.update("transport");
     return;
   }
   if (kind === "preview" || e.detail?.live || state.drag || state.scrubbing) {

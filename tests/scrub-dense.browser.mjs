@@ -5,6 +5,9 @@ import assert from 'node:assert/strict';
 const browser = await chromium.launch({channel: 'chrome', headless: true});
 const page = await browser.newPage({viewport: {width: 1560, height: 1000}});
 const errors = []; page.on('pageerror', error => errors.push(error.message));
+/** The transport's readout against the playhead it should show. */
+const readout = () => page.evaluate(() => { const {tick, report: {fps}} = styk.editor, two = value => String(value).padStart(2, '0');
+  return {shown: document.getElementById('time-display').textContent, playhead: `${two(Math.floor(tick / fps / 60))}:${two(Math.floor(tick / fps) % 60)}:${two(tick % fps)}`}; });
 const drag = async (from, to) => {
   const box = await page.locator('.sheet-scroll').boundingBox();
   await page.mouse.move(box.x + from, box.y + 15); await page.mouse.down();
@@ -35,6 +38,8 @@ try {
   assert.equal(await page.evaluate(() => styk.scrub.costs.dear(styk.editor.report)), false, 'the demo paints a new tick in a few milliseconds');
   await drag(700, 960);
   await page.waitForFunction(() => scrubLog.draws.some(draw => draw.scrubbing && draw.kind === 'edit' && draw.onions && draw.tick > 0));
+  let time = await readout();
+  assert.equal(time.shown, time.playhead, 'the time readout follows the playhead while it is dragged');
   await page.mouse.up();
   let draws = await page.evaluate(() => scrubLog.draws.filter(draw => draw.scrubbing));
   assert.ok(draws.length > 1 && draws.every(draw => draw.kind === 'edit' && draw.onions), 'an ordinary scrub is editing, with onion skins');
@@ -50,6 +55,8 @@ try {
   await page.waitForFunction(() => scrubLog.draws.filter(draw => draw.kind === 'prepared' && draw.drawn).length >= 2, null, {timeout: 20000});
   const during = await page.evaluate(() => ({active: styk.scrub.preview.active, draws: scrubLog.draws.filter(draw => draw.scrubbing), reads: scrubLog.reads}));
   assert.equal(during.active, true);
+  time = await readout();
+  assert.equal(time.shown, time.playhead, 'the time readout follows the playhead of a dense scrub too');
   assert.deepEqual(during.draws.filter(draw => draw.kind === 'edit'), [], 'the editing frame waits for the release');
   assert.equal(during.reads, 0, 'nothing reads the frame on show while the playhead is dragged');
   assert.ok(during.draws.every(draw => draw.cameraEnabled === false), 'prepared frames are shown in the editing view, not through the scene camera');
