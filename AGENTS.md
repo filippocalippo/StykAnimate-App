@@ -8,7 +8,7 @@ StykAnimate is a local stick animation program built on sound architecture and g
 - Complete implementation and relevant verification. Make reasonable assumptions for routine reversible decisions. Ask only when missing information changes correctness, scope, or authorization; continue independent work meanwhile.
 - Follow the user's latest correction without losing the original objective. Use applicable skills and inspect their instructions for conflicts or stale assumptions. Delegate only when requested or explicitly authorized by applicable instructions.
 - Keep changes focused and use existing module boundaries. Fix the owning layer instead of duplicating state or adding a second implementation of the same behavior.
-- Report the result, checks actually run, and remaining limitations concisely. Claims about builds, performance, or releases require evidence for the changed bytes.
+- Report the result, checks actually run, and remaining limitations concisely, for a reader who has not seen the work: the outcome first, file paths and commands in full, no names coined during the task. Claims about builds, performance, or releases require evidence for the changed bytes.
 
 ## Where to look
 
@@ -24,7 +24,7 @@ StykAnimate is a local stick animation program built on sound architecture and g
 | Engine in the app: owner, frame reads, stage, playback, exports | `src/engine/`, `docs/engine/document.md`, `docs/engine/evaluation.md`, `docs/engine/rendering.md`, `docs/engine/threading.md` |
 | Import, formats, saving | `backend/README.md`, `codecs/`, `native/`, `docs/IMPORT-PIPELINE.md`, `docs/document-exports.md` |
 | Desktop and packaging | `desktop/`, `scripts/before-pack.cjs`, `docs/DESKTOP-RELEASE.md` |
-| Tests and measurements | `tests/`, `scripts/smoke-*.mjs`, `scripts/benchmark-*.mjs`; generated output goes to the ignored `artifacts/` |
+| Tests and measurements | `tests/`, `scripts/smoke-*.mjs`, `scripts/benchmark-*.mjs`, `.github/workflows/ci.yml` (what runs on a pull request); generated output goes to the ignored `artifacts/` |
 | Release history and shipping | `CHANGELOG.md`, `docs/RELEASING.md`, `docs/UPDATES.md`, `.github/workflows/desktop-release.yml` |
 | Licensing and community | `LICENSE`, `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, `SECURITY.md` |
 | Public site, catalogue and services | The separate StykAnimate-Site repository; `docs/WEB.md` covers the browser editor |
@@ -44,7 +44,7 @@ Read the relevant contract before changing behavior. Current code and workflow c
 The Rust engine in `engine/` is the only engine. It holds the open document and its history, runs every edit (a `styk-edit` session per document, reached through `src/engine/engine-owner.mjs`), evaluates and draws every frame, and makes every export. The interface keeps a read view of the document, patched from the session's answers, and its own view state (selection, playhead, tools); it never changes the document in place. `docs/RUST-ENGINE-PORT.md` records the migration.
 
 - Commands: `npm run engine:build` (WebAssembly into `src/engine/pkg/`, required before the app can use the engine), `npm run engine:test` (Rust tests, seconds once built), `npm run engine:parity` (the Rust fixture suites, V8 `Math` fixtures, container checks and live-worker replays; `-- --corpus`), `npm run engine:bench` and `npm run engine:bench:summary <label>`.
-- One owner per concern: `styk-doc` store, `styk-formats` containers, `styk-piv` Pivot codec, `styk-eval` evaluation and draw-list encoding, `styk-draw` the draw-list format, `styk-render` GPU, `styk-raster` CPU, `styk-edit` editing commands, `styk-drawing` drawing raster work (in the drawing workers), `styk-math` V8-exact `Math` functions, `styk-engine` scheduler and jobs, `styk-wasm` browser binding, `styk-cli` tools. JavaScript reaches the engine only through `src/engine/`.
+- One owner per concern: `styk-doc` store, `styk-formats` containers, `styk-piv` Pivot codec, `styk-eval` evaluation and draw-list encoding, `styk-draw` the draw-list format, `styk-render` GPU, `styk-raster` CPU, `styk-edit` editing commands, `styk-drawing` drawing raster work (in the drawing workers), `styk-math` V8-exact `Math` functions, `styk-engine` scheduler and jobs, `styk-export` export frames (sampling, tiles, read-back), `styk-wasm` browser binding, `styk-codec-wasm` and `styk-drawing-wasm` the codec's and the drawing engine's WebAssembly modules, `styk-alloc` the allocator of those modules, `styk-cli` tools. JavaScript reaches the engine only through `src/engine/`.
 - A new primitive kind or flag: define and document it in `styk-draw`, encode it in `styk_eval::drawlist`, draw it in `prim.wgsl` and `styk-raster`, with Rust tests of its encoding and of both renderers' output.
 - A new evaluated feature or file field: unknown fields already survive in the store; read it into the typed views in `styk_eval::load`, evaluate it in `styk_eval`, with Rust tests that state the expected result and fail without it, and a test of what the interface reads of it (an owned editor: `tests/support/owned-editor.mjs`).
 - A new effect: registry and parameters in `styk_eval::vfx`, evaluation fixtures, then a pass in `styk-render/src/effects/` and in `styk-raster/src/effects.rs` (`docs/engine/vfx.md`).
@@ -56,6 +56,7 @@ The Rust engine in `engine/` is the only engine. It holds the open document and 
 
 - For nontrivial fixes, identify the failing behavior, owning layer, and invariant to preserve. Reproduce the defect where practical; distinguish confirmed causes from hypotheses and state verification limits.
 - Add focused behavioral regression coverage where useful, confirming it exposes the original defect where practical. Test observable outcomes; change expectations only when the contract changes or the old expectation is demonstrably wrong.
+- Put a test where its behavior already has tests, at the layer that owns the behavior: Rust tests for what the engine computes, an owned-editor test for what the interface reads of it, a browser or smoke script only for what needs a real window. Extend the existing file instead of adding one per fix, and remove a test that a new one makes redundant. Scratch scripts and one-off checks stay out of the repository. Commit a browser test or smoke script together with the `package.json` script or workflow step that runs it: a test nothing runs goes stale. The unit and Rust tests run on every change on two platforms, so share expensive setup within a file and say in the test why it is slow when it takes more than a few seconds.
 - Before adding helpers, state, caches, dependencies, or fallbacks, inspect existing implementations. Prefer clear ownership and current needs over speculative abstractions. Trace relevant indirect uses before deletion, including workers, dynamic imports, IPC, configuration, and packaging. Keep useful boundaries; line count is not a quality target.
 - Compare performance on the same workload and settings, measuring the affected interaction, stalls, memory, and visual correctness as relevant. Report tradeoffs explicitly; CPU throttling does not establish behavior on other GPUs. Verify cancellation, stale results, disposal, and recovery when changing asynchronous work or resource lifetimes.
 - Review the final diff for duplicated state, unnecessary abstractions, abandoned experiments, weakened tests, and scope expansion. Scale investigation and verification to the change; repeat or broaden passing checks only when new evidence warrants it. Documentation-only changes need documentation checks, not application benchmarks.
@@ -70,11 +71,11 @@ The Rust engine in `engine/` is the only engine. It holds the open document and 
 
 Use locked dependencies and the runtimes in `.github/workflows/desktop-release.yml` (currently Node 24.11.0 and Python 3.12.9 for releases). Use `npm ci`; avoid incidental upgrades. See `README.md` for source setup and `scripts/requirements-build.txt` for packaging prerequisites. Run commands from the repository root.
 
-If PowerShell's `npm` launcher reports a missing `npm-cli.js`, try `npm.cmd` from the same Node installation; it is verified on this workstation. Do not change global tools or dependencies to work around a launcher issue without diagnosing it first.
-
-Scripts and agents that launch the app set `STYK_BACKGROUND_WINDOW=1`: the window opens off-screen, out of the taskbar and without focus, so it never covers the desktop of the person working on this computer.
+Scripts and agents that launch the app set `STYK_BACKGROUND_WINDOW=1`: the window opens off-screen, out of the taskbar and without focus, so it never covers the desktop of the person working on this computer. They also set `STYK_USER_DATA_DIR` and `STYK_LIBRARY_DIR` to new scratch folders, as the smoke scripts do: a packaged app otherwise opens that person's own settings, library and recovery files.
 
 Run `npm run check` after JavaScript changes and tests covering affected behavior. `npm test` covers root unit tests; desktop smoke scripts and browser tests are separate. Inspect rendered results for visual changes. Run relevant Python tests for backend/codec changes and representative benchmarks for performance changes. Rebuild native components when their source changes. Report missing prerequisites or unrelated failures accurately.
+
+The Tests workflow runs `npm run check`, `npm test` and the Python tests on Linux and Windows, the Rust tests when `engine/` or `tests/fixtures/` changed, the browser build with its tests, and a packaged Linux app. It does not run `npm run engine:parity`, the desktop smoke scripts, or the `tests/*.browser.mjs` scripts outside `test:web` and `test:web:browsers`: run the ones a change affects and name them in the report.
 
 ## Changelog and shipping
 
