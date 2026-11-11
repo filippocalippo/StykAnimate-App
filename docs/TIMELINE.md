@@ -243,6 +243,66 @@ prepared worker previews, and settle the exact editable frame at completion.
 Timeline pointer seeks use `editor.seek(tick, {evaluate:false})`; keyboard seeks
 retain normal evaluation. The latest pending move is consumed at most once per
 RAF. Pointer release cancels any older pending move and flushes its exact tick.
+While the playhead is dragged the chrome waits for the release: the inspector, the
+library's selection state and the camera monitor read the frame on show, and none
+of them is updated for an intermediate tick.
+
+### Scrubbing a dense scene
+
+In a scene of a few figures the drag draws the exact editing frame (onion skins,
+joints, selection) at every tick it reaches. Drawing the editing frame at a new
+tick is all interface-thread work: on 2,000 figures of 100 segments it is about
+110 ms of evaluation, building, encoding and upload, and a drag showed about five
+frames a second with the interface frozen in between (tasks of up to 750 ms).
+
+`src/engine/engine-scrub.mjs` decides and runs the other way of scrubbing:
+
+- **The rule** (`createSeekCosts`): the paint loop records the interface time of
+  every editing paint that showed another tick than the paint before it (a redraw
+  of the tick on show, after a pan or an edit, is not a seek). A drag scrubs from
+  prepared frames when the lower median of the document's last three such paints is
+  over 12 ms: a stage paint over that cannot follow a pointer at the display's rate,
+  and a prepared frame costs the interface a few milliseconds whatever the scene.
+  The rule is asked once, at the press (`scrubStarted`, through `timeline-host.mjs`),
+  and holds until the release. A new document is measured anew. Build's canvas
+  colour keeps the editing scrub (prepared frames carry the scene's background).
+- **The drag** (`createScrubPreview`): nothing evaluates or reads the frame on the
+  interface thread, and the stage shows the frames the engine's workers prepare,
+  as playback does (`renderPrepared`, the editor's view, without the scene camera;
+  hidden figures and layers and the effects switch are part of the prepared frame,
+  `engine-playback.mjs`). The joints, onion skins and selection are not drawn, the
+  camera outline follows the prepared frame's camera. Until a frame is ready the
+  picture on show stays. The interface never waits on a worker: readiness is one
+  nonblocking read per tick, and a paint is asked for when the engine's progress
+  counter moves.
+- **Which frames:** every tick the pointer crosses is marked with the order it was
+  crossed in; a paint shows the ready frame of the tick crossed last after the one
+  on show, so a frame of an older place of the pointer that is ready late is never
+  shown over a newer one. At most three frames are prepared at once
+  (`scrub.framesInFlight`): the pointer's tick first, then up to two ticks past it
+  in the drag's direction (`scrub.aheadFrames`); a frame asked for when one of them
+  finishes is the pointer's tick of that moment. Each request replaces the one
+  before (the engine drops what it had not started) and asks again for the frames
+  still wanted. With eight at once every frame took about twice as long, as many
+  were shown, and they lagged further behind the pointer. The engine's cache counts
+  from the low end of the wanted ticks (`prepareRange(ticks, {playhead})`): it drops
+  the frames furthest forward from its playhead first, and counted from the pointer
+  a forward drag lost each frame finished just behind it before a paint could show it.
+- **The picture:** a prepared frame leaves out what lies well outside the artboard
+  ([rendering.md](engine/rendering.md#prepared-frames-leave-out-what-the-artboard-clips)),
+  so it is drawn clipped to the artboard, the editing view's background around it.
+  Figures beyond the artboard's edge show again on release. Past the document's
+  end the last tick stays on show.
+- **The release** draws the exact editing frame once, with onion skins, joints and
+  selection, and the inspector updates.
+
+Measured 2026-11-11 (desktop app, the stress document of 2,000 figures of 100
+segments, joints hidden, a pointer drag of 60 moves across 101 ticks of the ruler):
+no task over 50 ms during the drag (up to 725 ms before), paint p95 about 6 ms
+(about 210 ms), and about 15 distinct frames a second (about 5), bounded by the
+workers: a frame of that scene costs a worker about 170 ms with three at once. The
+frame under a pointer that stops shows 110 to 190 ms later. The release's editing
+frame costs about 130 ms of the interface, as a seek does.
 
 ## Recorded evidence and remaining acceptance
 
