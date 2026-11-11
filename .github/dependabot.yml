@@ -1,0 +1,13 @@
+# Keeps the workflows' actions current: one pull request a month for all of them.
+# npm and Cargo dependencies are locked and upgraded deliberately (CONTRIBUTING.md), so they are not listed here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/engine-build
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']

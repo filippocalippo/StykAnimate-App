@@ -22,7 +22,8 @@ const site = remote
   : await startWebServer({ root: existing ?? (await buildWeb({ output: path.join(temp, 'site') })).output });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const checks = [];
-const check = (name, condition) => { assert.ok(condition, name); checks.push(name); console.log('PASS', name); };
+// `measured` is what a failure reports beside the name: a run that fails on a runner can then be read from its log.
+const check = (name, condition, measured) => { assert.ok(condition, measured === undefined ? name : `${name} (measured ${JSON.stringify(measured)})`); checks.push(name); console.log('PASS', name); };
 
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
@@ -159,7 +160,7 @@ try {
   if (aacSupported) {
     const withMp4 = await heard('export-mp4', 'sound.mp4');
     check('An MP4 carries the project\'s sound (AAC): the same pitch, level and stereo layout', Math.abs(withMp4.hertz - 440) < 6 && Math.abs(withMp4.rms - 0.354) < 0.05 && withMp4.channels === 2);
-    check('The MP4 soundtrack lasts as long as the animation', Math.abs(withMp4.seconds - place.seconds) < 0.1);
+    check('The MP4 soundtrack lasts as long as the animation', Math.abs(withMp4.seconds - place.seconds) < 0.1, {sound: withMp4, place});
   } else {
     // AAC encoding is unavailable in Linux Chromium. Verify the supported error
     // path rather than leaving a pending download or silently losing sound.
@@ -172,7 +173,7 @@ try {
   }
   const withWebm = await heard('export-video', 'sound.webm');
   check('A WebM carries the project\'s sound (Opus): the same pitch and level', Math.abs(withWebm.hertz - 440) < 6 && Math.abs(withWebm.rms - 0.354) < 0.05);
-  check('The soundtrack is as long as the animation, with the recording where it was placed', Math.abs(withWebm.seconds - place.seconds) < 0.1 && place.start > 0);
+  check('The soundtrack is as long as the animation, with the recording where it was placed', Math.abs(withWebm.seconds - place.seconds) < 0.1 && place.start > 0, {sound: withWebm, place});
 
   const capabilities = await page.evaluate(async () => (await import('/src/export-capabilities.mjs')).getExportCapabilities());
   const offered = capabilities.formats.find((item) => item.id === 'mp4');
