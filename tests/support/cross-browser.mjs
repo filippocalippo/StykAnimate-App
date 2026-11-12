@@ -12,6 +12,26 @@ export async function launchBrowser() {
   throw new Error(`Unknown STYK_BROWSER "${BROWSER}". Use chrome, firefox or webkit.`);
 }
 
+/**
+ * Waits for the editor of `page` to be ready. When it never is, what the page said while starting and what it shows are
+ * printed before the timeout is thrown: the browser's own reason (a graphics process that failed, a module that did not load).
+ * Call `watch(page)` before the page loads and `ready()` on what it returns after each load.
+ */
+export function watchEditorStart(page) {
+  const said = [];
+  page.on('console', message => { if (said.length < 60) said.push(`[${message.type()}] ${message.text().slice(0, 300)}`); });
+  page.on('pageerror', error => said.push(`[pageerror] ${String(error.stack ?? error).slice(0, 400)}`));
+  return {
+    async ready(timeout = 90000) {
+      try { await page.waitForFunction(() => window.styk?.ready === true, undefined, {timeout}); }
+      catch (error) {
+        console.error(['The editor did not start. The page said:', ...said, await page.evaluate(() => document.body.innerText.slice(0, 400)).catch(() => '')].join('\n'));
+        throw error;
+      }
+    },
+  };
+}
+
 /** Whether the editor can draw in this browser on this machine: the engine needs WebGPU or WebGL 2. */
 export async function editorCanDraw(browser, origin) {
   const context = await browser.newContext(), page = await context.newPage();

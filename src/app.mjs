@@ -29,7 +29,7 @@ import {resolveInstanceFigure, polygonIdentity} from './animation-style.mjs';
 import { applicationMenuItems } from "./application-menu.mjs";
 import { Editor } from "./editor.mjs";
 import { worldToScreen, screenToWorld, objectBounds } from "./renderer-geometry.mjs";
-import { createStage } from "./engine/engine-stage.mjs";
+import { createStage, startStage } from "./engine/engine-stage.mjs";
 import { createStagePlayback } from "./engine/engine-playback.mjs";
 import { createScrubPreview, createSeekCosts } from "./engine/engine-scrub.mjs";
 import { installEngineOwner } from "./engine/engine-owner.mjs";
@@ -6378,8 +6378,11 @@ async function init() {
   window.styk.thumbnails = thumbnailRenderer;
   timelineHost.mount();
   status({messageKey: "app.preparingCanvasAndEffects", messageParams: {}}, false, true);
-  // A stage that cannot start is reported by the catch of init() below: nothing else draws the scene.
-  state.renderer = await createRenderer(canvas, rendererOptions());
+  // A stage that cannot start is reported by the catch of init() below: nothing else draws the scene. A start that fails or
+  // never settles is tried again over a new canvas first (startStage).
+  state.renderer = await startStage(surface => createRenderer(surface, rendererOptions()), canvas, {
+    replace: () => { const replacement = canvas.cloneNode(false); canvas.replaceWith(replacement); canvas = replacement; return canvas; },
+  });
   // The document was loaded into playback before the stage existed: the engine takes it now.
   state.playbackRevision = null;
   new ResizeObserver(resize).observe(viewport);

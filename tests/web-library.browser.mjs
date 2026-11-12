@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { BROWSER, launchBrowser, requireDrawing } from './support/cross-browser.mjs';
+import { BROWSER, launchBrowser, requireDrawing, watchEditorStart } from './support/cross-browser.mjs';
 import { startCommunitySite } from './support/community-site.mjs';
 import { buildWeb } from '../scripts/build-web.mjs';
 import { startWebServer } from '../scripts/serve-web.mjs';
@@ -34,7 +34,7 @@ const until = async (description, read, timeout = 45000) => {
 
 async function open(context, { blockStorage = false } = {}) {
   const page = await context.newPage();
-  const problems = [];
+  const problems = [], start = watchEditorStart(page);
   page.on('pageerror', (error) => problems.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error' && !/Failed to load resource|Viewport argument key "interactive-widget"/.test(message.text())) problems.push(message.text()); });
   await page.addInitScript((block) => {
@@ -43,9 +43,9 @@ async function open(context, { blockStorage = false } = {}) {
     if (block) IDBFactory.prototype.open = () => { throw new DOMException('Storage is blocked.', 'SecurityError'); };
   }, blockStorage);
   await page.goto(site.origin, { waitUntil: 'load' });
-  await page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 90000 });
+  await start.ready();
   await page.evaluate(() => document.querySelector('.styk-privacy [data-decline]')?.click());
-  return { page, problems };
+  return { page, problems, start };
 }
 const panel = (page) => page.locator('#user-library');
 const cards = (page) => panel(page).locator('.library-card:not(.is-skeleton)');

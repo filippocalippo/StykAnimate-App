@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { BROWSER, launchBrowser, requireDrawing } from './support/cross-browser.mjs';
+import { BROWSER, launchBrowser, requireDrawing, watchEditorStart } from './support/cross-browser.mjs';
 import { buildWeb } from '../scripts/build-web.mjs';
 import { startWebServer } from '../scripts/serve-web.mjs';
 
@@ -31,15 +31,15 @@ const until = async (description, read, timeout = 45000) => {
 
 async function open(context, { blocked = false } = {}) {
   const page = await context.newPage();
-  const problems = [];
+  const problems = [], start = watchEditorStart(page);
   page.on('pageerror', (error) => problems.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error' && !/Failed to load resource|Viewport argument key "interactive-widget"/.test(message.text())) problems.push(message.text()); });
   // Patch the prototype: WebKit can recreate the indexedDB wrapper, dropping properties set on it.
   if (blocked) await page.addInitScript(() => { IDBFactory.prototype.open = () => { throw new DOMException('Storage is blocked.', 'SecurityError'); }; });
   await page.goto(site.origin, { waitUntil: 'load' });
-  await page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 90000 });
+  await start.ready();
   await page.evaluate(() => document.querySelector('.styk-privacy [data-decline]')?.click());
-  return { page, problems };
+  return { page, problems, start };
 }
 const recovery = (page) => page.evaluate(async () => {
   const record = await (await import('/src/browser-recovery.mjs')).readBrowserRecovery();
@@ -72,7 +72,7 @@ try {
   const written = await until('the recovery copy to be written', () => recovery(first.page));
   check('A moment after an edit the work is copied into the browser', written.size > 100 && Math.abs(written.savedAt - Date.now()) < 30000);
   await first.page.reload({ waitUntil: 'load' });
-  await first.page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 90000 });
+  await first.start.ready();
   await first.page.evaluate(() => document.querySelector('.styk-privacy [data-decline]')?.click());
   const offer = first.page.getByText('Restore unsaved work', { exact: true });
   await until('the restore offer', () => offer.isVisible());
@@ -93,7 +93,7 @@ try {
   await until('the recovery copy to be cleared by the save', async () => !(await recovery(first.page)));
   check('A saved project leaves no recovery copy behind', true);
   await first.page.reload({ waitUntil: 'load' });
-  await first.page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 90000 });
+  await first.start.ready();
   await first.page.waitForTimeout(1500);
   check('and nothing is offered after the next reload', !(await first.page.getByText('Restore unsaved work', { exact: true }).isVisible()));
 

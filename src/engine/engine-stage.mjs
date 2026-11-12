@@ -124,6 +124,38 @@ export function uploadRemainingPictures(side, schedule = setTimeout) {
   schedule(step, IDLE_UPLOAD_MS);
 }
 
+/** How long a stage's start is waited for before it is started again over a new canvas, and how many times it is started again. */
+const STAGE_START_MS = 20000, STAGE_RESTARTS = 2;
+
+/**
+ * Starts the page's stage and does not give up at the first start that fails or never settles: the browser's graphics
+ * process can fail while the device is being made (machines without a GPU, several editors in one browser), and the
+ * request it was answering then never comes back, while a new request is served by the process the browser starts
+ * again. A canvas keeps the context type it was first asked for, so each new start gets a new canvas (`replace()`
+ * returns it). The last start is waited for without a limit and its failure is the one reported.
+ * @param {(canvas: HTMLCanvasElement) => Promise<object>} start starts a stage over a canvas (`createStage`)
+ * @param {HTMLCanvasElement} canvas the scene canvas
+ * @param {{replace(): HTMLCanvasElement, waitMs?: number, restarts?: number, warn?(message: string): void}} options
+ */
+export async function startStage(start, canvas, {replace, waitMs = STAGE_START_MS, restarts = STAGE_RESTARTS, warn = message => console.warn(message)}) {
+  for (let attempt = 0; ; attempt++) {
+    const started = start(canvas);
+    if (attempt >= restarts) return started;
+    let timer;
+    const stalled = new Promise(resolve => { timer = setTimeout(resolve, waitMs, startStage); });
+    try {
+      const stage = await Promise.race([started, stalled]);
+      if (stage !== startStage) return stage;
+      warn(`The stage did not start in ${waitMs} ms; starting it again.`);
+      // The start left behind installs nothing should it ever finish: its canvas has left the page (createStage).
+      started.catch(() => {});
+    } catch (error) {
+      warn(`The stage could not start (${error?.message ?? error}); starting it again.`);
+    } finally { clearTimeout(timer); }
+    canvas = replace();
+  }
+}
+
 /** How long the stage's start waits for the browser's description of its adapter before using the engine's name of it. */
 const ADAPTER_NAME_MS = 1500;
 
@@ -157,6 +189,11 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
   let stage;
   try { stage = await side.engine.createStage(canvas); }
   catch (error) { throw messageError(error, 'errors.engineStage.theDrawingEngineCouldNotStart', {reason: error?.message ?? error}); }
+  // A start that was given up on (startStage) finishes late: the page has another canvas and stage by now, which stay the engine's.
+  if (canvas.isConnected === false) {
+    stage.free?.();
+    throw messageError(new Error('its canvas is no longer in the page'), 'errors.engineStage.theDrawingEngineCouldNotStart', {reason: 'its canvas is no longer in the page'});
+  }
   // The engine keeps the document; a stage on a new device starts from empty poses.
   Object.assign(side, perStage(), {stage, live: new LiveCels(stage), failed: null, failure: null});
   /** The stage's pixels per CSS pixel (the last `resize`), and a frame the stage has drawn. */
