@@ -8,8 +8,9 @@ rest. The design was chosen from a set of mockups (concept 6, "Calm band").
 The band reads left to right as three groups: where (the mark and the open projects), how (Animate, Draw,
 Build) and what next (undo, redo, save, Export).
 
-- The mark opens the StykAnimate menu. File, Edit, View, Joint, Animation and Help are its first rows, each
-  a submenu; with two or more projects it also lists them. The `.app-menubar` stays in `index.html` as the
+- The mark opens the StykAnimate menu: Search commands…, then File, Edit, View, Joint, Animation and Help,
+  each a submenu, the open projects when there are two or more, and Settings. It repeats none of the commands
+  those menus and the band already hold (`markMenuItems` in `src/application-menu.mjs`). The `.app-menubar` stays in `index.html` as the
   source of those menus (`[data-app-menu]`) and never shows.
 - `#project-tabs` holds the tab list and New. `src/shell/project-tabs-view.mjs` renders one tab per open
   project: a picture of its stage, its name, and a dot while it has unsaved changes (Close takes the dot's

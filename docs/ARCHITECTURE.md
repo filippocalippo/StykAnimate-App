@@ -153,8 +153,9 @@ see [Effects and connected figures](VFX.md) for scope, draw-order and timing rul
 The left tool rail has a divided stacking group: normal clicks move to front/back,
 and Shift-click moves one step. These use the existing selection-order command.
 Normal right-click opens a short menu for the hit figure or an empty-stage menu;
-clicking a selected figure preserves multi-selection. More figure actions holds
-less frequent commands. Shift + right-drag retains joint bending; Held R handle
+clicking a selected figure preserves multi-selection. Flip and More figure actions
+are submenus there; More figure actions holds the paste kinds and the less frequent
+commands (`src/canvas-context-menu.mjs`). Shift + right-drag retains joint bending; Held R handle
 editing can use the same modified secondary gesture. Escape closes menus and
 returns focus, and pointer-down outside dismisses them before another gesture.
 

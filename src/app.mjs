@@ -26,7 +26,8 @@ import {installMovieclipUI} from './movieclip-ui.mjs';
 import {isMovieclip} from './movieclips.mjs';
 import {segmentPaint, parseColor, hexColor, backgroundPaint, paintBackground, paintCSS} from './paint.mjs';
 import {resolveInstanceFigure, polygonIdentity} from './animation-style.mjs';
-import { applicationMenuItems } from "./application-menu.mjs";
+import { applicationMenuItems, markMenuItems } from "./application-menu.mjs";
+import { canvasMenuItems, selectionMoreItems } from "./canvas-context-menu.mjs";
 import { Editor } from "./editor.mjs";
 import { worldToScreen, screenToWorld, objectBounds } from "./renderer-geometry.mjs";
 import { createStage, startStage } from "./engine/engine-stage.mjs";
@@ -3999,20 +4000,12 @@ installMenuBar(document.querySelector(".app-menubar"), {
 function closeMenu(reason = "close") {
   menuFor(menuHost)?.close(reason, { restore: false });
 }
-/** The menus live in the mark's menu (the band keeps its room for the open projects): they lead it as submenus. */
-function foldedMenubarItems() {
-  const menus = [...document.querySelectorAll(".titlebar .app-menubar [data-app-menu]")].map((button) => ({
-    label: button.textContent.trim(),
-    submenu: appMenuItems(button.dataset.appMenu),
-  }));
-  return [...menus, null];
-}
 /** The open projects as a submenu, for where the band has no room for their tabs and for the keyboard. */
 function openProjectsMenu() {
-  if (projects.tabs.size < 2) return [];
-  return [{ label: interfaceText("projectTabs.openProjects"), labelKey: "projectTabs.openProjects", icon: "layers",
+  if (projects.tabs.size < 2) return null;
+  return { label: interfaceText("projectTabs.openProjects"), labelKey: "projectTabs.openProjects", icon: "layers",
     submenu: projects.tabs.items.map((item) => ({ label: item.name || interfaceText("app.untitled"), checked: item.id === projects.tabs.activeId,
-      run: guarded(() => projects.activate(item.id)) })) }, null];
+      run: guarded(() => projects.activate(item.id)) })) };
 }
 /** A tab's menu: the project in front has its file commands; a resting one can come forward or close. */
 function projectMenuItems(id) {
@@ -4032,33 +4025,14 @@ function projectMenuItems(id) {
   ];
 }
 function showMenu(anchor) {
-  const items = [
-    ...foldedMenubarItems(),
-    ...openProjectsMenu(),
+  showCommandMenu(markMenuItems({
     // The palette's row shows its first key only (Ctrl+P), from the registry.
-    { command: "command-palette", icon: "search", label: commands.label("command-palette"), labelKey: "overlays.palette.open",
+    palette: { command: "command-palette", icon: "search", label: commands.label("command-palette"), labelKey: "overlays.palette.open",
       shortcut: commands.shortcut("command-palette"), keyshortcuts: commands.keyShortcuts("command-palette") },
-    null,
-    messageTuple(["new", "plus", interfaceText("app.newAnimation"), "Ctrl N"], {2: {key: "app.newAnimation", params: {}}}),
-    messageTuple(["open", "folder", interfaceText("app.openProject"), "Ctrl O"], {2: {key: "app.openProject", params: {}}}),
-    messageTuple(["open-recent", "clock", interfaceText("app.openRecent"), "", !desktop?.listRecentFiles], {2: {key: "app.openRecent", params: {}}}),
-    messageTuple(["save", "save", interfaceText("common.save"), "Ctrl S"], {2: {key: "common.save", params: {}}}),
-    messageTuple(["save-as", "save", interfaceText("common.saveAs"), "Ctrl Shift S"], {2: {key: "common.saveAs", params: {}}}),
-    null,
-    messageTuple(["undo", "undo", interfaceText("common.undo"), "Ctrl Z"], {2: {key: "common.undo", params: {}}}),
-    messageTuple(["redo", "redo", interfaceText("common.redo"), "Ctrl Shift Z"], {2: {key: "common.redo", params: {}}}),
-    null,
-    messageTuple(["import", "import", interfaceText("app.importFigures"), ""], {2: {key: "app.importFigures", params: {}}}),
-    messageTuple(["import-sprite", "frame", interfaceText("app.importSpriteImage"), ""], {2: {key: "app.importSpriteImage", params: {}}}),
-    messageTuple(["import-background", "frame", interfaceText("app.importBackgroundImage"), ""], {2: {key: "app.importBackgroundImage", params: {}}}),
-    messageTuple(["add-text", "text", interfaceText("app.createText"), "T"], {2: {key: "app.createText", params: {}}}),
-    messageTuple(["export", "export", interfaceText("common.export"), ""], {2: {key: "common.export", params: {}}}),
-    null,
-    messageTuple(["settings", "settings", interfaceText("app.settings"), "Ctrl ,"], {2: {key: "app.settings", params: {}}}),
-    messageTuple(["help", "help", interfaceText("app.keyboardShortcuts"), "?"], {2: {key: "app.keyboardShortcuts", params: {}}}),
-    messageTuple(["performance", "activity", interfaceText("app.performance"), ""], {2: {key: "app.performance", params: {}}}),
-  ];
-  showCommandMenu(items, anchor);
+    menus: [...document.querySelectorAll(".titlebar .app-menubar [data-app-menu]")].map((button) => ({
+      label: button.textContent.trim(), submenu: appMenuItems(button.dataset.appMenu) })),
+    projects: openProjectsMenu(),
+  }), anchor);
 }
 /**
  * Opens a command menu below `anchor` (an element, whose second press closes
@@ -4190,43 +4164,10 @@ overlay.addEventListener(
       editor.select(hit.g.obj.unique_id, hit.joint);
     if (hit && selection().size <= 1)
       editor.select(hit.g.obj.unique_id, hit.joint);
-    // The canvas's menus (revision 5): named groups, the rarer paste kinds in a submenu, and Delete last.
-    const pasteKinds = [
-      messageTuple(["paste-in-place", "clipboard", interfaceText("app.pasteInPlace"), "Ctrl Shift V"], {2: {key: "app.pasteInPlace", params: {}}}),
-      messageTuple(["paste-instance", "clipboard", interfaceText("app.pasteInstance")], {2: {key: "app.pasteInstance", params: {}}}),
-      messageTuple(["paste-unique", "duplicate", interfaceText("app.pasteUniqueCopy")], {2: {key: "app.pasteUniqueCopy", params: {}}}),
-    ];
     const joint = hit && hit.joint >= 0 && !editor.figure?._styk?.movieclip && selection().size <= 1;
-    const items = !hit ? [
-      { label: interfaceText("common.paste"), labelKey: "common.paste" },
-      messageTuple(["paste", "clipboard", interfaceText("common.paste"), "Ctrl V"], {2: {key: "common.paste", params: {}}}),
-      ...pasteKinds,
-      null,
-      messageTuple(["select-all", "cursor", interfaceText("app.selectAll"), "Ctrl A"], {2: {key: "app.selectAll", params: {}}}),
-      null,
-      messageTuple(["scene-settings", "scene", interfaceText("app.sceneProperties")], {2: {key: "app.sceneProperties", params: {}}}),
-      messageTuple(["zoom-reset", "fit", interfaceText("app.fitCanvas"), "Shift 1"], {2: {key: "app.fitCanvas", params: {}}}),
-    ] : [
-      { label: selection().size > 1 ? interfaceText('counts.figures', {count: selection().size}) : editor.figure?.name || interfaceText("app.figure") },
-      messageTuple(["copy", "duplicate", interfaceText("common.copy"), "Ctrl C"], {2: {key: "common.copy", params: {}}}),
-      messageTuple(["paste", "clipboard", interfaceText("common.paste"), "Ctrl V"], {2: {key: "common.paste", params: {}}}),
-      { label: interfaceText("app.pasteAs"), labelKey: "app.pasteAs", icon: "clipboard", submenu: pasteKinds },
-      messageTuple(["duplicate", "duplicate", interfaceText("common.duplicate"), "Ctrl D"], {2: {key: "common.duplicate", params: {}}}),
-      null,
-      messageTuple(["mirror", "flip", interfaceText("app.flipHorizontally"), "Shift H"], {2: {key: "app.flipHorizontally", params: {}}}),
-      messageTuple(["mirror-vertical", "flip-vertical", interfaceText("app.flipVertically"), "Shift V"], {2: {key: "app.flipVertically", params: {}}}),
-      joinMenuItem(),
-      ...(joint ? [messageTuple(["disconnect-segment", "cut", interfaceText("app.disconnectSegment"), "", !canDisconnectSegment()], {2: {key: "app.disconnectSegment", params: {}}})] : []),
-      messageTuple(["camera-follow", "camera", interfaceText("app.followWithCamera"), "", Boolean(builderMode?.active)], {2: {key: "app.followWithCamera", params: {}}}),
-      ...(joint ? [messageTuple(["segment-values", "sliders", interfaceText("app.exactValues"), "I"], {2: {key: "app.exactValues", params: {}}})] : []),
-      messageTuple(["selection-more", "more", interfaceText("app.moreFigureActions")], {2: {key: "app.moreFigureActions", params: {}}}),
-      ...(!builderMode?.active && !editor.figure?._styk?.movieclip ? [
-        null,
-        messageTuple(["edit-in-build-mode", "nodes", interfaceText("app.editInBuild"), "", selection().size !== 1], {2: {key: "app.editInBuild", params: {}}}),
-      ] : []),
-      null,
-      ["delete", "trash", "Delete", "Delete"],
-    ];
+    const items = canvasMenuItems({ hit: Boolean(hit), join: hit && joinMenuItem(), joint, canDisconnect: joint && canDisconnectSegment(),
+      title: selection().size > 1 ? interfaceText('counts.figures', {count: selection().size}) : editor.figure?.name || interfaceText("app.figure"),
+      building: Boolean(builderMode?.active), movieclip: Boolean(editor.figure?._styk?.movieclip), single: selection().size === 1 });
     showCommandMenu(items, { left: e.clientX, bottom: e.clientY });
   }),
 );
@@ -4330,19 +4271,7 @@ const actions = {
     if (editor.object && selection().size === 1 && !editor.figure?._styk?.movieclip)
       studioShell?.changeMode('rig');
   },
-  "selection-more": () => showCommandMenu([
-    { label: interfaceText("app.select"), labelKey: "app.select" },
-    messageTuple(["select-same", "person", interfaceText("app.selectSameFigure")], {2: {key: "app.selectSameFigure", params: {}}}),
-    messageTuple(["select-invert", "cursor", interfaceText("app.invertSelection")], {2: {key: "app.invertSelection", params: {}}}),
-    null,
-    { label: interfaceText("app.pose"), labelKey: "app.pose" },
-    messageTuple(["locate-previous", "match-prev", interfaceText("app.matchPreviousPose"), "L"], {2: {key: "app.matchPreviousPose", params: {}}}),
-    messageTuple(["locate-next", "match-next", interfaceText("app.matchNextPose"), "Shift L"], {2: {key: "app.matchNextPose", params: {}}}),
-    joinMenuItem(),
-    null,
-    messageTuple(["add-to-library", "plus", interfaceText("app.addToLibrary")], {2: {key: "app.addToLibrary", params: {}}}),
-    messageTuple(["zoom-selection", "center", interfaceText("app.fitSelection"), "Shift 2"], {2: {key: "app.fitSelection", params: {}}}),
-  ], lastMenuAnchor || viewport, { label: interfaceText("app.moreFigureActions2"), labelKey: "app.moreFigureActions2" }),
+  "selection-more": () => showCommandMenu(selectionMoreItems({ join: joinMenuItem() }), lastMenuAnchor || viewport, { label: interfaceText("app.moreFigureActions2"), labelKey: "app.moreFigureActions2" }),
   "segment-values": () => showSegmentValues(),
   menu: (e) =>
     showMenu(e?.closest?.("button") || document.querySelector(".brand")),

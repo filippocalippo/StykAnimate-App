@@ -119,6 +119,7 @@ src/camera-motion.mjs	engine	styk-eval::camera	partial	Rust: presets, travel and
 src/camera-overlay.mjs	engine	styk-eval::picking	js	handles, picking, snapping geometry (drawn by the JS overlay)
 src/canvas-artwork-pick.mjs	engine	styk-render	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.
 src/canvas-color-sample.mjs	engine	styk-render	js	
+src/canvas-context-menu.mjs	ui	-	stays	
 src/canvas-guides.mjs	ui	-	stays	
 src/canvas-handle-overlay.mjs	ui	-	stays	
 src/canvas-handles.mjs	ui	-	stays	

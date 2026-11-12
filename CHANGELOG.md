@@ -23,7 +23,8 @@ What's new in each version of StykAnimate.
 ### Changed
 
 - Ctrl-dragging a node that uses IK stretches it like any other node.
-- A calmer top bar: the menus are in the StykAnimate menu, and your open projects take their place.
+- A calmer top bar: the menus are in a short StykAnimate menu, and your open projects take their place.
+- Shorter right-click menus on the canvas, with less frequent figure commands grouped under More figure actions.
 - Exports preserve effects and 3D artwork when No smoothing is selected.
 - Recent colors, personal palettes and your brush library are kept between launches on desktop.
 

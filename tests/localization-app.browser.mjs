@@ -47,7 +47,9 @@ try {
   await page.getByRole('button',{name:'Chiudi impostazioni',exact:true}).click();
   await page.evaluate(() => styk.settingsUI.flush());
   await page.locator('.brand[data-action=menu]').click();
-  check('Actual menu lifecycle translates commands while retaining keyboard hints',await page.locator('#menu').evaluate(menu => menu.querySelector('[data-action=new] span').textContent==='Nuova animazione' && menu.querySelector('[data-action=save] span').textContent==='Salva' && menu.querySelector('[data-action=save] kbd').textContent==='Ctrl+S'));
+  await page.locator('#menu .ui-menu-item[aria-haspopup=menu]').first().click();
+  check('Actual menu lifecycle translates commands while retaining keyboard hints',await page.locator('.ui-menu:has([data-action=save])').evaluate(menu => menu.querySelector('[data-action=new] span').textContent==='Nuova animazione' && menu.querySelector('[data-action=save] span').textContent==='Salva' && menu.querySelector('[data-action=save] kbd').textContent==='Ctrl+S'));
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+z');
   await page.waitForFunction(value => styk.editor.object.root_x===value,originalX);

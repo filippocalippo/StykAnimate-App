@@ -1,6 +1,7 @@
 import {chooseExport, exportDialogClosed} from './helpers/export-dialog.mjs';
 import {installProjectSavePicker} from './support/project-save-picker.mjs';
 import {readNativeDocument} from '../scripts/read-native-document.mjs';
+import {openAppMenu} from './support/app-menu.mjs';
 /** Bounded application authoring flows. Requires the local app at STYK_URL. */
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
@@ -49,14 +50,15 @@ try {
     c.fillStyle = '#ffb443'; c.fillRect(5, 4, 13, 13); return canvas.toDataURL('image/png').split(',')[1];
   });
   const imagePath = path.join(out, 'authoring-input.png'); await writeFile(imagePath, Buffer.from(png, 'base64'));
-  await page.locator('.titlebar .brand').click();
-  const spriteChooser = page.waitForEvent('filechooser'); await page.locator('#menu [data-action="import-sprite"]').click();
+  const importRow = async command => { await page.getByRole('menuitem', {name: 'Import', exact: true}).click(); await page.locator(`.ui-menu [data-action="${command}"]`).click(); };
+  await openAppMenu(page, 'file');
+  const spriteChooser = page.waitForEvent('filechooser'); await importRow('import-sprite');
   await (await spriteChooser).setFiles(imagePath);
   await page.waitForFunction(n => styk.editor.evaluatedFrame.objects.length === n + 1, initial.count);
   check('Sprite menu and image input create an embedded editable figure', await value(() => styk.editor.figure.image_assets[0].data_url.startsWith('data:image/png;base64,')));
   const beforeBackground = await value(() => ({backgrounds: styk.editor.report.backgrounds.length, id: styk.editor.evaluatedFrame.background_id}));
-  await page.locator('.titlebar .brand').click();
-  const backgroundChooser = page.waitForEvent('filechooser'); await page.locator('#menu [data-action="import-background"]').click();
+  await openAppMenu(page, 'file');
+  const backgroundChooser = page.waitForEvent('filechooser'); await importRow('import-background');
   await (await backgroundChooser).setFiles(imagePath);
   await page.waitForFunction(n => styk.editor.report.backgrounds.length === n + 1, beforeBackground.backgrounds);
   check('Background menu and image input assign an embedded image background', await value(() => styk.editor.evaluatedFrame.background_id > 0));

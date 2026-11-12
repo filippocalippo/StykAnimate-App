@@ -280,7 +280,7 @@ try {
   check(
     "Canvas context menu offers figure actions and the selection submenu",
     (await page.locator('#menu [data-action="duplicate"]').isVisible()) &&
-      (await page.locator('#menu [data-action="selection-more"]').isVisible()),
+      (await page.locator('#menu').getByRole("menuitem", { name: "More figure actions", exact: true }).isVisible()),
   );
   check(
     "Context menu stays within the window viewport",
@@ -298,15 +298,15 @@ try {
     { timeout: 60000 },
   );
   await rightClick(430, 300);
-  await page.locator('#menu [data-action="selection-more"]').click();
-  await page.locator('#menu [data-action="select-same"]').click();
+  await page.locator("#menu").getByRole("menuitem", { name: "More figure actions", exact: true }).click();
+  await page.locator('.ui-menu [data-action="select-same"]').click();
   check(
     "Select same figure selects both reusable walker instances",
     [...(await selection())].sort().join(",") === "1,2",
   );
   await rightClick(430, 300);
-  await page.locator('#menu [data-action="selection-more"]').click();
-  await page.locator('#menu [data-action="select-invert"]').click();
+  await page.locator("#menu").getByRole("menuitem", { name: "More figure actions", exact: true }).click();
+  await page.locator('.ui-menu [data-action="select-invert"]').click();
   check(
     "Invert selection selects only the previously unselected figure",
     (await selection()).join(",") === "3",

@@ -1,5 +1,5 @@
 // The application menus live in the mark's menu (the band keeps its room for the open projects):
-// File, Edit, View, Joint, Animation and Help are its first rows, each opening its menu as a submenu.
+// File, Edit, View, Joint, Animation and Help follow Search commands…, each opening its menu as a submenu.
 const LABELS = Object.freeze({file: 'File', edit: 'Edit', view: 'View', editor: 'Joint', animation: 'Animation', help: 'Help'});
 
 /**
