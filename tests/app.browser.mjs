@@ -4,6 +4,8 @@ import {chooseExport,exportDialogClosed} from './helpers/export-dialog.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
+import {skipWithoutFixtures} from './helpers/local-fixtures.mjs';
+skipWithoutFixtures('../Pivot Animator v5/Animations/tween_pendulum.piv','../Pivot Animator v5/Figures/Legacy/man.stk');
 const out=path.resolve('artifacts'),url=process.env.STYK_URL||'http://127.0.0.1:47831';
 await mkdir(out,{recursive:true});
 const browser=await chromium.launch({channel:'chrome',headless:true});

@@ -4,11 +4,13 @@ import assert from 'node:assert/strict';
 import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {skipWithoutFixtures} from './helpers/local-fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'artifacts', 'native-text-authoring');
 const origin = process.env.STYK_URL || 'http://127.0.0.1:47831';
 const names = ['text_abc_66903de7', 'text_bike_f18f65c7', 'text_speech_bubble_0f3b81ef'];
+skipWithoutFixtures(...names.map(name => `../reports/browser_corpus/${name}/scene.json`));
 const reports = await Promise.all(names.map(async name => JSON.parse(await readFile(
   path.join(root, '..', 'reports', 'browser_corpus', name, 'scene.json'), 'utf8'))));
 const figures = reports.flatMap(report => report.figure_types.filter(figure => figure.text_assets?.length));

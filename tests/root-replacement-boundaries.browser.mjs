@@ -2,6 +2,8 @@ import { chromium } from "./support/playwright.mjs";
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { skipWithoutFixtures } from "./helpers/local-fixtures.mjs";
+skipWithoutFixtures("../Pivot Animator v5/Animations/tween_pendulum.piv");
 const out = "artifacts/root-replacement-boundaries",
   checks = [],
   errors = [];
