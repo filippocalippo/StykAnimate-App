@@ -64,8 +64,8 @@ export default [
   // Scripts that drive the app hold functions that run in its page, where the page's own names exist: an undefined
   // name cannot be told from one of those here. Their mistakes show when the script runs.
   {
-    files: ['tests/**/*.browser.mjs', 'tests/**/*.desktop.mjs', 'tests/document-export-browser.mjs', 'tests/import-client-only.mjs', 'tests/join-interaction-profile.mjs',
-      'scripts/smoke-*.mjs', 'scripts/benchmark-*.{mjs,cjs}', 'scripts/dense-drag-benchmark.mjs', 'scripts/corpus-gestures.mjs'],
+    files: ['tests/**/*.browser.mjs', 'tests/**/*.desktop.mjs', 'tests/document-export-browser.mjs', 'tests/import-client-only.mjs',
+      'scripts/smoke-*.mjs', 'scripts/benchmark-*.{mjs,cjs}'],
     rules: {'no-undef': 'off'},
   },
 ];

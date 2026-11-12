@@ -12,7 +12,7 @@
 // `trace.save` is the client's own: it stops the capture, reads every page and writes the Perfetto file. With several
 // developer builds running, name one with --pid. The pipe only accepts this user's local connections.
 // This client never starts the app, so it never chooses a data folder: an agent starts a developer build with
-// STYK_USER_DATA_DIR set to a scratch folder (scripts/styk-profile.mjs --app does), never on the owner's data.
+// STYK_USER_DATA_DIR set to a scratch folder (perf/lib/app.mjs `launch` does), never on the owner's data.
 import net from 'node:net';
 import {readdirSync, writeFileSync} from 'node:fs';
 import os from 'node:os';

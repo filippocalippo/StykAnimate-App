@@ -81,7 +81,7 @@ Save all saves each in turn and stops at the first one the person cancels.
 
 ## Measurements
 
-`tests/project-tabs-switch.benchmark.mjs` on 2026-10-02 (i5-13420H, Intel UHD iGPU, headless Chrome 153, development
+Measured on 2026-10-02 with a script since replaced by the project scenarios of `npm run perf` ([PERFORMANCE.md](PERFORMANCE.md)) (i5-13420H, Intel UHD iGPU, headless Chrome 153, development
 server), switching six times between AyameDemo.piv (2 MB) and Uriel 19-2-2026.piv (6 MB):
 
 | | Result |

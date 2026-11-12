@@ -136,10 +136,10 @@ the editor page and ends with it, however the app stops.
 
 Before `desktop/gpu-switches.cjs`, Electron on Linux found no WebGPU adapter and the
 editor drew with a Canvas 2D renderer (since deleted: the engine's WebGL2
-backend is the fallback now). `scripts/benchmark-synthetic-scene.mjs`
-measures the difference with no private files: it clones the startup figure into a
-dense scene and zooms it through the app's own Ctrl+wheel handler, so every frame
-redraws the whole scene. Median of three runs, 4 s each, real desktop app on
+backend is the fallback now). The difference was measured then with a script since removed: the startup figure cloned into a
+dense scene and zoomed through the app's own Ctrl+wheel handler, so every frame
+redraws the whole scene (today `npm run perf -- run --env gpu,webgl,software --scenario canvas.zoom` measures the same
+on generated scenes, [PERFORMANCE.md](PERFORMANCE.md)). Median of three runs, 4 s each, real desktop app on
 Wayland (AMD Ryzen 5 5500, NVIDIA RTX 4070 SUPER, 144 Hz display):
 
 | Scene | Renderer | Frames/s | 95th percentile frame | Worst frame |

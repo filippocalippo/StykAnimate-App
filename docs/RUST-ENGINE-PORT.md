@@ -16,6 +16,10 @@ nothing here should need re-deriving.
 
 ## Performance phase: running record (started 2026-10-31)
 
+> The scripts this record and the sections after it name (`scripts/benchmark-app*.mjs`, `scripts/engine-benchmark.mjs`,
+> `scripts/engine-bench-*.{mjs,sh}`, `scripts/engine-memory.mjs`) were removed in November 2026, when `perf/` replaced the
+> old benchmarks ([PERFORMANCE.md](PERFORMANCE.md)). The record stands as what was measured then, and how.
+
 **Goal.** Opening, playing, scrubbing, posing, dragging, drawing, undoing and saving respond on the next
 display refresh on the heaviest projects, no hitch or flicker, far less memory; obvious side by side with
 `main`. Targets, floors and rules are the owner's brief: the scoreboard in `scripts/benchmark-app-summary.mjs`

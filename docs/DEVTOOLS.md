@@ -1,6 +1,8 @@
 # Developer tools
 
-Profiling and debugging tools for the people and agents working on StykAnimate. They exist **only in a developer
+Profiling and debugging tools for the people and agents working on StykAnimate. This page is the tools inside the
+running app: what they record, the panels, and the control channel. Measuring the app from the command line (scenarios,
+environments, comparing two runs) is [PERFORMANCE.md](PERFORMANCE.md), which reads these same recorders. They exist **only in a developer
 launch** of a source checkout; a packaged app carries no line of them, no channel that reaches them and no pipe, and
 checks prove it (`scripts/check-devtools-shipping.mjs`, `tests/devtools.test.mjs`).
 
@@ -24,38 +26,70 @@ The interface code is the same in both. Three small hooks are shipping code, and
 launch:
 - **`src/trace.mjs`, the one instrumentation layer.** Call sites build span arguments only behind `if (tracing)` or an
   open span, and live parameters' specs are module constants, so the shipping build pays a null check and allocates
-  nothing (`tests/devtools.test.mjs` scans for it). `traceBegin/traceEnd/traceComplete/traceInstant/traceCounter` and
-  `tuned(name, default, spec)`. Its sink is `globalThis.__stykTrace`, which only the early script defines: in the
+  nothing (`tests/devtools.test.mjs` scans for it). `traceBegin/traceEnd/traceComplete/traceInstant/traceCounter`,
+  `tracePhase(name)` (a run of steps that follow one another: the app's start) and `tuned(name, default, spec)`. Its sink is `globalThis.__stykTrace`, which only the early script defines: in the
   shipping build each call is a null check and `tuned` returns its default.
 - **`src/devtools-gate.mjs`.** It loads `src/devtools/devtools.mjs` by URL when the early script marked the page
   (`__STYK_DEVTOOLS__`). The URL is built at run time, so no bundler follows it: the tools are never in a bundle.
+  The app calls it as the last step of its start, so the tools know when the app was ready.
+- **`boundary` of the loaded engine (`src/engine/engine.mjs`).** The generated classes whose methods are the interface
+  thread's calls into WebAssembly, handed to the tools so they can meter them. References only.
 - **`window.styk.requestRender`.** It draws the scene again on the next frame; the control channel waits on it.
 
 Instrumented once, at the owning layer:
-- the frame loop's `paint` (src/app.mjs);
-- `stage draw` and `stage draw prepared` (src/engine/engine-stage.mjs), with the geometry and submit times;
+- the frame loop's `paint` (src/app.mjs), with what it draws nested inside;
+- `stage draw` and `stage draw prepared` (src/engine/engine-stage.mjs), with the tick drawn and the geometry and submit times;
 - every edit session call, by method (src/engine/engine-owner.mjs `sessionCall`);
+- every `interface update`, by surface (src/ui/ui-invalidation.mjs): which part of the chrome a pass paid for;
+- the app's start as phases (`init()` in src/app.mjs): document activation, language, interface, stage and graphics
+  device, first layout;
+- `open`, `save`, `export` and `recovery write` as spans of the `tasks` lane (src/app.mjs);
 - `engine load` (src/engine/engine.mjs).
 
-The browser itself reports long tasks and input-to-paint latency per event.
+Recorded by the tools themselves, with no line in the app (`src/devtools/early.js`, `boundary.mjs`):
+- every input handler, where the browser calls it: `on pointermove (canvas)`, `on keydown (document)`,
+  `on change (editor)` (the editor's own change event, which every edit sends to its listeners);
+- every animation-frame callback (`animation frame`): the app's paint and its pass of interface updates;
+- every call the interface thread makes into the engine, counted by method, and a span
+  (`engine Stage.render_edit`) when one takes a quarter of a millisecond or more.
+
+The browser itself reports long tasks and input-to-paint latency per event (the `long tasks` and `input` lanes).
 
 Live parameters are registered where they are used:
 - `playback.lookaheadFrames`, the frames prepared ahead of the playhead;
+- `scrub.framesInFlight`, `scrub.stepFramesInFlight`, `scrub.aheadFrames`, how a dense scene's scrub asks for frames;
 - `engine.workers`, the preparation threads (applies on reload);
-- `engine.atlasPages`, the sprite pages kept resident;
-- `devtools.lateFrameMs`, the late-frame threshold.
+- `engine.memoryMaximumMiB`, the most the engine's memory may reserve, as a device with little address space gets
+  (applies on reload);
+- `engine.atlasPages`, the sprite pages kept resident.
+
+A frame is late when it took over one and a half of the display's periods; the tools measure the period (the shortest
+run of frames seen), so there is no threshold to set.
 
 ## The early script
 
 `src/devtools/early.js` is a classic script the developer launch's preload script runs in the page before its first script, so it
 runs before the engine starts. With the tools closed it keeps only small bounded rings:
-- **spans:** 65,536 entries in typed arrays; names interned, at most 65,535;
+- **spans:** 65,536 entries in typed arrays; names interned, at most 65,535. Lanes: `interface`, `tasks`, `phases`,
+  `display`, `long tasks`, `input`;
 - **logs:** 4,096 rows. It captures the console (a `[module]` prefix names the module), uncaught errors and rejections;
 - **workers:** at most 512 rows, each with its messages in and out and its errors;
 - **long tasks and slow inputs** (input over 16 ms), from the browser's own observers;
 - **live parameters,** with the values kept in `localStorage` for this developer profile.
 
-Display frames are measured only while the overlay or a capture watches, so the tools cost nothing when closed.
+While something watches (the overlay, the panel, a capture), and only then, it also records **every display frame**
+(2,048 in a ring): when it began, the time since the frame before, and what the interface thread spent on it by phase:
+`handlers` (input handlers since the frame before), `script` (animation-frame callbacks) and `render` (the browser's
+own style, layout and paint, measured to the first task after the frame: an upper estimate). It keeps **how long each
+input waited** for the frame that followed its handler (2,048 in a ring). `src/devtools/frames.mjs` reads both;
+[PERFORMANCE.md](PERFORMANCE.md#what-is-measured) says what each number means. With the tools closed nothing ticks and
+a wrapped handler costs one comparison.
+
+**A requested environment.** A profiling run can ask a developer launch to behave as a smaller machine:
+`STYK_DEVTOOLS_ENVIRONMENT` is JSON with `deviceMemoryGiB` and `hardwareConcurrency` (what the page reports) and
+`parameters` (live parameters' starting values). `desktop/devtools.cjs` passes only those three keys, as numbers,
+booleans and short strings, and the early script applies them before any page script. An ordinary developer launch has
+none and runs as the machine it is.
 
 ## Panels
 
@@ -116,9 +150,14 @@ A request is `{id, op, args?, detail?: "short" | "full"}`. The answer is `{id, o
 |---|---|
 | `hello` | protocol version (1), build, operations |
 | `state` | document summary, playback, view, focus, open dialogs, window, cross-origin isolation, WebGPU |
-| `metrics`, `threads` | the overlay's numbers; the page's workers |
+| `metrics`, `threads`, `memory` | the overlay's numbers; the page's workers; the page's, the engine's and the GPU's memory |
+| `boundary` | `{limit, reset}`: the calls the interface made into the engine since the last capture began, heaviest first |
+| `environment` | what a profiling run asked the page to pretend, and what the page, the engine and the stage report |
+| `startup` | the launch's milestones and the app's start as phases, in ms from the page's start |
+| `display.period` | measures the display's period over `frames` frames (call it while the app rests) |
+| `process.metrics` | over the pipe only: the app's processes with their processor seconds and memory |
 | `logs` | `{level, module, text, since, limit}` |
-| `trace.start`, `trace.stop`, `trace.read`, `trace.recent` | captures; Perfetto JSON in 256 KiB pages; the last `ms` from the ring |
+| `trace.start`, `trace.stop`, `trace.read`, `trace.recent` | captures; Perfetto JSON in 256 KiB pages; the last `ms` from the rings. A capture's summary holds the spans' statistics, the frames with the interface's work by phase, input delay, the calls into the engine, what the engine's threads prepared, and when the stage drew which tick (`src/devtools/capture.mjs` `analyze`); `trace.stop {series: true}` adds the frames as chart series |
 | `params.list`, `params.set`, `params.reset`, `params.save`, `params.load` | live parameters and named sets |
 | `doc.tree`, `doc.frame`, `doc.history`, `doc.commands` | the engine inspector's reads, paged |
 | `command.list`, `command.run` | the app's command registry (what the palette and menus run) |
@@ -133,35 +172,11 @@ There is deliberately no operation that runs arbitrary code: the browser inspect
 `node scripts/styk-dev.mjs <op> [json]` is the client. `trace.save '{"path": "x.json"}'` stops a capture and writes
 the Perfetto file.
 
-## Profiling command
+## Measuring from the command line
 
-```
-node scripts/styk-profile.mjs <file> [open|play|scrub|drag|pan-zoom|all] [--runs 3] [--out <new dir>] [--desktop] [--budget "<metric> <op> <value>"]
-```
-
-Each run opens the document fresh, then runs the steps:
-- **play:** a few seconds from tick 0;
-- **scrub:** 60 seeks;
-- **drag:** a joint dragged at about 120 Hz, then undone;
-- **pan-zoom:** 60 wheel notches with Ctrl held, then a middle-button pan.
-
-Each scenario is one capture. The command writes:
-- `summary.txt`, short enough to read in full. Per scenario: time, display frames (p50, p95, worst, late), paint p95,
-  edit calls, seek p95 and playback fps. Then the slowest spans, anything unusual (dropped events, logged errors),
-  and the budgets;
-- `profile.json`, with every number, the medians over runs, each run, and the machine;
-- `trace-<scenario>.json` (Perfetto) and `stage.png`, from the first run.
-
-The document is named only by its hash. Budgets judge the median and make the command exit 1 when missed; 2 is a tool
-error.
-
-How the command reaches the app:
-- **With `--desktop`,** it starts this checkout's app in a developer launch on a fresh scratch data folder
-  (`STYK_USER_DATA_DIR`; `--user-data` names one, never the owner's), with `STYK_BACKGROUND_WINDOW=1` and
-  `STYK_REMOTE_DEBUGGING_PORT=<port>`. The driver attaches with Playwright's `connectOverCDP`. Input goes through the
-  inspector protocol, which is page input, not system input.
-- **Without it,** the app runs from this checkout's sources in Chrome, with the early script injected: the same
-  tools and measurements, without the desktop shell.
+`npm run perf -- run` starts the app on scratch data, runs scenarios with real input, and says for each how it felt and
+where its time went, thread by thread; `compare` says what changed between two runs. It is built on the recorders and
+the control channel above: [PERFORMANCE.md](PERFORMANCE.md).
 
 ## The shipping build
 
@@ -176,8 +191,9 @@ accepts the gate's import of it.
 
 ## Checks
 
-- `node --test tests/devtools.test.mjs`: the ring, captures, summaries, Perfetto, log filters, inspector paging, the
-  inert instrumentation layer, the shipping check and the shipped file set.
+- `node --test tests/devtools.test.mjs`: the ring, captures, summaries, the frame recorder's reads, the engine boundary
+  meter, the requested environment's filter, Perfetto, log filters, inspector paging, the inert instrumentation layer,
+  the shipping check and the shipped file set.
 - `node tests/devtools.browser.mjs`: the early script injected in Chrome, every control operation, a real joint drag
   reaching the edit session, the Perfetto export, and each panel and the overlay rendering without errors.
 - `tests/devtools.test.mjs` also holds the packaged app to its file lists (no `desktop/devtools.cjs`, no

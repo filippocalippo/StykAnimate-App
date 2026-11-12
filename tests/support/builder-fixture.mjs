@@ -1,4 +1,5 @@
-import {emptyDocument,createObject,createFrame} from '../src/demo.mjs';
+/** A figure of `count` segments in limbs of twenty, with `instances` - 1 copies of an unrelated figure beside it: the large rig the Build tests work on. */
+import {emptyDocument,createObject,createFrame} from '../../src/demo.mjs';
 export function builderFixture(count=1000,instances=1){
  const report=emptyDocument(),figure=report.figure_types[0],base=figure.segments[0];
  figure.segments=Array.from({length:count},(_,i)=>({...base,segment_id:i+1,parent_id:i%20===0?0:i,length:5,angle_rad:(i%20)*.13,thickness:2}));figure.segment_count=count;
