@@ -25,7 +25,7 @@ async function drag(from, to, during) {
   await page.mouse.up(); await page.waitForFunction(() => !styk.state.drag);
 }
 try {
-  await page.goto('http://127.0.0.1:47831'); await page.waitForFunction(() => window.styk?.ready);
+  await page.goto(process.env.STYK_URL ?? 'http://127.0.0.1:47831'); await page.waitForFunction(() => window.styk?.ready);
   await page.evaluate(async () => {
     const {emptyDocument, createObject, createFrame} = await import('/src/demo.mjs');
     const document = emptyDocument(), figure = document.figure_types[0], base = figure.segments[0];
@@ -138,7 +138,7 @@ try {
     const exporter = new DocumentExporter(), importer = new ImportClient(), results = [];
     try {
       for (const format of ['styk', 'stkz', 'piv']) {
-        const blob = await exporter.export(styk.editor.serialize(), {format, figureUid: 1, tick: styk.editor.tick, revision: styk.editor.revision});
+        const blob = await exporter.export(styk.editor.report, {format, figureUid: 1, tick: styk.editor.tick, revision: styk.editor.revision});
         const imported = await importer.importFile(new File([blob], `ik.${format}`));
         const reopened = pageEditor({demo: false}).load(imported.document);
         const g = reopened.geometry.objects.get(0);
@@ -221,7 +221,7 @@ try {
     const exporter=new DocumentExporter(),importer=new ImportClient(),results=[];
     const sample=e=>[...e.geometry.objects.values()].map(g=>({uid:g.obj.unique_id,segments:g.segments.map(s=>({end:s.end,angle:s.angle}))}));
     try{for(const format of ['styk','piv']){
-      const blob=await exporter.export(styk.editor.serialize(),{format,revision:styk.editor.revision}),loaded=await importer.importFile(new File([blob],`joined.${format}`));
+      const blob=await exporter.export(styk.editor.report,{format,revision:styk.editor.revision}),loaded=await importer.importFile(new File([blob],`joined.${format}`));
       results.push({format,expected:sample(styk.editor),actual:sample(pageEditor({demo:false}).load(loaded.document))});
     }}finally{exporter.dispose();importer.dispose();}return results;
   });
