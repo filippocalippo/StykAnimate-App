@@ -140,7 +140,7 @@ import {
   drawCameraViewport,
   drawCameraOutline,
 } from "./camera-overlay.mjs";
-import { EditorSettings, normalizeEditorSettings } from "./settings.mjs";
+import { EditorSettings, normalizeEditorSettings, storedEditorSettings } from "./settings.mjs";
 import { HotkeyManager, HOTKEY_BY_ID, isHotkeyInput } from "./hotkeys.mjs";
 import { hotkeyCommandId, refreshHotkeyHints } from "./hotkey-hints.mjs";
 import { runTimelineHotkey } from "./timeline-hotkeys.mjs";
@@ -5989,7 +5989,8 @@ async function init() {
     ? await window.stykInitialEditorSettings
     : desktop?.getEditorSettings
     ? await desktop.getEditorSettings()
-    : undefined;
+    : storedEditorSettings();
+  // The saved language is loaded before anything chooses it.
   await loadLocale(settingsValue?.locale);
   appLocalization = new AppLocalization({ locale: settingsValue?.locale });
   editorSettings = new EditorSettings({

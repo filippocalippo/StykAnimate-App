@@ -255,6 +255,15 @@ const TIMELINE_ART = {
     .join("")}</svg>`,
 };
 
+/** The settings this browser saved (the desktop app keeps them in its main process instead); {} when none can be read. */
+export function storedEditorSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(EDITOR_SETTINGS_KEY) || "null");
+  } catch {
+    return {};
+  }
+}
+
 export class EditorSettings {
   constructor({
     value,
@@ -267,13 +276,7 @@ export class EditorSettings {
     onFeedback,
     onDonate,
   } = {}) {
-    if (value === undefined) {
-      try {
-        value = JSON.parse(localStorage.getItem(EDITOR_SETTINGS_KEY) || "null");
-      } catch {
-        value = {};
-      }
-    }
+    if (value === undefined) value = storedEditorSettings();
     this.value = normalizeEditorSettings(value);
     // Motion-path visibility is session-only; keep saved display options.
     this.value.motionPaths = false;
