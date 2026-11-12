@@ -8,6 +8,8 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {skipWithoutFixtures} from './helpers/local-fixtures.mjs';
+skipWithoutFixtures('../Pivot Animator v5/Animations/tween_pendulum.piv');
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(appRoot, 'artifacts'), url = process.env.STYK_URL || 'http://127.0.0.1:47831';

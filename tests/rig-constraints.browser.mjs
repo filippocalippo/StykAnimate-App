@@ -2,6 +2,9 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+// The imported projects come from the repository's own generator (docs/RIG-CONSTRAINTS.md), rebuilt from the current examples.
+execFileSync(process.execPath,['scripts/build-rig-collection.mjs'],{stdio:'ignore'});
 const browser=await chromium.launch({channel:'chrome',headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 const output='artifacts/rig-constraints';await mkdir(output,{recursive:true});
 page.on('pageerror',e=>errors.push(e.message));

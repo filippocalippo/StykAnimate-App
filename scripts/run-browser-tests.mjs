@@ -5,11 +5,15 @@
  *   npm run test:browser -- timeline hotkeys      the tests whose file name contains one of the words
  *   npm run test:browser -- --jobs 2 --timeout 240
  *
- * Each test is its own script that exits with 0 when it passes. They run several at a time, each in its own
+ * Each test is its own script that exits with 0 when it passes. A test that cannot run on this machine, because
+ * local sample files it reads are missing (tests/helpers/local-fixtures.mjs), prints a first line `SKIP <reason>`
+ * and exits with 0 before it opens a browser: it is reported as skipped, which is not a failure
+ * (STYK_REQUIRE_FIXTURES=1 makes those tests run, and fail on the missing file, instead). A `SKIP` line with any
+ * other exit code is a failure. They run several at a time, each in its own
  * headless browser, against `scripts/serve.mjs` on STYK_PORT (47831 by default, the address some tests name
  * themselves); with STYK_URL set, that server is used and none is started. The results go to
- * artifacts/browser-tests/results.json (file, status, seconds, the last lines of a failure).
- * Exit code 1 when a test fails or does not finish.
+ * artifacts/browser-tests/results.json (file; status pass, skip, fail or timeout; seconds; the reason for a skip;
+ * the last lines of a failure). Exit code 1 when a test fails or does not finish.
  */
 import {spawn} from 'node:child_process';
 import {mkdir, readdir, writeFile} from 'node:fs/promises';
@@ -50,16 +54,19 @@ const run = file => new Promise(resolve => {
   const started = Date.now();
   const child = spawn(process.execPath, [path.join('tests', file)], {cwd: root, windowsHide: true, detached: process.platform !== 'win32',
     env: {...process.env, STYK_URL: url}, stdio: ['ignore', 'pipe', 'pipe']});
-  let output = '', timedOut = false;
+  let output = '', head = '', timedOut = false;
   const keep = chunk => { output = (output + chunk).slice(-6000); };
-  child.stdout.on('data', keep); child.stderr.on('data', keep);
+  child.stdout.on('data', chunk => { if (head.length < 2000) head += chunk; keep(chunk); });
+  child.stderr.on('data', keep);
   const timer = setTimeout(() => { timedOut = true; stop(child); }, timeout);
   child.on('close', code => {
     clearTimeout(timer);
-    const status = timedOut ? 'timeout' : code === 0 ? 'pass' : 'fail';
+    const skip = /^SKIP (.*)$/.exec(head.split(/\r?\n/)[0]);
+    const status = timedOut ? 'timeout' : code !== 0 ? 'fail' : skip ? 'skip' : 'pass';
     const result = {file, status, seconds: Math.round((Date.now() - started) / 100) / 10};
-    if (status !== 'pass') result.output = output.trim().split('\n').slice(-12).join('\n');
-    console.log(`${status.toUpperCase().padEnd(7)} ${String(result.seconds).padStart(6)}s  ${file}`);
+    if (status === 'skip') result.reason = skip[1].trim();
+    else if (status !== 'pass') result.output = output.trim().split('\n').slice(-12).join('\n');
+    console.log(`${status.toUpperCase().padEnd(7)} ${String(result.seconds).padStart(6)}s  ${file}${result.reason ? `  ${result.reason}` : ''}`);
     resolve(result);
   });
 });
@@ -74,5 +81,5 @@ const count = status => results.filter(result => result.status === status).lengt
 const out = path.join(root, 'artifacts', 'browser-tests');
 await mkdir(out, {recursive: true});
 await writeFile(path.join(out, 'results.json'), JSON.stringify({url, jobs, results}, null, 2));
-console.log(`\n${count('pass')} passed, ${count('fail')} failed, ${count('timeout')} did not finish, of ${results.length}. Details: artifacts/browser-tests/results.json`);
-process.exit(count('pass') === results.length ? 0 : 1);
+console.log(`\n${count('pass')} passed, ${count('skip')} skipped, ${count('fail')} failed, ${count('timeout')} did not finish, of ${results.length}. Details: artifacts/browser-tests/results.json`);
+process.exit(count('fail') + count('timeout') ? 1 : 0);
