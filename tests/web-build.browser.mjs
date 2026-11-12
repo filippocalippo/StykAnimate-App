@@ -132,11 +132,15 @@ try {
   const tone = Float32Array.from({ length: 48000 }, (_, i) => 0.5 * Math.sin(2 * Math.PI * 440 * i / 48000));
   const recording = path.join(temp, 'tone.wav');
   await writeFile(recording, new Uint8Array(await pcmWave([tone]).arrayBuffer()));
+  // The recording goes in at the playhead. Playback above leaves that wherever it stopped, which on a slow machine
+  // is sometimes the first tick, where the placement check below would say nothing: put it on a known later tick.
+  const playhead = await page.evaluate(() => { const { editor } = window.styk; editor.seek(Math.min(3, editor.totalTicks - 1)); return { tick: editor.tick, ticks: editor.totalTicks }; });
+  assert.ok(playhead.tick > 0, `the scene has a tick after the first to place the recording on (${JSON.stringify(playhead)})`);
   await page.getByRole('button', { name: 'Audio', exact: true }).click();
   await page.getByLabel('Choose audio recording').setInputFiles(recording);
   await page.waitForFunction(() => window.styk.editor.report._styk.audio?.tracks[0]?.clips.length === 1, undefined, { timeout: 30000 });
   // The recording starts at the playhead and the scene grows to fit it.
-  const place = await page.evaluate(() => { const { editor } = window.styk, report = editor.report; return { start: report._styk.audio.tracks[0].clips[0].start, seconds: editor.totalTicks / (report.frame_delay_ms ? 1000 / report.frame_delay_ms : report.fps) }; });
+  const place = await page.evaluate(() => { const { editor } = window.styk, report = editor.report; return { start: report._styk.audio.tracks[0].clips[0].start, tick: editor.tick, seconds: editor.totalTicks / (report.frame_delay_ms ? 1000 / report.frame_delay_ms : report.fps) }; });
   const heard = async (action, name) => {
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: 120000 }),
