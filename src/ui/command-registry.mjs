@@ -12,7 +12,7 @@ import {messageError} from '../localized-error.mjs';
  * user's bindings, availability from the app's `requirements` and
  * `availability` hooks for the current context, and the checked state of
  * toggles. The registry holds no editor state and runs commands only through
- * the app's own dispatch wrapper, so telemetry and gesture guards are unchanged.
+ * the app's own dispatch wrapper, so statistics and gesture guards are unchanged.
  *
  * Shortcuts are shown the way HotkeyManager.match resolves them: in a
  * workspace whose own hotkey scope claims a key (F10 in Build, M in Draw),

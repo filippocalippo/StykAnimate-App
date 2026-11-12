@@ -1,4 +1,5 @@
 import {restoreMessageError, messageError} from './localized-error.mjs';
+import {restoreFailure} from './stats/files.mjs';
 
 /** File I/O boundary: bytes transfer to a worker; JSON parsing stays off the UI. */
 import { applyDocumentChunk } from './document-transport.mjs';
@@ -34,10 +35,10 @@ export class ImportClient {
     const worker = new Worker(this.workerURL, {type: 'module', name: 'StykAnimate file importer'});
     this.worker=worker;this.failure=null;
     worker.addEventListener('message', event => {if(this.worker===worker)this._receive(event.data);});
-    worker.addEventListener('messageerror', () => {if(this.worker===worker)this._fail(Object.assign(messageError(new Error(''), "errors.importClient.theImportedProjectCouldNotBeTransferred", {}), { telemetryCode: 'snapshot_failed', telemetryStage: 'prepare' }));});
+    worker.addEventListener('messageerror', () => {if(this.worker===worker)this._fail(Object.assign(messageError(new Error(''), "errors.importClient.theImportedProjectCouldNotBeTransferred", {}), { fileReason: 'transfer-failed', fileStage: 'prepare' }));});
     worker.addEventListener('error', event => {
       event.preventDefault();
-      if(this.worker===worker)this._fail(Object.assign((event.message ? new Error(event.message) : messageError(new Error(''), "errors.importClient.theFileImporterStoppedUnexpectedly")), { telemetryCode: 'worker_failed', telemetryStage: 'decode' }));
+      if(this.worker===worker)this._fail(Object.assign((event.message ? new Error(event.message) : messageError(new Error(''), "errors.importClient.theFileImporterStoppedUnexpectedly")), { fileReason: 'worker-stopped', fileStage: 'decode' }));
     });
   }
 
@@ -76,8 +77,7 @@ export class ImportClient {
       const error = restoreMessageError((message.error?.message ? new Error(message.error?.message) : messageError(new Error(''), "errors.importClient.thisFileCouldNotBeImported")), message.error);
       if (message.error?.code) error.code = message.error.code;
       if (message.error?.status) error.status = message.error.status;
-      error.telemetryCode = message.error?.telemetryCode; error.telemetryStage = message.error?.telemetryStage;
-      error.telemetryFrames=message.error?.telemetryFrames;error.name=message.error?.name||'Error';
+      restoreFailure(error, message.error); error.name=message.error?.name||'Error';
       request.reject(error);
     }
   }
@@ -115,7 +115,7 @@ export class ImportClient {
       const timer = this.timeoutMs > 0 ? setTimeout(() => {
         const error = messageError(new Error(''), "errors.importClient.theFileImportTimedOutTryOpeningA", {});
         error.code = 'import_timeout';
-        error.telemetryStage='decode';
+        error.fileStage='decode';
         this._fail(error);
       }, this.timeoutMs) : null;
       const succeeded=value=>{this.diagnostics?.recovery('import_worker','recovered');resolve(value);};
@@ -146,7 +146,7 @@ export class ImportClient {
     }
     const native = /\.(styk|stkz|stykmov|json)$/i.test(file.name);
     const limit = (native ? 256 : 128) * 1024 * 1024;
-    if (Number(file.size) > limit) throw Object.assign(messageError(new Error(''), "errors.importClient.theFileExceedsTheMibImportLimit", {value: limit / 1024 / 1024}), { telemetryCode: 'file_too_large', telemetryStage: 'prepare' });
+    if (Number(file.size) > limit) throw Object.assign(messageError(new Error(''), "errors.importClient.theFileExceedsTheMibImportLimit", {value: limit / 1024 / 1024}), { fileReason: 'too-large', fileStage: 'prepare' });
     prepareOpen();
     const generation=this.cancelGeneration,bytes = await file.arrayBuffer();
     if(generation!==this.cancelGeneration)throw messageError(new DOMException('', 'AbortError'), "errors.importClient.importSuperseded", {});
@@ -228,7 +228,7 @@ export class ImportClient {
       // The codec service's own answer for a sample it could not open (desktop/samples.cjs).
       const status=Number(sample?.status)||500;
       const error=sample?.error?new Error(sample.error):messageError(new Error(''), 'errors.importWorker.importFailed', {status});
-      throw Object.assign(error,{code:sample?.code,status,telemetryCode:status>=500?'backend_unavailable':'backend_rejected',telemetryStage:'request'});
+      throw Object.assign(error,{code:sample?.code,status,...(status>=500?{fileReason:'service-unavailable'}:{}),fileStage:'request'});
     }
     const view=sample.bytes,bytes=view.byteOffset===0&&view.byteLength===view.buffer.byteLength?view.buffer:view.slice().buffer;
     return this._import(sample.name,bytes,{open});

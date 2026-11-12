@@ -68,7 +68,7 @@ test('an open the memory cannot hold is refused with a message, and the engine o
       const refusal = await open().then(() => null, error => error);
       assert.ok(refusal, 'the open is refused');
       assert.equal(refusal.messageKey, 'errors.engine.outOfMemory');
-      assert.equal(refusal.telemetryCode, 'out_of_memory');
+      assert.equal(refusal.fileReason, 'out-of-memory');
     }
   });
   const {engine} = await nodeEngine();

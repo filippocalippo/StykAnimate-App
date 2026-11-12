@@ -27,7 +27,7 @@ function environment(t,options={}) {
 for(const event of ['error','messageerror'])test(`the next import recovers after a worker ${event}`,async t=>{
   const {client,workers,host,open}=environment(t),[first]=await open('sample.piv');
   workers[0].emit(event,{message:'Worker stopped'});
-  await assert.rejects(first,{telemetryCode:event==='error'?'worker_failed':'snapshot_failed'});
+  await assert.rejects(first,{fileReason:event==='error'?'worker-stopped':'transfer-failed'});
   assert.equal(workers[0].terminated,true);assert.equal(client.pending.size,0);
   assert.deepEqual(host.cancelled,[workers[0].messages[0].jobId]);
   const [next]=await open('next.piv');assert.equal(workers.length,2);
@@ -54,15 +54,15 @@ test('cancelling pending imports cancels each codec job once and rejects stale c
 
 test('a timed-out worker releases all pending work and the next import gets a fresh worker',async t=>{
   const {client,workers,open}=environment(t,{timeoutMs:10});
-  await assert.rejects((await open('stalled.piv'))[0],{code:'import_timeout',telemetryStage:'decode'});
+  await assert.rejects((await open('stalled.piv'))[0],{code:'import_timeout',fileStage:'decode'});
   assert.equal(workers[0].terminated,true);assert.equal(client.pending.size,0);
   const [next]=await open('valid.piv');workers[1].complete({ok:true});assert.deepEqual(await next,{ok:true});
 });
 
 test('worker rejection preserves diagnostics and does not discard a healthy worker',async t=>{
   const {client,workers,open}=environment(t),[pending]=await open('bad.piv');
-  workers[0].emit('message',{data:{id:1,ok:false,error:{message:'Bad file',name:'TypeError',telemetryCode:'invalid_document',telemetryStage:'decode',telemetryFrames:[{module:'import-worker.mjs',line:55}]}}});
-  await assert.rejects(pending,error=>error.name==='TypeError'&&error.telemetryCode==='invalid_document'&&error.telemetryFrames[0].line===55);
+  workers[0].emit('message',{data:{id:1,ok:false,error:{message:'Bad file',name:'TypeError',fileReason:'damaged',fileStage:'decode',workerStack:'TypeError: Bad file\n    at read (styk-app://app/src/import-worker.mjs:55:3)'}}});
+  await assert.rejects(pending,error=>error.name==='TypeError'&&error.fileReason==='damaged'&&error.fileStage==='decode'&&error.workerStack.includes('import-worker.mjs:55'));
   const [next]=await open('valid.piv');workers[0].complete({ok:true});
   assert.deepEqual(await next,{ok:true});assert.equal(workers.length,1);
   client.dispose();await assert.rejects(client.openSample('next.piv'),/disposed/);assert.equal(workers.length,1);
@@ -81,6 +81,6 @@ test('a sample is imported from the bytes the desktop read, under its own name',
 test('a sample the desktop refuses fails with the codec service\'s own answer and starts no import',async t=>{
   const {workers,client}=environment(t,{readSample:()=>({ok:false,status:404,code:'file_not_found',error:'This project file no longer exists.'})});
   await assert.rejects(client.openSample('gone.piv'),error=>error.message==='This project file no longer exists.'&&error.code==='file_not_found'&&
-    error.status===404&&error.telemetryCode==='backend_rejected'&&error.telemetryStage==='request');
+    error.status===404&&error.fileReason===undefined&&error.fileStage==='request');
   assert.equal(workers[0].messages.length,0);
 });

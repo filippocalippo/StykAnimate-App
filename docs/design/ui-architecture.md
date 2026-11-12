@@ -1133,6 +1133,8 @@ x = inset.left + (rect.width - inset.left - inset.right - w * s) / 2;   // y lik
 
 ### 3.17 Telemetry
 
+> **Superseded (2026-11-13).** The telemetry this section and the milestones below describe (`src/telemetry-*.mjs`, `ERROR_MODULES`, `privacy-ui.mjs`) was removed. Statistics replaced it ([STATISTICS.md](../STATISTICS.md)): stack lines name any module of ours by its path, so moving code out of `app.mjs` loses nothing and no list has to follow it. The plan's other references to those files are history.
+
 - **`ERROR_MODULES`** (`src/telemetry-schema.mjs:72`) only lists `app.mjs` among UI files. Frames from new files are dropped, and code moved out of `app.mjs` would lose diagnostics.
 - **In one M0 commit**, add every planned basename:
   - `overlay-manager`, `ui-menu`, `ui-popover`, `ui-tooltip`, `ui-toast`, `ui-dialog`, `anchor-position`, `command-registry`, `command-catalog`, `command-palette`, `roving-focus`, `toolbar-overflow`, `dom-write`, `ui-invalidation`, `ui-context`, `canvas-chrome-theme`, `font-loading`

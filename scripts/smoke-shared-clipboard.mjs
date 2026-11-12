@@ -6,7 +6,8 @@ import path from 'node:path';
 const root = process.cwd(), run = path.join(root, 'artifacts', `shared-clipboard-${Date.now()}`), profile = path.join(run, 'profile');
 await mkdir(profile, {recursive:true});
 await writeFile(path.join(profile, 'editor-settings.json'), JSON.stringify({timelineMode:'simple'}));
-await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({decided:true,consent:{analytics:false,diagnostics:false,policyVersion:'2026-09-10',updatedAt:Date.now()}}));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 const apps = [], errors = [], checks = [];
 async function launch() {
   const app = await electron.launch({args:[root],cwd:root,timeout:45000,env:{...process.env,STYK_USER_DATA_DIR:profile,STYK_LIBRARY_DIR:path.join(run,'library'),STYK_DEBUG:'1'}});

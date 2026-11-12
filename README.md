@@ -26,7 +26,7 @@
 - **Export** MP4, WebM (with transparency), GIF, APNG, PNG/JPEG/SVG frames, and editable `.piv`/`.stk`.
 - **27 interface languages**, light and dark themes, a touch interface for phones and tablets.
 
-Everything (decoding, editing, saving and rendering) runs locally. Optional, consent-based diagnostics are described in [docs/telemetry.md](docs/telemetry.md).
+Everything (decoding, editing, saving and rendering) runs locally. The desktop app sends anonymous statistics about how it runs, never anything from an animation, and they can be turned off: [docs/STATISTICS.md](docs/STATISTICS.md) says what is sent.
 
 ## Get StykAnimate
 

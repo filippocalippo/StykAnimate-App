@@ -26,7 +26,8 @@ const expect = (name, condition, detail = '') => { if (!condition) failures.push
 
 async function launch(args) {
   const profile = await mkdtemp(path.join(work, 'profile-'));
-  await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
+  // Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
   const env = { ...process.env, STYK_USER_DATA_DIR: profile, STYK_BACKGROUND_WINDOW: '1' };
   delete env.ELECTRON_RUN_AS_NODE; delete env.STYK_STARTUP_VIEW;
   const app = await electron.launch({ executablePath, args: packaged ? args : [appRoot, ...args], cwd: appRoot, timeout: 60000, env });

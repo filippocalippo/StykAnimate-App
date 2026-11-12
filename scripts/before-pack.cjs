@@ -43,5 +43,6 @@ module.exports = async function beforePack(context) {
   }
   // The page's scripts, bundled into build/app, which the package carries as resources/bundle (scripts/build-app.mjs).
   await (await import('./build-app.mjs')).buildApp({root: appRoot});
-  await require('./build-telemetry-info.cjs').buildTelemetryInfo(appRoot);
+  // An internal test build (STYK_INTERNAL_BUILD=1) reports statistics on the channel `internal` (desktop/main.cjs); nothing else of the build is sent.
+  await fs.writeFile(path.join(appRoot, 'desktop', 'build-channel.json'), JSON.stringify({internal: process.env.STYK_INTERNAL_BUILD === '1'}) + '\n');
 };

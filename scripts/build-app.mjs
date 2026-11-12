@@ -11,7 +11,6 @@
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ERROR_MODULES } from '../src/telemetry-schema.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Electron 39's Chromium. */
@@ -20,8 +19,9 @@ const TARGET = 'chrome142';
  * patches `PlaybackMetrics`) and the export renderer the determinism smoke creates are entries so that they meet the application's module
  * and not a second copy; tests/app-bundle.test.mjs keeps the list in step with the scripts. */
 const PAGE_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs', 'src/engine/engine.mjs', 'src/engine/engine-export.mjs', 'src/playback-metrics.mjs', 'src/canvas-interactions.mjs', 'src/renderer-geometry.mjs'];
-/** The page's tables of where its bundled lines came from (frameTable), a classic script the page runs before its modules. */
-const FRAME_SCRIPT = 'src/frame-map.js';
+/** The tables of where the page's and the workers' bundled lines came from (frameTable). Nothing loads them at start: statistics
+ * fetch them the first time they describe a problem (src/stats/stack.mjs `loadFrameTables`). */
+export const FRAME_TABLES = 'src/frame-map.json';
 /** The one stylesheet index.html links. */
 const STYLESHEET = 'src/styles/app.css';
 const LAUNCH_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs'];
@@ -105,29 +105,33 @@ function mappedLines(mappings) {
   return lines;
 }
 
+/** A module of ours, by its path in this repository: every module under src/ except the engine's generated glue, anything vendored
+ * and the language files (text tables, which a stack never runs through: leaving them out halves the tables). */
+export const ourModule = (module) => module.startsWith('src/') && !/(^|\/)(node_modules|pkg|locales)\//.test(module);
+
 /**
- * Where a line of a bundled file came from, for the crash reports that name only module basenames and line numbers
- * (src/telemetry-schema.mjs): `[module, lastLine, bundleLine, sourceLine, bundleLine, sourceLine, ...]` for each run of lines
- * (1-based, as a stack trace counts them) that came from one of the modules reports may name. A run lists a pair wherever the
- * distance between the two numbers changes, so a line of the run is found from the last pair at or before it.
+ * Where a line of a bundled file came from, for the stack lines statistics send (src/stats/stack.mjs): `{modules, runs}`, where
+ * `modules` are paths in this repository ("src/engine/engine-stage.mjs") and each run is `[module index, lastLine, bundleLine,
+ * sourceLine, bundleLine, sourceLine, ...]` for lines (1-based, as a stack trace counts them) that came from one module of ours
+ * (`ourModule`). A run lists a pair wherever the distance between the two numbers changes, so a line of the run is found from the
+ * last pair at or before it. `moduleOf` turns a source of the map into its path in this repository.
  */
-export function frameTable(map, allowed = new Set(ERROR_MODULES)) {
-  const names = map.sources.map((source) => path.posix.basename(source));
-  const runs = [];
+export function frameTable(map, moduleOf = (source) => source, ours = ourModule) {
+  const names = map.sources.map(moduleOf);
+  const modules = [], index = new Map(), runs = [];
   let run = null;
-  mappedLines(map.mappings).forEach((entry, index) => {
+  mappedLines(map.mappings).forEach((entry, line) => {
     if (!entry) return;
-    const module = names[entry[0]], bundleLine = index + 1, sourceLine = entry[1] + 1;
-    if (!allowed.has(module)) { run = null; return; }
-    if (!run || run[0] !== module) runs.push(run = [module, bundleLine, bundleLine, sourceLine]);
+    const module = names[entry[0]], bundleLine = line + 1, sourceLine = entry[1] + 1;
+    if (!ours(module)) { run = null; return; }
+    if (!index.has(module)) { index.set(module, modules.length); modules.push(module); }
+    const at = index.get(module);
+    if (!run || run[0] !== at) runs.push(run = [at, bundleLine, bundleLine, sourceLine]);
     else if (sourceLine - bundleLine !== run.at(-1) - run.at(-2)) run.push(bundleLine, sourceLine);
     run[1] = bundleLine;
   });
-  return runs;
+  return { modules, runs };
 }
-
-/** The statement that hands a bundle's tables to the code that builds crash reports. */
-const frameStatement = (tables) => `globalThis.__stykFrames=Object.assign(globalThis.__stykFrames??{},${JSON.stringify(tables)});`;
 
 /** The stylesheet imports its ninety-odd files with `@import`; bundled, it is one request. Fonts and images stay files of
  * the web assets, and their `url()`s are rewritten to be right from the bundled sheet's own place. */
@@ -150,10 +154,7 @@ export function bundledIndex(html, preloads) {
   if (first < 0) throw new Error('index.html has no modulepreload links to replace with the bundle\'s.');
   const indent = /^[ \t]*/.exec(html.slice(first))[0];
   const links = preloads.map((href) => `${indent}<link rel="modulepreload" href="${href}" />\n`).join('');
-  const bundled = html.slice(0, first) + links + html.slice(first).replace(line, '');
-  const theme = '<script src="./src/theme-bootstrap.js"></script>';
-  if (!bundled.includes(theme)) throw new Error('index.html does not load src/theme-bootstrap.js, which the frame tables go before.');
-  return bundled.replace(theme, () => `<script src="./${FRAME_SCRIPT}"></script>\n${indent}${theme}`);
+  return html.slice(0, first) + links + html.slice(first).replace(line, '');
 }
 
 /** The files `entry` loads when it starts: its static imports, and theirs. Paths as the metafile has them. */
@@ -203,22 +204,19 @@ export async function buildApp({ root = appRoot, output = path.join(root, 'build
   const prefix = `${path.relative(root, output).split(path.sep).join('/')}/`;
   const preloads = new Set();
   for (const entry of LAUNCH_ENTRIES) for (const file of launchFiles(result.metafile, prefix + entry)) preloads.add(`./${file.slice(prefix.length)}`);
-  // Each script's tables of where its lines came from, for crash reports; the maps are then deleted. A worker's own are written
-  // at the start of its first line (no line moves); the page's are one classic script, run before any module.
+  // Each script's table of where its lines came from, for statistics' stack lines, all in one file; the maps are then deleted.
   const tablesOf = async (metafile) => {
     const tables = [];
     for (const file of Object.keys(metafile.outputs).filter((name) => name.endsWith('.mjs'))) {
       const map = JSON.parse(await readFile(path.resolve(root, `${file}.map`), 'utf8'));
-      tables.push([path.resolve(root, file), frameTable(map)]);
+      const folder = path.dirname(path.resolve(root, file));
+      tables.push([path.resolve(root, file), frameTable(map, (source) => path.relative(root, path.resolve(folder, source)).split(path.sep).join('/'))]);
       await rm(path.resolve(root, `${file}.map`));
     }
     return tables;
   };
-  const named = (tables) => Object.fromEntries(tables.filter(([, runs]) => runs.length).map(([file, runs]) => [path.basename(file), runs]));
-  await writeFile(path.join(output, FRAME_SCRIPT), `${frameStatement(named(await tablesOf(result.metafile)))}\n`);
-  for (const [file, runs] of await tablesOf(workers.metafile)) {
-    if (runs.length) await writeFile(file, frameStatement(named([[file, runs]])) + await readFile(file, 'utf8'));
-  }
+  const named = (tables) => Object.fromEntries(tables.filter(([, table]) => table.runs.length).map(([file, table]) => [path.basename(file), table]));
+  await writeFile(path.join(output, FRAME_TABLES), `${JSON.stringify(named([...await tablesOf(result.metafile), ...await tablesOf(workers.metafile)]))}\n`);
   const html = bundledIndex(await readFile(path.join(root, 'index.html'), 'utf8'), [...preloads].sort());
   await writeFile(path.join(output, 'index.html'), html);
   return { output, files: Object.keys(result.metafile.outputs).length + Object.keys(workers.metafile.outputs).length + 2, preloads: [...preloads].sort() };

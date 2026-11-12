@@ -10,7 +10,8 @@ import zlib from 'node:zlib';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const output=path.join(root,'artifacts','drawing-desktop'),profile=path.join(output,`profile-${Date.now()}`),file=path.join(output,`drawing-${Date.now()}.styk`);
 await mkdir(profile,{recursive:true});
-await writeFile(path.join(profile,'telemetry-state.json'),JSON.stringify({decided:true,consent:{analytics:false,diagnostics:false,policyVersion:'2026-09-10',updatedAt:Date.now()}}));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 // The pixels of a PNG the page was captured as (8-bit RGB or RGBA): what the stage really shows, not what the cel holds.
 const decodePng=buffer=>{let at=8,width=0,height=0,type=0;const data=[];while(at<buffer.length){const length=buffer.readUInt32BE(at),kind=buffer.toString('ascii',at+4,at+8);if(kind==='IHDR'){width=buffer.readUInt32BE(at+8);height=buffer.readUInt32BE(at+12);type=buffer[at+17];}if(kind==='IDAT')data.push(buffer.subarray(at+8,at+8+length));at+=12+length;}
   const bpp=type===6?4:3,raw=zlib.inflateSync(Buffer.concat(data)),stride=width*bpp,out=Buffer.alloc(height*stride);

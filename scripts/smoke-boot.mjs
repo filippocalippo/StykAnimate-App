@@ -7,10 +7,12 @@
 // Checks: the window and renderer start, the bridge is present and Node is not
 // exposed, the codec answers (and, packaged, is the frozen build with its native
 // scanner), video export offers what the platform's encoder supports, updates and
-// telemetry are in their expected state, and there were no page errors. On Linux
+// statistics are in their expected state (a source run collects and keeps its session
+// on disk, uploading nothing; a packaged run is forced off, so it never reaches the
+// network), and there were no page errors. On Linux
 // without a display, run it under xvfb-run; without a GPU it reports WebGL2
 // instead of WebGPU, and both are accepted.
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,13 +26,11 @@ const unpacked = process.platform === 'win32' ? ['win-unpacked', 'StykAnimate.ex
 const executablePath = packaged ? process.env.STYK_PACKAGED_EXECUTABLE || path.join(appRoot, 'release', ...unpacked) : undefined;
 
 const profile = await mkdtemp(path.join(os.tmpdir(), 'styk-boot-'));
-// No first-run privacy prompt: consent is recorded as declined.
-await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
 const failures = [];
 const expect = (name, condition, detail = '') => { if (!condition) failures.push(`${name}${detail ? ` (${detail})` : ''}`); console.log(`${condition ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`); };
 let app;
 try {
-  app = await electron.launch({ executablePath, args: packaged ? [] : [appRoot], cwd: appRoot, timeout: 60000, env: { ...process.env, STYK_USER_DATA_DIR: profile } });
+  app = await electron.launch({ executablePath, args: packaged ? [] : [appRoot], cwd: appRoot, timeout: 60000, env: { ...process.env, STYK_USER_DATA_DIR: profile, ...(packaged ? { STYK_NO_STATS: '1' } : {}) } });
   const page = await app.firstWindow({ timeout: 60000 });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -44,6 +44,7 @@ try {
     video: await window.stykDesktop.getVideoCapabilities({ width: 320, height: 240 }),
     vfw: (await window.stykDesktop.getVfwCapabilities({ width: 320, height: 240 })).available === true,
     updates: (await window.stykDesktop.getUpdateState()).status,
+    stats: await window.stykDesktop.getStatsState(),
     title: document.title,
   }));
   expect('The window opens on the editor', /StykAnimate/.test(facts.title), facts.title);
@@ -60,6 +61,16 @@ try {
   if (!packaged) expect('Source builds do not update', facts.updates === 'unavailable', facts.updates);
   if (packaged && process.platform === 'linux' && executablePath?.endsWith('.AppImage')) {
     expect('The Linux AppImage enables updates', facts.updates !== 'unavailable', facts.updates);
+  }
+  if (packaged) expect('Statistics are forced off in a packaged smoke run', facts.stats.forcedOff === true && facts.stats.enabled === false && facts.stats.uploads === false);
+  else {
+    expect('A source run collects statistics and uploads nothing', facts.stats.enabled === true && facts.stats.uploads === false, JSON.stringify(facts.stats));
+    // The page hands its summary over (at most once a minute, so the check asks now); the desktop process keeps it with the session.
+    await page.evaluate(() => window.styk.stats.flush());
+    const waiting = await page.waitForFunction(async () => (await window.stykDesktop.previewStats()).waiting.find(report => report.kind === 'session') ?? null, undefined, { timeout: 10000 }).then(handle => handle.jsonValue()).catch(() => null);
+    expect('The running session reaches the desktop process and passes its checks', waiting?.kind === 'session' && /^[a-f0-9]{32}$/.test(waiting.sid), waiting ? `${waiting.minutes} min, ${waiting.smooth?.length ?? 0} cells` : 'none');
+    const onDisk = JSON.parse(await readFile(path.join(profile, 'stats-session.json'), 'utf8').catch(() => '{}'));
+    expect('The session is kept on disk for an unknown ending', Boolean(onDisk.running?.summary), Object.keys(onDisk).join(', '));
   }
   expect('The page raised no errors', errors.length === 0, errors[0]);
 } finally {

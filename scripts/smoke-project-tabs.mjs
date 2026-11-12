@@ -11,8 +11,8 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const run = path.join(appRoot, 'artifacts', `project-tabs-desktop-${Date.now()}`), profile = path.join(run, 'profile');
 await mkdir(run, {recursive: true});
 await mkdir(profile, {recursive: true});
-// The privacy choice is made, so no first-run prompt covers the editor.
-await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({decided: true, consent: {analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now()}}));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 const launch = () => electron.launch({args: [appRoot], cwd: appRoot, timeout: 60000,
   env: {...process.env, STYK_USER_DATA_DIR: profile, STYK_STARTUP_VIEW: 'editor'}});
 const checks = [], check = (name, value) => { assert.ok(value, name); checks.push(name); console.log('PASS', name); };

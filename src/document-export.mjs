@@ -1,4 +1,5 @@
 import {restoreMessageError, messageError} from './localized-error.mjs';
+import {restoreFailure} from './stats/files.mjs';
 
 import {drawingBarrier} from './drawing-resources.mjs';
 import {codecJob} from './codec-job.mjs';
@@ -144,7 +145,7 @@ export class DocumentExporter {
     // revision, or which snapshots of sessions (and a flag, in that memory, that stops it). A page that is not cross-origin
     // isolated cannot share the memory with a worker (nor make the flag), so it makes no file.
     const engine = this.engine;
-    if (!engine?.join || globalThis.crossOriginIsolated === false) throw Object.assign(messageError(new Error(''), "errors.documentExport.theEngineCannotMakeThisFileHere", {}), {telemetryCode: 'engine_failed', telemetryStage: 'prepare'});
+    if (!engine?.join || globalThis.crossOriginIsolated === false) throw Object.assign(messageError(new Error(''), "errors.documentExport.theEngineCannotMakeThisFileHere", {}), {fileReason: 'engine', fileStage: 'prepare'});
     const reusedWorker = Boolean(this.worker);
     const worker = this.worker ??= new Worker(new URL('./document-export-worker.mjs', import.meta.url), {type: 'module', name: 'StykAnimate document export'});
     if (!reusedWorker) {
@@ -170,14 +171,14 @@ export class DocumentExporter {
     const stoppedError = cause => {
       const stopped = messageError(new Error(''), "errors.documentExport.theDocumentExportWorkerStopped");
       if (cause) stopped.cause = cause instanceof Error ? cause : new Error(String(cause));
-      return Object.assign(stopped, { telemetryCode: 'worker_failed', telemetryStage: 'serialize' });
+      return Object.assign(stopped, { fileReason: 'worker-stopped', fileStage: 'serialize' });
     };
     const onError = event => {
       event.preventDefault();
       giveBackMemory();
       fail(stoppedError(event.message));
     };
-    const onMessageError = () => fail(Object.assign(messageError(new Error(''), "errors.documentExport.theDocumentSnapshotCouldNotBeTransferred", {}), { telemetryCode: 'snapshot_failed', telemetryStage: 'prepare' }));
+    const onMessageError = () => fail(Object.assign(messageError(new Error(''), "errors.documentExport.theDocumentSnapshotCouldNotBeTransferred", {}), { fileReason: 'transfer-failed', fileStage: 'prepare' }));
     const onMessage = event => {
       if (!pending || pending.id !== event.data?.id) return;
       const request = pending; pending = null;
@@ -191,8 +192,7 @@ export class DocumentExporter {
         giveBackMemory();
         const error = restoreMessageError((event.data.error?.message ? new Error(event.data.error?.message) : messageError(new Error(''), "errors.documentExport.documentExportFailed")), event.data.error);
         error.code = event.data.error?.code; error.status = event.data.error?.status;
-        error.telemetryCode = event.data.error?.telemetryCode; error.telemetryStage = event.data.error?.telemetryStage;
-        error.telemetryFrames=event.data.error?.telemetryFrames;error.name=event.data.error?.name||'Error';
+        restoreFailure(error, event.data.error); error.name=event.data.error?.name||'Error';
         request.reject(error);
       }
     };
@@ -218,7 +218,7 @@ export class DocumentExporter {
     };
     const abort = () => fail(abortError());
     signal?.addEventListener('abort', abort, {once: true});
-    const timer = this.timeoutMs > 0 ? setTimeout(() => fail(Object.assign(messageError(new Error(''), "errors.documentExport.documentExportTimedOut", {}), { telemetryCode: 'timeout', telemetryStage: 'serialize' })), this.timeoutMs) : null;
+    const timer = this.timeoutMs > 0 ? setTimeout(() => fail(Object.assign(messageError(new Error(''), "errors.documentExport.documentExportTimedOut", {}), { fileReason: 'timeout', fileStage: 'serialize' })), this.timeoutMs) : null;
     try {
       const link = backendJob.link();
       await request('start', {options: {format, name, figureTypeId, figureUid, figureUids, tick, jobId: backendJob.id, engine: {join: engine.join}, guard: workerGuard(worker), ...link.fields}}, link.transfer);

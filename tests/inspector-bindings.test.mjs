@@ -27,7 +27,7 @@ function setup({builder = false} = {}) {
   });
   const state = {rigMode: 'move', applyRange: false};
   const ctx = {
-    editor, state, telemetry: {count: record('telemetry.count')}, guarded: fn => fn, pause: record('pause'),
+    editor, state, stats: {feature: record('stats.feature')}, guarded: fn => fn, pause: record('pause'),
     finishCurrentEdit: record('finishCurrentEdit'), queueUI: record('queueUI'), requestRender: record('requestRender'), fit: record('fit'),
     changeFigureLayer: async () => true, timeline: () => null, builderActive: () => builder, usesBuilderBranch: () => false,
     updateBuilderStyle: record('updateBuilderStyle'), rangeFrames: () => undefined, selectionBounds: () => ({minX: 0, minY: 0, maxX: 10, maxY: 10}),
@@ -80,7 +80,7 @@ test('IK controls use their field names and ids', () => {
   change(control({id: 'node-ik-pinned', checked: true}));
   change(control({name: 'node-ik-bend', value: '-1'}));
   assert.deepEqual(calls.filter(([name]) => name !== 'pause'),
-    [['telemetry.count', 'ik'], ['setNodeIK', {pinned: true}], ['setNodeIK', {bendDirection: -1}]]);
+    [['stats.feature', 'ik'], ['setNodeIK', {pinned: true}], ['setNodeIK', {bendDirection: -1}]]);
 });
 
 test('a control no binding takes changes nothing but the playback state', () => {

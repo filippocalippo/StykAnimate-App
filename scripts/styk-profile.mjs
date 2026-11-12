@@ -146,14 +146,20 @@ function driver(page) {
     if (!answer.ok) throw new Error(`${op}: ${answer.error.what}${answer.error.cause ? ` (${answer.error.cause})` : ''}`);
     return answer.result;
   };
+  // Statistics' own frame counter (src/stats/frames.mjs) measures the same scenario, so a desk's smooth share and the dashboard's agree.
+  const statsFrames = action => page.evaluate(action => { const frames = window.styk?.stats?.frames; if (!frames) return null;
+    if (action === 'reset') { frames.reset(); return null; }
+    const counted = [...frames.cells.values()].reduce((sum, cell) => ({frames: sum.frames + cell.frames, late: sum.late + cell.late}), {frames: 0, late: 0});
+    return {...counted, smooth: frames.smoothShare()}; }, action).catch(() => null);
   const traced = async (label, work) => {
+    await statsFrames('reset');
     await request('trace.start', {label});
-    let extra;
+    let extra, counted;
     try { extra = await work(); }
-    finally { var stopped = await request('trace.stop', {}, 'full'); }
+    finally { var stopped = await request('trace.stop', {}, 'full'); counted = await statsFrames('read'); }
     let text = '';
     for (let index = 0; index < stopped.pages; index++) text += (await request('trace.read', {page: index})).text;
-    return {extra, summary: stopped.summary, events: stopped.events, dropped: stopped.dropped, ms: stopped.ms, trace: text};
+    return {extra, summary: stopped.summary, events: stopped.events, dropped: stopped.dropped, ms: stopped.ms, trace: text, stats: counted};
   };
   return {request, traced};
 }
@@ -239,6 +245,7 @@ function measures(name, result) {
     paint: paint ? {p50: paint.p50, p95: paint.p95, worst: paint.worst} : undefined,
     edit: edits.length ? {calls: edits.reduce((n, row) => n + row.count, 0), worst: Math.max(...edits.map(row => row.worst))} : undefined,
     longTasks: s.spans.find(row => row.name === 'long task')?.count ?? 0,
+    ...(result.stats?.frames ? {smooth: result.stats.smooth, counted: result.stats.frames, countedLate: result.stats.late} : {}),
     ...(result.extra?.seekMs ? {seek: result.extra.seekMs} : {}), ...(result.extra?.fps !== undefined ? {fps: result.extra.fps, targetFps: result.extra.targetFps} : {})};
 }
 
@@ -248,6 +255,7 @@ function writeSummary({input, mode, runs, medians, slowest, judged, unusual}) {
   for (const scenario of scenarios) {
     const get = key => medians[`${scenario}.${key}`];
     const parts = [`${scenario.padEnd(8)} ${fmt(get('ms'))} ms`, `frames p50 ${fmt(get('frames.p50'))} p95 ${fmt(get('frames.p95'))} worst ${fmt(get('frames.worst'))}, late ${fmt(get('frames.late'), 0)}`];
+    if (get('smooth') !== undefined) parts.push(`smooth ${fmt(get('smooth') * 100, 1)} % of ${fmt(get('counted'), 0)}`);
     if (get('paint.p95') !== undefined) parts.push(`paint p95 ${fmt(get('paint.p95'))}`);
     if (get('edit.calls') !== undefined) parts.push(`${fmt(get('edit.calls'), 0)} edit calls, worst ${fmt(get('edit.worst'))}`);
     if (get('seek.p95') !== undefined) parts.push(`seek p95 ${fmt(get('seek.p95'))}`);

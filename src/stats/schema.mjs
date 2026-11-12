@@ -35,41 +35,42 @@ export const DOING = Object.freeze(['drag', 'play', 'scrub', 'view', 'draw']);
 /** Scene size: the segments the engine drew for the frame on show. */
 export const SCENES = Object.freeze(['under-1k', '1k-10k', '10k-50k', '50k-200k', 'over-200k']);
 /** Where a frame's time went. docs/STATISTICS.md says which span each one is. */
-export const STAGES = Object.freeze(['edit', 'evaluate', 'geometry', 'draw', 'overlay', 'interface', 'wait', 'other']);
+export const STAGES = Object.freeze(['edit', 'geometry', 'draw', 'interface', 'wait', 'other']);
 /** Upper bounds, in milliseconds, of the frame-time histogram. A last, open step holds everything slower. */
 export const FRAME_BOUNDS = Object.freeze([4, 8, 12, 17, 21, 25, 33, 42, 50, 67, 83, 100, 150, 250, 500, 1000]);
 /** A frame is late when it took longer than this many display refreshes. */
 export const LATE_FACTOR = 1.5;
 
 export const FEATURES = Object.freeze(['onion', 'library', 'camera', 'effects', 'drawing', 'ik', 'movieclips', 'sound',
-  'builder', 'motion-paths', 'backgrounds', 'pictures', 'layers', 'tutorials', 'palette']);
+  'builder', 'motion-paths', 'backgrounds', 'pictures', 'layers', 'tutorials', 'palette', 'text']);
 export const REACHED = Object.freeze(['edit', 'play', 'save', 'export']);
 export const ENDINGS = Object.freeze(['clean', 'crashed', 'unknown']);
 export const INSTALL_AGES = Object.freeze(['day', 'week', 'month', 'half-year', 'older']);
 export const DAY_PARTS = Object.freeze(['morning', 'afternoon', 'evening', 'night']);
 
 export const FILE_OPS = Object.freeze(['open', 'save', 'autosave', 'export', 'recover']);
-export const FORMATS = Object.freeze(['styk', 'pivot-animation', 'pivot-figure', 'sticknodes', 'sticknodes-figure', 'picture',
-  'gif', 'video', 'picture-sequence', 'svg', 'sound', 'unknown']);
+export const FORMATS = Object.freeze(['styk', 'styk-figure', 'styk-movieclip', 'pivot-animation', 'pivot-figure', 'sticknodes',
+  'sticknodes-figure', 'sticknodes-movieclip', 'archive', 'picture', 'gif', 'apng', 'video', 'picture-sequence', 'svg', 'sound', 'unknown']);
 export const FILE_SIZES = Object.freeze(['under-1mb', '1-10mb', '10-50mb', 'over-50mb', 'unknown']);
-export const FILE_STAGES = Object.freeze(['read', 'decode', 'prepare', 'serialize', 'encode', 'write', 'replace', 'unknown']);
+/** `request`: the file service that converts Pivot and Stick Nodes files (codec-request.mjs). */
+export const FILE_STAGES = Object.freeze(['read', 'request', 'decode', 'prepare', 'serialize', 'encode', 'write', 'replace', 'unknown']);
 export const FILE_REASONS = Object.freeze(['disk-full', 'no-permission', 'file-in-use', 'path-gone', 'too-large', 'not-this-format',
   'unsupported-version', 'unsupported-feature', 'damaged', 'out-of-memory', 'timeout', 'graphics-lost', 'worker-stopped',
-  'engine', 'unknown']);
+  'transfer-failed', 'service-unavailable', 'engine', 'unknown']);
 /** Whether the file that was on disk before a failed save is still as it was. */
 export const KEPT = Object.freeze(['untouched', 'unknown']);
 
 export const PROBLEM_TYPES = Object.freeze(['error', 'engine', 'frozen', 'graphics-lost', 'window-gone', 'worker-stopped']);
 /** What the app was doing when a problem happened. */
-export const ACTIVITIES = Object.freeze(['starting', 'idle', 'editing', 'dragging', 'playing', 'scrubbing', 'drawing', 'opening',
-  'saving', 'exporting', 'recovering', 'closing', 'unknown']);
+export const ACTIVITIES = Object.freeze(['starting', 'idle', 'editing', 'dragging', 'playing', 'scrubbing', 'viewing', 'drawing',
+  'opening', 'saving', 'exporting', 'recovering', 'closing', 'unknown']);
 
 export const FIGURE_COUNTS = Object.freeze(['1', '2-5', '6-20', '21-100', 'over-100']);
 export const FRAME_COUNTS = Object.freeze(['under-50', '50-200', '200-1k', '1k-5k', 'over-5k']);
 export const FRAME_RATES = Object.freeze(['under-12', '12-15', '16-24', '25-30', 'over-30']);
 
 /** Whole numbers a session counts. Each is capped so one odd session cannot bend a total. */
-export const COUNTS = Object.freeze({ edits: 1e6, undos: 1e6, redos: 1e6, frames: 1e6, plays: 1e5, playSeconds: 86400, opens: 1e4,
+export const COUNTS = Object.freeze({ edits: 1e6, undos: 1e6, redos: 1e6, keyframes: 1e6, plays: 1e5, playSeconds: 86400, opens: 1e4,
   saves: 1e5, exports: 1e4, commands: 1e6, graphicsLost: 1e3, graphicsBack: 1e3, problems: 1e4 });
 
 // ---------------------------------------------------------------------------------------------------- steps

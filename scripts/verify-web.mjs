@@ -17,7 +17,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const LIMITS = { files: 20000, fileBytes: 25 * 1024 * 1024, headerRules: 100, headerLine: 2000 };
 const REQUIRED = ['index.html', '_headers', 'build-info.json', 'src/app.mjs', 'src/codec-web-worker.mjs', 'src/codec-engine.mjs',
   'src/web-offline.mjs', 'src/web-support.js', 'src/web-library.mjs', 'src/community-library.mjs', 'sw.js', 'manifest.webmanifest', 'robots.txt', ...CODEC_FILES];
-const PRIVATE = /(^|\/)(\.env[^/]*|telemetry-build\.json|[^/]+\.(pem|key|p12)|desktop|backend|codecs|cloud|node_modules)(\/|$)/;
+const PRIVATE = /(^|\/)(\.env[^/]*|build-channel\.json|[^/]+\.(pem|key|p12)|desktop|backend|codecs|cloud|node_modules)(\/|$)/;
 
 async function listFiles(root, directory = root, out = new Map()) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {

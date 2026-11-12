@@ -109,6 +109,45 @@ test('the instrumentation layer records nothing and returns defaults without the
   assert.equal(gate.startDevtools({}, {}), null);
 });
 
+test('a statistics listener hears names and durations only, and the developer sink still gets every span and its arguments', async () => {
+  const recorded = [], sink = {
+    begin: (name, args) => { recorded.push(['begin', name, args]); return recorded.length; },
+    end: (token, args) => recorded.push(['end', token, args]),
+    complete: (name, start, duration, args) => recorded.push(['complete', name, duration, args]),
+    instant() {}, counter() {}, parameter: (name, fallback) => fallback,
+  };
+  globalThis.__stykTrace = sink;
+  try {
+    const trace = await import('../src/trace.mjs?with-sink');
+    const heard = [];
+    trace.listenSpans(new Set(['edit session call', 'stage geometry']), (name, ms) => heard.push([name, typeof ms]));
+    const listened = trace.traceBegin('edit session call', undefined), other = trace.traceBegin('engine load');
+    assert.ok(listened < 0 && other > 0, 'a listened span has a listener token, another the sink\'s');
+    trace.traceEnd(listened, {method: 'pose'}); trace.traceEnd(other, {workers: 2});
+    trace.traceComplete('stage geometry', 0, 4, {why: 1}); trace.traceComplete('paint', 0, 9);
+    assert.deepEqual(heard, [['edit session call', 'number'], ['stage geometry', 'number']]);
+    assert.deepEqual(recorded.map(row => row[0] === 'begin' ? row.slice(0, 2) : row[0] === 'end' ? [row[0], row[2]] : [row[0], row[1], row[3]]),
+      [['begin', 'edit session call'], ['begin', 'engine load'], ['end', {method: 'pose'}], ['end', {workers: 2}], ['complete', 'stage geometry', {why: 1}], ['complete', 'paint', undefined]]);
+    trace.stopListening();
+    assert.ok(trace.traceBegin('edit session call') > 0, 'without a listener the sink alone answers');
+  } finally { delete globalThis.__stykTrace; }
+});
+
+test('without the developer build a listener uses a fixed set of slots, and stopping it restores the inert layer', async () => {
+  const trace = await import('../src/trace.mjs');
+  let heard = 0;
+  trace.listenSpans(new Set(['stage submit']), () => { heard++; });
+  try {
+    const tokens = new Set();
+    for (let i = 0; i < 200; i++) { const token = trace.traceBegin('stage submit'); tokens.add(token); trace.traceEnd(token); }
+    assert.equal(heard, 200);
+    assert.ok(tokens.size <= 64, `tokens come from a fixed set of slots (${tokens.size})`);
+    assert.equal(trace.traceBegin('paint'), 0, 'a span the listener did not ask for is inert');
+  } finally { trace.stopListening(); }
+  assert.equal(trace.traceBegin('stage submit'), 0);
+  assert.equal(trace.tracing, false);
+});
+
 test('the shipping check finds developer files, markers, binaries and capabilities, and passes clean inputs', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'styk-devtools-'));
   try {
@@ -157,7 +196,8 @@ test('shipping code builds no tracing objects: span arguments are guarded and li
       const where = `${file}:${index + 1}`;
       if (/\btrace(End|Complete|Instant|Begin)\([^)]*\{/.test(line)) {
         calls++;
-        assert.match(line, /if \((tracing|span !== 0)\)/, `${where}: a span's argument object is built only when tracing`);
+        // An open span is not enough: statistics open spans in the shipping build too (src/trace.mjs listenSpans).
+        assert.match(line, /if \(tracing\)|tracing \? \{/, `${where}: a span's argument object is built only when the developer tools record`);
       }
       if (/\btuned\(/.test(line)) { calls++; assert.doesNotMatch(line, /\btuned\([^)]*,\s*\{/, `${where}: a live parameter's spec is a module constant`); }
     }

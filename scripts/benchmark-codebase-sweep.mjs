@@ -26,7 +26,7 @@ if (mode === 'evidence') {
   for (const name of ['benchmark-codebase-sweep.mjs', 'benchmark-codec-topology-sweep.py',
     'benchmark-localization-sweep.mjs'])
     evidence.benchmarkSources[`scripts/${name}`] = createHash('sha256').update(await readFile(`scripts/${name}`)).digest('hex');
-  for (const name of ['node-selection', 'telemetry'])
+  for (const name of ['node-selection'])
     evidence.measurements[name] = await read(`${base}/${name}.json`);
   evidence.measurements.localization = await read('artifacts/performance-sweep/sweep-20261001-r2/localization.json');
   evidence.measurements.stkTopology = await read(`${later}/stk-topology.json`);
@@ -96,12 +96,10 @@ async function run(name, args, env = {}) {
 {
   const jobs = [
     ['node-selection', ['scripts/benchmark-node-selection.mjs']],
-    ['telemetry', ['scripts/benchmark-telemetry.mjs']],
   ];
   for (const [name, args, env] of jobs) await run(name, args, env);
   for (const [name, source] of Object.entries({
     'node-selection': 'artifacts/join-selection/benchmark.json',
-    telemetry: 'artifacts/telemetry-performance.json',
   })) {
     if (report.rows.find(row => row.name === name)?.exitCode === 0)
       await writeFile(path.join(output, `${name}.json`), await readFile(source));

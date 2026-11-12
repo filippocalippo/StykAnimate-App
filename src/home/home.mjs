@@ -50,7 +50,7 @@ export function createHome(ctx) {
   const workspace = root.closest('.workspace'), shell = root.closest('.shell'), band = shell?.querySelector('.titlebar') ?? null;
   const supported = Boolean(desktop?.listProjects);
   const model = {
-    supported, news: Boolean(desktop?.getUpdateState), feedback: Boolean(desktop?.sendTelemetryFeedback), loading: supported, projects: [], folders: [], scope: ALL_PROJECTS, query: '',
+    supported, news: Boolean(desktop?.getUpdateState), feedback: Boolean(desktop?.supportRequest), loading: supported, projects: [], folders: [], scope: ALL_PROJECTS, query: '',
     sort: 'recent', layout: 'grid', busyId: null, tutorials: tutorialProgress([], []), documentName: '', firstTime: false,
   };
   let view = null, shown = false, loads = 0, pictureTimer = 0, storedPicture = null;
