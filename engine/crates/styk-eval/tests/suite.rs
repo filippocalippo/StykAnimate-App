@@ -3,6 +3,7 @@
 //! allocator, a measurement) stays a binary of its own in Cargo.toml.
 mod build_memory;
 mod build_memory_stale;
+mod build_throughput;
 mod cancellation;
 mod channels;
 mod clip_cache;
