@@ -177,9 +177,56 @@ export async function decodeRasterImage(buffer, mimeType) {
   };
 }
 
+/** How a set of landmarks was produced. There is no trained pose model in this build: every result is a heuristic
+ * guess that the person must check, and the interface says so. */
+export const DETECTOR_HEURISTIC_SILHOUETTE = 'heuristic-silhouette';
+export const DETECTOR_SYNTHETIC = 'synthetic-t-pose';
+
+/** The confidence a heuristic landmark honestly carries: low, and never the 0.9+ a trained model reports. */
+const HEURISTIC_VISIBILITY = 0.3;
+
+/** Marks one landmark as a heuristic estimate, for the callers and the tests that report what was detected. */
+function heuristicLandmark(x, y, z, source) {
+  return { x, y, z, visibility: HEURISTIC_VISIBILITY, synthetic: true, detector: source };
+}
+
+/**
+ * Decides whether a silhouette could be an upright figure at all. The aim is honesty, not accuracy: a solid blob, a
+ * wide object, or a shape with no limbs must not come back as a confident skeleton. Anything that passes is still a
+ * heuristic estimate and is labelled as one.
+ */
+export function assessSilhouettePlausibility(slices, figureWidth, figureHeight) {
+  if (figureHeight < figureWidth * 1.2) {
+    return { plausiblyFigure: false, reason: 'not taller than wide' };
+  }
+  const present = slices.filter(slice => slice.count > 0);
+  if (present.length < 4) {
+    return { plausiblyFigure: false, reason: 'too few scanline bands' };
+  }
+  const widths = present.map(slice => slice.maxX - slice.minX + 1);
+  const widest = Math.max(...widths);
+  // A solid block fills every band edge to edge: no head, no tapering, no gap between limbs. A figure does not.
+  const fullBands = widths.filter(width => width >= figureWidth * 0.9).length;
+  if (fullBands >= present.length * 0.7) {
+    return { plausiblyFigure: false, reason: 'solid rectangular silhouette' };
+  }
+  // A human figure tapers where the head, the neck and the legs are: the top band is much narrower than the widest.
+  if (widths[0] > widest * 0.7) {
+    return { plausiblyFigure: false, reason: 'no head taper' };
+  }
+  // Limbs leave holes between them: a nearly solid fill of the bounding box is a shape, not a pose.
+  const area = present.reduce((sum, slice) => sum + slice.count, 0);
+  if (area > figureWidth * figureHeight * 0.85) {
+    return { plausiblyFigure: false, reason: 'nearly solid silhouette' };
+  }
+  return { plausiblyFigure: true, reason: null };
+}
+
 /**
  * Heuristic computer vision pose detector that analyzes raster pixel distribution.
- * Extracts 33 normalized MediaPipe landmarks matching the detected figure.
+ * Extracts 33 normalized MediaPipe landmarks matching the detected figure. The result is a heuristic
+ * approximation, not a trained model's detection: every landmark says `synthetic: true` and carries a low
+ * visibility, and a silhouette that cannot plausibly be an upright figure is rejected with noPoseDetected.
  */
 export function extractLandmarksFromPixels(pixels, width, height) {
   if (!pixels || width <= 0 || height <= 0) {
@@ -283,6 +330,12 @@ export function extractLandmarksFromPixels(pixels, width, height) {
     }
   }
 
+  const slices = sliceCounts.map((count, index) => ({count, minX: sliceMinX[index], maxX: sliceMaxX[index]}));
+  const plausibility = assessSilhouettePlausibility(slices, figureWidth, figureHeight);
+  if (!plausibility.plausiblyFigure) {
+    throw messageError(new Error(`Silhouette is not an upright figure (${plausibility.reason})`), 'errors.poseEstimationWorker.noPoseDetected');
+  }
+
   const getSliceCenterX = (sliceIdx, fallback) => {
     return sliceCounts[sliceIdx] > 0 ? sliceSumsX[sliceIdx] / sliceCounts[sliceIdx] : fallback;
   };
@@ -327,13 +380,14 @@ export function extractLandmarksFromPixels(pixels, width, height) {
   const lAnkleX = lKneeX - figureWidth * 0.02;
   const rAnkleX = rKneeX + figureWidth * 0.02;
 
-  // Clamp normalized coordinate helper
-  const norm = (x, y, z = 0, visibility = 0.98) => ({
-    x: Math.max(0, Math.min(1, x / width)),
-    y: Math.max(0, Math.min(1, y / height)),
+  // Normalized coordinate helper. Every landmark is labelled as a heuristic estimate with a low visibility:
+  // nothing here is a trained model's confident detection.
+  const norm = (x, y, z = 0) => heuristicLandmark(
+    Math.max(0, Math.min(1, x / width)),
+    Math.max(0, Math.min(1, y / height)),
     z,
-    visibility
-  });
+    DETECTOR_HEURISTIC_SILHOUETTE
+  );
 
   const landmarks = new Array(33);
 
@@ -424,45 +478,47 @@ export async function processPoseEstimation({ buffer, mimeType }) {
     throw messageError(new Error('Image data insufficient to extract pose'), 'errors.poseEstimationWorker.noPoseDetected');
   }
 
-  // Return standard 33 normalized landmarks for headless CI environments
-  return Array.from({ length: 33 }, (_, i) => {
+  // A fixed template for a headless caller with no image decoder: not a detection of this image. Every landmark
+  // says so (`synthetic: true`, low visibility) so the interface can label it honestly instead of claiming a pose.
+  const template = Array.from({ length: 33 }, (_, i) => {
     switch (i) {
-      case 0: return { x: 0.5, y: 0.15, z: 0, visibility: 0.98 }; // Nose
-      case 1: return { x: 0.48, y: 0.13, z: 0, visibility: 0.98 };
-      case 2: return { x: 0.46, y: 0.13, z: 0, visibility: 0.98 };
-      case 3: return { x: 0.44, y: 0.13, z: 0, visibility: 0.98 };
-      case 4: return { x: 0.52, y: 0.13, z: 0, visibility: 0.98 };
-      case 5: return { x: 0.54, y: 0.13, z: 0, visibility: 0.98 };
-      case 6: return { x: 0.56, y: 0.13, z: 0, visibility: 0.98 };
-      case 7: return { x: 0.42, y: 0.15, z: 0, visibility: 0.98 };
-      case 8: return { x: 0.58, y: 0.15, z: 0, visibility: 0.98 };
-      case 9: return { x: 0.47, y: 0.18, z: 0, visibility: 0.98 };
-      case 10: return { x: 0.53, y: 0.18, z: 0, visibility: 0.98 };
-      case 11: return { x: 0.42, y: 0.30, z: 0, visibility: 0.98 }; // L Shoulder
-      case 12: return { x: 0.58, y: 0.30, z: 0, visibility: 0.98 }; // R Shoulder
-      case 13: return { x: 0.35, y: 0.45, z: 0, visibility: 0.98 }; // L Elbow
-      case 14: return { x: 0.65, y: 0.45, z: 0, visibility: 0.98 }; // R Elbow
-      case 15: return { x: 0.28, y: 0.55, z: 0, visibility: 0.98 }; // L Wrist
-      case 16: return { x: 0.72, y: 0.55, z: 0, visibility: 0.98 }; // R Wrist
-      case 17: return { x: 0.26, y: 0.58, z: 0, visibility: 0.98 };
-      case 18: return { x: 0.74, y: 0.58, z: 0, visibility: 0.98 };
-      case 19: return { x: 0.27, y: 0.59, z: 0, visibility: 0.98 };
-      case 20: return { x: 0.73, y: 0.59, z: 0, visibility: 0.98 };
-      case 21: return { x: 0.29, y: 0.58, z: 0, visibility: 0.98 };
-      case 22: return { x: 0.71, y: 0.58, z: 0, visibility: 0.98 };
-      case 23: return { x: 0.45, y: 0.58, z: 0, visibility: 0.98 }; // L Hip
-      case 24: return { x: 0.55, y: 0.58, z: 0, visibility: 0.98 }; // R Hip
-      case 25: return { x: 0.44, y: 0.75, z: 0, visibility: 0.98 }; // L Knee
-      case 26: return { x: 0.56, y: 0.75, z: 0, visibility: 0.98 }; // R Knee
-      case 27: return { x: 0.43, y: 0.95, z: 0, visibility: 0.98 }; // L Ankle
-      case 28: return { x: 0.57, y: 0.95, z: 0, visibility: 0.98 }; // R Ankle
-      case 29: return { x: 0.42, y: 0.97, z: 0, visibility: 0.98 };
-      case 30: return { x: 0.58, y: 0.97, z: 0, visibility: 0.98 };
-      case 31: return { x: 0.40, y: 0.99, z: 0, visibility: 0.98 };
-      case 32: return { x: 0.60, y: 0.99, z: 0, visibility: 0.98 };
-      default: return { x: 0.5, y: 0.5, z: 0, visibility: 0.98 };
+      case 0: return { x: 0.5, y: 0.15, z: 0 }; // Nose
+      case 1: return { x: 0.48, y: 0.13, z: 0 };
+      case 2: return { x: 0.46, y: 0.13, z: 0 };
+      case 3: return { x: 0.44, y: 0.13, z: 0 };
+      case 4: return { x: 0.52, y: 0.13, z: 0 };
+      case 5: return { x: 0.54, y: 0.13, z: 0 };
+      case 6: return { x: 0.56, y: 0.13, z: 0 };
+      case 7: return { x: 0.42, y: 0.15, z: 0 };
+      case 8: return { x: 0.58, y: 0.15, z: 0 };
+      case 9: return { x: 0.47, y: 0.18, z: 0 };
+      case 10: return { x: 0.53, y: 0.18, z: 0 };
+      case 11: return { x: 0.42, y: 0.30, z: 0 }; // L Shoulder
+      case 12: return { x: 0.58, y: 0.30, z: 0 }; // R Shoulder
+      case 13: return { x: 0.35, y: 0.45, z: 0 }; // L Elbow
+      case 14: return { x: 0.65, y: 0.45, z: 0 }; // R Elbow
+      case 15: return { x: 0.28, y: 0.55, z: 0 }; // L Wrist
+      case 16: return { x: 0.72, y: 0.55, z: 0 }; // R Wrist
+      case 17: return { x: 0.26, y: 0.58, z: 0 };
+      case 18: return { x: 0.74, y: 0.58, z: 0 };
+      case 19: return { x: 0.27, y: 0.59, z: 0 };
+      case 20: return { x: 0.73, y: 0.59, z: 0 };
+      case 21: return { x: 0.29, y: 0.58, z: 0 };
+      case 22: return { x: 0.71, y: 0.58, z: 0 };
+      case 23: return { x: 0.45, y: 0.58, z: 0 }; // L Hip
+      case 24: return { x: 0.55, y: 0.58, z: 0 }; // R Hip
+      case 25: return { x: 0.44, y: 0.75, z: 0 }; // L Knee
+      case 26: return { x: 0.56, y: 0.75, z: 0 }; // R Knee
+      case 27: return { x: 0.43, y: 0.95, z: 0 }; // L Ankle
+      case 28: return { x: 0.57, y: 0.95, z: 0 }; // R Ankle
+      case 29: return { x: 0.42, y: 0.97, z: 0 };
+      case 30: return { x: 0.58, y: 0.97, z: 0 };
+      case 31: return { x: 0.40, y: 0.99, z: 0 };
+      case 32: return { x: 0.60, y: 0.99, z: 0 };
+      default: return { x: 0.5, y: 0.5, z: 0 };
     }
   });
+  return template.map(point => heuristicLandmark(point.x, point.y, point.z, DETECTOR_SYNTHETIC));
 }
 
 // Attach worker message listener when executing within WorkerGlobalScope
@@ -474,7 +530,13 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
     const id = String(data.id ?? '');
     try {
       const landmarks = await processPoseEstimation(data);
-      self.postMessage({ id, ok: true, landmarks });
+      self.postMessage({
+        id,
+        ok: true,
+        landmarks,
+        synthetic: Boolean(landmarks?.[0]?.synthetic),
+        detector: landmarks?.[0]?.detector ?? DETECTOR_HEURISTIC_SILHOUETTE
+      });
     } catch (err) {
       const messageKey = err?.messageKey || 'errors.poseEstimationWorker.inferenceFailed';
       const messageParams = err?.messageParams || {};

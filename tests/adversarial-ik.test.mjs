@@ -1,18 +1,22 @@
 /**
- * Adversarial Stress Test Suite for 2-Bone IK Solver & Topology Synthesis
- * Executed headlessly via node:test runner.
- * Author: Challenger 1 (Adversarial Verifier for IK & Geometry)
+ * Adversarial tests for pose-topology synthesis and the stored IK controller table.
+ *
+ * The 2-bone analytic solver these tests once exercised (solveIKPoints/solveObjectIK) no longer exists in
+ * JavaScript: the Rust engine solves stored IK controllers (styk-edit/styk-eval), and the interface only
+ * validates and describes the table through src/ik.mjs. The solver's own edge cases belong in the Rust
+ * suite; what can be checked here is the document contract the engine receives: finite geometry, stable
+ * segment ids, and an IK table that passes validateIK(). The engine-owned drag/undo stress vectors moved to
+ * tests/auto-rig.test.mjs, where they are gated on a built engine.
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildFigureFromPoseLandmarks } from '../src/pose-topology.mjs';
 import { createClaudeFigureData } from '../src/claude-figure-data.mjs';
-import { Editor } from '../src/editor.mjs';
 import { createObject, createFrame } from '../src/demo.mjs';
-import { solveIKPoints, solveObjectIK, ikChain, validateIK } from '../src/ik.mjs';
+import { hasPinnedIK, ikChain, validateIK } from '../src/ik.mjs';
 
-// Standard 33-landmark T-pose generator
+// Standard 33-landmark T-pose generator.
 function createStandardPose33(overrides = {}) {
   const landmarks = Array.from({ length: 33 }, (_, i) => {
     switch (i) {
@@ -23,23 +27,23 @@ function createStandardPose33(overrides = {}) {
       case 14: return { x: 0.65, y: 0.45, z: 0.0, visibility: 0.95 }; // Right Elbow
       case 15: return { x: 0.28, y: 0.55, z: 0.0, visibility: 0.92 }; // Left Wrist
       case 16: return { x: 0.72, y: 0.55, z: 0.0, visibility: 0.92 }; // Right Wrist
-      case 23: return { x: 0.45, y: 0.58, z: 0.0, visibility: 0.97 }; // Left Hip
-      case 24: return { x: 0.55, y: 0.58, z: 0.0, visibility: 0.97 }; // Right Hip
-      case 25: return { x: 0.44, y: 0.75, z: 0.0, visibility: 0.94 }; // Left Knee
-      case 26: return { x: 0.56, y: 0.75, z: 0.0, visibility: 0.94 }; // Right Knee
-      case 27: return { x: 0.43, y: 0.95, z: 0.0, visibility: 0.90 }; // Left Ankle
-      case 28: return { x: 0.57, y: 0.95, z: 0.0, visibility: 0.90 }; // Right Ankle
-      default: return { x: 0.50, y: 0.50, z: 0.0, visibility: 0.80 };
+      case 23: return { x: 0.45, y: 0.58, z: 0.0, visibility: 0.98 }; // Left Hip
+      case 24: return { x: 0.55, y: 0.58, z: 0.0, visibility: 0.98 }; // Right Hip
+      case 25: return { x: 0.44, y: 0.75, z: 0.0, visibility: 0.98 }; // Left Knee
+      case 26: return { x: 0.56, y: 0.75, z: 0.0, visibility: 0.98 }; // Right Knee
+      case 27: return { x: 0.43, y: 0.95, z: 0.0, visibility: 0.98 }; // Left Ankle
+      case 28: return { x: 0.57, y: 0.95, z: 0.0, visibility: 0.98 }; // Right Ankle
+      default: return { x: 0.5, y: 0.5, z: 0.0, visibility: 0.5 };
     }
   });
-  for (const [idx, pt] of Object.entries(overrides)) {
-    landmarks[Number(idx)] = { ...landmarks[Number(idx)], ...pt };
+  for (const [index, point] of Object.entries(overrides)) {
+    landmarks[Number(index)] = { ...landmarks[Number(index)], ...point };
   }
   return landmarks;
 }
 
-// Wrap synthesized figure in document for Editor.importFigure
-function createRiggedDoc(landmarks, options = {}) {
+/** Wraps synthesized landmarks into the document shape the app imports, with the IK table the dialog builds. */
+function riggedDocument(landmarks, options = {}) {
   const { figure, ikSetup, rootPosition } = buildFigureFromPoseLandmarks(landmarks, options);
   const _stykIK = {};
   for (const item of ikSetup) {
@@ -49,704 +53,145 @@ function createRiggedDoc(landmarks, options = {}) {
       allowStretch: false,
       chainLength: item.chainLength,
       bendDirection: item.bendDirection,
-      target: item.target ?? { x: rootPosition.x, y: rootPosition.y, rotation: 0 },
+      target: { x: rootPosition.x, y: rootPosition.y, rotation: 0 },
       followers: {}
     };
   }
   const object = createObject(figure, 1, rootPosition.x, rootPosition.y, {
-    angles: figure.segments.map(s => s.angle_rad),
+    angles: figure.segments.map(segment => segment.angle_rad),
     _stykIK
   });
-  return {
+  const document = {
     version: 5,
-    canvas_width: 960,
-    canvas_height: 540,
+    canvas_width: 640,
+    canvas_height: 460,
     fps: 24,
-    auto_easing: false,
-    auto_easing_disabled_raw: 1,
     figure_types: [figure],
     backgrounds: [],
-    keyframes: [createFrame([object], 1)],
-    _styk: { format: 'StykAnimate', format_version: 1, name: figure.name }
+    keyframes: [createFrame([object], 1)]
   };
+  return { figure, object, document, ikSetup };
 }
 
-// ============================================================================
-// VECTOR 1: HIGH-FREQUENCY CANVAS DRAG MUTATIONS (200+ TO 1000 CALLS)
-// ============================================================================
-describe('Vector 1: High-Frequency Canvas Drag Mutations via editor.poseJoint', () => {
+const finite = segment => Number.isFinite(segment.length) && Number.isFinite(segment.angle_rad);
 
-  it('1.1: 250 high-frequency mutations in an eccentric Lissajous curve on Left Forearm', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'LissajousStress' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
+describe('Vector 1: Degenerate and collinear skeletons stay finite', () => {
+  it('1.1: a fully collapsed skeleton (all 33 landmarks coincident) keeps minimum lengths and unique ids', () => {
+    const collapsed = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5 }));
+    const { figure, document } = riggedDocument(collapsed);
+    assert.equal(figure.segments.length, 10);
+    assert.equal(new Set(figure.segments.map(segment => segment.segment_id)).size, 10);
+    for (const segment of figure.segments) assert.ok(finite(segment), `segment ${segment.segment_id} is not finite`);
+    assert.ok(figure.segments[0].length >= 10);
+    assert.ok(figure.segments[7].length >= 12);
+    assert.doesNotThrow(() => validateIK(document.keyframes[0].objects[0]));
+  });
 
-    // Select Left Forearm (segment_id: 4 -> segment index 3)
-    editor.select(editor.selectedUid, 3);
+  it('1.2: perfectly vertical and perfectly horizontal skeletons do not divide by zero', () => {
+    const vertical = createStandardPose33();
+    for (const index of [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) vertical[index] = { ...vertical[index], x: 0.5 };
+    const verticalFigure = buildFigureFromPoseLandmarks(vertical).figure;
+    for (const segment of verticalFigure.segments) assert.ok(finite(segment));
 
-    editor.beginDrag('Canvas drag');
-    const start = performance.now();
-    for (let i = 0; i < 250; i++) {
-      const t = i * 0.1;
-      // Lissajous curve: x = A sin(at + delta), y = B sin(bt)
-      const targetX = 220 + 80 * Math.sin(3 * t + Math.PI / 4);
-      const targetY = 240 + 70 * Math.sin(2 * t);
+    const horizontal = createStandardPose33();
+    for (const index of [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) horizontal[index] = { ...horizontal[index], y: 0.5 };
+    const horizontalFigure = buildFigureFromPoseLandmarks(horizontal).figure;
+    for (const segment of horizontalFigure.segments) assert.ok(finite(segment));
+  });
 
-      editor.poseJoint(targetX, targetY);
+  it('1.3: a 180-degree inverted skeleton (head below the pelvis) still yields finite geometry', () => {
+    const inverted = createStandardPose33({
+      0: { x: 0.5, y: 0.95 },
+      23: { x: 0.45, y: 0.5 }, 24: { x: 0.55, y: 0.5 },
+      25: { x: 0.44, y: 0.3 }, 26: { x: 0.56, y: 0.3 },
+      27: { x: 0.43, y: 0.1 }, 28: { x: 0.57, y: 0.1 }
+    });
+    const { figure } = riggedDocument(inverted);
+    for (const segment of figure.segments) assert.ok(finite(segment));
+    assert.ok(Math.abs(figure.segments[0].angle_rad) <= Math.PI);
+  });
+});
 
-      // Verify numerical stability after each mutation
-      for (let j = 0; j < editor.object.angles.length; j++) {
-        const angle = editor.object.angles[j];
-        assert.ok(Number.isFinite(angle), `Joint angle at index ${j} became non-finite at step ${i}: ${angle}`);
+describe('Vector 2: Extreme coordinate values stay finite', () => {
+  it('2.1: coordinates far outside [0, 1] and negative coordinates clamp to finite lengths', () => {
+    for (const pose of [
+      createStandardPose33({ 0: { x: 1e6, y: -1e6 }, 11: { x: -1e6, y: 1e6 } }),
+      createStandardPose33({ 27: { x: -500, y: 900 }, 28: { x: 500, y: -900 } })
+    ]) {
+      const { figure } = riggedDocument(pose);
+      for (const segment of figure.segments) {
+        assert.ok(finite(segment));
+        assert.ok(segment.length > 0 && Number.isFinite(segment.length));
       }
     }
-    const elapsed = performance.now() - start;
-    const avgPerMutation = elapsed / 250;
-    assert.ok(avgPerMutation < 1.0, `Average mutation time too high: ${avgPerMutation.toFixed(3)}ms`);
-
-    // Verify commitDrag preserves clean state
-    editor.commitDrag();
-    assert.equal(editor.object.angles.length, 10);
-    assert.equal(editor._undo.length, 2); // 1 import + 1 drag
   });
 
-  it('1.2: 300 sequential spiral drag mutations expanding beyond max reach and collapsing to base', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'SpiralStress' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Select Left Lower Leg (segment_id: 8 -> segment index 7)
-    editor.select(editor.selectedUid, 7);
-
-    // Base position for hip/thigh is approximately (200, 270)
-    for (let i = 0; i < 300; i++) {
-      const angle = (i / 30) * Math.PI * 2;
-      // Radius oscillates from 0 (collapsed) to 250 (far beyond ~140 max reach)
-      const radius = 125 + 125 * Math.sin((i / 50) * Math.PI);
-      const targetX = 200 + Math.cos(angle) * radius;
-      const targetY = 270 + Math.sin(angle) * radius;
-
-      editor.poseJoint(targetX, targetY);
-
-      assert.ok(Number.isFinite(editor.object.angles[6]), `Thigh angle non-finite at step ${i}`);
-      assert.ok(Number.isFinite(editor.object.angles[7]), `Calf angle non-finite at step ${i}`);
+  it('2.2: an array with fewer than 17 landmarks is rejected as invalid input', () => {
+    for (const invalid of [[], null, undefined, {}, 'pose', Array.from({ length: 16 }, () => ({ x: 0.5, y: 0.5 }))]) {
+      assert.throws(() => buildFigureFromPoseLandmarks(invalid), TypeError);
     }
-    editor.commitDrag();
   });
 
-  it('1.3: 200 rapid alternating switchback mutations crossing directly through fold singularity', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'FoldSwitchback' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
+  it('2.3: exactly 17 COCO landmarks are accepted; 18-32 also use COCO indexing', () => {
+    const mediaPipe = createStandardPose33();
+    const coco = [mediaPipe[0], mediaPipe[2], mediaPipe[5], mediaPipe[7], mediaPipe[8],
+      mediaPipe[11], mediaPipe[12], mediaPipe[13], mediaPipe[14], mediaPipe[15], mediaPipe[16],
+      mediaPipe[23], mediaPipe[24], mediaPipe[25], mediaPipe[26], mediaPipe[27], mediaPipe[28]];
+    assert.equal(coco.length, 17);
+    assert.equal(buildFigureFromPoseLandmarks(coco).figure.segments.length, 10);
+    const extended = [...coco, ...Array.from({ length: 10 }, () => ({ x: 0.5, y: 0.5 }))];
+    assert.equal(buildFigureFromPoseLandmarks(extended).figure.segments.length, 10);
+  });
+});
 
-    editor.select(editor.selectedUid, 3); // Left Forearm
-    // Shoulder base position is approximately at (189, 90)
-    const base = editor.geometry.objects.get(editor.selectedSlot).segments[2].start;
-
-    for (let i = 0; i < 200; i++) {
-      // Oscillate directly through base with tiny delta
-      const offset = ((i % 2 === 0 ? 1 : -1) * (i + 1)) * 0.1;
-      const targetX = base.x + (i % 4 < 2 ? offset : 0);
-      const targetY = base.y + (i % 4 >= 2 ? offset : 0);
-
-      editor.poseJoint(targetX, targetY);
-
-      assert.ok(Number.isFinite(editor.object.angles[2]));
-      assert.ok(Number.isFinite(editor.object.angles[3]));
+describe('Vector 3: The stored IK controller table is valid document data', () => {
+  it('3.1: the synthesized table passes validateIK, with four 2-bone terminal controllers', () => {
+    const { figure, document } = riggedDocument(createStandardPose33());
+    const object = document.keyframes[0].objects[0];
+    assert.doesNotThrow(() => validateIK(object));
+    assert.deepEqual(Object.keys(object._stykIK).sort(), ['10', '4', '6', '8']);
+    for (const controller of Object.values(object._stykIK)) {
+      assert.equal(controller.chainLength, 2);
+      assert.equal(controller.enabled, true);
+      assert.equal(controller.pinned, false);
+      assert.deepEqual(Object.keys(controller.followers), []);
     }
-    editor.commitDrag();
-  });
-
-  it('1.4: 200 multi-limb sequential drag mutations alternating across all 4 terminal controllers', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'MultiLimbStress' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Limb indices: Left Forearm (3), Right Forearm (5), Left Leg (7), Right Leg (9)
-    const limbs = [3, 5, 7, 9];
-
-    for (let i = 0; i < 200; i++) {
-      const limbIdx = limbs[i % limbs.length];
-      editor.select(editor.selectedUid, limbIdx);
-
-      const angle = (i / 10) * Math.PI;
-      const targetX = 250 + Math.cos(angle) * 50;
-      const targetY = 250 + Math.sin(angle) * 50;
-
-      editor.poseJoint(targetX, targetY);
-
-      // Verify all 10 angles remain valid and bounded
-      for (let a = 0; a < 10; a++) {
-        assert.ok(Number.isFinite(editor.object.angles[a]));
-      }
+    // The terminal ids the controllers address close a two-bone chain back to the torso/root.
+    const chains = { 4: [3, 4], 6: [5, 6], 8: [7, 8], 10: [9, 10] };
+    for (const [terminal, ids] of Object.entries(chains)) {
+      assert.deepEqual(ikChain(figure, Number(terminal), 2).map(index => figure.segments[index].segment_id), ids);
     }
-    editor.commitDrag();
   });
 
-  it('1.5: 200 high-frequency drag mutations on Claude Mascot 4-legged quadruped rig', () => {
+  it('3.2: validateIK rejects every malformed controller field the engine would trust', () => {
+    const base = () => riggedDocument(createStandardPose33()).document.keyframes[0].objects[0];
+    const reject = mutate => {
+      const object = structuredClone(base());
+      mutate(object._stykIK['4']);
+      assert.throws(() => validateIK(object), error => typeof error.messageKey === 'string' && error.messageKey.startsWith('errors.ik.'));
+    };
+    reject(controller => { controller.chainLength = 0; });
+    reject(controller => { controller.bendDirection = 2; });
+    reject(controller => { controller.target.x = Infinity; });
+    reject(controller => { controller.followers = []; });
+    reject(controller => { controller.enabled = 'yes'; });
+  });
+
+  it('3.3: pinned controllers are detectable and do not change table validity', () => {
+    const { document } = riggedDocument(createStandardPose33());
+    const object = document.keyframes[0].objects[0];
+    assert.equal(hasPinnedIK(object), false);
+    object._stykIK['4'].pinned = true;
+    assert.equal(hasPinnedIK(object), true);
+    assert.doesNotThrow(() => validateIK(object));
+  });
+
+  it('3.4: the Claude mascot rig has seven segments and four valid IK legs', () => {
     const { figure, object } = createClaudeFigureData();
-    const doc = {
-      version: 5,
-      canvas_width: 960,
-      canvas_height: 540,
-      fps: 24,
-      auto_easing: false,
-      auto_easing_disabled_raw: 1,
-      figure_types: [figure],
-      backgrounds: [],
-      keyframes: [createFrame([object], 1)],
-      _styk: { format: 'StykAnimate', format_version: 1, name: figure.name }
-    };
-
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Leg indices for Claude mascot: 3, 4, 5, 6
-    const legs = [3, 4, 5, 6];
-
-    const initialTorsoAngle = editor.object.angles[0];
-
-    for (let i = 0; i < 200; i++) {
-      const legIdx = legs[i % legs.length];
-      editor.select(editor.selectedUid, legIdx);
-
-      const targetX = 480 + (i % 2 === 0 ? 30 : -30) * Math.cos(i);
-      const targetY = 360 + (i % 2 === 0 ? 20 : -20) * Math.sin(i);
-
-      editor.poseJoint(targetX, targetY);
-
-      // Terracotta torso angle (index 0) must remain invariant
-      assert.equal(editor.object.angles[0], initialTorsoAngle, 'Torso angle shifted unexpectedly');
-      assert.ok(Number.isFinite(editor.object.angles[legIdx]));
-    }
-    editor.commitDrag();
+    assert.equal(figure.segments.length, 7);
+    assert.equal(Object.keys(object._stykIK).length, 4);
+    assert.deepEqual(Object.keys(object._stykIK).sort(), ['4', '5', '6', '7']);
+    assert.doesNotThrow(() => validateIK(object));
+    assert.equal(figure.segments.every(segment => Number.isFinite(segment.length) && Number.isFinite(segment.angle_rad)), true);
   });
 });
-
-// ============================================================================
-// VECTOR 2: EXTREME TARGET COORDINATES
-// ============================================================================
-describe('Vector 2: Extreme Target Coordinates (Negative, Infinite, NaN, Out-of-Reach)', () => {
-
-  it('2.1: Target at exact base coordinates (distance == 0) folds cleanly without NaN', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'ExactZeroTarget' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    editor.select(editor.selectedUid, 3); // Left Forearm
-    const base = editor.geometry.objects.get(editor.selectedSlot).segments[2].start;
-
-    // Pose exactly to base
-    editor.poseJoint(base.x, base.y);
-
-    assert.ok(Number.isFinite(editor.object.angles[2]));
-    assert.ok(Number.isFinite(editor.object.angles[3]));
-    editor.commitDrag();
-  });
-
-  it('2.2: Extreme coordinates far beyond reach (+/- 1e5, +/- 1e9) clamp chord safely', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'ExtremeReach' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    editor.select(editor.selectedUid, 3);
-
-    const extremeCoords = [
-      { x: 10000, y: 10000 },
-      { x: -10000, y: -10000 },
-      { x: 1e6, y: 1e6 },
-      { x: -1e6, y: -1e6 },
-      { x: 1e9, y: -1e9 },
-      { x: -1e9, y: 1e9 }
-    ];
-
-    for (const { x, y } of extremeCoords) {
-      editor.poseJoint(x, y);
-      assert.ok(Number.isFinite(editor.object.angles[2]), `Failed at (${x}, ${y}) for upper arm`);
-      assert.ok(Number.isFinite(editor.object.angles[3]), `Failed at (${x}, ${y}) for forearm`);
-    }
-    editor.commitDrag();
-  });
-
-  it('2.3: Non-finite target coordinates (NaN, Infinity, -Infinity) throw cleanly and preserve angles', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'NonFiniteTargets' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    editor.select(editor.selectedUid, 3);
-    const anglesBefore = [...editor.object.angles];
-
-    const invalidInputs = [
-      [NaN, 200],
-      [200, NaN],
-      [NaN, NaN],
-      [Infinity, 200],
-      [200, Infinity],
-      [-Infinity, -Infinity],
-      [undefined, 200],
-      [null, 200]
-    ];
-
-    for (const [x, y] of invalidInputs) {
-      assert.throws(() => {
-        editor.poseJoint(x, y);
-      }, /must be finite|cannot be negative|TypeError|finite/i, `Should reject non-finite inputs: (${x}, ${y})`);
-
-      // Verify angles were NOT corrupted by rejected call
-      assert.deepEqual(editor.object.angles, anglesBefore, `Angles corrupted after rejecting (${x}, ${y})`);
-    }
-  });
-
-  it('2.4: Direct solveIKPoints with subnormal / near-zero distances (1e-12, 1e-15, EPS)', () => {
-    const lengths = [50, 50];
-    const points = [{ x: 100, y: 100 }, { x: 150, y: 100 }, { x: 200, y: 100 }];
-
-    const nearZeroTargets = [
-      { x: 100 + 1e-12, y: 100 + 1e-12 },
-      { x: 100 + 1e-15, y: 100 },
-      { x: 100, y: 100 + Number.EPSILON },
-      { x: 100, y: 100 }
-    ];
-
-    for (const target of nearZeroTargets) {
-      const pts = points.map(p => ({ ...p }));
-      const result = solveIKPoints(pts, lengths, target, 0);
-
-      assert.ok(Number.isFinite(pts[1].x));
-      assert.ok(Number.isFinite(pts[1].y));
-      assert.ok(Number.isFinite(pts[2].x));
-      assert.ok(Number.isFinite(pts[2].y));
-    }
-  });
-
-  it('2.5: Negative snapTolerance throws and rejects without state alteration', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'NegativeSnap' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-    editor.select(editor.selectedUid, 3);
-
-    assert.throws(() => {
-      editor.poseJoint(200, 200, { snapTolerance: -5 });
-    });
-  });
-});
-
-// ============================================================================
-// VECTOR 3: DEGENERATE, COLLINEAR, OR COLLAPSED SKELETONS
-// ============================================================================
-describe('Vector 3: Degenerate, Collinear, or Collapsed Skeletons', () => {
-
-  it('3.1: Fully collapsed skeleton (all 33 landmarks at identical coordinates)', () => {
-    // All 33 points coincident at (0.5, 0.5)
-    const collapsedPose = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 }));
-    const { figure, ikSetup, rootPosition } = buildFigureFromPoseLandmarks(collapsedPose);
-
-    // Verify minimum safe lengths enforced by topology synthesizer
-    assert.ok(figure.segments[0].length >= 10, 'Torso should clamp >= 10');
-    assert.ok(figure.segments[1].length >= 15, 'Head should clamp >= 15');
-    assert.ok(figure.segments[2].length >= 10, 'Upper arm should clamp >= 10');
-    assert.ok(figure.segments[3].length >= 10, 'Forearm should clamp >= 10');
-    assert.ok(figure.segments[6].length >= 12, 'Thigh should clamp >= 12');
-    assert.ok(figure.segments[7].length >= 12, 'Calf should clamp >= 12');
-
-    // Import into Editor and verify IK handles still function
-    const doc = createRiggedDoc(collapsedPose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    editor.select(editor.selectedUid, 3);
-    assert.doesNotThrow(() => {
-      editor.poseJoint(160, 160);
-    });
-    assert.ok(Number.isFinite(editor.object.angles[2]));
-    assert.ok(Number.isFinite(editor.object.angles[3]));
-  });
-
-  it('3.2: Perfectly collinear vertical and horizontal limb alignments', () => {
-    // Vertical alignment: all x coordinates identical
-    const verticalPose = createStandardPose33();
-    for (const pt of verticalPose) pt.x = 0.5;
-
-    const docVert = createRiggedDoc(verticalPose);
-    const editorVert = new Editor({ demo: false });
-    editorVert.importFigure(docVert);
-
-    editorVert.select(editorVert.selectedUid, 3);
-    editorVert.poseJoint(150, 150);
-    assert.ok(Number.isFinite(editorVert.object.angles[2]));
-    assert.ok(Number.isFinite(editorVert.object.angles[3]));
-
-    // Horizontal alignment: all y coordinates identical
-    const horizontalPose = createStandardPose33();
-    for (const pt of horizontalPose) pt.y = 0.5;
-
-    const docHoriz = createRiggedDoc(horizontalPose);
-    const editorHoriz = new Editor({ demo: false });
-    editorHoriz.importFigure(docHoriz);
-
-    editorHoriz.select(editorHoriz.selectedUid, 7);
-    editorHoriz.poseJoint(200, 300);
-    assert.ok(Number.isFinite(editorHoriz.object.angles[6]));
-    assert.ok(Number.isFinite(editorHoriz.object.angles[7]));
-  });
-
-  it('3.3: Direct solveIKPoints with zero-length and degenerate links ([0, 50], [50, 0], [0, 0])', () => {
-    const testCases = [
-      { lengths: [0, 50], points: [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 50, y: 0 }] },
-      { lengths: [50, 0], points: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 0 }] },
-      { lengths: [0, 0], points: [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }] }
-    ];
-
-    for (const { lengths, points } of testCases) {
-      const target = { x: 30, y: 20 };
-      const pts = points.map(p => ({ ...p }));
-      assert.doesNotThrow(() => {
-        solveIKPoints(pts, lengths, target, 1);
-      });
-      for (const p of pts) {
-        assert.ok(Number.isFinite(p.x));
-        assert.ok(Number.isFinite(p.y));
-      }
-    }
-  });
-
-  it('3.4: 180-degree inverted skeleton (head below pelvis, legs pointing upward)', () => {
-    const invertedPose = createStandardPose33({
-      0: { x: 0.50, y: 0.90 }, // Nose at bottom
-      11: { x: 0.42, y: 0.70 }, // Shoulders lower than hips
-      12: { x: 0.58, y: 0.70 },
-      23: { x: 0.45, y: 0.30 }, // Hips at top
-      24: { x: 0.55, y: 0.30 },
-      27: { x: 0.43, y: 0.10 }, // Feet pointing up
-      28: { x: 0.57, y: 0.10 }
-    });
-
-    const doc = createRiggedDoc(invertedPose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Verify legs articulate upwards properly
-    editor.select(editor.selectedUid, 7);
-    assert.doesNotThrow(() => {
-      editor.poseJoint(200, 50);
-    });
-    assert.ok(Number.isFinite(editor.object.angles[6]));
-    assert.ok(Number.isFinite(editor.object.angles[7]));
-  });
-});
-
-// ============================================================================
-// VECTOR 4: RAPID ATOMIC UNDO/REDO STRESS CYCLES & BITWISE PARITY
-// ============================================================================
-describe('Vector 4: Rapid Atomic Undo/Redo Stress Cycles, Memory Leaks, and Bitwise Parity', () => {
-
-  it('4.1: 50 rapid sequential import -> pose -> undo -> redo cycles verify bitwise parity', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'CycleFigure' });
-    const editor = new Editor({ demo: false });
-
-    for (let c = 0; c < 50; c++) {
-      editor.importFigure(doc);
-      editor.select(editor.selectedUid, 3);
-      editor.poseJoint(210 + (c % 10), 230 + (c % 10));
-
-      const posedJson = JSON.stringify(editor.serialize());
-
-      // Undo pose + import
-      editor.undo(); // Undo pose
-      editor.undo(); // Undo import
-
-      assert.equal(editor.report.figure_types.length, 1, `Cycle ${c}: Figure definitions leaked on undo`);
-      assert.equal(editor.frame.objects.length, 0, `Cycle ${c}: Scene objects leaked on undo`);
-
-      // Redo import + pose
-      editor.redo(); // Redo import
-      editor.redo(); // Redo pose
-
-      const redoneJson = JSON.stringify(editor.serialize());
-      assert.equal(redoneJson, posedJson, `Cycle ${c}: Bitwise parity failed upon redo!`);
-
-      // Clean up for next cycle
-      editor.undo();
-      editor.undo();
-    }
-  });
-
-  it('4.2: Zero memory leakage & zero leftover state in report.figure_types after 50 cancelled imports', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'LeakCheckRig' });
-    const editor = new Editor({ demo: false });
-    const baselineFigCount = editor.report.figure_types.length;
-    const baselineObjCount = editor.frame.objects.length;
-
-    for (let i = 0; i < 50; i++) {
-      editor.importFigure(doc);
-      assert.equal(editor.report.figure_types.length, baselineFigCount + 1);
-      assert.equal(editor.frame.objects.length, baselineObjCount + 1);
-
-      // Immediately revert
-      editor.undo();
-      assert.equal(editor.report.figure_types.length, baselineFigCount, `Leak at iteration ${i} in figure_types`);
-      assert.equal(editor.frame.objects.length, baselineObjCount, `Leak at iteration ${i} in objects`);
-    }
-
-    // Verify undo stack does not hold runaway references
-    assert.equal(editor._undo.length, 0);
-  });
-
-  it('4.3: Hammering 100 undos and 100 redos beyond stack boundaries causes zero errors or state corruption', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'HammerTest' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-    editor.select(editor.selectedUid, 3);
-    editor.poseJoint(220, 220);
-
-    // Baseline with 2 operations
-    assert.equal(editor._undo.length, 2);
-
-    // Hammer 100 undos
-    for (let i = 0; i < 100; i++) {
-      assert.doesNotThrow(() => editor.undo());
-    }
-    assert.equal(editor._undo.length, 0);
-    assert.equal(editor._redo.length, 2);
-
-    // Hammer 100 redos
-    for (let i = 0; i < 100; i++) {
-      assert.doesNotThrow(() => editor.redo());
-    }
-    assert.equal(editor._undo.length, 2);
-    assert.equal(editor._redo.length, 0);
-  });
-
-  it('4.4: Bitwise serialization parity across multiple complex figures (Claude Mascot + AutoRig)', () => {
-    const autoDoc = createRiggedDoc(createStandardPose33(), { name: 'AutoRigMaster' });
-    const { figure: claudeFig, object: claudeObj } = createClaudeFigureData();
-    const claudeDoc = {
-      version: 5,
-      canvas_width: 960,
-      canvas_height: 540,
-      fps: 24,
-      auto_easing: false,
-      auto_easing_disabled_raw: 1,
-      figure_types: [claudeFig],
-      backgrounds: [],
-      keyframes: [createFrame([claudeObj], 1)],
-      _styk: { format: 'StykAnimate', format_version: 1, name: claudeFig.name }
-    };
-
-    const editor = new Editor({ demo: false });
-    const pristineDoc = JSON.stringify(editor.serialize());
-
-    // Import AutoRig
-    editor.importFigure(autoDoc, { position: { x: 200, y: 200 } });
-    const autoUid = editor.selectedUid;
-
-    // Import Claude Mascot
-    editor.importFigure(claudeDoc, { position: { x: 500, y: 200 } });
-    const claudeUid = editor.selectedUid;
-
-    // Pose AutoRig arm & leg
-    editor.select(autoUid, 3);
-    editor.poseJoint(180, 220);
-    editor.select(autoUid, 7);
-    editor.poseJoint(190, 430);
-
-    // Pose Claude Mascot legs
-    editor.select(claudeUid, 3);
-    editor.poseJoint(450, 360);
-    editor.select(claudeUid, 6);
-    editor.poseJoint(530, 360);
-
-    const complexPosedSnapshot = JSON.stringify(editor.serialize());
-
-    // Revert everything to empty pristine state
-    editor.undo(); // Claude leg 6
-    editor.undo(); // Claude leg 3
-    editor.undo(); // Auto leg
-    editor.undo(); // Auto arm
-    editor.undo(); // Claude import
-    editor.undo(); // Auto import
-
-    assert.equal(JSON.stringify(editor.serialize()), pristineDoc);
-
-    // Redo everything forward to complex posed snapshot
-    editor.redo(); // Auto import
-    editor.redo(); // Claude import
-    editor.redo(); // Auto arm
-    editor.redo(); // Auto leg
-    editor.redo(); // Claude leg 3
-    editor.redo(); // Claude leg 6
-
-    assert.equal(JSON.stringify(editor.serialize()), complexPosedSnapshot);
-  });
-});
-
-// ============================================================================
-// VECTOR 5: DEEP ADVERSARIAL HARDENING & STRESS LIMITS
-// ============================================================================
-describe('Vector 5: Deep Adversarial Hardening (1,000 Drags, Negative Scale, Adversarial setNodeIK)', () => {
-
-  it('5.1: 1,000 rapid sequential canvas drag mutations in a single uninterrupted gesture', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'ThousandDrags' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    editor.select(editor.selectedUid, 3); // Left Forearm
-
-    editor.beginDrag('1000-drag gesture');
-    const t0 = performance.now();
-    for (let i = 0; i < 1000; i++) {
-      const angle = (i / 100) * Math.PI * 2;
-      const r = 50 + 20 * Math.cos(i * 0.05);
-      const targetX = 220 + Math.cos(angle) * r;
-      const targetY = 240 + Math.sin(angle) * r;
-
-      editor.poseJoint(targetX, targetY);
-    }
-    const duration = performance.now() - t0;
-    const avg = duration / 1000;
-
-    // Sub-millisecond performance guarantee (< 0.5ms per step during active drag)
-    assert.ok(avg < 0.5, `1000-drag average exceeds 0.5ms target: ${avg.toFixed(3)}ms`);
-
-    // All angles finite
-    for (let a = 0; a < 10; a++) {
-      assert.ok(Number.isFinite(editor.object.angles[a]));
-    }
-
-    editor.commitDrag();
-    assert.equal(editor._undo.length, 2); // 1 import + 1 commitDrag
-  });
-
-  it('5.2: Negative scale rejected by model integrity; extreme valid scales (0.01, 10.0) handle IK drag cleanly', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'ScaledFigure' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-    editor.select(editor.selectedUid, 3);
-
-    // Negative scale reflection is strictly rejected by model integrity guard
-    editor.object.scale = -1;
-    assert.throws(() => {
-      editor.poseJoint(200, 200);
-    }, /cannot be negative/i);
-
-    // Reset to extreme small positive scale (0.01)
-    editor.object.scale = 0.01;
-    assert.doesNotThrow(() => {
-      editor.poseJoint(200, 200);
-    });
-    assert.ok(Number.isFinite(editor.object.angles[2]));
-    assert.ok(Number.isFinite(editor.object.angles[3]));
-
-    // Extreme large scale (10.0)
-    editor.object.scale = 10.0;
-    assert.doesNotThrow(() => {
-      editor.poseJoint(200, 200);
-    });
-    assert.ok(Number.isFinite(editor.object.angles[2]));
-    assert.ok(Number.isFinite(editor.object.angles[3]));
-  });
-
-  it('5.3: Adversarial editor.setNodeIK parameter injection and overlapping chain rejection', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'SetNodeIKTest' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Select Left Forearm (segment 4 / index 3)
-    editor.select(editor.selectedUid, 3);
-
-    // 1. Invalid chainLength
-    assert.throws(() => {
-      editor.setNodeIK({ chainLength: 0 });
-    }, /between 1 and/i);
-
-    assert.throws(() => {
-      editor.setNodeIK({ chainLength: 10 });
-    }, /between 1 and/i);
-
-    assert.throws(() => {
-      editor.setNodeIK({ chainLength: -1 });
-    }, /between 1 and/i);
-
-    assert.throws(() => {
-      editor.setNodeIK({ chainLength: 1.5 });
-    }, /between 1 and/i);
-
-    // 2. Invalid bendDirection
-    assert.throws(() => {
-      editor.setNodeIK({ bendDirection: 2 });
-    }, /invalid/i);
-
-    assert.throws(() => {
-      editor.setNodeIK({ bendDirection: -2 });
-    }, /invalid/i);
-
-    // 3. Invalid types
-    assert.throws(() => {
-      editor.setNodeIK({ enabled: 'true' });
-    }, /invalid/i);
-
-    assert.throws(() => {
-      editor.setNodeIK({ pinned: 'false' });
-    }, /invalid/i);
-
-    // 4. Overlapping chains: Select Left Upper Arm (segment 3 / index 2)
-    // and attempt to enable IK while Left Forearm (segment 4) already uses bone 3
-    editor.select(editor.selectedUid, 2);
-    assert.throws(() => {
-      editor.setNodeIK({ enabled: true, chainLength: 2 });
-    }, /cannot share bones|shorten the chain/i);
-  });
-
-  it('5.4: Pinned IK limbs preserve world target invariance during figure root translation', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'PinnedLimbInvariance' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Pin all 4 limbs: Left Forearm (3), Right Forearm (5), Left Leg (7), Right Leg (9)
-    const limbIndices = [3, 5, 7, 9];
-    for (const idx of limbIndices) {
-      editor.select(editor.selectedUid, idx);
-      editor.setNodeIK({ pinned: true });
-    }
-
-    // Capture initial pinned targets in world space
-    const initialTargets = {};
-    for (const [id, c] of Object.entries(editor.object._stykIK)) {
-      initialTargets[id] = { ...c.target };
-    }
-
-    // Translate root by (150, 80) without moving pins
-    editor.beginTranslationDrag();
-    editor.moveSelection(150, 80, { fromStart: true, movePins: false });
-    editor.commitDrag();
-
-    // Verify pinned world targets did NOT move with root
-    for (const [id, c] of Object.entries(editor.object._stykIK)) {
-      assert.equal(c.target.x, initialTargets[id].x, `Pinned target X shifted on node ${id}`);
-      assert.equal(c.target.y, initialTargets[id].y, `Pinned target Y shifted on node ${id}`);
-    }
-  });
-
-  it('5.5: Dynamic bendDirection modulation (-1, 0, 1) during high-frequency drag', () => {
-    const doc = createRiggedDoc(createStandardPose33(), { name: 'DynamicBend' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    editor.select(editor.selectedUid, 3); // Left Forearm
-
-    const directions = [-1, 0, 1];
-    for (let i = 0; i < 210; i++) {
-      const bend = directions[Math.floor(i / 70)];
-      editor.setNodeIK({ bendDirection: bend });
-
-      const targetX = 220 + 40 * Math.cos(i * 0.1);
-      const targetY = 240 + 40 * Math.sin(i * 0.1);
-      editor.poseJoint(targetX, targetY);
-
-      assert.ok(Number.isFinite(editor.object.angles[2]));
-      assert.ok(Number.isFinite(editor.object.angles[3]));
-    }
-    editor.commitDrag();
-  });
-});
-

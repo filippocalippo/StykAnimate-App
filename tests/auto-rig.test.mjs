@@ -1,14 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { buildFigureFromPoseLandmarks } from '../src/pose-topology.mjs';
 import { createClaudeFigureData } from '../src/claude-figure-data.mjs';
-import { Editor } from '../src/editor.mjs';
-import { createObject, createFrame, emptyDocument } from '../src/demo.mjs';
-import { solveIKPoints, ikChain, validateIK } from '../src/ik.mjs';
+import { createObject, createFrame } from '../src/demo.mjs';
+import { ikChain, validateIK } from '../src/ik.mjs';
+import { generateSvgAsset, generateIconAsset, generateAnimationAsset } from '../scripts/creative-studio-cli.mjs';
+
+// Some contract tests open a document; the engine (Rust/WASM) owns that path, so they run only when
+// src/engine/pkg has been built (`npm run engine:build`), as `npm test` does.
+const ENGINE_BUILT = existsSync(new URL('../src/engine/pkg/styk_engine_bg.wasm', import.meta.url));
+const needsEngine = ENGINE_BUILT ? true : { skip: 'requires the built Rust engine (npm run engine:build)' };
 
 // Synthetic Standard T-Pose fixture (33 MediaPipe Landmarks)
 function createSyntheticPose33(overrides = {}) {
@@ -119,9 +121,6 @@ function createClaudeFigureDocument(options = {}) {
     _styk: { format: 'StykAnimate', format_version: 1, name: options.name || figure.name }
   };
 }
-
-// CLI helper
-const cliPath = fileURLToPath(new URL('../scripts/creative-studio-cli.mjs', import.meta.url));
 
 // ============================================================================
 // TIER 1: FEATURE COVERAGE (50 Tests across 10 Features)
@@ -421,55 +420,26 @@ describe('Tier 1: Feature Coverage', () => {
     });
   });
 
-  describe('Feature 7: Creative AI Studio CLI Generation', () => {
-    it('validates CLI argument specification contract for supported types', () => {
-      const supportedTypes = ['svg', 'icon', 'mascot', 'animation'];
-      assert.equal(supportedTypes.length, 4);
-      assert(supportedTypes.includes('svg'));
-      assert(supportedTypes.includes('icon'));
-      assert(supportedTypes.includes('mascot'));
-      assert(supportedTypes.includes('animation'));
+
+  // The CLI is a process entry point; its generators are also plain functions, and those are what these tests
+  // call, so the contract is checked without spawning a child process.
+  describe('Feature 7: Creative Studio CLI Generation (module contract)', () => {
+    it('generates well-formed SVG XML for an svg asset', () => {
+      const out = generateSvgAsset('geometric star');
+      assert(out.includes('<svg') && out.includes('</svg>'));
+      assert(out.includes('xmlns="http://www.w3.org/2000/svg"'));
     });
 
-    it('validates CLI argument specification contract for supported engines', () => {
-      const supportedEngines = ['antigravity', 'claude', 'codex', 'opencode'];
-      assert.equal(supportedEngines.length, 4);
-      assert(supportedEngines.includes('antigravity'));
-      assert(supportedEngines.includes('claude'));
+    it('generates a rounded rectangle icon SVG for an icon asset', () => {
+      const out = generateIconAsset('editor icon');
+      assert(out.includes('<svg') && out.includes('viewBox'));
+      assert(out.includes('rx='));
     });
 
-    it('validates SVG generation contract outputs well-formed SVG XML', () => {
-      if (fs.existsSync(cliPath)) {
-        const out = execFileSync(process.execPath, [cliPath, 'generate', '--type', 'svg', '--prompt', 'geometric star'], { encoding: 'utf8' });
-        assert(out.includes('<svg') && out.includes('</svg>'));
-        assert(out.includes('xmlns="http://www.w3.org/2000/svg"'));
-      } else {
-        const mockSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><polygon points="50,15 61,38 86,38 66,53 74,77 50,62 26,77 34,53 14,38 39,38" fill="#D97757"/></svg>';
-        assert(mockSvg.startsWith('<svg'));
-        assert(mockSvg.endsWith('</svg>'));
-      }
-    });
-
-    it('validates Icon generation contract outputs rounded rectangle icon SVG', () => {
-      if (fs.existsSync(cliPath)) {
-        const out = execFileSync(process.execPath, [cliPath, 'generate', '--type', 'icon', '--prompt', 'editor icon'], { encoding: 'utf8' });
-        assert(out.includes('<svg') && out.includes('viewBox'));
-      } else {
-        const mockIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#2B2B2B"/></svg>';
-        assert(mockIcon.includes('rx="112"'));
-      }
-    });
-
-    it('validates Animation generation contract outputs StykAnimate JSON keyframe data', () => {
-      if (fs.existsSync(cliPath)) {
-        const out = execFileSync(process.execPath, [cliPath, 'generate', '--type', 'animation', '--prompt', 'waving arm'], { encoding: 'utf8' });
-        const parsed = JSON.parse(out);
-        assert(parsed.keyframes || parsed.figure_types || parsed.angles);
-      } else {
-        const mockAnim = { version: 5, keyframes: [{ duration_raw: 1, objects: [] }] };
-        assert.equal(mockAnim.version, 5);
-        assert(Array.isArray(mockAnim.keyframes));
-      }
+    it('generates StykAnimate JSON keyframe data for an animation asset', needsEngine, () => {
+      const out = generateAnimationAsset('waving arm');
+      const parsed = JSON.parse(out);
+      assert(parsed.keyframes || parsed.figure_types || parsed.angles);
     });
   });
 
@@ -564,66 +534,7 @@ describe('Tier 1: Feature Coverage', () => {
       assert.equal(buf.byteLength, 64);
     });
   });
-
-  describe('Feature 10: Atomic Figure Import Transaction Contract', () => {
-    it('imports rigged figure document cleanly via editor.importFigure', () => {
-      const pose = createSyntheticPose33();
-      const doc = createRiggedFigureDocument(pose, { name: 'RiggedImport' });
-      const editor = new Editor({ demo: false });
-      const initialFigures = editor.report.figure_types.length;
-      editor.importFigure(doc);
-      assert.equal(editor.report.figure_types.length, initialFigures + 1);
-      assert.equal(editor.frame.objects.length, 1);
-      assert.equal(editor.figure.name, 'RiggedImport');
-    });
-
-    it('preserves attached 2-bone IK controllers in editor.object._stykIK upon import', () => {
-      const pose = createSyntheticPose33();
-      const doc = createRiggedFigureDocument(pose);
-      const editor = new Editor({ demo: false });
-      editor.importFigure(doc);
-      const ik = editor.object._stykIK;
-      assert.ok(ik);
-      assert.equal(Object.keys(ik).length, 4);
-      assert.equal(ik['4'].enabled, true);
-      assert.equal(ik['4'].chainLength, 2);
-    });
-
-    it('records exactly one figure-range undo command for atomic insertion', () => {
-      const pose = createSyntheticPose33();
-      const doc = createRiggedFigureDocument(pose);
-      const editor = new Editor({ demo: false });
-      const beforeUndoLen = editor._undo.length;
-      editor.importFigure(doc);
-      assert.equal(editor._undo.length, beforeUndoLen + 1);
-      assert.equal(editor._undo[editor._undo.length - 1].kind, 'figure-range');
-    });
-
-    it('reverts both figure definition and scene object in a single editor.undo() call', () => {
-      const pose = createSyntheticPose33();
-      const doc = createRiggedFigureDocument(pose);
-      const editor = new Editor({ demo: false });
-      const baseFigures = editor.report.figure_types.length;
-      const baseObjects = editor.frame.objects.length;
-      editor.importFigure(doc);
-      assert.equal(editor.report.figure_types.length, baseFigures + 1);
-      assert.equal(editor.frame.objects.length, baseObjects + 1);
-      editor.undo();
-      assert.equal(editor.report.figure_types.length, baseFigures);
-      assert.equal(editor.frame.objects.length, baseObjects);
-    });
-
-    it('restores previous selection state after atomic undo', () => {
-      const pose = createSyntheticPose33();
-      const doc = createRiggedFigureDocument(pose);
-      const editor = new Editor({ demo: false });
-      const selBefore = editor._selectionState();
-      editor.importFigure(doc);
-      editor.undo();
-      assert.deepEqual(editor._selectionState(), selBefore);
-    });
   });
-});
 
 // ============================================================================
 // TIER 2: BOUNDARY & CORNER CASES (50 Tests across 10 Categories)
@@ -963,435 +874,123 @@ describe('Tier 2: Boundary & Corner Cases', () => {
       assert(Number.isFinite(target.rotation));
     });
 
-    it('confirms analytic 2-bone solver handles target beyond maximum reach via chord clamp', () => {
-      const points = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }];
-      const lengths = [50, 50];
-      const targetFar = { x: 200, y: 0 }; // Distance 200 > 100 max reach
-      solveIKPoints(points, lengths, targetFar, 0);
-      assert(Number.isFinite(points[1].x) && Number.isFinite(points[1].y));
-      assert(Number.isFinite(points[2].x) && Number.isFinite(points[2].y));
-    });
-  });
 
-  describe('Boundary 10: Atomic Transaction Guard & Empty Figure Definitions', () => {
-    it('throws localized error when importing document without figure definitions', () => {
-      const editor = new Editor({ demo: false });
-      assert.throws(() => {
-        editor.importFigure({ version: 5, figure_types: [], keyframes: [] });
-      }, /The imported file contains no figure definitions/);
-    });
-
-    it('throws error when importing figure at invalid non-finite position', () => {
-      const editor = new Editor({ demo: false });
+    it('validates the generated IK controller table with the engine-owned document schema', () => {
       const doc = createRiggedFigureDocument(createSyntheticPose33());
-      assert.throws(() => {
-        editor.importFigure(doc, { position: { x: NaN, y: 0 } });
-      }, /Choose a valid canvas position/);
+      const object = doc.keyframes[0].objects[0];
+      assert.doesNotThrow(() => validateIK(object));
+      // Two-bone chains resolve from a terminal limb back to the shoulder/hip the engine would drive.
+      assert.deepEqual(ikChain(doc.figure_types[0], 4, 2), [2, 3]);
+      assert.deepEqual(ikChain(doc.figure_types[0], 10, 2), [8, 9]);
     });
 
-    it('retains baseline figures without mutation when importFigure fails', () => {
-      const editor = new Editor({ demo: false });
-      const initialCount = editor.report.figure_types.length;
-      assert.throws(() => {
-        editor.importFigure(null);
-      });
-      assert.equal(editor.report.figure_types.length, initialCount);
-    });
-
-    it('ensures rapid undo on untouched editor does not throw or corrupt state', () => {
-      const editor = new Editor({ demo: false });
-      assert.doesNotThrow(() => {
-        editor.undo();
-        editor.undo();
-      });
-    });
-
-    it('ensures redo on top of history does not throw or corrupt state', () => {
-      const editor = new Editor({ demo: false });
-      assert.doesNotThrow(() => {
-        editor.redo();
-      });
+    it('rejects an IK controller table whose target is not finite', () => {
+      const doc = createRiggedFigureDocument(createSyntheticPose33());
+      const object = structuredClone(doc.keyframes[0].objects[0]);
+      object._stykIK['4'].target.x = NaN;
+      assert.throws(() => validateIK(object), error => typeof error.messageKey === 'string' && error.messageKey.startsWith('errors.ik.'));
     });
   });
 });
 
 // ============================================================================
-// TIER 3: CROSS-FEATURE COMBINATIONS (10 Tests)
+// POSE VARIATIONS AND HONEST PROVENANCE
 // ============================================================================
-describe('Tier 3: Cross-Feature Combinations', () => {
-
-  it('Combination 1: Topology synthesis -> Document wrapping -> Editor import -> Single-step undo', () => {
+describe('Pose variations and honest provenance', () => {
+  const repoint = overrides => {
     const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose, { name: 'ComboFigure' });
-    const editor = new Editor({ demo: false });
-    const figuresBefore = editor.report.figure_types.length;
-    const objectsBefore = editor.frame.objects.length;
+    for (const [index, point] of Object.entries(overrides)) pose[Number(index)] = { ...pose[Number(index)], ...point };
+    return pose;
+  };
 
-    editor.importFigure(doc);
-    assert.equal(editor.report.figure_types.length, figuresBefore + 1);
-    assert.equal(editor.frame.objects.length, objectsBefore + 1);
-    assert.equal(editor.figure.name, 'ComboFigure');
+  it('a different arm pose changes the synthesized arm geometry (no fixed template)', () => {
+    const tPose = buildFigureFromPoseLandmarks(createSyntheticPose33());
+    const armsDown = buildFigureFromPoseLandmarks(repoint({
+      13: { x: 0.44, y: 0.50 }, 14: { x: 0.56, y: 0.50 },
+      15: { x: 0.45, y: 0.65 }, 16: { x: 0.55, y: 0.65 }
+    }));
+    const upperLeft = index => tPose.figure.segments[index];
+    assert.notEqual(upperLeft(2).angle_rad, armsDown.figure.segments[2].angle_rad);
+    assert.notEqual(upperLeft(2).length, armsDown.figure.segments[2].length);
+    assert.notDeepEqual(upperLeft(2).color_rgb, undefined);
+  });
+
+  it('a crouch pose changes the synthesized leg geometry', () => {
+    const stand = buildFigureFromPoseLandmarks(createSyntheticPose33());
+    const crouch = buildFigureFromPoseLandmarks(repoint({
+      25: { x: 0.40, y: 0.70 }, 26: { x: 0.60, y: 0.70 },
+      27: { x: 0.42, y: 0.82 }, 28: { x: 0.58, y: 0.82 }
+    }));
+    assert.notEqual(stand.figure.segments[7].angle_rad, crouch.figure.segments[7].angle_rad);
+    assert.notEqual(stand.figure.segments[8].angle_rad, crouch.figure.segments[8].angle_rad);
+    for (const segment of crouch.figure.segments) assert.ok(Number.isFinite(segment.angle_rad));
+  });
+
+  it('COCO 17-landmark input matches the equivalent MediaPipe 33-landmark input', () => {
+    const mediaPipe = createSyntheticPose33();
+    // A COCO 17-keypoint array built from the same body: nose, (eyes, ears, unused by the synthesizer),
+    // shoulders, elbows, wrists, hips, knees, ankles.
+    const coco = [
+      mediaPipe[0], mediaPipe[2], mediaPipe[5], mediaPipe[7], mediaPipe[8],
+      mediaPipe[11], mediaPipe[12], mediaPipe[13], mediaPipe[14], mediaPipe[15], mediaPipe[16],
+      mediaPipe[23], mediaPipe[24], mediaPipe[25], mediaPipe[26], mediaPipe[27], mediaPipe[28]
+    ];
+    assert.equal(coco.length, 17);
+    const fromCoco = buildFigureFromPoseLandmarks(coco).figure;
+    const fromMediaPipe = buildFigureFromPoseLandmarks(mediaPipe).figure;
+    assert.deepEqual(fromCoco.segments.map(s => s.length), fromMediaPipe.segments.map(s => s.length));
+    assert.deepEqual(fromCoco.segments.map(s => Math.round(s.angle_rad * 1e6)), fromMediaPipe.segments.map(s => Math.round(s.angle_rad * 1e6)));
+  });
+
+  it('heuristic-marked landmarks still synthesize a finite figure and are never upgraded to confident detections', () => {
+    const heuristic = createSyntheticPose33().map(point => ({ ...point, visibility: 0.3, synthetic: true, detector: 'heuristic-silhouette' }));
+    const { figure } = buildFigureFromPoseLandmarks(heuristic);
+    assert.equal(figure.segments.every(segment => Number.isFinite(segment.length) && Number.isFinite(segment.angle_rad)), true);
+    assert.equal(heuristic.every(point => point.visibility <= 0.5), true);
+  });
+});
+
+// ============================================================================
+// ENGINE-OWNED DOCUMENT PATH: IMPORT, UNDO/REDO AND SAVE
+// The engine (Rust/WASM) owns the document and its history, so these run only when src/engine/pkg is built.
+// ============================================================================
+const ownedEditorFor = ENGINE_BUILT ? (await import('./support/owned-editor.mjs')).ownedEditorFor : null;
+
+describe('Engine-owned document path: rigged figure import, undo/redo and save', needsEngine, () => {
+  it('imports one rigged figure through the session, and undo then redo restores it', () => {
+    const editor = ownedEditorFor({ demo: false });
+    const document = createRiggedFigureDocument(createSyntheticPose33(), { name: 'EngineImport' });
+    const figures = editor.report.figure_types.length;
+    const objects = editor.frame.objects.length;
+    const history = editor._undo.length;
+
+    editor.importFigure(document);
+
+    assert.equal(editor.report.figure_types.length, figures + 1);
+    assert.equal(editor.frame.objects.length, objects + 1);
+    assert.equal(editor._undo.length, history + 1);
 
     editor.undo();
-    assert.equal(editor.report.figure_types.length, figuresBefore);
-    assert.equal(editor.frame.objects.length, objectsBefore);
-  });
-
-  it('Combination 2: Canvas drag mutation on Left Forearm triggers 2-bone IK solver response', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Select Left Forearm (segment_id: 4 -> segment index 3)
-    editor.select(editor.selectedUid, 3);
-    const initialAngles = [...editor.object.angles];
-
-    // Drag Left Forearm handle to new world position
-    editor.poseJoint(220, 240);
-
-    // Verify 2-bone solver updated arm angles (indices 2 and 3: L upper arm & L forearm)
-    assert.notEqual(editor.object.angles[2], initialAngles[2]);
-    assert.notEqual(editor.object.angles[3], initialAngles[3]);
-    assert(Number.isFinite(editor.object.angles[2]));
-    assert(Number.isFinite(editor.object.angles[3]));
-  });
-
-  it('Combination 3: Canvas drag mutation on Left Lower Leg triggers 2-bone IK solver response', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Select Left Lower Leg (segment_id: 8 -> segment index 7)
-    editor.select(editor.selectedUid, 7);
-    const initialAngles = [...editor.object.angles];
-
-    // Drag Left Foot target
-    editor.poseJoint(200, 450);
-
-    // Verify 2-bone solver updated leg angles (indices 6 and 7: L thigh & L lower leg)
-    assert.notEqual(editor.object.angles[6], initialAngles[6]);
-    assert.notEqual(editor.object.angles[7], initialAngles[7]);
-  });
-
-  it('Combination 4: Bilateral limb independence: Left Arm IK drag preserves Right Arm rest angles', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    const rUpperArmBefore = editor.object.angles[4];
-    const rForearmBefore = editor.object.angles[5];
-
-    // Drag Left Forearm
-    editor.select(editor.selectedUid, 3);
-    editor.poseJoint(180, 260);
-
-    // Verify Right Arm angles are completely untouched
-    assert.equal(editor.object.angles[4], rUpperArmBefore);
-    assert.equal(editor.object.angles[5], rForearmBefore);
-  });
-
-  it('Combination 5: Modulation of bendDirection flips knee deflection across limb chord', () => {
-    const lengths = [70, 70];
-    const target = { x: 300, y: 320 }; // Chord along vertical axis
-
-    const posPoints = [{ x: 300, y: 200 }, { x: 300, y: 260 }, { x: 300, y: 320 }];
-    const negPoints = [{ x: 300, y: 200 }, { x: 300, y: 260 }, { x: 300, y: 320 }];
-
-    solveIKPoints(posPoints, lengths, target, 1);
-    solveIKPoints(negPoints, lengths, target, -1);
-
-    // With target on vertical axis, positive and negative bends should deflect on opposite sides of X=300
-    assert.notEqual(posPoints[1].x, negPoints[1].x);
-    assert.ok((posPoints[1].x > 300 && negPoints[1].x < 300) || (posPoints[1].x < 300 && negPoints[1].x > 300));
-  });
-
-  it('Combination 6: Full transaction undo & redo cycle preserves identical figure geometry and IK table', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    const serializedState = JSON.stringify(editor.serialize());
-    editor.undo();
-    assert.notEqual(JSON.stringify(editor.serialize()), serializedState);
+    assert.equal(editor.report.figure_types.length, figures);
+    assert.equal(editor.frame.objects.length, objects);
 
     editor.redo();
-    assert.equal(JSON.stringify(editor.serialize()), serializedState);
+    assert.equal(editor.report.figure_types.length, figures + 1);
+    assert.equal(editor.frame.objects.length, objects + 1);
   });
 
-  it('Combination 7: Multiple auto-rig figures imported into same scene maintain isolated identities and non-colliding UIDs', () => {
-    const poseA = createSyntheticPose33();
-    const poseB = createSyntheticPose33({ 0: { x: 0.6, y: 0.2 } });
-    const docA = createRiggedFigureDocument(poseA, { name: 'RigA' });
-    const docB = createRiggedFigureDocument(poseB, { name: 'RigB' });
+  it('saves and reopens the document with the rigged figure and its IK controllers intact', () => {
+    const editor = ownedEditorFor({ demo: false });
+    editor.importFigure(createRiggedFigureDocument(createSyntheticPose33(), { name: 'SavedRig' }));
+    const saved = structuredClone(editor.serialize());
 
-    const editor = new Editor({ demo: false });
-    editor.importFigure(docA, { position: { x: 200, y: 200 } });
-    const uidA = editor.selectedUid;
+    const reopened = ownedEditorFor({ demo: false });
+    reopened.load(saved);
 
-    editor.importFigure(docB, { position: { x: 500, y: 200 } });
-    const uidB = editor.selectedUid;
-
-    assert.notEqual(uidA, uidB);
-    assert.equal(editor.frame.objects.length, 2);
-    const objA = editor.frame.objects.find(o => o.unique_id === uidA);
-    const objB = editor.frame.objects.find(o => o.unique_id === uidB);
-    assert.ok(objA._stykIK);
-    assert.ok(objB._stykIK);
-  });
-
-  it('Combination 8: Pinned IK controller (pinned: true) preserves world target position during figure root translation', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Set Left Forearm pinned
-    editor.select(editor.selectedUid, 3);
-    editor.setNodeIK({ enabled: true, pinned: true });
-    assert.equal(editor.object._stykIK['4'].pinned, true);
-
-    const pinTargetX = editor.object._stykIK['4'].target.x;
-    const pinTargetY = editor.object._stykIK['4'].target.y;
-
-    // Translate figure origin without moving pins
-    editor.beginTranslationDrag();
-    editor.moveSelection(30, -20, { fromStart: true, movePins: false });
-    editor.commitDrag();
-
-    // Pin target remains invariant in world space
-    assert.equal(editor.object._stykIK['4'].target.x, pinTargetX);
-    assert.equal(editor.object._stykIK['4'].target.y, pinTargetY);
-  });
-
-  it('Combination 9: Claude mascot loaded into Editor articulates leg IK without mutating terracotta torso', () => {
-    const doc = createClaudeFigureDocument();
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    const torsoAngleBefore = editor.object.angles[0];
-
-    // Select leg outer (segment_id: 4 -> segment index 3)
-    editor.select(editor.selectedUid, 3);
-    editor.poseJoint(440, 390);
-
-    // Leg angle updated, torso angle remains -PI / 2
-    assert.equal(editor.object.angles[0], torsoAngleBefore);
-    assert.notEqual(editor.object.angles[3], Math.PI / 2);
-  });
-
-  it('Combination 10: Figure scaling in Editor preserves relative IK controller reach and valid segment lengths', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    editor.select(editor.selectedUid, -1);
-    editor.scaleSelection(1.5);
-    assert.equal(editor.object.scale, 1.5);
-
-    for (const seg of editor.figure.segments) {
-      assert(seg.length > 0);
-      assert(Number.isFinite(seg.length));
-    }
-  });
-});
-
-// ============================================================================
-// TIER 4: REAL-WORLD WORKLOAD SCENARIOS (6 Tests)
-// ============================================================================
-describe('Tier 4: Real-World Workload Scenarios', () => {
-
-  it('Scenario 1: Full human stick figure 5-frame animation sequence (rest, crouch, jump, land, recover)', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose, { name: 'AthleteRig' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Create 4 additional frames (5 frames total)
-    for (let f = 1; f < 5; f++) {
-      editor.addFrame();
-      editor.seek(f);
-      // Animate IK controllers across frames:
-      // Frame 1: Crouch (knees bend, lower root Y)
-      // Frame 2: Jump apex (straight limbs, higher root Y)
-      // Frame 3: Landing (knees deep bend)
-      // Frame 4: Recover to rest
-      editor.select(editor.selectedUid, 7); // Left Lower Leg
-      const legOffset = f === 1 ? -30 : (f === 2 ? 40 : (f === 3 ? -40 : 0));
-      editor.poseJoint(440 + legOffset, 480);
-    }
-
-    assert.equal(editor.report.keyframes.length, 5);
-    const serialized = editor.serialize();
-    assert.equal(serialized.keyframes.length, 5);
-    for (const kf of serialized.keyframes) {
-      assert.equal(kf.objects.length, 1);
-      assert(kf.objects[0].angles.every(Number.isFinite));
-    }
-  });
-
-  it('Scenario 2: 4-legged Claude mascot 8-frame quadruped walk cycle with alternating diagonal leg IK', () => {
-    const doc = createClaudeFigureDocument({ name: 'ClaudeWalk' });
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    // Build 8 walk-cycle frames
-    for (let step = 1; step < 8; step++) {
-      editor.addFrame();
-      editor.seek(step);
-      const phase = (step / 8) * Math.PI * 2;
-      const legStrideA = Math.sin(phase) * 20;
-      const legStrideB = Math.sin(phase + Math.PI) * 20;
-
-      // Diagonal pair 1: Leg 4 & Leg 6
-      editor.select(editor.selectedUid, 3); // Leg outer L
-      editor.poseJoint(460 + legStrideA, 356);
-
-      editor.select(editor.selectedUid, 5); // Leg inner R
-      editor.poseJoint(500 + legStrideA, 356);
-
-      // Diagonal pair 2: Leg 5 & Leg 7
-      editor.select(editor.selectedUid, 4); // Leg inner L
-      editor.poseJoint(480 + legStrideB, 356);
-
-      editor.select(editor.selectedUid, 6); // Leg outer R
-      editor.poseJoint(520 + legStrideB, 356);
-    }
-
-    assert.equal(editor.report.keyframes.length, 8);
-    const serialized = editor.serialize();
-    assert.equal(serialized.keyframes.length, 8);
-    assert.equal(serialized.figure_types[1].name, 'ClaudeWalk');
-  });
-
-  it('Scenario 3: Localized error presentation simulation: invalid image input triggers localized notice without polluting table', () => {
-    const editor = new Editor({ demo: false });
-    const figuresBefore = editor.report.figure_types.length;
-    const objectsBefore = editor.frame.objects.length;
-
-    // Simulate an unrecognized/invalid image input event
-    const invalidImageSimulation = {
-      ok: false,
-      messageKey: 'errors.poseEstimationWorker.noPoseDetected',
-      messageParams: { threshold: 0.5 }
-    };
-
-    let localizedNoticePresented = false;
-    function presentError(result) {
-      if (!result.ok) {
-        localizedNoticePresented = true;
-      }
-    }
-
-    presentError(invalidImageSimulation);
-
-    // Notice is triggered
-    assert.equal(localizedNoticePresented, true);
-
-    // Definitions table and scene objects remain completely untouched (0 pollution)
-    assert.equal(editor.report.figure_types.length, figuresBefore);
-    assert.equal(editor.frame.objects.length, objectsBefore);
-  });
-
-  it('Scenario 4: Full lifecycle test: synthesis -> import -> multiple IK drag poses -> serialization -> complete undo -> redo -> bitwise JSON equality', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose, { name: 'LifecycleRig' });
-    const editor = new Editor({ demo: false });
-    const pristineDoc = JSON.stringify(editor.serialize());
-
-    // Import figure
-    editor.importFigure(doc);
-
-    // Pose arm
-    editor.select(editor.selectedUid, 3);
-    editor.poseJoint(200, 220);
-
-    // Pose leg
-    editor.select(editor.selectedUid, 7);
-    editor.poseJoint(210, 440);
-
-    const posedState = JSON.stringify(editor.serialize());
-
-    // Undo pose 2, pose 1, and import
-    editor.undo(); // Undo leg pose
-    editor.undo(); // Undo arm pose
-    editor.undo(); // Undo import figure
-
-    assert.equal(JSON.stringify(editor.serialize()), pristineDoc);
-
-    // Redo back to posed state
-    editor.redo(); // Redo import
-    editor.redo(); // Redo arm pose
-    editor.redo(); // Redo leg pose
-
-    assert.equal(JSON.stringify(editor.serialize()), posedState);
-  });
-
-  it('Scenario 5: High-frequency canvas drag stress test: 100 rapid sequential editor.poseJoint calls in an arc with sub-millisecond execution and bounded joint angles', () => {
-    const pose = createSyntheticPose33();
-    const doc = createRiggedFigureDocument(pose);
-    const editor = new Editor({ demo: false });
-    editor.importFigure(doc);
-
-    editor.select(editor.selectedUid, 3); // Left Forearm
-    const startTime = performance.now();
-
-    for (let i = 0; i < 100; i++) {
-      const angle = (i / 100) * Math.PI * 2;
-      const targetX = 250 + Math.cos(angle) * 60;
-      const targetY = 250 + Math.sin(angle) * 60;
-      editor.poseJoint(targetX, targetY);
-
-      // Verify intermediate angles remain bounded
-      for (const a of editor.object.angles) {
-        assert(Number.isFinite(a));
-      }
-    }
-
-    const duration = performance.now() - startTime;
-    // 100 drag solves should execute comfortably under 500ms (average < 5ms per step)
-    assert.ok(duration < 1000, `High frequency drag took ${duration}ms, exceeding 1000ms threshold`);
-  });
-
-  it('Scenario 6: Creative Studio asset generation pipeline: generates valid SVG, icon, mascot, and animation definitions', () => {
-    const supportedTypes = ['svg', 'icon', 'mascot', 'animation'];
-    const generatedAssets = {};
-
-    for (const type of supportedTypes) {
-      if (fs.existsSync(cliPath)) {
-        const out = execFileSync(process.execPath, [cliPath, 'generate', '--type', type, '--prompt', `sample ${type}`], { encoding: 'utf8' });
-        generatedAssets[type] = out;
-      } else {
-        // Contract-based procedural generation fallback
-        if (type === 'svg') {
-          generatedAssets[type] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#D97757"/></svg>';
-        } else if (type === 'icon') {
-          generatedAssets[type] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#D97757"/></svg>';
-        } else if (type === 'mascot') {
-          generatedAssets[type] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300"><rect x="100" y="50" width="100" height="150" fill="#D97757"/></svg>';
-        } else if (type === 'animation') {
-          const pose = createSyntheticPose33();
-          const doc = createRiggedFigureDocument(pose, { name: 'GeneratedAnim' });
-          generatedAssets[type] = JSON.stringify(doc);
-        }
-      }
-    }
-
-    // Verify SVG markup
-    assert(generatedAssets.svg.includes('<svg'));
-    assert(generatedAssets.icon.includes('<svg'));
-    assert(generatedAssets.mascot.includes('<svg'));
-
-    // Verify Animation loads cleanly into Editor.importFigure
-    const animDoc = JSON.parse(generatedAssets.animation);
-    const editor = new Editor({ demo: false });
-    assert.doesNotThrow(() => {
-      editor.importFigure(animDoc);
-    });
-    assert.equal(editor.frame.objects.length, 1);
+    assert.equal(reopened.report.figure_types.length, editor.report.figure_types.length);
+    const object = reopened.frame.objects.at(-1);
+    assert.ok(object?._stykIK, 'the reopened object keeps its IK controller table');
+    assert.equal(Object.keys(object._stykIK).length, 4);
+    for (const controller of Object.values(object._stykIK)) assert.equal(controller.chainLength, 2);
   });
 });

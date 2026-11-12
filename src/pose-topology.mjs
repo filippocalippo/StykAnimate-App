@@ -2,6 +2,10 @@
  * StykAnimate Pose Topology Synthesizer
  * Maps MediaPipe 33-landmark or COCO 17-landmark coordinates into
  * a native StykAnimate figure definition with 2-bone IK handles.
+ *
+ * This module contains no pose model: it only turns landmark coordinates it is given into document data. The
+ * landmarks the app produces itself are heuristic estimates (see src/workers/pose-estimation-worker.mjs), and the
+ * interface labels the result accordingly.
  */
 
 /**

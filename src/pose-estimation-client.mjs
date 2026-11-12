@@ -86,7 +86,7 @@ export class PoseEstimationClient {
           this.#pending.delete(String(data.id));
 
           if (data.ok) {
-            const result = this.#createResultObject(data.id, data.landmarks);
+            const result = this.#createResultObject(data.id, data.landmarks, {synthetic: data.synthetic, detector: data.detector});
             entry.resolve(result);
           } else {
             const err = restoreMessageError(new Error(data.error || 'Pose estimation failed'), data);
@@ -116,11 +116,15 @@ export class PoseEstimationClient {
     return this.#worker;
   }
 
-  #createResultObject(id, landmarks) {
+  #createResultObject(id, landmarks, meta = {}) {
+    // There is no trained pose model in this build: a result is always a heuristic estimate, and it says so here
+    // (`synthetic`) so the interface can label it instead of presenting it as a confident detection.
     const result = {
       id: String(id),
       ok: true,
-      landmarks
+      landmarks,
+      synthetic: meta.synthetic ?? Boolean(landmarks?.[0]?.synthetic),
+      detector: meta.detector ?? landmarks?.[0]?.detector ?? 'heuristic-silhouette'
     };
 
     // Provide array-like indexing and iteration so result can be used either as

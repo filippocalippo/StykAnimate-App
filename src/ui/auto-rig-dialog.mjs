@@ -3,6 +3,7 @@ import { estimatePose, detectMimeTypeFromBuffer } from '../pose-estimation-clien
 import { buildFigureFromPoseLandmarks } from '../pose-topology.mjs';
 import { presentError } from '../error-presentation.mjs';
 import { messageError } from '../localized-error.mjs';
+import { t as interfaceText } from '../localization.mjs';
 import { createObject, createFrame } from '../demo.mjs';
 
 function parseColorToRgb(color) {
@@ -63,8 +64,9 @@ export function createRiggedFigureDocument(landmarks, options = {}) {
 }
 
 /**
- * Draws the source image (if loaded) and overlays the detected skeleton, joints,
- * and 2-bone IK end-effectors onto the staging canvas.
+ * Draws the source image (if loaded) and overlays the synthesized skeleton, joints,
+ * and 2-bone IK end-effectors onto the staging canvas. The landmarks are a heuristic
+ * estimate; this preview is what the person checks before importing.
  */
 export function renderSkeletonPreview(canvas, image, landmarks, { color = [13, 153, 255] } = {}) {
   const ctx = canvas?.getContext?.('2d');
@@ -273,6 +275,14 @@ export function createAutoRigDialog(editor, builderSession, options = {}) {
   errorNotice.style.cssText = 'color: #ff6b6b; margin-top: 8px; font-size: 13px; text-align: center;';
   bodyNode.appendChild(errorNotice);
 
+  // Honest provenance notice: the skeleton is a heuristic guess from the silhouette, never a trained model's
+  // confident detection. It is shown whenever the estimator returns something to preview.
+  const poseNotice = doc.createElement('div');
+  poseNotice.className = 'auto-rig-notice ui-dialog-hint';
+  poseNotice.hidden = true;
+  poseNotice.style.cssText = 'color: #b8b8b8; margin-top: 8px; font-size: 12px; text-align: center;';
+  bodyNode.appendChild(poseNotice);
+
   // Configuration options row
   const optionsRow = doc.createElement('div');
   optionsRow.className = 'auto-rig-options';
@@ -354,8 +364,8 @@ export function createAutoRigDialog(editor, builderSession, options = {}) {
 
   const dialog = createDialog({
     size: 'md',
-    title: options.title || 'Auto-Rig from Image',
-    description: options.description || 'Import an image or SVG to detect pose landmarks and synthesize a stick figure rig.',
+    title: options.title || interfaceText('autoRig.title'),
+    description: options.description || interfaceText('autoRig.description'),
     body: bodyNode,
     actions: [
       { label: 'Cancel', cancel: true, variant: 'ghost' },
@@ -407,6 +417,7 @@ export function createAutoRigDialog(editor, builderSession, options = {}) {
 
     errorNotice.hidden = true;
     errorNotice.textContent = '';
+    poseNotice.hidden = true;
     dialog.setError('');
     dialog.setBusy(true);
 
@@ -431,6 +442,9 @@ export function createAutoRigDialog(editor, builderSession, options = {}) {
       }
 
       currentLandmarks = landmarks;
+      const syntheticPose = result?.detector === 'synthetic-t-pose' || landmarks[0]?.detector === 'synthetic-t-pose';
+      poseNotice.textContent = interfaceText(syntheticPose ? 'autoRig.syntheticNotice' : 'autoRig.heuristicNotice');
+      poseNotice.hidden = false;
 
       if (typeof Image !== 'undefined' && typeof URL?.createObjectURL === 'function' && file instanceof Blob) {
         const url = URL.createObjectURL(file);
@@ -462,6 +476,7 @@ export function createAutoRigDialog(editor, builderSession, options = {}) {
     } catch (err) {
       currentLandmarks = null;
       currentImage = null;
+      poseNotice.hidden = true;
       if (confirmBtn) confirmBtn.disabled = true;
 
       // Present localized error notice without polluting figure definitions table
@@ -509,6 +524,7 @@ export function createAutoRigDialog(editor, builderSession, options = {}) {
     dropZone,
     canvas,
     errorNotice,
+    poseNotice,
     confirmButton: confirmBtn,
     nameInput,
     scaleInput,
@@ -519,6 +535,12 @@ export function createAutoRigDialog(editor, builderSession, options = {}) {
       currentLandmarks = landmarks;
       currentImage = image;
       if (confirmBtn) confirmBtn.disabled = !landmarks;
+      if (landmarks?.length) {
+        poseNotice.textContent = interfaceText(landmarks[0]?.detector === 'synthetic-t-pose' ? 'autoRig.syntheticNotice' : 'autoRig.heuristicNotice');
+        poseNotice.hidden = false;
+      } else {
+        poseNotice.hidden = true;
+      }
       renderPreview();
     }
   });

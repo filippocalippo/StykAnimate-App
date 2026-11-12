@@ -1,7 +1,9 @@
-# Project: StykAnimate AI Auto-Rigging & Asset Tooling Pipeline
+# Project: StykAnimate Heuristic Auto-Rigging & Asset Tooling Pipeline
 
 ## Architecture
-The StykAnimate AI Auto-Rigging pipeline synthesizes editable 2-bone IK-ready stick figures from input images and SVGs while providing a programmatic creative AI asset suite for generating SVGs, icons, mascots, and animations.
+The StykAnimate auto-rigging pipeline synthesizes editable 2-bone IK-ready stick figures from input images and SVGs, with a programmatic creative asset CLI for generating SVGs, icons, mascots, and animations.
+
+**Honesty note:** this build contains no trained pose model and does not bundle MediaPipe. Landmarks produced by the app are heuristic estimates of a figure silhouette, marked `synthetic: true` in the worker result and labelled as a heuristic preview in the interface. Shapes that cannot plausibly be an upright figure are rejected.
 
 ```
 [Input: PNG / JPG / WebP / SVG]
@@ -11,7 +13,7 @@ The StykAnimate AI Auto-Rigging pipeline synthesizes editable 2-bone IK-ready st
 │ Web Worker (src/workers/pose-estimation-worker.mjs)         │
 │ - Off-thread raster decoding (createImageBitmap)            │
 │ - Off-thread SVG rasterization (vendor/resvg WASM)          │
-│ - MediaPipe Pose inference (33 normalized landmarks)        │
+│ - Heuristic silhouette analysis (33 landmark estimates)     │
 │ - Error isolation (never stalls main-thread WebGPU)         │
 └──────────────────────────────┬──────────────────────────────┘
                                │ Structured Clone (<0.05ms)
@@ -38,7 +40,7 @@ The StykAnimate AI Auto-Rigging pipeline synthesizes editable 2-bone IK-ready st
 └─────────────────────────────────────────────────────────────┘
                                ▲
 ┌──────────────────────────────┴──────────────────────────────┐
-│ Creative AI Studio CLI (scripts/creative-studio-cli.mjs)    │
+│ Creative Studio CLI (scripts/creative-studio-cli.mjs)       │
 │ - Multi-engine CLI: Antigravity, Claude, Codex, OpenCode    │
 │ - Procedural deterministic fallback for offline testing     │
 └─────────────────────────────────────────────────────────────┘
@@ -47,7 +49,7 @@ The StykAnimate AI Auto-Rigging pipeline synthesizes editable 2-bone IK-ready st
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Pose Estimation Worker | Off-thread inference bundling @mediapipe/pose | M1 | ORIGINAL_REQUEST §R1 |
+| 1 | Pose Estimation Worker | Off-thread heuristic silhouette analysis (no @mediapipe/pose dependency) | M1 | ORIGINAL_REQUEST §R1 |
 | 2 | Image & SVG Rasterization | OffscreenCanvas rasterization via createImageBitmap and resvg WASM | M1 | ORIGINAL_REQUEST §R1 |
 | 3 | 33 Landmark Extraction | Non-blocking extraction of normalized coordinates & visibility scores | M1 | ORIGINAL_REQUEST §R1 |
 | 4 | Localized Error Handling | Localized notices for invalid/unrecognized images without polluting definitions | M1 | ORIGINAL_REQUEST §Acceptance |
@@ -58,7 +60,7 @@ The StykAnimate AI Auto-Rigging pipeline synthesizes editable 2-bone IK-ready st
 | 9 | Staging Overlay Dialog | Modal dialog with image drop zone, skeleton preview canvas, and confirm action | M3 | ORIGINAL_REQUEST §R4 |
 | 10 | Claude Mascot Figure Rig | Terracotta #D97757 palette, block head/torso, dual arms, 4 IK-controlled legs | M4 | ORIGINAL_REQUEST §R5 |
 | 11 | Claude Mascot Preset & Library | Loadable figure preset (.stkz) and rig example in StykAnimate library | M4 | ORIGINAL_REQUEST §R5, §Acceptance |
-| 12 | Creative AI Studio CLI | scripts/creative-studio-cli.mjs generating SVGs, icons, mascots, animations | M5 | ORIGINAL_REQUEST §R6 |
+| 12 | Creative Studio CLI | scripts/creative-studio-cli.mjs generating SVGs, icons, mascots, animations | M5 | ORIGINAL_REQUEST §R6 |
 | 13 | Multi-Engine & Offline Support | Interfaces with Antigravity, Claude, Codex, OpenCode with deterministic fallback | M5 | ORIGINAL_REQUEST §R6, §Acceptance |
 | 14 | E2E Test Suite (Tiers 1-4) | Comprehensive test suite tests/auto-rig.test.mjs covering all features headlessly | M6 | ORIGINAL_REQUEST §Acceptance |
 | 15 | Adversarial Coverage Hardening | Tier 5 adversarial edge cases, stress testing, and mutation verification | M6 | ORIGINAL_REQUEST §Acceptance |
@@ -67,11 +69,11 @@ The StykAnimate AI Auto-Rigging pipeline synthesizes editable 2-bone IK-ready st
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
 | M0 | Survey & Architecture | Codebase survey, interface contract definition, and project mapping | none | DONE |
-| M1 | Pose Estimation Inference Worker | `src/workers/pose-estimation-worker.mjs`, `src/pose-estimation-client.mjs`, error localization | M0 | IN_PROGRESS |
+| M1 | Pose Estimation Worker (heuristic) | `src/workers/pose-estimation-worker.mjs`, `src/pose-estimation-client.mjs`, error localization | M0 | IN_PROGRESS |
 | M2 | Topology Synthesis & IK Rigging | `src/pose-topology.mjs`, 2-bone IK configuration, atomic undo transaction | M0 | PLANNED |
 | M3 | Builder UI & Staging Overlay | `src/ui/auto-rig-dialog.mjs`, `src/ui/quick-actions.mjs`, `src/ui/command-catalog.mjs` | M1, M2 | PLANNED |
 | M4 | Claude Mascot Rig & Presets | `src/claude-figure-data.mjs`, `src/rig-examples.mjs`, `.stkz` preset packaging | M2 | PLANNED |
-| M5 | Creative AI Asset Tooling Suite | `scripts/creative-studio-cli.mjs` CLI tool and creative-agent-studio skill | M0 | PLANNED |
+| M5 | Creative Asset Tooling CLI | `scripts/creative-studio-cli.mjs` CLI tool and creative-agent-studio skill | M0 | PLANNED |
 | M6 | E2E Test Suite & Adversarial Hardening | `tests/auto-rig.test.mjs` covering Tiers 1-5 headlessly | M1, M2, M3, M4, M5 | PLANNED |
 
 ## Interface Contracts
@@ -161,5 +163,5 @@ The StykAnimate AI Auto-Rigging pipeline synthesizes editable 2-bone IK-ready st
 - `src/ui/command-catalog.mjs`: Auto-rig command definition. Owned by M3.
 - `src/claude-figure-data.mjs`: Claude Mascot stick figure definition. Owned by M4.
 - `src/rig-examples.mjs`: Built-in library rig examples and presets. Owned by M4.
-- `scripts/creative-studio-cli.mjs`: Unified AI asset generation CLI. Owned by M5.
+- `scripts/creative-studio-cli.mjs`: Unified asset generation CLI (procedural, with optional external CLI engines). Owned by M5.
 - `tests/auto-rig.test.mjs`: Comprehensive test suite for Auto-Rig pipeline. Owned by M6.

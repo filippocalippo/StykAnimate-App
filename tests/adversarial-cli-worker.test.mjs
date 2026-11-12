@@ -1,6 +1,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -127,12 +128,19 @@ describe('Challenger 2: Adversarial Stress Tests (CLI & Worker Subsystems)', () 
       assert(res.stdout.includes('<svg') && res.stdout.includes('</svg>'));
     });
 
-    it('C1.14: generate command writing to invalid/unwritable path fails cleanly with code 1', () => {
-      // In Windows, characters like * ? : are forbidden in file names
-      const invalidPath = 'C:\\invalid\\forbidden*path?\\asset.svg';
-      const res = runCli(['generate', '--type', 'svg', '--prompt', 'star', '--out', invalidPath]);
-      assert.equal(res.status, 1);
-      assert(res.stderr.includes('Error:'));
+    it('C1.14: generate command writing beneath a regular file path fails cleanly with code 1', () => {
+      // Portable failure: a path segment that is a regular file cannot be a directory on any platform,
+      // unlike a Windows-only invalid name. The temporary directory is cleaned up either way.
+      const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'styk-cli-'));
+      const blocker = path.join(scratch, 'not-a-directory');
+      fs.writeFileSync(blocker, 'blocker');
+      try {
+        const res = runCli(['generate', '--type', 'svg', '--prompt', 'star', '--out', path.join(blocker, 'asset.svg')]);
+        assert.equal(res.status, 1, `Expected exit code 1, got ${res.status}`);
+        assert(res.stderr.includes('Error:'));
+      } finally {
+        fs.rmSync(scratch, { recursive: true, force: true });
+      }
     });
 
     it('C1.15: generate command writing to valid nested path creates directories recursively', () => {
@@ -480,7 +488,103 @@ describe('Challenger 2: Adversarial Stress Tests (CLI & Worker Subsystems)', () 
       for (const lm of landmarks) {
         assert(Number.isFinite(lm.x) && lm.x >= 0 && lm.x <= 1, `Invalid landmark x: ${lm.x}`);
         assert(Number.isFinite(lm.y) && lm.y >= 0 && lm.y <= 1, `Invalid landmark y: ${lm.y}`);
-        assert(Number.isFinite(lm.visibility) && lm.visibility > 0);
+        // Honest provenance: heuristic landmarks are marked synthetic and never carry a detector's confidence.
+        assert.equal(lm.synthetic, true);
+        assert.equal(lm.detector, 'heuristic-silhouette');
+        assert.ok(Number.isFinite(lm.visibility) && lm.visibility > 0 && lm.visibility <= 0.5,
+          `Heuristic visibility must stay low, got ${lm.visibility}`);
+      }
+    });
+
+    it('C3.16: a solid tall rectangle is not accepted as a figure', () => {
+      const width = 100, height = 200;
+      const pixels = new Uint8ClampedArray(width * height * 4);
+      for (let y = 20; y < 180; y++) {
+        for (let x = 30; x < 70; x++) {
+          const idx = (y * width + x) * 4;
+          pixels[idx] = 217; pixels[idx + 1] = 119; pixels[idx + 2] = 87; pixels[idx + 3] = 255;
+        }
+      }
+      assert.throws(
+        () => extractLandmarksFromPixels(pixels, width, height),
+        (err) => err.messageKey === 'errors.poseEstimationWorker.noPoseDetected'
+      );
+    });
+
+    it('C3.17: a shape wider than it is tall is not accepted as an upright figure', () => {
+      const width = 200, height = 100;
+      const pixels = new Uint8ClampedArray(width * height * 4);
+      for (let y = 20; y < 80; y++) {
+        for (let x = 20; x < 180; x++) {
+          const idx = (y * width + x) * 4;
+          pixels[idx] = 217; pixels[idx + 1] = 119; pixels[idx + 2] = 87; pixels[idx + 3] = 255;
+        }
+      }
+      assert.throws(
+        () => extractLandmarksFromPixels(pixels, width, height),
+        (err) => err.messageKey === 'errors.poseEstimationWorker.noPoseDetected'
+      );
+    });
+
+    it('C3.18: a filled circle (non-human shape) is not labelled a pose', () => {
+      const width = 200, height = 200;
+      const pixels = new Uint8ClampedArray(width * height * 4);
+      for (let y = 20; y < 180; y++) {
+        for (let x = 20; x < 180; x++) {
+          if ((x - 100) ** 2 + (y - 100) ** 2 <= 80 ** 2) {
+            const idx = (y * width + x) * 4;
+            pixels[idx] = 217; pixels[idx + 1] = 119; pixels[idx + 2] = 87; pixels[idx + 3] = 255;
+          }
+        }
+      }
+      assert.throws(
+        () => extractLandmarksFromPixels(pixels, width, height),
+        (err) => err.messageKey === 'errors.poseEstimationWorker.noPoseDetected'
+      );
+    });
+
+    it('C3.19: different figure silhouettes produce different landmarks (not a fixed template)', () => {
+      const draw = ({ centerX = 100, armSpan = 40 } = {}) => {
+        const width = 200, height = 200;
+        const pixels = new Uint8ClampedArray(width * height * 4);
+        const paint = (x, y) => {
+          if (x < 0 || y < 0 || x >= width || y >= height) return;
+          const idx = (y * width + x) * 4;
+          pixels[idx] = 217; pixels[idx + 1] = 119; pixels[idx + 2] = 87; pixels[idx + 3] = 255;
+        };
+        const headX = centerX;
+        for (let y = 25; y <= 55; y++) for (let x = headX - 15; x <= headX + 15; x++) {
+          if ((x - headX) ** 2 + (y - 40) ** 2 <= 15 ** 2) paint(x, y);
+        }
+        for (let y = 55; y <= 130; y++) for (let x = headX - 5; x <= headX + 5; x++) paint(x, y);
+        for (let y = 70; y <= 76; y++) for (let x = centerX - armSpan; x <= centerX + armSpan; x++) paint(x, y);
+        for (let y = 130; y <= 190; y++) for (const x of [headX - 25, headX - 24, headX - 23, headX - 22, headX + 22, headX + 23, headX + 24, headX + 25]) paint(x, y);
+        return extractLandmarksFromPixels(pixels, width, height);
+      };
+      const centred = draw();
+      const shifted = draw({ centerX: 80 });
+      const wideArms = draw({ armSpan: 50 });
+      // The estimator reads the image: moving the figure moves the head landmark, and a wider arm span moves the wrists.
+      assert.notEqual(Math.round(centred[0].x * 1000), Math.round(shifted[0].x * 1000));
+      assert.notEqual(Math.round(centred[15].x * 1000), Math.round(wideArms[15].x * 1000));
+      for (const pose of [centred, shifted, wideArms]) {
+        assert.equal(pose.length, 33);
+        assert.equal(pose.every(point => Number.isFinite(point.x) && Number.isFinite(point.y)), true);
+      }
+    });
+
+    it('C3.20: the headless fallback returns a labelled synthetic template, never a confident detection', async () => {
+      // A PNG header with no raster decoder available in Node: the worker answers from its fixed template.
+      const png = new Uint8Array(64);
+      png.set([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], 0);
+      png[18] = 1; png[19] = 0; // 256 px wide
+      png[22] = 1; png[23] = 0; // 256 px tall
+      const landmarks = await processPoseEstimation({ buffer: png.buffer, mimeType: 'image/png' });
+      assert.equal(landmarks.length, 33);
+      for (const lm of landmarks) {
+        assert.equal(lm.synthetic, true);
+        assert.equal(lm.detector, 'synthetic-t-pose');
+        assert.ok(lm.visibility > 0 && lm.visibility <= 0.5);
       }
     });
   });
@@ -641,7 +745,13 @@ describe('Challenger 2: Adversarial Stress Tests (CLI & Worker Subsystems)', () 
 
     it('C4.12: Concurrency stress: 20 rapid sequential/concurrent headless requests complete with correct ID mapping', async () => {
       const client = new PoseEstimationClient();
-      const validSvg = '<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#D97757"/></svg>';
+      // A tall figure silhouette: the heuristic rejects non-figure shapes such as a plain circle.
+      const validSvg = '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">' +
+        '<circle cx="50" cy="15" r="8" fill="#D97757"/>' +
+        '<rect x="47" y="23" width="6" height="35" fill="#D97757"/>' +
+        '<rect x="20" y="35" width="60" height="6" fill="#D97757"/>' +
+        '<rect x="34" y="58" width="6" height="30" fill="#D97757"/>' +
+        '<rect x="60" y="58" width="6" height="30" fill="#D97757"/></svg>';
 
       const promises = Array.from({ length: 20 }, async (_, i) => {
         if (i % 2 === 0) {
@@ -649,6 +759,9 @@ describe('Challenger 2: Adversarial Stress Tests (CLI & Worker Subsystems)', () 
           const res = await client.estimatePose(validSvg);
           assert.equal(res.ok, true);
           assert.equal(res.landmarks.length, 33);
+          // The client reports the heuristic provenance instead of claiming a confident detection.
+          assert.equal(res.synthetic, true);
+          assert.equal(res.detector, 'heuristic-silhouette');
           return 'ok';
         } else {
           // Intentionally invalid request
