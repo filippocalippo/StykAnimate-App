@@ -124,13 +124,19 @@ export function uploadRemainingPictures(side, schedule = setTimeout) {
   schedule(step, IDLE_UPLOAD_MS);
 }
 
+/** How long the stage's start waits for the browser's description of its adapter before using the engine's name of it. */
+const ADAPTER_NAME_MS = 1500;
+
 /**
  * What the status line and telemetry call the graphics adapter: the browser's own description of it
  * (vendor, architecture, device) where WebGPU exists, else the name the engine got from the backend.
  */
-async function adapterName(stage) {
+async function adapterName(stage, waitMs = ADAPTER_NAME_MS) {
   try {
-    const info = (await expectedAdapterInfo()) ?? (await globalThis.navigator?.gpu?.requestAdapter?.())?.info;
+    // The name is a label: the stage exists by now, and a browser whose graphics process never answers the question
+    // (seen on machines without a GPU, a later page of one browser) must not keep the editor from starting.
+    const described = (async () => (await expectedAdapterInfo()) ?? (await globalThis.navigator?.gpu?.requestAdapter?.())?.info)();
+    const info = await Promise.race([described, new Promise(resolve => setTimeout(resolve, waitMs, null))]);
     const name = [info?.vendor, info?.architecture, info?.device].filter(Boolean).join(' · ');
     if (name) return name;
   } catch { /* the engine's own name will do */ }
@@ -171,7 +177,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
   const warnings = [];
   /** The engine's counters, read from the stage once per frame drawn. */
   let statsAt = -1, gpuStats = null;
-  const backend = {name: stage.backend().startsWith('BrowserWebGpu') ? 'WebGPU' : 'WebGL2', adapter: await adapterName(stage)};
+  const backend = {name: stage.backend().startsWith('BrowserWebGpu') ? 'WebGPU' : 'WebGL2', adapter: await adapterName(stage, options.adapterNameMs)};
 
   const invalidate = () => options.onInvalidate?.();
   /** Another attempt at a frame the engine could not draw yet, on the next animation frame. */

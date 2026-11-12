@@ -372,6 +372,23 @@ test('the slots of the figures not drawn and dragged come from the engine, and a
   renderer.destroy();
 });
 
+test('a stage starts although the browser never describes its adapter: it takes the engine\'s name of it', async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const {expectAdapterInfo} = await import('../src/engine/engine.mjs');
+  try {
+    // The warm-up worker never answers.
+    expectAdapterInfo(new Promise(() => {}));
+    assert.equal((await open({}, {adapterNameMs: 20})).renderer.stats.adapter, 'Test GPU');
+    // No worker, and the browser's own answer never comes.
+    expectAdapterInfo(Promise.resolve(null));
+    Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {gpu: {requestAdapter: () => new Promise(() => {})}}});
+    assert.equal((await open({}, {adapterNameMs: 20})).renderer.stats.adapter, 'Test GPU');
+  } finally {
+    expectAdapterInfo(null);
+    if (original) Object.defineProperty(globalThis, 'navigator', original); else delete globalThis.navigator;
+  }
+});
+
 test('the stage names its adapter from the warm-up worker\'s description, and asks the browser only when it has none', async () => {
   let asked = 0;
   const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
