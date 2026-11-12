@@ -21,7 +21,7 @@ const fits = element => {
   return bounds.left >= 0 && bounds.right <= innerWidth && element.scrollWidth <= element.clientWidth + 1;
 };
 try {
-  await page.goto(process.env.STYK_TEST_URL || 'http://127.0.0.1:47831');
+  await page.goto(process.env.STYK_URL || process.env.STYK_TEST_URL || 'http://127.0.0.1:47831');
   await page.waitForFunction(() => window.styk?.ready && styk.localization);
   await page.locator('.brand[data-action=menu]').click();
   await page.locator('#menu [data-action=settings]').click();
@@ -31,8 +31,22 @@ try {
     check(`${locale.id}: selected language and interface direction are active`, await page.evaluate(locale =>
       styk.localization.localization.locale===locale.id&&document.documentElement.lang===locale.id&&document.documentElement.dir===locale.direction
       &&getComputedStyle(document.querySelector('.styk-settings')).direction===locale.direction,locale));
-    check(`${locale.id}: complete messages and plurals do not show a fallback notice`, await page.evaluate(() =>
-      !styk.localization.localization.hasFallback && !document.querySelector('[data-locale-coverage]')));
+    // A pack may be partial: what it lacks shows in English, and Settings says so exactly when it lacks
+    // messages or plural forms (docs/LOCALIZATION.md). Coverage is worked out here from the pack itself.
+    check(`${locale.id}: English fallback and the partial-language notice follow the pack's own coverage`, await page.evaluate(async id => {
+      const english = (await import('/src/locales/en.mjs')).default, pack = (await import(`/src/locales/messages/${id}.mjs`)).default;
+      const owns = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+      const categories = new Intl.PluralRules(id).resolvedOptions().pluralCategories;
+      const missing = Object.keys(english).filter(key => !owns(pack, key));
+      const partial = missing.length > 0 || Object.keys(english).some(key => typeof english[key] !== 'string' && owns(pack, key) && categories.some(category => !owns(pack[key], category)));
+      const service = styk.localization.localization, notice = document.querySelector('[data-locale-coverage]');
+      const plain = missing.find(key => typeof english[key] === 'string' && !/{/.test(english[key]));
+      const translated = Object.keys(pack).find(key => typeof pack[key] === 'string' && pack[key] !== english[key]);
+      return service.hasFallback === partial && Boolean(notice) === partial
+        && (!notice || notice.textContent === service.t('settings.partialLanguage'))
+        && (!plain || service.t(plain) === english[plain])
+        && Boolean(translated) && service.t(translated) === pack[translated];
+    }, locale.id));
     for (const tab of ['interface', 'canvas', 'animation', 'shortcuts']) {
       await page.locator(`button[data-tab=${tab}]`).click();
       check(`${locale.id}: ${tab} settings fit a compact window`, await page.locator('.styk-settings-content').evaluate(fits));
@@ -73,7 +87,7 @@ try {
     await page.locator('.brand[data-action=menu]').click();
     await page.locator('#menu [data-action=settings]').click();
   }
-  check('Completed packs produce no uncaught browser errors', errors.length === 0);
+  check('Language packs produce no uncaught browser errors', errors.length === 0);
   await writeFile(path.join(output, requested ? `${requested}-report.json` : 'report.json'), JSON.stringify({checks, errors, locales:locales.map(locale => locale.id), scope:'All 26 translated Settings tabs at 760px; twelve representatives also at 390px. Export/timeline bounds at 390px for those twelve and at 760px for the other fourteen. Linux browser fonts only.'}, null, 2));
 } catch (error) {
   await page.screenshot({animations:'disabled',path:path.join(output, 'failure.png')});

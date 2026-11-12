@@ -16,7 +16,7 @@ async function settings() {
   await page.locator('#menu [data-action=settings]').click();
 }
 try {
-  await page.goto(process.env.STYK_TEST_URL || 'http://127.0.0.1:47831');
+  await page.goto(process.env.STYK_URL || process.env.STYK_TEST_URL || 'http://127.0.0.1:47831');
   await page.waitForFunction(() => window.styk?.ready && styk.localization && styk.settingsUI);
   check('Actual app starts in English despite Italian browser preferences',await page.evaluate(() => styk.state.settings.locale === 'en' && styk.localization.localization.locale === 'en' && document.documentElement.lang === 'en'));
   // Arrange a small real native document; the edit itself uses the visible field.
@@ -35,6 +35,8 @@ try {
   await settings();
   await page.locator('.styk-settings [data-setting=locale]').focus();
   await page.locator('.styk-settings [data-setting=locale]').selectOption('it');
+  // A language is chosen once its messages are loaded (only the language in use is loaded).
+  await page.waitForFunction(() => styk.localization.localization.locale === 'it');
   check('Actual Settings selector switches the shared app language and retains focus',await page.evaluate(() => styk.state.settings.locale === 'it' && styk.localization.localization.locale === 'it' && document.documentElement.lang === 'it' && document.activeElement.dataset.setting === 'locale'));
   check('Language changes preserve exact document bytes, undo count, revision, selection and tick',await page.evaluate(() => {
     const e=styk.editor,b=localeBaseline;
@@ -65,6 +67,7 @@ try {
   check('Actual app reload restores Italian settings and translated chrome',await page.evaluate(() => styk.state.settings.locale==='it' && styk.localization.localization.locale==='it' && document.documentElement.lang==='it' && document.querySelector('.titlebar [data-action=save]').getAttribute('aria-label')==='Salva'));
   await settings();
   await page.locator('.styk-settings [data-setting=locale]').selectOption('en');
+  await page.waitForFunction(() => styk.localization.localization.locale === 'en');
   await page.getByRole('button',{name:'Close settings',exact:true}).click();
   await page.evaluate(() => styk.settingsUI.flush());
   check('Actual app can return to English through the same visible control',await page.evaluate(() => styk.state.settings.locale==='en' && document.querySelector('.titlebar [data-action=save]').getAttribute('aria-label')==='Save'));

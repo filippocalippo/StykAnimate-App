@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const base = process.env.STYK_TEST_URL || 'http://127.0.0.1:47831';
+const base = process.env.STYK_URL || process.env.STYK_TEST_URL || 'http://127.0.0.1:47831';
 const output = path.resolve('artifacts/localization-settings');
 await mkdir(output, {recursive:true});
 const browser = await chromium.launch({channel:'chrome',headless:true});
