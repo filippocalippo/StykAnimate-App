@@ -481,6 +481,7 @@ src/spatial-projection.mjs	engine	styk-eval::spatial	partial	Rust: perspective p
 src/sprite-placement-dialog.mjs	ui	-	stays	
 src/startup-blue-data.mjs	engine	styk-edit	js	
 src/startup-document.mjs	engine	styk-edit	js	
+src/stats/schema.mjs	app	-	stays	statistics
 src/sticknodes/adapter.mjs	engine	styk-formats::sticknodes	js	
 src/sticknodes/decoder/archive.mjs	engine	styk-formats::sticknodes	js	
 src/sticknodes/decoder/binary.mjs	engine	styk-formats::sticknodes	js	
