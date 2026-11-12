@@ -44,7 +44,7 @@ npm start            # desktop app (Electron)
 npm run serve        # or the editor in your browser at http://127.0.0.1:47831
 ```
 
-`npm run engine:build` needs `rustup` with the pinned nightly and its source (`rustup toolchain install nightly-2026-09-15 --component rust-src --target wasm32-unknown-unknown`), stable Rust with the same target, `wasm-bindgen-cli` 0.2.129 (`cargo install wasm-bindgen-cli --version 0.2.129 --locked`) and clang for the WebAssembly target. Python runs only the codec's development test oracle (`backend/`, `codecs/`) and the packaging scripts; set `STYK_PYTHON` to choose an interpreter.
+`npm run engine:build` needs `rustup` with the pinned nightly and its source (`rustup toolchain install nightly-2026-09-15 --component rust-src --target wasm32-unknown-unknown`), the stable Rust that `rust-toolchain.toml` names with the same target (rustup installs it on first use), `wasm-bindgen-cli` 0.2.129 (`cargo install wasm-bindgen-cli --version 0.2.129 --locked`) and clang for the WebAssembly target. Python runs only the codec's development test oracle (`backend/`, `codecs/`) and the packaging scripts; set `STYK_PYTHON` to choose an interpreter.
 
 Packaging, on the matching operating system:
 
@@ -61,12 +61,12 @@ The browser build: `npm run web:build`, then `npm run web:preview`. See [Web bui
 ## Tests
 
 ```sh
-npm run check        # syntax, stylesheet lint
+npm run check        # syntax, stylesheet lint, locales, engine inventory
 npm test             # unit tests
 python -m unittest discover -s backend -p "test_*.py"   # the Python codec oracle (development only)
 ```
 
-Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or Playwright Chromium, for example `node tests/timeline.browser.mjs`. Some tests read a local corpus of Pivot projects that is not distributed; they skip and name the missing file. Desktop tests and scripts (`tests/*.desktop.mjs`, `scripts/smoke-*.mjs`) open the app in a window; set `STYK_BACKGROUND_WINDOW=1` to open it off-screen without taking focus (packaged builds too). [`.github/workflows/ci.yml`](.github/workflows/ci.yml) shows what runs on every pull request.
+Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or Playwright Chromium, for example `node tests/timeline.browser.mjs`. `npm run test:browser` starts the server and runs them all, or those whose names contain the words you give it (`npm run test:browser -- timeline hotkeys`), and lists which pass, skip or fail. Some tests read a local corpus of Pivot projects that is not distributed; without it they skip and name the missing file (`STYK_REQUIRE_FIXTURES=1` makes them fail instead). Desktop tests and scripts (`tests/*.desktop.mjs`, `scripts/smoke-*.mjs`) open the app in a window; set `STYK_BACKGROUND_WINDOW=1` to open it off-screen without taking focus (packaged builds too). [`.github/workflows/ci.yml`](.github/workflows/ci.yml) shows what runs on every pull request.
 
 ## How the code is organized
 

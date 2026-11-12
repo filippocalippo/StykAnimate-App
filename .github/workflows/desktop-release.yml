@@ -45,12 +45,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.11.0'
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12.9'
           cache: pip
@@ -62,11 +62,13 @@ jobs:
       - name: Prepare Linux display
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
+          # The runner image ships xvfb; the package index is only read where it does not.
+          command -v xvfb-run > /dev/null || { sudo apt-get update; sudo apt-get install -y xvfb; }
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The unit tests open Pivot files through the codec module the engine build produces.
       - uses: ./.github/actions/engine-build
+        with:
+          optimize: 'true'
       - name: Validate release and source
         run: |
           npm run changelog:check
@@ -107,7 +109,7 @@ jobs:
             xvfb-run -a npm run test:updates:linux
           fi
       - name: Upload release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-assets-${{ matrix.platform }}
           path: |
@@ -122,7 +124,7 @@ jobs:
         run: node scripts/verify-release-install.mjs
       - name: Upload verification evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-evidence-${{ matrix.platform }}
           path: |
@@ -146,8 +148,8 @@ jobs:
       STYK_CANDIDATE_RUN: ${{ inputs.verify_windows_run }}
       VERIFY_PUBLIC_FEED: ${{ inputs.verify_public_feed }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.11.0'
           cache: npm
@@ -155,7 +157,7 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           echo "RELEASE_VERSION=$(node -p 'JSON.parse(require("fs").readFileSync("package.json")).version')" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-assets-win32
           run-id: ${{ inputs.verify_windows_run }}
@@ -180,7 +182,7 @@ jobs:
         run: node scripts/verify-github-update.mjs
       - name: Upload verification evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: retained-installer-evidence
           path: |
@@ -193,8 +195,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.11.0'
           cache: npm
@@ -202,7 +204,7 @@ jobs:
         run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
       - name: Select version
         run: echo "RELEASE_VERSION=$(node -p 'JSON.parse(require("fs").readFileSync("package.json")).version')" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-assets-*
           merge-multiple: true

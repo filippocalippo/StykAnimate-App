@@ -293,7 +293,7 @@ of it the multisampled depth buffer of the layer pages); none without 3D.
 ## Testing
 
 ```sh
-cd engine && cargo test -p styk-eval --test spatial --test records
+cd engine && cargo test -p styk-eval --test suite -- spatial:: records::
 cargo test -p styk-render -p styk-raster --test depth
 cargo build --release -p styk-cli
 target/release/styk render <file> <tick> gpu.png && target/release/styk raster <file> <tick> cpu.png && target/release/styk diff gpu.png cpu.png diff.png

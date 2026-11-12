@@ -926,7 +926,7 @@ async function timelineInspector(ctx, seconds = 10) {
       const o = new MutationObserver(() => list.push(performance.now())); o.observe(el, {subtree: true, childList: true, attributes: true, characterData: true}); B.watch.observers.push(o); return visible(el); };
     // Inputs take their values as properties, which no observer sees: a changed value of an input in the inspector counts as a change too.
     const proto = HTMLInputElement.prototype, value = Object.getOwnPropertyDescriptor(proto, 'value');
-    Object.defineProperty(proto, 'value', {...value, set(v) { if (this.closest('#inspector') && value.get.call(this) !== String(v)) B.watch.inspector.push(performance.now()); return value.set.call(this, v); }});
+    Object.defineProperty(proto, 'value', {...value, set(v) { if (this.closest('#inspector') && value.get.call(this) !== String(v)) B.watch.inspector.push(performance.now()); value.set.call(this, v); }});
     B.watch.restore.push(() => Object.defineProperty(proto, 'value', value));
     return {selected: window.styk.editor.selectedUid === uid, timeline: watch('.sheet-playhead-clip', B.watch.playhead), inspector: watch('#inspector', B.watch.inspector)};
   }, target.uid);

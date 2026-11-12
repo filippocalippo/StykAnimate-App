@@ -20,69 +20,8 @@ import {actionKeys, readActionSources} from './helpers/source-scan.mjs';
 
 const root = new URL('../', import.meta.url);
 const source = file => (existsSync(new URL(file, root)) ? readFileSync(new URL(file, root), 'utf8') : '');
-const lines = text => text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join('\n');
 const outcome = run => {try {return {value: run()};} catch (error) {return {error: error.message};}};
 const product = (...lists) => lists.reduce((rows, list) => rows.flatMap(row => list.map(item => [...row, item])), [[]]);
-
-// ---------------------------------------------------------------------------
-// The legacy code the equivalence tests run is verbatim: while app.mjs (or the
-// export-flow.mjs it moves to) still holds it, it must match the fixture.
-
-const LEGACY_HOMES = ['src/app.mjs', 'src/export-flow.mjs'].map(source).filter(Boolean);
-const fixtureBlock = name => {
-  const text = source('tests/fixtures/export-legacy.mjs');
-  return text.slice(text.indexOf(`// BEGIN legacy ${name}`), text.indexOf(`// END legacy ${name}`)).split('\n').slice(1).join('\n');
-};
-const between = (text, start, endLine) => {
-  const from = text.indexOf(start);
-  if (from < 0) return null;
-  const end = text.indexOf('\n', text.indexOf(endLine, from));
-  return text.slice(from, end < 0 ? text.length : end);
-};
-const functionText = (text, signature) => {
-  const from = text.indexOf(signature);
-  if (from < 0) return null;
-  let depth = 0;
-  for (let i = text.indexOf('{', from + signature.length - 1); i < text.length; i++) {
-    if (text[i] === '{') depth++;
-    else if (text[i] === '}' && --depth === 0) return text.slice(from, i + 1);
-  }
-  return null;
-};
-
-test('the legacy fixture is still verbatim app.mjs export code', t => {
-  const found = [];
-  for (const text of LEGACY_HOMES) {
-    const images = functionText(text, 'async function exportImages(format) {');
-    const video = functionText(text, 'async function exportVideo(format = "webm") {');
-    const blocks = {
-      exportOptions: functionText(text, 'function exportOptions({ animation = true } = {}) {'),
-      exportImages: images && between(images, 'const options = exportOptions(),', 'if (format === "svg-sequence") options.smoothing = "edges";'),
-      exportVideo: video && between(video, 'const vfw = format === "vfw"', 'if (includeAudio && encode !== encodeNativeVideo)'),
-    };
-    const present = Object.keys(blocks).filter(name => blocks[name]);
-    if (!present.length) continue;
-    // All or nothing: a reworded signature or anchor must not silently stop one block's comparison.
-    assert.deepEqual(present, Object.keys(blocks), 'some legacy export blocks were not found: update tests/fixtures/export-legacy.mjs or the anchors above');
-    for (const [name, block] of Object.entries(blocks)) {found.push(name); assert.equal(lines(block), lines(fixtureBlock(name)), `${name} changed: update tests/fixtures/export-legacy.mjs`);}
-    // Transcribed below: the file names, the lock-ratio input handler, the codec options and the dialog's notes.
-    for (const snippet of ['filename = `${editor.name}-frame-${editor.tick + 1}.png`', 'filename = `${editor.name}-frame-${editor.tick + 1}.svg`',
-      '...exportOptions({ animation: false }),', 'const filename = `${["stk", "stkz", "stykmov"].includes(format) ? nameOf(editor.object) : editor.name || "Untitled"}.${format}`;',
-      'Math.round(id === "export-width" ? value / ratio : value * ratio),', '"export-stkz": () => exportPivot(isMovieclip(editor.figure)?"stykmov":"stkz"),',
-      '`<option value="${esc(codec.id)}" ${codec.supported ? "" : "disabled"}>${esc(codec.label)}${codec.lossless && !/lossless|uncompressed/i.test(codec.label) ? " · Lossless" : ""}</option>`,',
-      'select.disabled = !(format.codecs || []).some(', 'const selected = select.value || format.defaultCodec;',
-      '<p class="property-note">Add the working pose as a frame to include it in animation exports. Your .styk project keeps the working pose.</p>',
-      'editor.frameDraft?.mode === "add" &&', '? `.${format.extension} · ${selectedCodec?.label || format.codec || format.label}${encodedWidth && (encodedWidth !== width || encodedHeight !== height) ? ` · ${encodedWidth} × ${encodedHeight} (padded)` : ""}`'])
-      assert.ok(text.includes(snippet), `app.mjs no longer has: ${snippet}`);
-  }
-  const panel = source('src/export-panel.mjs');
-  if (panel) for (const snippet of ["visibility = {start: !single, end: !single, quality: action === 'export-jpeg-sequence',",
-    "const shortSide = preset === 'original' ? Math.min(width, height) : Number(preset);", "input('width').dispatchEvent(new Event('input', {bubbles: true}));",
-    "note.textContent = `Export counts every frame that plays. Your ${storedFrames} timeline ${storedFrames === 1 ? 'frame plays' : 'frames play'} as ${totalFrames} with inbetweens.`;",
-    "if (Number.isInteger(storedFrames) && storedFrames !== totalFrames) {", "input('all-frames').onclick = () => {input('start').value = 1; input('end').value = totalFrames; updateSettings();};"])
-    assert.ok(panel.includes(snippet), `export-panel.mjs no longer has: ${snippet}`);
-  if (!found.length) t.skip('the export actions read an ExportRequest now; the fixture keeps the last legacy code');
-});
 
 test('the dialog ids the browser tests query stay in one map', () => {
   if (!source('src/export-panel.mjs')) {

@@ -10,7 +10,7 @@ page.on('pageerror',e=>errors.push(e.message));
 page.on('console',message=>{if (/^(?:ReferenceError|TypeError|SyntaxError):/.test(message.text())) errors.push(message.text());});
 const check=(name,condition)=>{assert.ok(condition,name);checks.push(name);console.log('PASS',name);};
 try {
-  await page.goto(process.env.STYK_TEST_URL||'http://127.0.0.1:47831');
+  await page.goto(process.env.STYK_URL||process.env.STYK_TEST_URL||'http://127.0.0.1:47831');
   await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(async()=>{const {loadLocales}=await import('/src/localization.mjs');await loadLocales();});
   await page.waitForFunction(()=>styk.assets.count.getAttribute('data-i18n')==='counts.figures');
@@ -440,23 +440,27 @@ try {
   await page.evaluate(()=>{publicCard.remove();localClipCard.remove();styk.localization.localization.setPseudo(null);});
   await page.evaluate(async()=>{
     const {createDockKeyboard}=await import('/src/shell/dock-keyboard.mjs');
+    const {dockTargets,zoneLabelKey}=await import('/src/shell/dock-tabs.mjs');
     window.dockMoves=[];window.dockSpeech=[];
+    // The app's own dock host, with the workspace commit recorded instead of applied.
+    const host=Object.create(styk.shell,{workspace:{value:{float:id=>dockMoves.push(['float',id]),move:(id,target)=>dockMoves.push(['move',id,target])}},showPanel:{value(){}}});
+    window.dockPlaces=dockTargets(host,{panel:'properties'}).map(zoneLabelKey);
     window.dockDraft=document.createElement('input');dockDraft.value='Panel draft';document.body.append(dockDraft);dockDraft.focus();dockDraft.setSelectionRange(1,4);
-    window.dockProbe=createDockKeyboard({host:{registry:new Map([['properties',{title:'Properties',titleKey:'shell.panel.properties'}]]),canPlace:()=>true,presentation:()=> 'docked',solution:{panels:{properties:{side:'right'}}},workspace:{float:id=>dockMoves.push(['float',id]),dock:(id,target)=>dockMoves.push(['dock',id,target])},showPanel(){}},announce:text=>dockSpeech.push(text)});
+    window.dockProbe=createDockKeyboard({host,announce:text=>dockSpeech.push(text)});
     dockProbe.startMove('properties');window.dockCaption=document.querySelector('.shell-drop .ui-drop-label');
     styk.localization.localization.setPseudo('rtl');
   });
   check('Keyboard panel-move preview follows RTL in its original caption without moving the panel or disturbing focus and drafts',await page.evaluate(()=>
-    dockCaption.textContent===styk.localization.t('dockKeyboard.floatHere')&&dockMoves.length===0
+    dockPlaces.length>1&&dockCaption.textContent===styk.localization.t(dockPlaces[0])&&dockMoves.length===0
     &&document.activeElement===dockDraft&&dockDraft.value==='Panel draft'&&dockDraft.selectionStart===1&&dockDraft.selectionEnd===4));
   await page.evaluate(()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true})));
-  check('Keyboard movement keeps physical arrow choices and announces the current localized placement',await page.evaluate(()=>
-    dockCaption===document.querySelector('.shell-drop .ui-drop-label')&&dockProbe.moving.target==='left'
-    &&dockCaption.textContent===styk.localization.t('dockKeyboard.dockLeft')&&dockSpeech.at(-1)===styk.localization.t('dockKeyboard.dockLeft')));
+  check('Keyboard movement steps to the next placement and announces it localized in the same caption',await page.evaluate(()=>
+    dockCaption===document.querySelector('.shell-drop .ui-drop-label')&&dockProbe.moving.id==='properties'
+    &&dockCaption.textContent===styk.localization.t(dockPlaces[1])&&dockSpeech.at(-1)===styk.localization.t(dockPlaces[1])));
   await page.evaluate(()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
   check('Keyboard placement preserves the canonical panel and side while announcing its translated title',await page.evaluate(()=>
-    JSON.stringify(dockMoves)===JSON.stringify([['dock','properties','left']])
-    &&dockSpeech.at(-1)===styk.localization.t('dockKeyboard.panelLocation',{title:{messageKey:'shell.panel.properties'},place:{messageKey:'dockKeyboard.dockLeft'}})));
+    dockMoves.length===1&&dockMoves[0][0]!=='float'&&dockMoves[0][1]==='properties'
+    &&dockSpeech.at(-1)===styk.localization.t('dockKeyboard.panelLocation',{title:{messageKey:'shell.panel.properties'},place:{messageKey:dockPlaces[1]}})));
   await page.evaluate(()=>{dockProbe.destroy();dockDraft.remove();styk.localization.localization.setPseudo(null);});
   await page.evaluate(async()=>{
     const {VfwExportControls}=await import('/src/vfw-export-controls.mjs');const {appendLocalized}=await import('/src/localization-bindings.mjs');
@@ -708,19 +712,19 @@ try {
   await page.evaluate(()=>{
     styk.actions['layout-menu']();
     window.layoutCaptionRoot=document.querySelector('#layout-popover');
-    window.layoutCaptionControls=[...layoutCaptionRoot.querySelectorAll('select')];
-    window.layoutCaptionOptions=layoutCaptionControls.flatMap(select=>[...select.options]);
-    window.layoutCaptionValues=layoutCaptionControls.map(select=>select.value);
-    window.layoutCaptionDraft=layoutCaptionRoot.querySelector('[data-layout-position=vfx]');layoutCaptionDraft.focus();
+    // Since the dock (2026-11-09) the popover lists every panel as a show/hide row under its translated title.
+    window.layoutCaptionControls=[...layoutCaptionRoot.querySelectorAll('.shell-layout-panel')];
+    window.layoutCaptionValues=layoutCaptionControls.map(row=>row.getAttribute('aria-checked'));
+    window.layoutCaptionDraft=layoutCaptionRoot.querySelector('.shell-layout-panel[data-panel=vfx]');layoutCaptionDraft.focus();
     window.layoutCaptionBytes=JSON.stringify(styk.editor.report);window.layoutCaptionUndo=styk.editor._undo.length;
     styk.localization.localization.setPseudo('rtl');
   });
-  check('Layout position captions and retained options use actual catalog keys without losing focus, selection or authored data',await page.evaluate(()=>{
+  check('Layout panel captions and retained rows use actual catalog keys without losing focus, state or authored data',await page.evaluate(()=>{
     const root=layoutCaptionRoot,t=(key,params)=>styk.localization.t(key,params);
-    return layoutCaptionControls.every((select,index)=>select===root.querySelectorAll('select')[index]&&select.value===layoutCaptionValues[index])
-      &&layoutCaptionOptions.every(option=>option===option.parentElement.options[option.index]&&option.textContent===t(option.dataset.i18n))
-      &&root.querySelector('[data-layout-position=vfx]').getAttribute('aria-label')===t('layoutPopover.vfxPosition')
-      &&root.querySelector('[data-layout-position=vfx]').closest('.ui-row').querySelector('.ui-row-label').textContent===t('chrome.vfx')
+    return layoutCaptionControls.length>1&&layoutCaptionControls.every((row,index)=>row===root.querySelectorAll('.shell-layout-panel')[index]&&row.getAttribute('aria-checked')===layoutCaptionValues[index]
+        &&row.textContent===t(styk.shell.registry.get(row.dataset.panel).titleKey))
+      &&layoutCaptionDraft.textContent===t('shell.panel.vfx')
+      &&root.querySelector('.shell-layout-rows').getAttribute('aria-label')===t('layoutPopover.panels')
       &&document.activeElement===layoutCaptionDraft&&JSON.stringify(styk.editor.report)===layoutCaptionBytes&&styk.editor._undo.length===layoutCaptionUndo;
   }));
   await page.evaluate(()=>{styk.actions['layout-menu']();styk.localization.localization.setPseudo(null);});

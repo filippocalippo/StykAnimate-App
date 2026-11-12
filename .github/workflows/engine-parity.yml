@@ -1,0 +1,59 @@
+name: Engine parity
+# The engine against its recorded fixtures and tapes (npm run engine:parity): release builds of the Rust suites,
+# V8's Math fixtures, the containers and the live-worker replays. Too slow for every pull request, so it runs after
+# a change to the engine reaches main, once a week, and on request.
+on:
+  push:
+    branches: [main]
+    paths:
+      - engine/**
+      - rust-toolchain.toml
+      - scripts/engine-parity.mjs
+      - scripts/engine-build.mjs
+  pull_request:
+    # A change to this workflow is tried by running it.
+    paths:
+      - .github/workflows/engine-parity.yml
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: engine-parity-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  parity:
+    name: Engine parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      # Release test builds without link-time optimisation: the same optimisation level and results in a fraction of
+      # the build time. The WebAssembly build sets its own profile and is not affected.
+      CARGO_PROFILE_RELEASE_LTO: 'off'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '64'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      # The runner has no GPU: the tests that need one say so and pass.
+      STYK_ALLOW_NO_GPU: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.11.0'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      # The container checks run the app's own open and save path, which needs the modules.
+      - uses: ./.github/actions/engine-build
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: engine -> target
+          key: parity
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Engine parity
+        run: npm run engine:parity

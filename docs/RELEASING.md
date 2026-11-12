@@ -38,6 +38,8 @@ The initial 0.5.5 section comes from existing release metadata, with overlapping
 
 Use `.github/workflows/desktop-release.yml` for the current runtime pins and coordinated Windows, Linux and browser verification. `docs/UPDATES.md` covers updates and public assets; `docs/DESKTOP-RELEASE.md` covers package verification and the local launcher marker. A feature implementation request does not imply publication authorization. An explicit release request authorizes its normal shipping steps; do not ask again without a concrete new blocker.
 
+Before a release, run `npm run test:browser` on a machine with a GPU (about fifteen minutes): it is every browser test of the interface, and the workflows' runners, which have no GPU, cannot run it.
+
 For a local Windows release, install the locked dependencies and build prerequisites described in those documents, then run:
 
 ```powershell

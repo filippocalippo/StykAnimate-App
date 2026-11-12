@@ -55,7 +55,7 @@
   },
   "app.applyingLayerChanges": {
     "locations": [
-      "src/app.mjs:5921"
+      "src/app.mjs:5923"
     ],
     "context": "localizedText($(\"layer-progress-label\"), (latest.phase === \"staging\" ? \"app.applyingLayerChanges\" : \"app.preservingAnimation\"), (latest.phase === \"staging\" ? {}"
   },
@@ -109,7 +109,7 @@
   },
   "app.cancel": {
     "locations": [
-      "src/app.mjs:5940"
+      "src/app.mjs:5942"
     ],
     "context": "`<p id=\"layer-progress-label\" data-i18n=\"app.preservingAnimation\">${messageHTML(\"app.preservingAnimation\", {})}</p><progress id=\"layer-progress\" style=\"width:10"
   },
@@ -381,7 +381,7 @@
   },
   "app.editorReadyFileServiceUnavailable": {
     "locations": [
-      "src/app.mjs:6330"
+      "src/app.mjs:6333"
     ],
     "context": "status({messageKey: \"app.editorReadyFileServiceUnavailable\", messageParams: {}}, true);"
   },
@@ -483,8 +483,8 @@
     "locations": [
       "src/app.mjs:4140",
       "src/app.mjs:4998",
-      "src/app.mjs:6213",
-      "src/app.mjs:6228"
+      "src/app.mjs:6216",
+      "src/app.mjs:6231"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo2\"), \"app.finishTheFigureOrReturnToAnimateTo2\", {});"
   },
@@ -688,7 +688,7 @@
   },
   "app.layerChangeCancelled": {
     "locations": [
-      "src/app.mjs:5958"
+      "src/app.mjs:5960"
     ],
     "context": "status({messageKey: \"app.layerChangeCancelled\", messageParams: {}});"
   },
@@ -706,13 +706,13 @@
   },
   "app.loadingThePivotConverterFirstUseOnly": {
     "locations": [
-      "src/app.mjs:6321"
+      "src/app.mjs:6324"
     ],
     "context": "if (state === \"loading\") status(stage === \"runtime\" ? {messageKey: \"app.loadingThePivotConverterFirstUseOnly\", messageParams: {}} : {messageKey: \"app.startingTh"
   },
   "app.manageCopies": {
     "locations": [
-      "src/app.mjs:5784"
+      "src/app.mjs:5786"
     ],
     "context": "...(browserRecovery || records.length > 1 ? [{ label: interfaceText(\"app.manageCopies\"), labelKey: \"app.manageCopies\", id: \"manage-recovery\", dismiss: false, ru"
   },
@@ -808,7 +808,7 @@
   },
   "app.notNow": {
     "locations": [
-      "src/app.mjs:5783"
+      "src/app.mjs:5785"
     ],
     "context": "{ label: interfaceText(\"app.notNow\"), labelKey: \"app.notNow\", id: \"dismiss-recovery\" },"
   },
@@ -947,14 +947,14 @@
   },
   "app.preparingCanvasAndEffects": {
     "locations": [
-      "src/app.mjs:6291"
+      "src/app.mjs:6294"
     ],
     "context": "status({messageKey: \"app.preparingCanvasAndEffects\", messageParams: {}}, false, true);"
   },
   "app.preservingAnimation": {
     "locations": [
-      "src/app.mjs:5921",
-      "src/app.mjs:5940"
+      "src/app.mjs:5923",
+      "src/app.mjs:5942"
     ],
     "context": "localizedText($(\"layer-progress-label\"), (latest.phase === \"staging\" ? \"app.applyingLayerChanges\" : \"app.preservingAnimation\"), (latest.phase === \"staging\" ? {}"
   },
@@ -981,19 +981,19 @@
       "src/app.mjs:1957",
       "src/app.mjs:3397",
       "src/app.mjs:3659",
-      "src/app.mjs:6300"
+      "src/app.mjs:6303"
     ],
     "context": "status({messageKey: \"app.ready\", messageParams: {}});"
   },
   "app.reconnectCanvas": {
     "locations": [
-      "src/app.mjs:6432"
+      "src/app.mjs:6435"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
   "app.recoveryCopies": {
     "locations": [
-      "src/app.mjs:5776"
+      "src/app.mjs:5778"
     ],
     "context": "const messageKey = record ? \"app.recoveryOffer\" : \"app.recoveryCopies\";"
   },
@@ -1001,19 +1001,19 @@
     "locations": [
       "src/app.mjs:227",
       "src/app.mjs:3770",
-      "src/app.mjs:5752"
+      "src/app.mjs:5754"
     ],
     "context": "checkpointFailed: (error) => status({messageKey: \"app.recoveryCopyCouldNotBeWritten\", messageParams: {message: error.message}}, true),"
   },
   "app.recoveryCouldNotBeRead": {
     "locations": [
-      "src/app.mjs:5770"
+      "src/app.mjs:5772"
     ],
     "context": "}).catch(error => status({messageKey: \"app.recoveryCouldNotBeRead\", messageParams: {message: error.message}}, true));"
   },
   "app.recoveryOffer": {
     "locations": [
-      "src/app.mjs:5776"
+      "src/app.mjs:5778"
     ],
     "context": "const messageKey = record ? \"app.recoveryOffer\" : \"app.recoveryCopies\";"
   },
@@ -1032,13 +1032,13 @@
   },
   "app.restore": {
     "locations": [
-      "src/app.mjs:5785"
+      "src/app.mjs:5787"
     ],
     "context": "{ label: interfaceText(\"app.restore\"), labelKey: \"app.restore\", id: \"restore-recovery\", variant: \"outline\", dismiss: false, run: guarded(() => restore()) },"
   },
   "app.restoreUnsavedWork": {
     "locations": [
-      "src/app.mjs:5779"
+      "src/app.mjs:5781"
     ],
     "context": "slot: \"recovery\", icon: \"clock\", title: interfaceText(\"app.restoreUnsavedWork\"), titleKey: \"app.restoreUnsavedWork\", key: \"recovery\","
   },
@@ -1247,7 +1247,7 @@
   },
   "app.startingThePivotConverter": {
     "locations": [
-      "src/app.mjs:6321"
+      "src/app.mjs:6324"
     ],
     "context": "if (state === \"loading\") status(stage === \"runtime\" ? {messageKey: \"app.loadingThePivotConverterFirstUseOnly\", messageParams: {}} : {messageKey: \"app.startingTh"
   },
@@ -1307,13 +1307,13 @@
   },
   "app.theCanvasCouldNotReconnectYourAnimationIs": {
     "locations": [
-      "src/app.mjs:6376"
+      "src/app.mjs:6379"
     ],
     "context": "localizedText($(\"renderer-error\").querySelector('p'), \"app.theCanvasCouldNotReconnectYourAnimationIs\", {});"
   },
   "app.theGraphicsDeviceWasResetReconnectingYourCanvas": {
     "locations": [
-      "src/app.mjs:6432"
+      "src/app.mjs:6435"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
@@ -7245,7 +7245,7 @@
       "src/app-dialogs.mjs:99",
       "src/app-dialogs.mjs:148",
       "src/app-dialogs.mjs:327",
-      "src/app.mjs:5940",
+      "src/app.mjs:5942",
       "src/builder-surface-ui.mjs:23",
       "src/color-picker.mjs:155",
       "src/color-picker.mjs:157",
@@ -11928,14 +11928,14 @@
   },
   "errors.app.selectionChangedReopenTheColorPicker": {
     "locations": [
-      "src/app.mjs:6462",
-      "src/app.mjs:6469"
+      "src/app.mjs:6465",
+      "src/app.mjs:6472"
     ],
     "context": "if(editor.report!==report||editor.tick!==tick||[...editor.selectedUids].join(',')!==uids)throw messageError(new Error(''), \"errors.app.selectionChangedReopenThe"
   },
   "errors.app.selectionChangedReopenThePalette": {
     "locations": [
-      "src/app.mjs:6455"
+      "src/app.mjs:6458"
     ],
     "context": "if(editor.report!==report||editor.selectedUid!==uid||editor.figure!==figure||editor.tick!==tick)throw messageError(new Error(''), \"errors.app.selectionChangedRe"
   },
@@ -11959,25 +11959,25 @@
   },
   "errors.app.theGraphicsDeviceWasLost": {
     "locations": [
-      "src/app.mjs:6415"
+      "src/app.mjs:6418"
     ],
     "context": "telemetry.error(Object.assign(messageError(new Error(''), \"errors.app.theGraphicsDeviceWasLost\", {}), { name: 'GPUError', telemetryCode: 'device_lost' }), 'gpu'"
   },
   "errors.app.theRecoveryCopyChangedReopenStykanimateToSee": {
     "locations": [
-      "src/app.mjs:5807"
+      "src/app.mjs:5809"
     ],
     "context": "if (!copy || copy.savedAt !== chosen.savedAt || copy.token !== chosen.token) throw messageError(new Error(''), \"errors.app.theRecoveryCopyChangedReopenStykanima"
   },
   "errors.app.theRecoveryFileIsNoLongerAvailable": {
     "locations": [
-      "src/app.mjs:5804"
+      "src/app.mjs:5806"
     ],
     "context": "if (!copy) throw messageError(new Error(''), \"errors.app.theRecoveryFileIsNoLongerAvailable\", {});"
   },
   "errors.app.thisRecoveryCopyIsOpenInAnotherTab": {
     "locations": [
-      "src/app.mjs:5798"
+      "src/app.mjs:5800"
     ],
     "context": "if (browserRecovery && !reservation) throw messageError(new Error(''), \"errors.app.thisRecoveryCopyIsOpenInAnotherTab\", {});"
   },
@@ -24986,7 +24986,7 @@
     "locations": [
       "src/app.mjs:5417"
     ],
-    "context": "meta: kitText(kitT, isMovieclip(figure) ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\", { layer }), metaKey: isMovieclip(figure) ? \"overlays.pal"
+    "context": "const metaKey = type.kind === \"Movieclip\" ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\";"
   },
   "overlays.palette.goTo": {
     "locations": [
@@ -25017,7 +25017,7 @@
     "locations": [
       "src/app.mjs:5417"
     ],
-    "context": "meta: kitText(kitT, isMovieclip(figure) ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\", { layer }), metaKey: isMovieclip(figure) ? \"overlays.pal"
+    "context": "const metaKey = type.kind === \"Movieclip\" ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\";"
   },
   "overlays.palette.open": {
     "locations": [
@@ -25047,13 +25047,13 @@
   },
   "overlays.palette.settingIn": {
     "locations": [
-      "src/app.mjs:5434"
+      "src/app.mjs:5436"
     ],
     "context": ".map(({ entry, match }) => ({ id: entry.setting, label: entry.label, icon: \"settings\", meta: kitText(kitT, \"overlays.palette.settingIn\", { tab: entry.tabLabel }"
   },
   "overlays.palette.settings": {
     "locations": [
-      "src/app.mjs:5428"
+      "src/app.mjs:5430"
     ],
     "context": "get label() { return kitText(kitT, \"overlays.palette.settings\"); },"
   },
@@ -25868,7 +25868,7 @@
   "rendererStatus.deviceLost": {
     "locations": [
       "src/app.mjs:1818",
-      "src/app.mjs:6411"
+      "src/app.mjs:6414"
     ],
     "context": "if (state.renderer.stats?.backend === \"WebGPU device lost\") localizedText($(\"renderer-label\"), \"rendererStatus.deviceLost\");"
   },
@@ -26695,633 +26695,633 @@
   },
   "settings.advancedDescription": {
     "locations": [
-      "src/settings.mjs:618"
+      "src/settings.mjs:621"
     ],
     "context": "[\"advanced\", this.t(\"timeline.advanced\"), this.t(\"settings.advancedDescription\")],"
   },
   "settings.altDragFigureRoot": {
     "locations": [
-      "src/settings.mjs:642"
+      "src/settings.mjs:645"
     ],
     "context": "this.select(say('settings.altDragFigureRoot'), 'altDragDuplicate', [messageTuple(['instance', interfaceText(\"settings.linkedInstance\")], {1: {key: \"settings.lin"
   },
   "settings.appearance": {
     "locations": [
-      "src/settings.mjs:627"
+      "src/settings.mjs:630"
     ],
     "context": "return this.group(this.t(\"settings.appearance\"), themes + language + coverage + this.scaleControl())"
   },
   "settings.autosaveInterval": {
     "locations": [
-      "src/settings.mjs:667"
+      "src/settings.mjs:670"
     ],
     "context": "+ this.group(say(\"settings.recovery\"), this.select(say(\"settings.autosaveInterval\"), 'autosaveSeconds', autosave, say(\"settings.autosaveNote\")));"
   },
   "settings.autosaveNote": {
     "locations": [
-      "src/settings.mjs:667"
+      "src/settings.mjs:670"
     ],
     "context": "+ this.group(say(\"settings.recovery\"), this.select(say(\"settings.autosaveInterval\"), 'autosaveSeconds', autosave, say(\"settings.autosaveNote\")));"
   },
   "settings.autosaveOff": {
     "locations": [
-      "src/settings.mjs:660"
+      "src/settings.mjs:663"
     ],
     "context": "const autosave = [messageTuple([0, say(\"settings.autosaveOff\")], {1: {key: \"settings.autosaveOff\", params: {}}}), ...presets.slice(1, -1).map(seconds => message"
   },
   "settings.autoScale": {
     "locations": [
-      "src/settings.mjs:579"
+      "src/settings.mjs:582"
     ],
     "context": "return `<div class=\"styk-settings-row styk-settings-scale\"><span class=\"styk-settings-text\"><label class=\"styk-settings-label\" for=\"styk-ui-scale\" ${messageAttr"
   },
   "settings.autoScaleNote": {
     "locations": [
-      "src/settings.mjs:566",
-      "src/settings.mjs:577"
+      "src/settings.mjs:569",
+      "src/settings.mjs:580"
     ],
     "context": "if (note) { note.hidden = !auto; note.textContent = this.t('settings.autoScaleNote').replace('{scale}', `${autoUIScale()}%`); }"
   },
   "settings.autoSize": {
     "locations": [
-      "src/settings.mjs:646"
+      "src/settings.mjs:649"
     ],
     "context": "+ this.checkbox(say(\"settings.autoSize\"), 'autoSizeHandles')"
   },
   "settings.boxBounds": {
     "locations": [
-      "src/settings.mjs:639"
+      "src/settings.mjs:642"
     ],
     "context": "+ this.select(say(\"settings.boxSelection\"), 'marqueeSelection', [messageTuple(['bounds', say(\"settings.boxBounds\")], {1: {key: \"settings.boxBounds\", params: {}}"
   },
   "settings.boxOrigins": {
     "locations": [
-      "src/settings.mjs:639"
+      "src/settings.mjs:642"
     ],
     "context": "+ this.select(say(\"settings.boxSelection\"), 'marqueeSelection', [messageTuple(['bounds', say(\"settings.boxBounds\")], {1: {key: \"settings.boxBounds\", params: {}}"
   },
   "settings.boxSelection": {
     "locations": [
-      "src/settings.mjs:639"
+      "src/settings.mjs:642"
     ],
     "context": "+ this.select(say(\"settings.boxSelection\"), 'marqueeSelection', [messageTuple(['bounds', say(\"settings.boxBounds\")], {1: {key: \"settings.boxBounds\", params: {}}"
   },
   "settings.browserScale": {
     "locations": [
-      "src/settings.mjs:578"
+      "src/settings.mjs:581"
     ],
     "context": ": `<small class=\"styk-settings-hint\" ${messageAttributes('settings.browserScale', {})}>${escape(this.t('settings.browserScale'))}</small>`;"
   },
   "settings.builder": {
     "locations": [
-      "src/settings.mjs:652"
+      "src/settings.mjs:655"
     ],
     "context": "+ this.group(say(\"settings.builder\"),"
   },
   "settings.chooseWhetherPastedFiguresKeepTheirCopiedDepth": {
     "locations": [
-      "src/settings.mjs:640"
+      "src/settings.mjs:643"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.close": {
     "locations": [
-      "src/settings.mjs:306",
-      "src/settings.mjs:446"
+      "src/settings.mjs:309",
+      "src/settings.mjs:449"
     ],
     "context": "localizedMarkup(this.dialog, `<header class=\"styk-settings-head\"><img class=\"styk-settings-mark\" src=\"${SYMBOL_URL}\" alt=\"\"><h2 ${messageAttributes(\"settings.ti"
   },
   "settings.construction": {
     "locations": [
-      "src/settings.mjs:655"
+      "src/settings.mjs:658"
     ],
     "context": "+ this.checkbox(say(\"settings.construction\"), 'useBuilderCanvasColor')"
   },
   "settings.constructionColor": {
     "locations": [
-      "src/settings.mjs:656"
+      "src/settings.mjs:659"
     ],
     "context": "+ `<label class=\"styk-settings-row\">${this.text(say(\"settings.constructionColorShort\"))}<span class=\"styk-settings-color\"><input type=\"color\" data-setting=\"buil"
   },
   "settings.constructionColorShort": {
     "locations": [
-      "src/settings.mjs:656"
+      "src/settings.mjs:659"
     ],
     "context": "+ `<label class=\"styk-settings-row\">${this.text(say(\"settings.constructionColorShort\"))}<span class=\"styk-settings-color\"><input type=\"color\" data-setting=\"buil"
   },
   "settings.customScale": {
     "locations": [
-      "src/settings.mjs:579"
+      "src/settings.mjs:582"
     ],
     "context": "return `<div class=\"styk-settings-row styk-settings-scale\"><span class=\"styk-settings-text\"><label class=\"styk-settings-label\" for=\"styk-ui-scale\" ${messageAttr"
   },
   "settings.donate": {
     "locations": [
-      "src/settings.mjs:332",
-      "src/settings.mjs:333",
-      "src/settings.mjs:458",
-      "src/settings.mjs:459"
+      "src/settings.mjs:335",
+      "src/settings.mjs:336",
+      "src/settings.mjs:461",
+      "src/settings.mjs:462"
     ],
     "context": "localizedMarkup(button, `<span class=\"styk-settings-donate-badge\">${icon('heart')}</span><span class=\"styk-settings-donate-text\"><strong ${messageAttributes('se"
   },
   "settings.donateNote": {
     "locations": [
-      "src/settings.mjs:332",
-      "src/settings.mjs:460"
+      "src/settings.mjs:335",
+      "src/settings.mjs:463"
     ],
     "context": "localizedMarkup(button, `<span class=\"styk-settings-donate-badge\">${icon('heart')}</span><span class=\"styk-settings-donate-text\"><strong ${messageAttributes('se"
   },
   "settings.duplication": {
     "locations": [
-      "src/settings.mjs:641"
+      "src/settings.mjs:644"
     ],
     "context": "+ this.group(interfaceText(\"settings.duplication\"),"
   },
   "settings.editorLabel": {
     "locations": [
-      "src/settings.mjs:305",
-      "src/settings.mjs:444"
+      "src/settings.mjs:308",
+      "src/settings.mjs:447"
     ],
     "context": "localizedAttribute(this.dialog, \"aria-label\", \"settings.editorLabel\", {});"
   },
   "settings.feedback.myReports": {
     "locations": [
-      "src/settings.mjs:683"
+      "src/settings.mjs:686"
     ],
     "context": "+ `<div class=\"styk-settings-card settings-feedback-private\"><span class=\"settings-feedback-lock\">${icon('lock')}</span>${this.text(say(\"settings.feedback.priva"
   },
   "settings.feedback.private": {
     "locations": [
-      "src/settings.mjs:683"
+      "src/settings.mjs:686"
     ],
     "context": "+ `<div class=\"styk-settings-card settings-feedback-private\"><span class=\"settings-feedback-lock\">${icon('lock')}</span>${this.text(say(\"settings.feedback.priva"
   },
   "settings.feedback.privateNote": {
     "locations": [
-      "src/settings.mjs:683"
+      "src/settings.mjs:686"
     ],
     "context": "+ `<div class=\"styk-settings-card settings-feedback-private\"><span class=\"settings-feedback-lock\">${icon('lock')}</span>${this.text(say(\"settings.feedback.priva"
   },
   "settings.feedback.start": {
     "locations": [
-      "src/settings.mjs:682"
+      "src/settings.mjs:685"
     ],
     "context": "].map(([category, symbol, tint]) => `<button type=\"button\" class=\"settings-feedback-tile\" data-settings-feedback=\"${category}\" data-tint=\"${tint}\"><span class=\""
   },
   "settings.fingerDraw": {
     "locations": [
-      "src/settings.mjs:626"
+      "src/settings.mjs:629"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fingerDrawAlways": {
     "locations": [
-      "src/settings.mjs:626"
+      "src/settings.mjs:629"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fingerDrawAuto": {
     "locations": [
-      "src/settings.mjs:626"
+      "src/settings.mjs:629"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fingerDrawNever": {
     "locations": [
-      "src/settings.mjs:626"
+      "src/settings.mjs:629"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fingerDrawNote": {
     "locations": [
-      "src/settings.mjs:626"
+      "src/settings.mjs:629"
     ],
     "context": "+ this.select(say(\"settings.fingerDraw\"), 'fingerDraw', [messageTuple(['auto', say(\"settings.fingerDrawAuto\")], {1: {key: \"settings.fingerDrawAuto\", params: {}}"
   },
   "settings.fitView": {
     "locations": [
-      "src/settings.mjs:666"
+      "src/settings.mjs:669"
     ],
     "context": "+ this.checkbox(say(\"settings.fitView\"), 'fitViewOnPlayback', say(\"settings.fitViewNote\")))"
   },
   "settings.fitViewNote": {
     "locations": [
-      "src/settings.mjs:666"
+      "src/settings.mjs:669"
     ],
     "context": "+ this.checkbox(say(\"settings.fitView\"), 'fitViewOnPlayback', say(\"settings.fitViewNote\")))"
   },
   "settings.gestures": {
     "locations": [
-      "src/settings.mjs:670"
+      "src/settings.mjs:673"
     ],
     "context": "return this.hotkeySettings.html() + this.group(say(\"settings.gestures\"), `<dl class=\"styk-settings-gestures\">${["
   },
   "settings.handlePreview": {
     "locations": [
-      "src/settings.mjs:635"
+      "src/settings.mjs:638"
     ],
     "context": "const handleSize = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-handle-head\">${this.text(say(\"settings.handleRadius\"))}<span c"
   },
   "settings.handleRadius": {
     "locations": [
-      "src/settings.mjs:635"
+      "src/settings.mjs:638"
     ],
     "context": "const handleSize = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-handle-head\">${this.text(say(\"settings.handleRadius\"))}<span c"
   },
   "settings.highlightSegment": {
     "locations": [
-      "src/settings.mjs:654"
+      "src/settings.mjs:657"
     ],
     "context": "+ this.checkbox(say(\"settings.highlightSegment\"), 'builderHighlightSegment')"
   },
   "settings.independentCopy": {
     "locations": [
-      "src/settings.mjs:642"
+      "src/settings.mjs:645"
     ],
     "context": "this.select(say('settings.altDragFigureRoot'), 'altDragDuplicate', [messageTuple(['instance', interfaceText(\"settings.linkedInstance\")], {1: {key: \"settings.lin"
   },
   "settings.inFront": {
     "locations": [
-      "src/settings.mjs:640"
+      "src/settings.mjs:643"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.jointHandles": {
     "locations": [
-      "src/settings.mjs:643"
+      "src/settings.mjs:646"
     ],
     "context": "+ this.group(say(\"settings.jointHandles\"),"
   },
   "settings.keyframes": {
     "locations": [
-      "src/settings.mjs:662"
+      "src/settings.mjs:665"
     ],
     "context": "return this.group(say(\"settings.keyframes\"), this.checkbox(say(\"settings.replaceOnDrop\"), 'replaceKeyframesOnDrop', say(\"settings.replaceOnDropNote\")))"
   },
   "settings.language": {
     "locations": [
-      "src/settings.mjs:615"
+      "src/settings.mjs:618"
     ],
     "context": "const language = this.select(this.t('settings.language'), 'locale', SUPPORTED_LOCALES.map(locale => [locale.id, locale.nativeName]));"
   },
   "settings.linkedInstance": {
     "locations": [
-      "src/settings.mjs:642"
+      "src/settings.mjs:645"
     ],
     "context": "this.select(say('settings.altDragFigureRoot'), 'altDragDuplicate', [messageTuple(['instance', interfaceText(\"settings.linkedInstance\")], {1: {key: \"settings.lin"
   },
   "settings.linkedInstancesShareFigureEditsMadeInBuild": {
     "locations": [
-      "src/settings.mjs:642"
+      "src/settings.mjs:645"
     ],
     "context": "this.select(say('settings.altDragFigureRoot'), 'altDragDuplicate', [messageTuple(['instance', interfaceText(\"settings.linkedInstance\")], {1: {key: \"settings.lin"
   },
   "settings.loop": {
     "locations": [
-      "src/settings.mjs:665"
+      "src/settings.mjs:668"
     ],
     "context": "+ this.checkbox(say(\"settings.loop\"), 'loopPlayback')"
   },
   "settings.message0pxSolidTransparent": {
     "locations": [
-      "src/settings.mjs:635",
-      "src/settings.mjs:750"
+      "src/settings.mjs:638",
+      "src/settings.mjs:753"
     ],
     "context": "const handleSize = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-handle-head\">${this.text(say(\"settings.handleRadius\"))}<span c"
   },
   "settings.message1pxSolid000": {
     "locations": [
-      "src/settings.mjs:635",
-      "src/settings.mjs:750"
+      "src/settings.mjs:638",
+      "src/settings.mjs:753"
     ],
     "context": "const handleSize = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-handle-head\">${this.text(say(\"settings.handleRadius\"))}<span c"
   },
   "settings.minute": {
     "locations": [
-      "src/settings.mjs:660"
+      "src/settings.mjs:663"
     ],
     "context": "const autosave = [messageTuple([0, say(\"settings.autosaveOff\")], {1: {key: \"settings.autosaveOff\", params: {}}}), ...presets.slice(1, -1).map(seconds => message"
   },
   "settings.motionPaths": {
     "locations": [
-      "src/settings.mjs:651"
+      "src/settings.mjs:654"
     ],
     "context": "+ this.checkbox(say(\"settings.motionPaths\"), 'motionPaths'))"
   },
   "settings.navigation": {
     "locations": [
-      "src/settings.mjs:636"
+      "src/settings.mjs:639"
     ],
     "context": "return this.group(say(\"settings.navigation\"),"
   },
   "settings.noResults": {
     "locations": [
-      "src/settings.mjs:606"
+      "src/settings.mjs:609"
     ],
     "context": "if (!found) return `${heading}<div class=\"styk-settings-empty\">${icon('search')}<p ${messageAttributes('settings.noResults', {query: query.trim()})}>${escape(th"
   },
   "settings.outline": {
     "locations": [
-      "src/settings.mjs:647"
+      "src/settings.mjs:650"
     ],
     "context": "+ this.checkbox(say(\"settings.outline\"), 'outlineHandles')"
   },
   "settings.overlays": {
     "locations": [
-      "src/settings.mjs:649"
+      "src/settings.mjs:652"
     ],
     "context": "+ this.group(say(\"settings.overlays\"),"
   },
   "settings.panelLayouts": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:625"
     ],
     "context": "? this.group(this.t('settings.workspace'), `<div class=\"styk-settings-row\">${this.text(say(\"settings.panelLayouts\"), say(\"settings.panelLayoutsNote\"))}<button t"
   },
   "settings.panelLayoutsNote": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:625"
     ],
     "context": "? this.group(this.t('settings.workspace'), `<div class=\"styk-settings-row\">${this.text(say(\"settings.panelLayouts\"), say(\"settings.panelLayoutsNote\"))}<button t"
   },
   "settings.partialLanguage": {
     "locations": [
-      "src/settings.mjs:616"
+      "src/settings.mjs:619"
     ],
     "context": "const coverage = this.localization.hasFallback ? `<p class=\"styk-settings-note\">${icon('alert')}<span data-locale-coverage ${messageAttributes('settings.partial"
   },
   "settings.pastedFigureDepth": {
     "locations": [
-      "src/settings.mjs:640"
+      "src/settings.mjs:643"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.pasting": {
     "locations": [
-      "src/settings.mjs:640"
+      "src/settings.mjs:643"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.playback": {
     "locations": [
-      "src/settings.mjs:663"
+      "src/settings.mjs:666"
     ],
     "context": "+ this.group(say(\"settings.playback\"),"
   },
   "settings.playbackQuality": {
     "locations": [
-      "src/settings.mjs:664"
+      "src/settings.mjs:667"
     ],
     "context": "this.select(say(\"settings.playbackQuality\"), 'playbackQuality', playbackQualityOptions.map(option => messageTuple([option.id, say(option.labelKey)], {1: {key: o"
   },
   "settings.playbackQualityNote": {
     "locations": [
-      "src/settings.mjs:664"
+      "src/settings.mjs:667"
     ],
     "context": "this.select(say(\"settings.playbackQuality\"), 'playbackQuality', playbackQualityOptions.map(option => messageTuple([option.id, say(option.labelKey)], {1: {key: o"
   },
   "settings.privacy": {
     "locations": [
-      "src/settings.mjs:324",
-      "src/settings.mjs:325",
-      "src/settings.mjs:453"
+      "src/settings.mjs:327",
+      "src/settings.mjs:328",
+      "src/settings.mjs:456"
     ],
     "context": "localizedMarkup(button, `${icon('lock')}<span ${messageAttributes('settings.privacy', {})}>${escape(this.say('settings.privacy'))}</span>`);"
   },
   "settings.recovery": {
     "locations": [
-      "src/settings.mjs:667"
+      "src/settings.mjs:670"
     ],
     "context": "+ this.group(say(\"settings.recovery\"), this.select(say(\"settings.autosaveInterval\"), 'autosaveSeconds', autosave, say(\"settings.autosaveNote\")));"
   },
   "settings.replaceOnDrop": {
     "locations": [
-      "src/settings.mjs:662"
+      "src/settings.mjs:665"
     ],
     "context": "return this.group(say(\"settings.keyframes\"), this.checkbox(say(\"settings.replaceOnDrop\"), 'replaceKeyframesOnDrop', say(\"settings.replaceOnDropNote\")))"
   },
   "settings.replaceOnDropNote": {
     "locations": [
-      "src/settings.mjs:662"
+      "src/settings.mjs:665"
     ],
     "context": "return this.group(say(\"settings.keyframes\"), this.checkbox(say(\"settings.replaceOnDrop\"), 'replaceKeyframesOnDrop', say(\"settings.replaceOnDropNote\")))"
   },
   "settings.resetPanels": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:625"
     ],
     "context": "? this.group(this.t('settings.workspace'), `<div class=\"styk-settings-row\">${this.text(say(\"settings.panelLayouts\"), say(\"settings.panelLayoutsNote\"))}<button t"
   },
   "settings.resetScale": {
     "locations": [
-      "src/settings.mjs:579"
+      "src/settings.mjs:582"
     ],
     "context": "return `<div class=\"styk-settings-row styk-settings-scale\"><span class=\"styk-settings-text\"><label class=\"styk-settings-label\" for=\"styk-ui-scale\" ${messageAttr"
   },
   "settings.sameZIndexDefault": {
     "locations": [
-      "src/settings.mjs:640"
+      "src/settings.mjs:643"
     ],
     "context": "+ this.group(interfaceText(\"settings.pasting\"), this.select(interfaceText(\"settings.pastedFigureDepth\"), 'pasteDepth', [messageTuple(['same', interfaceText(\"set"
   },
   "settings.search": {
     "locations": [
-      "src/settings.mjs:437"
+      "src/settings.mjs:440"
     ],
     "context": "const label = this.say('settings.search');"
   },
   "settings.searchResults": {
     "locations": [
-      "src/settings.mjs:605"
+      "src/settings.mjs:608"
     ],
     "context": "const heading = `<header class=\"styk-settings-page\"><h3 ${messageAttributes('settings.searchResults', {query: query.trim()})}>${escape(this.say('settings.search"
   },
   "settings.seconds": {
     "locations": [
-      "src/settings.mjs:660",
-      "src/settings.mjs:661"
+      "src/settings.mjs:663",
+      "src/settings.mjs:664"
     ],
     "context": "const autosave = [messageTuple([0, say(\"settings.autosaveOff\")], {1: {key: \"settings.autosaveOff\", params: {}}}), ...presets.slice(1, -1).map(seconds => message"
   },
   "settings.sections": {
     "locations": [
-      "src/settings.mjs:306",
-      "src/settings.mjs:447"
+      "src/settings.mjs:309",
+      "src/settings.mjs:450"
     ],
     "context": "localizedMarkup(this.dialog, `<header class=\"styk-settings-head\"><img class=\"styk-settings-mark\" src=\"${SYMBOL_URL}\" alt=\"\"><h2 ${messageAttributes(\"settings.ti"
   },
   "settings.settingsFeedbackNote": {
     "locations": [
-      "src/settings.mjs:682"
+      "src/settings.mjs:685"
     ],
     "context": "].map(([category, symbol, tint]) => `<button type=\"button\" class=\"settings-feedback-tile\" data-settings-feedback=\"${category}\" data-tint=\"${tint}\"><span class=\""
   },
   "settings.showHandles": {
     "locations": [
-      "src/settings.mjs:644"
+      "src/settings.mjs:647"
     ],
     "context": "this.checkbox(say(\"settings.showHandles\"), 'showHandles')"
   },
   "settings.showHomeOnStartup": {
     "locations": [
-      "src/settings.mjs:628"
+      "src/settings.mjs:631"
     ],
     "context": "+ this.group(say(\"settings.startup\"), this.checkbox(say(\"settings.showHomeOnStartup\"), 'showHomeOnStartup', say(\"settings.showHomeOnStartupNote\")))"
   },
   "settings.showHomeOnStartupNote": {
     "locations": [
-      "src/settings.mjs:628"
+      "src/settings.mjs:631"
     ],
     "context": "+ this.group(say(\"settings.startup\"), this.checkbox(say(\"settings.showHomeOnStartup\"), 'showHomeOnStartup', say(\"settings.showHomeOnStartupNote\")))"
   },
   "settings.showUnselected": {
     "locations": [
-      "src/settings.mjs:645"
+      "src/settings.mjs:648"
     ],
     "context": "+ this.checkbox(say(\"settings.showUnselected\"), 'showUnselectedHandles')"
   },
   "settings.simpleDescription": {
     "locations": [
-      "src/settings.mjs:619"
+      "src/settings.mjs:622"
     ],
     "context": "[\"simple\", this.t(\"timeline.simple\"), this.t(\"settings.simpleDescription\")],"
   },
   "settings.sizePx": {
     "locations": [
-      "src/settings.mjs:428"
+      "src/settings.mjs:431"
     ],
     "context": "localizedText(this.content.querySelector(\"[data-handle-value]\"), 'settings.sizePx', {size: size});"
   },
   "settings.smoothZoom": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:641"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.smoothZoomAuto": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:641"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.smoothZoomNote": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:641"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.smoothZoomOff": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:641"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.smoothZoomOn": {
     "locations": [
-      "src/settings.mjs:638"
+      "src/settings.mjs:641"
     ],
     "context": "+ this.select(say(\"settings.smoothZoom\"), 'smoothZoom', [messageTuple(['auto', say(\"settings.smoothZoomAuto\")], {1: {key: \"settings.smoothZoomAuto\", params: {}}"
   },
   "settings.startup": {
     "locations": [
-      "src/settings.mjs:628"
+      "src/settings.mjs:631"
     ],
     "context": "+ this.group(say(\"settings.startup\"), this.checkbox(say(\"settings.showHomeOnStartup\"), 'showHomeOnStartup', say(\"settings.showHomeOnStartupNote\")))"
   },
   "settings.staticHandles": {
     "locations": [
-      "src/settings.mjs:653"
+      "src/settings.mjs:656"
     ],
     "context": "this.checkbox(say(\"settings.staticHandles\"), 'builderShowStaticHandles')"
   },
   "settings.theme": {
     "locations": [
-      "src/settings.mjs:614"
+      "src/settings.mjs:617"
     ],
     "context": "const themes = `<div class=\"styk-settings-row styk-settings-block\"><span class=\"styk-settings-label\" ${messageAttributes('settings.theme', {})}>${escape(this.t("
   },
   "settings.timelineMode": {
     "locations": [
-      "src/settings.mjs:617"
+      "src/settings.mjs:620"
     ],
     "context": "const timeline = `<div class=\"styk-settings-row styk-settings-block\"><div class=\"styk-settings-tiles\" data-columns=\"2\" role=\"radiogroup\" aria-label=\"${escape(th"
   },
   "settings.title": {
     "locations": [
-      "src/settings.mjs:306",
-      "src/settings.mjs:445"
+      "src/settings.mjs:309",
+      "src/settings.mjs:448"
     ],
     "context": "localizedMarkup(this.dialog, `<header class=\"styk-settings-head\"><img class=\"styk-settings-mark\" src=\"${SYMBOL_URL}\" alt=\"\"><h2 ${messageAttributes(\"settings.ti"
   },
   "settings.touch": {
     "locations": [
-      "src/settings.mjs:624"
+      "src/settings.mjs:627"
     ],
     "context": "const touch = this.group(say(\"settings.touch\"),"
   },
   "settings.touchAuto": {
     "locations": [
-      "src/settings.mjs:625"
+      "src/settings.mjs:628"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.touchInterface": {
     "locations": [
-      "src/settings.mjs:625"
+      "src/settings.mjs:628"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.touchInterfaceNote": {
     "locations": [
-      "src/settings.mjs:625"
+      "src/settings.mjs:628"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.touchOff": {
     "locations": [
-      "src/settings.mjs:625"
+      "src/settings.mjs:628"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.touchOn": {
     "locations": [
-      "src/settings.mjs:625"
+      "src/settings.mjs:628"
     ],
     "context": "this.select(say(\"settings.touchInterface\"), 'touchInterface', [messageTuple(['auto', say(\"settings.touchAuto\")], {1: {key: \"settings.touchAuto\", params: {}}}), "
   },
   "settings.uiScale": {
     "locations": [
-      "src/settings.mjs:579"
+      "src/settings.mjs:582"
     ],
     "context": "return `<div class=\"styk-settings-row styk-settings-scale\"><span class=\"styk-settings-text\"><label class=\"styk-settings-label\" for=\"styk-ui-scale\" ${messageAttr"
   },
   "settings.virtualCamera": {
     "locations": [
-      "src/settings.mjs:650"
+      "src/settings.mjs:653"
     ],
     "context": "this.checkbox(say(\"settings.virtualCamera\"), 'showCamera')"
   },
   "settings.workspace": {
     "locations": [
-      "src/settings.mjs:622"
+      "src/settings.mjs:625"
     ],
     "context": "? this.group(this.t('settings.workspace'), `<div class=\"styk-settings-row\">${this.text(say(\"settings.panelLayouts\"), say(\"settings.panelLayoutsNote\"))}<button t"
   },
   "settings.zoomCtrlScroll": {
     "locations": [
-      "src/settings.mjs:637"
+      "src/settings.mjs:640"
     ],
     "context": "this.select(say(\"settings.zoomGesture\"), 'canvasZoomGesture', [messageTuple(['ctrl-scroll', say(\"settings.zoomCtrlScroll\")], {1: {key: \"settings.zoomCtrlScroll\""
   },
   "settings.zoomGesture": {
     "locations": [
-      "src/settings.mjs:637"
+      "src/settings.mjs:640"
     ],
     "context": "this.select(say(\"settings.zoomGesture\"), 'canvasZoomGesture', [messageTuple(['ctrl-scroll', say(\"settings.zoomCtrlScroll\")], {1: {key: \"settings.zoomCtrlScroll\""
   },
   "settings.zoomScroll": {
     "locations": [
-      "src/settings.mjs:637"
+      "src/settings.mjs:640"
     ],
     "context": "this.select(say(\"settings.zoomGesture\"), 'canvasZoomGesture', [messageTuple(['ctrl-scroll', say(\"settings.zoomCtrlScroll\")], {1: {key: \"settings.zoomCtrlScroll\""
   },
@@ -30706,7 +30706,7 @@
       "desktop/main.cjs:204",
       "src/timeline-header.mjs:126",
       "src/timeline-header.mjs:128",
-      "src/timeline-header.mjs:515",
+      "src/timeline-header.mjs:516",
       "src/ui/command-catalog.mjs:163"
     ],
     "context": "item(t('desktop.main.playPause'), 'play'), item(t('timeline.addFrame'), 'add-frame'),"
@@ -30714,13 +30714,13 @@
   "timeline.addFrameName": {
     "locations": [
       "src/timeline-header.mjs:127",
-      "src/timeline-header.mjs:517"
+      "src/timeline-header.mjs:518"
     ],
     "context": "localizedAttribute(addFrame, 'aria-label', \"timeline.addFrameName\", {});"
   },
   "timeline.advanced": {
     "locations": [
-      "src/settings.mjs:618"
+      "src/settings.mjs:621"
     ],
     "context": "[\"advanced\", this.t(\"timeline.advanced\"), this.t(\"settings.advancedDescription\")],"
   },
@@ -30752,7 +30752,7 @@
   },
   "timeline.blankFrame": {
     "locations": [
-      "src/timeline-header.mjs:515"
+      "src/timeline-header.mjs:516"
     ],
     "context": "const key = blank ? 'timeline.blankFrame' : 'timeline.addFrame';"
   },
@@ -30833,20 +30833,20 @@
   "timeline.fit": {
     "locations": [
       "src/timeline-header.mjs:249",
-      "src/timeline-header.mjs:507"
+      "src/timeline-header.mjs:508"
     ],
     "context": "const fit = translatedElement(iconButton(rulerTools, 'fit', say(\"timeline.fit\"), {size: 'sm'}), \"timeline.fit\", {}, 'aria-label');"
   },
   "timeline.fitFilmstrip": {
     "locations": [
-      "src/timeline-header.mjs:507",
-      "src/timeline-header.mjs:508"
+      "src/timeline-header.mjs:508",
+      "src/timeline-header.mjs:509"
     ],
     "context": "localizedAttribute(fit, 'aria-label', simple ? 'timeline.fitFilmstrip' : 'timeline.fit');"
   },
   "timeline.fitTip": {
     "locations": [
-      "src/timeline-header.mjs:508"
+      "src/timeline-header.mjs:509"
     ],
     "context": "localizedAttribute(fit, 'data-tooltip', (simple ? \"timeline.fitFilmstrip\" : \"timeline.fitTip\"), (simple ? {} : {}));"
   },
@@ -31011,13 +31011,13 @@
       "src/timeline-header.mjs:186",
       "src/timeline-header.mjs:313",
       "src/timeline-header.mjs:421",
-      "src/timeline-header.mjs:541"
+      "src/timeline-header.mjs:542"
     ],
     "context": "localizedAttribute(playbackLimits, 'aria-label', 'timeline.playbackRange');"
   },
   "timeline.playbackRangeActive": {
     "locations": [
-      "src/timeline-header.mjs:541"
+      "src/timeline-header.mjs:542"
     ],
     "context": "localizedAttribute(playbackLimits, 'data-tooltip', active ? 'timeline.playbackRangeActive' : 'timeline.playbackRange', {first: start + 1, last: end});"
   },
@@ -31083,7 +31083,7 @@
   },
   "timeline.simple": {
     "locations": [
-      "src/settings.mjs:619"
+      "src/settings.mjs:622"
     ],
     "context": "[\"simple\", this.t(\"timeline.simple\"), this.t(\"settings.simpleDescription\")],"
   },
@@ -31096,7 +31096,7 @@
   "timeline.title": {
     "locations": [
       "src/localization-bindings.mjs:191",
-      "src/settings.mjs:630"
+      "src/settings.mjs:633"
     ],
     "context": "['.timeline-title', { text: 'timeline.title' }],"
   },

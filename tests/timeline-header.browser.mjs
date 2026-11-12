@@ -193,6 +193,18 @@ try {
   await page.setViewportSize({width: 1440, height: 900}); await settle(); await settle();
   check('Wide again: the folded controls are back', await page.evaluate(() => !document.getElementById('loop-button').hidden && !document.querySelector('[data-action="first-frame"]').hidden));
 
+  // A new language refolds the header for its own words: folded for Chinese, Croatian's longer words still fit.
+  if (styled) {
+    const language = async id => { await page.evaluate(async id => { await styk.loadLocale(id); styk.settingsUI.commit({locale: id}); }, id); await settle(); await settle(); };
+    await page.setViewportSize({width: 760, height: 740}); await language('zh-Hans');
+    await page.setViewportSize({width: 761, height: 740}); await settle(); await settle(); await settle();
+    await language('hr');
+    const result = await layout();
+    check(`A language change refolds the header: nothing overflows or leaves it (folded: ${result.fold})`, !result.overflow && result.outside.length === 0 && result.overlaps.length === 0);
+    await language('en');
+    await page.setViewportSize({width: 1440, height: 900}); await settle(); await settle();
+  }
+
   await mkdir(out, {recursive: true});
   await page.screenshot({path: `${out}/advanced.png`});
   assert.deepEqual(errors, []);

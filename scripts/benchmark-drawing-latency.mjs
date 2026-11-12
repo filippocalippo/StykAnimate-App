@@ -1,11 +1,11 @@
-// Input-to-frame latency benchmark for live drawing. Pointer input travels
-// through Chrome's real input pipeline (DevTools Input domain), so frame
-// alignment and coalescing match ordinary mouse input. After every app render
-// the benchmark reads a small canvas region around the oldest unconfirmed
-// samples; a sample is visible once its dab centre shows the brush colour.
-// Latency is measured from the event timestamp to the render that first shows
-// it. Display scanout and physical pen latency are outside this measurement.
-import {chromium} from './support/playwright.mjs';
+// Input-to-frame latency benchmark for live drawing, run by hand (31 scenarios, about 8 minutes against
+// `node scripts/serve.mjs`; STYK_URL names the server, STYK_LATENCY_SCENARIOS a comma-separated subset, other
+// STYK_LATENCY_* settings below). Pointer input travels through Chrome's real input pipeline (DevTools Input
+// domain), so frame alignment and coalescing match ordinary mouse input. After every app render the benchmark
+// reads a small canvas region around the oldest unconfirmed samples; a sample is visible once its dab centre
+// shows the brush colour. Latency is measured from the event timestamp to the render that first shows it.
+// Display scanout and physical pen latency are outside this measurement.
+import {chromium} from '../tests/support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 

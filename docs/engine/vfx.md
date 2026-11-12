@@ -202,7 +202,7 @@ After its evaluation (see Changing it): add its passes to `Recorder::effect` in 
 ### Testing the rendering
 
 ```sh
-cd engine && cargo test -p styk-render -p styk-eval --test vfx_layers   # planning, records, pass recording, layer structure
+cd engine && cargo test -p styk-render && cargo test -p styk-eval --test suite -- vfx_layers::   # planning, records, pass recording, layer structure
 target/debug/styk layers <file> <tick>          # a frame's layers
 target/debug/styk render <file> <tick> out.png [--zoom Z] [--neutral] [--after T]   # --after: the renderer drew tick T first
 ```
@@ -279,7 +279,7 @@ The memory is bounded but the bound is large: a layer is at most 3,968 pixels on
 ## Testing
 
 ```sh
-cd engine && cargo test -p styk-eval --test vfx   # well under a second
+cd engine && cargo test -p styk-eval --test suite -- vfx::   # well under a second
 cargo clippy -p styk-eval --all-targets
 cargo build -p styk-eval --target wasm32-unknown-unknown
 ```
@@ -294,7 +294,7 @@ cargo build -p styk-eval --target wasm32-unknown-unknown
 Generated effects:
 
 ```sh
-cd engine && cargo test -p styk-eval --test generators
+cd engine && cargo test -p styk-eval --test suite -- generators::
 target/debug/styk generators <file> <tick>…       # a frame's draws, live particles and what they cost
 ```
 

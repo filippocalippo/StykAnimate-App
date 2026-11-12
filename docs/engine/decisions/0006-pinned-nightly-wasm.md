@@ -17,3 +17,5 @@ The module is 4.4 MiB without wasm-opt (not installed on the development machine
 ## Consequences
 
 The toolchain is pinned in the build script and in CI; moving it is a deliberate change with a rebuild and the parity suite.
+The stable Rust that builds the codec and drawing modules and runs the engine's tests is pinned the same way, in
+`rust-toolchain.toml` (2026-11-12; CI installed whatever stable was current before).

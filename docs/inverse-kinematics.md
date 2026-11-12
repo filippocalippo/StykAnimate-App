@@ -34,7 +34,7 @@ Chains cross native figure joins and stop at the connected assembly's root. Join
 
 - `node --import ./tests/support/register-engine.mjs --test tests/ik.test.mjs`: circular and folded Both trajectories, subpixel extension jitter, longer-chain continuity, deterministic seeks, dual pins, orientation, unpinning, FK edits, interpolation and Pivot baking, authored channels, no-op/cancel/undo, native figure placement, rig edits, Simple drafts, and joined roots, all through the engine session.
 - `tests/ik-joined.test.mjs`, `tests/ik-rig.test.mjs`, `tests/ik-spatial.test.mjs` and `tests/engine-owner-ik-joined.test.mjs`: joined assemblies (constant target-space angles and polygon vertex distances during repeated drags, complete planted feet through root and ancestor rotation, cross-join chains, stretch, unpinning, foot articulation/bend edits, copy remapping, shared-chain rejection, topology undo and persistence), rig-constrained and spatial limbs.
-- `cargo test -p styk-eval --test ik`: the recorded fixtures and the solver's recorded inputs, bit for bit.
+- `cargo test -p styk-eval --test suite -- ik::`: the recorded fixtures and the solver's recorded inputs, bit for bit.
 - `node tests/ik.browser.mjs`: actual inspector controls and pointer gestures, live dual-foot root dragging, rotation, pin toggling, recovering an unreachable target, and real STYK/STKZ/PIV export/reopen. Screenshot and report: `artifacts/ik/`.
 
 The separate older `tests/rig.browser.mjs` smoke stops at its assertion that pressing R enters Rig. The current app assigns R to temporary Handle Edit (also documented in README). Its later rig gesture/export checks therefore did not run; the IK browser suite does not rely on that shortcut.

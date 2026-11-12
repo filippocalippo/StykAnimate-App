@@ -118,12 +118,14 @@ command line (they are merged with the app's).
 Many profiling scripts need private sample projects. `corpusPath()` finds them under
 your home directory (`Downloads/…`) or in the folder `STYK_CORPUS_DIR` names, and a
 missing file fails at once with that instruction. Tests that need the Pivot sample
-corpus beside the repository skip with the reason unless it is there or
-`STYK_REQUIRE_FIXTURES=1`.
+corpus beside the repository or such a sample project skip with the reason unless it is
+there or `STYK_REQUIRE_FIXTURES=1`; `npm run test:browser` counts those as skipped, not failed.
 
-Known gaps on Linux, all outside the shipping editor's runtime: a share of
-the `tests/*.browser.mjs` scripts are not run by CI and no longer match the current
-interface on any platform.
+Known gaps on Linux, all outside the shipping editor's runtime: the Tests workflow runs only
+the `tests/*.browser.mjs` scripts that guard the browser build. `npm run test:browser` runs all of
+them and lists which pass. It needs a machine with a GPU: on a GitHub runner a script takes
+several times as long and a third fail to start an editor. On Windows with a GPU every script
+passes, or skips for sample files that are not in the repository (216 scripts on 2026-11-12).
 
 ## Shutdown and processes
 

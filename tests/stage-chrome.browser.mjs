@@ -78,10 +78,11 @@ async function leaveBuild() {
   await settle();
 }
 
-/** Every visible control and box in #viewport except the renderer's own layers, and anything over the artboard. */
+/** Every visible control and box in #viewport except the renderer's own layers (the scene, the overlay, the drawing tools'
+ * wet-ink preview canvas), and anything over the artboard. */
 const viewportAudit = () => page.evaluate(() => {
   const viewport = document.getElementById('viewport'), artboard = document.getElementById('artboard').getBoundingClientRect();
-  const exempt = element => ['scene', 'overlay', 'artboard'].includes(element.id) || element.closest('.canvas-aids')
+  const exempt = element => ['scene', 'overlay', 'artboard'].includes(element.id) || element.matches('canvas.drawing-wet-ink') || element.closest('.canvas-aids')
     || (['renderer-error', 'canvas-empty'].includes(element.id) && !element.hidden);
   const shown = element => element.checkVisibility({visibilityProperty: true}) && element.getClientRects().length;
   const name = element => element.id ? `#${element.id}` : `${element.localName}.${[...element.classList].join('.')}`;

@@ -140,7 +140,7 @@ import {
   drawCameraViewport,
   drawCameraOutline,
 } from "./camera-overlay.mjs";
-import { EditorSettings, normalizeEditorSettings } from "./settings.mjs";
+import { EditorSettings, normalizeEditorSettings, storedEditorSettings } from "./settings.mjs";
 import { HotkeyManager, HOTKEY_BY_ID, isHotkeyInput } from "./hotkeys.mjs";
 import { hotkeyCommandId, refreshHotkeyHints } from "./hotkey-hints.mjs";
 import { runTimelineHotkey } from "./timeline-hotkeys.mjs";
@@ -5407,14 +5407,16 @@ const projectProvider = {
         ranges: match.ranges, run: () => { selectTrack({ id: layer.id, target: { kind: "layer", id: layer.id } }); timelineUI?.selectTrack?.(layer.id); } });
     }
     if (context?.mode !== "draw") {
-      const names = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row.name]));
+      // The rows of the figure types say which are movieclips, with no type fetched from the engine.
+      const types = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row]));
       for (const object of editor.selectionFrame?.objects ?? []) {
-        const name = names.get(object.figure_type_id);
+        const type = types.get(object.figure_type_id), name = type?.name;
         const match = name && fuzzyMatch(query, name);
         if (!match) continue;
         const layer = editor.getLayer(editor.layerForUid(object.unique_id))?.name ?? "";
-        rows.push({ id: `figure:${object.unique_id}`, label: name, icon: isMovieclip(figure) ? "frame" : "person",
-          meta: kitText(kitT, isMovieclip(figure) ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn", { layer }), metaKey: isMovieclip(figure) ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn", metaParams: { layer }, match, ranges: match.ranges,
+        const metaKey = type.kind === "Movieclip" ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn";
+        rows.push({ id: `figure:${object.unique_id}`, label: name, icon: type.kind === "Movieclip" ? "frame" : "person",
+          meta: kitText(kitT, metaKey, { layer }), metaKey, metaParams: { layer }, match, ranges: match.ranges,
           run: () => selectTrack({ uid: object.unique_id, target: { kind: "figure", uid: object.unique_id } }) });
       }
     }
@@ -5989,7 +5991,8 @@ async function init() {
     ? await window.stykInitialEditorSettings
     : desktop?.getEditorSettings
     ? await desktop.getEditorSettings()
-    : undefined;
+    : storedEditorSettings();
+  // The saved language is loaded before anything chooses it.
   await loadLocale(settingsValue?.locale);
   appLocalization = new AppLocalization({ locale: settingsValue?.locale });
   editorSettings = new EditorSettings({

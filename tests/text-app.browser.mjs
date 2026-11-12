@@ -6,6 +6,8 @@ import { chromium } from "./support/playwright.mjs";
 import assert from "node:assert/strict";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { skipWithoutFixtures } from "./helpers/local-fixtures.mjs";
+skipWithoutFixtures("../Pivot Animator v5/Animations/text_abc.piv");
 const output = path.resolve("artifacts/text-app");
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ channel: "chrome", headless: true });

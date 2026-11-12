@@ -461,7 +461,7 @@ src/shell/dock-tabs.mjs	ui	-	stays
 src/shell/layout-popover.mjs	ui	-	stays	
 src/shell/layout-schema.mjs	ui	-	stays	
 src/shell/layout-solver.mjs	ui	-	stays	
-src/shell/layout-store.mjs	ui	-	stays	
+src/shell/layout-store.mjs	ui	-	removed	Deleted with the docking model: src/shell/dock-store.mjs persists arrangements
 src/shell/panel-registry.mjs	ui	-	stays	
 src/shell/project-switcher.mjs	ui	-	stays	
 src/shell/project-tabs-view.mjs	ui	-	stays	
@@ -470,7 +470,7 @@ src/shell/shell-commands.mjs	ui	-	stays
 src/shell/stage-head.mjs	ui	-	stays	
 src/shell/topbar.mjs	ui	-	stays	
 src/simple-timeline.mjs	ui	-	removed	deleted: an alias of sheet-filmstrip.mjs that only tests imported (149 bytes)
-src/source-record.mjs	engine	styk-formats::container	js	
+src/source-record.mjs	engine	styk-formats::container	removed	Deleted: a Pivot project carries its original in its document (1440 bytes)
 src/spatial-controls.mjs	ui	-	stays	
 src/spatial-gizmo.mjs	ui	-	stays	
 src/spatial-mesh-legacy.mjs	engine	styk-eval::rig	js	Kept: the converter behind scripts/convert-spatial-meshes.mjs (docs/SPATIAL-MESHES.md); the app does not run it on open
@@ -620,3 +620,21 @@ src/web-support.js	ui	-	stays
 src/yield-task.mjs	platform	-	stays	gives the browser its turn between slices of work (scheduler.yield, else a message)
 src/zlib-sync.mjs	engine	styk-formats::container	partial	Rust: inflate of drawing tiles (PNG decoder); deflate still JS
 src/lazy-payload.mjs	ui	-	stays	the editor view's picture fields: a getter that asks the engine for the text on first read (styk_doc::payload names it), and the copies that keep it unread
+src/devtools/capture.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools/control.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools/devtools.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools/early.js	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools/inspector.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools/panels.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools/sampler.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools-gate.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/trace.mjs	app	-	stays	the instrumentation layer: spans, counters and live parameters (docs/DEVTOOLS.md)
+desktop/devtools.cjs	platform	-	stays	Electron shell and services: the developer launch's half of the developer tools, never packaged
+desktop/page-pushes.cjs	platform	-	stays	Electron shell and services
+src/shell/dock-migrate.mjs	ui	-	stays	
+src/shell/dock-model.mjs	ui	-	stays	
+src/shell/dock-solve.mjs	ui	-	stays	
+src/shell/dock-store.mjs	ui	-	stays	
+src/shell/dock-workspaces.mjs	ui	-	stays	
+src/lazy-table.mjs	ui	-	stays	the read view's tables, whose records the interface fetches from the engine's session when it reads them
+src/figure-types.mjs	ui	-	stays	what the interface asks of a document's figure types, through the read view
