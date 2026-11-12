@@ -1,0 +1,70 @@
+name: Styanimate Agent
+
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  triage-and-review:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Auto-label incoming issues based on title/body keywords
+      - name: Auto-Label Issues
+        if: github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const body = (issue.body || '').toLowerCase();
+            const title = (issue.title || '').toLowerCase();
+            const labels = [];
+
+            if (title.includes('bug') || body.includes('error') || body.includes('crash')) {
+              labels.push('bug');
+            }
+            if (title.includes('parser') || body.includes('.piv') || body.includes('.stknds')) {
+              labels.push('parser');
+            }
+            if (title.includes('feature') || title.includes('proposal')) {
+              labels.push('enhancement');
+            }
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: labels
+              });
+            }
+
+      # Automated comment check on new Pull Requests
+      - name: PR Automated Checklist
+        if: github.event_name == 'pull_request' && github.event.action == 'opened'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const commentBody = `🤖 **Automated PR Agent Checklist:**
+            
+            Thanks for opening this PR! Please verify:
+            - [ ] Canvas rendering loops maintain high FPS performance.
+            - [ ] Legacy animation format parsers (\`.piv\` / \`.stknds\`) pass backward-compatibility checks.
+            - [ ] Code follows standard linting rules.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: commentBody
+            });
