@@ -48,6 +48,7 @@ What's new in each version of StykAnimate.
 - Fixed projects that would not open again after you made a movieclip in a project that already had another movieclip on its timeline. Projects already saved that way now open, and StykAnimate tells you it repaired them.
 - Saving now repairs damage it finds in a project, so the saved file opens again.
 - Exporting the same animation twice no longer occasionally leaves a frame with garbled pixels.
+- The timeline’s buttons stay inside the window after you change the interface language.
 
 ### Performance
 

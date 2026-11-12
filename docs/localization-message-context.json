@@ -30706,7 +30706,7 @@
       "desktop/main.cjs:204",
       "src/timeline-header.mjs:126",
       "src/timeline-header.mjs:128",
-      "src/timeline-header.mjs:515",
+      "src/timeline-header.mjs:516",
       "src/ui/command-catalog.mjs:163"
     ],
     "context": "item(t('desktop.main.playPause'), 'play'), item(t('timeline.addFrame'), 'add-frame'),"
@@ -30714,7 +30714,7 @@
   "timeline.addFrameName": {
     "locations": [
       "src/timeline-header.mjs:127",
-      "src/timeline-header.mjs:517"
+      "src/timeline-header.mjs:518"
     ],
     "context": "localizedAttribute(addFrame, 'aria-label', \"timeline.addFrameName\", {});"
   },
@@ -30752,7 +30752,7 @@
   },
   "timeline.blankFrame": {
     "locations": [
-      "src/timeline-header.mjs:515"
+      "src/timeline-header.mjs:516"
     ],
     "context": "const key = blank ? 'timeline.blankFrame' : 'timeline.addFrame';"
   },
@@ -30833,20 +30833,20 @@
   "timeline.fit": {
     "locations": [
       "src/timeline-header.mjs:249",
-      "src/timeline-header.mjs:507"
+      "src/timeline-header.mjs:508"
     ],
     "context": "const fit = translatedElement(iconButton(rulerTools, 'fit', say(\"timeline.fit\"), {size: 'sm'}), \"timeline.fit\", {}, 'aria-label');"
   },
   "timeline.fitFilmstrip": {
     "locations": [
-      "src/timeline-header.mjs:507",
-      "src/timeline-header.mjs:508"
+      "src/timeline-header.mjs:508",
+      "src/timeline-header.mjs:509"
     ],
     "context": "localizedAttribute(fit, 'aria-label', simple ? 'timeline.fitFilmstrip' : 'timeline.fit');"
   },
   "timeline.fitTip": {
     "locations": [
-      "src/timeline-header.mjs:508"
+      "src/timeline-header.mjs:509"
     ],
     "context": "localizedAttribute(fit, 'data-tooltip', (simple ? \"timeline.fitFilmstrip\" : \"timeline.fitTip\"), (simple ? {} : {}));"
   },
@@ -31011,13 +31011,13 @@
       "src/timeline-header.mjs:186",
       "src/timeline-header.mjs:313",
       "src/timeline-header.mjs:421",
-      "src/timeline-header.mjs:541"
+      "src/timeline-header.mjs:542"
     ],
     "context": "localizedAttribute(playbackLimits, 'aria-label', 'timeline.playbackRange');"
   },
   "timeline.playbackRangeActive": {
     "locations": [
-      "src/timeline-header.mjs:541"
+      "src/timeline-header.mjs:542"
     ],
     "context": "localizedAttribute(playbackLimits, 'data-tooltip', active ? 'timeline.playbackRangeActive' : 'timeline.playbackRange', {first: start + 1, last: end});"
   },
