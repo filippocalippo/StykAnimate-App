@@ -123,9 +123,9 @@ there or `STYK_REQUIRE_FIXTURES=1`; `npm run test:browser` counts those as skipp
 
 Known gaps on Linux, all outside the shipping editor's runtime: the Tests workflow runs only
 the `tests/*.browser.mjs` scripts that guard the browser build. `npm run test:browser` runs all of
-them and lists which pass; the Browser tests workflow does that weekly on a Windows runner. On
-Windows with a GPU every script passes, or skips for sample files that are not in the repository
-(216 scripts on 2026-11-12).
+them and lists which pass. It needs a machine with a GPU: on a GitHub runner a script takes
+several times as long and a third fail to start an editor. On Windows with a GPU every script
+passes, or skips for sample files that are not in the repository (216 scripts on 2026-11-12).
 
 ## Shutdown and processes
 

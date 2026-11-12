@@ -17,9 +17,8 @@
  * artifacts/browser-tests/results.json (file; status pass, skip, fail or timeout; seconds; the reason for a skip;
  * the last lines of a failure). Exit code 1 when a test fails or does not finish.
  *
- * A machine without a GPU draws with a software renderer, which sometimes stops offering an adapter while several
- * editors are open: the page then says "No available adapters". A test that fails saying so is run once more, and
- * the result notes it; any other failure stands.
+ * The whole set needs a machine with a GPU: on a software renderer (a GitHub runner) a test takes several times as
+ * long and editors fail to start. There it runs only the few tests the Tests workflow names.
  */
 import {spawn} from 'node:child_process';
 import {mkdir, readFile, readdir, writeFile} from 'node:fs/promises';
@@ -66,7 +65,7 @@ if (!process.env.STYK_URL && !ownServers) {
   }
 }
 
-const once = file => new Promise(resolve => {
+const run = file => new Promise(resolve => {
   const started = Date.now();
   // A test that starts its own server is not handed the address of one that was not started.
   const child = spawn(process.execPath, [path.join('tests', file)], {cwd: root, windowsHide: true, detached: process.platform !== 'win32',
@@ -82,20 +81,11 @@ const once = file => new Promise(resolve => {
     const status = timedOut ? 'timeout' : code !== 0 ? 'fail' : skip ? 'skip' : 'pass';
     const result = {file, status, seconds: Math.round((Date.now() - started) / 100) / 10};
     if (status === 'skip') result.reason = skip[1].trim();
-    else if (status !== 'pass') { result.output = output.trim().split('\n').slice(-12).join('\n'); result.lostAdapter = output.includes('No available adapters'); }
+    else if (status !== 'pass') result.output = output.trim().split('\n').slice(-12).join('\n');
+    console.log(`${status.toUpperCase().padEnd(7)} ${String(result.seconds).padStart(6)}s  ${file}${result.reason ? `  ${result.reason}` : ''}`);
     resolve(result);
   });
 });
-const run = async file => {
-  let result = await once(file);
-  if (result.lostAdapter) {
-    console.log(`RETRY   ${String(result.seconds).padStart(6)}s  ${file}  the software renderer stopped offering an adapter`);
-    result = {...await once(file), retried: 'No available adapters'};
-  }
-  delete result.lostAdapter;
-  console.log(`${result.status.toUpperCase().padEnd(7)} ${String(result.seconds).padStart(6)}s  ${file}${result.reason ? `  ${result.reason}` : ''}`);
-  return result;
-};
 
 const results = [];
 let next = 0;

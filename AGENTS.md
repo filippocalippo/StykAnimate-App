@@ -45,7 +45,7 @@ Run what your change can affect, and say in your report what you ran and what it
 - `scripts/smoke-*.mjs`: the desktop app in a real window, for a change to saving, files, windows or exports.
 - `npm run engine:parity`: the engine against its recorded fixtures. Slow; run it for a change to evaluation, formats or editing commands.
 
-The Tests workflow runs the checks and unit tests on Linux and Windows for every pull request, the Rust tests on Linux when `engine/` or `tests/fixtures/` changed, and builds the browser version and a packaged Linux app. It is meant to finish in about five minutes for a change outside the engine and under ten for one inside it: a job that makes it slower needs a reason. It does not run the full browser suite, the desktop smoke scripts or parity. The browser suite and parity run weekly, and you run whatever your change affects.
+The Tests workflow runs the checks and unit tests on Linux and Windows for every pull request, the Rust tests on Linux when `engine/` or `tests/fixtures/` changed, and builds the browser version and a packaged Linux app. It is meant to finish in about five minutes for a change outside the engine and under ten for one inside it: a job that makes it slower needs a reason. It does not run the full browser suite or the desktop smoke scripts, which need a real GPU and a real window that the runners lack: run the ones your change affects on your own machine, and all of `npm run test:browser` before a release. Parity runs weekly and after an engine change reaches `main`.
 
 ## What the code will not tell you
 
