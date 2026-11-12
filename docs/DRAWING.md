@@ -339,10 +339,12 @@ Symmetry feeds each mirrored sample into its own pipeline (with its own jitter
 seed) so mirrored strokes keep even spacing while sharing one coverage buffer
 and undo step.
 Wet ink (`drawing-wet-ink.mjs`) draws the part of a stroke that is not yet
-on screen — the last presented dab, dabs in flight or pending, the raw
-pointer and its predicted position — on a desynchronized canvas between the
-scene and the overlay, at most every 8 ms (pens can report several hundred
-samples a second). Points closer than a CSS pixel merge and consecutive
+on screen — the last presented dab, dabs in flight or pending, and the raw
+pointer — on a desynchronized canvas between the scene and the overlay, at
+most every 8 ms (pens can report several hundred samples a second). It never
+draws the browser's predicted positions: only pointermove carries them, not
+pointerrawupdate, and they overshoot on turns, so a tail drawn to them
+flickered ahead of the pen. Points closer than a CSS pixel merge and consecutive
 segments of one width share a path: a canvas call per dab once flooded the
 compositor with fine brushes and stalled every frame. The stage records each
 cel's `presentedStamp` when a frame it drew carried the tiles of that stamp, and a

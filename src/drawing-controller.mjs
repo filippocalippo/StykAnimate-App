@@ -614,7 +614,10 @@ export class DrawingController {
   endStrokeWorker(s){if(s.ended&&s.drained&&!s.pending.length&&!s.outstanding&&!s.endPosted){s.endPosted=true;s.owner.strokeWorker.post({kind:'end',stroke:s.id});}}
   /** Draw the stroke's unpresented part as wet ink: the last presented dab of
    * each (mirrored) path, the dabs in flight or still pending, then the raw
-   * pointer and its predicted position, which the curve smoothing trails. */
+   * pointer, which the curve smoothing trails. The browser's predicted
+   * positions are left out: pointermove carries them and pointerrawupdate does
+   * not, and they overshoot on every turn, so a tail drawn to them jumped ahead
+   * and vanished between events. */
   drawWet(){
     const s=this.wetSession,wet=this.wet;if(!s||!wet)return;
     if(!s.wetStyle){wet.clear();return;}
@@ -630,7 +633,7 @@ export class DrawingController {
     for(let i=Math.max(s.qi,s.queue.length-2048);i<s.queue.length;i++){const q=s.queue[i];s.paths.forEach(({map},pi)=>add(pi,map(q.world),radiusAt(q.pressure)));}
     if(!s.ended&&s.brush.stabilization===0&&s.lastWorld){
       const radius=radiusAt(s.lastPressure);
-      s.paths.forEach(({map},i)=>{add(i,map(s.lastWorld),radius);if(s.predicted)add(i,map(s.predicted),radius);});
+      s.paths.forEach(({map},i)=>add(i,map(s.lastWorld),radius));
     }
     const radius=paths.flat().reduce((n,p)=>Math.max(n,p.r),0);
     wet.draw(paths.filter(p=>p.length),{color:s.wetStyle.color,opacity:s.wetStyle.opacity,blur:s.brush.hardness<.9?(1-s.brush.hardness)*radius*.5:0});
@@ -723,8 +726,7 @@ export class DrawingController {
   /** Stroke samples from a pointer event, including coalesced ones. Raw and
    * regular move events report the same samples; timestamps drop repeats. */
   strokeSamples(event){const s=this.gesture.session,samples=event.getCoalescedEvents?.();for(const sample of samples?.length?samples:[event]){if(sample.timeStamp<=(s.lastTime??-Infinity))continue;s.lastTime=sample.timeStamp;this.sampleStroke(sample);}
-    // Predicted input extends the wet ink toward where the pen is heading.
-    if(s.wetStyle){const predicted=event.getPredictedEvents?.();s.predicted=predicted?.length?this.point(predicted.at(-1)):null;this.queueWet();}}
+    if(s.wetStyle)this.queueWet();}
   /** Draw wet ink now, or at the next frame when it was drawn under 8 ms ago:
    * pens report up to several hundred samples a second, more than any display
    * shows, and each redraw costs the compositor. */

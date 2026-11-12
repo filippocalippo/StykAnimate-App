@@ -59,6 +59,25 @@ try{
     check('wet ink is retired once the stroke is presented',await page.evaluate(()=>!styk.drawing.wet.box));
     await page.evaluate(()=>{styk.editor.undo();});
   }
+  // Wet ink at zero smoothing stays on the path the pointer took. Browsers
+  // attach predicted positions to pointermove only (pointerrawupdate has
+  // none), and a prediction overshoots on every turn: drawing it made a tail
+  // that jumped ahead and vanished between events, flickering.
+  {
+    const y=rect.y+rect.height*.4,x0=rect.x+rect.width*.3;
+    await page.mouse.move(x0,y);await page.mouse.down();
+    for(let i=1;i<=8;i++)await page.mouse.move(x0+i*10,y);
+    const reach=await page.evaluate(({x,y})=>{
+      const d=styk.drawing,o=document.getElementById('overlay'),left=d.wet.canvas.parentElement.getBoundingClientRect().left;
+      const base={pointerId:d.gesture.id,pointerType:'mouse',buttons:1,bubbles:true};
+      const ahead=new PointerEvent('pointermove',{...base,clientX:x+300,clientY:y-200});
+      o.dispatchEvent(new PointerEvent('pointermove',{...base,clientX:x,clientY:y,predictedEvents:[ahead]}));
+      d.drawWet();const box=d.wet.box;return {right:box.x+box.width-left,top:box.y,pointer:x-left,pointerY:y-d.wet.canvas.parentElement.getBoundingClientRect().top};
+    },{x:x0+90,y});
+    await page.mouse.up();await page.waitForFunction(()=>!styk.drawing.gesture&&!styk.drawing.wetSession);
+    check('wet ink never draws ahead of the pointer to a predicted position',reach.right<reach.pointer+40&&reach.top>reach.pointerY-40);
+    await page.evaluate(()=>{styk.editor.undo();});
+  }
   // An interrupted pointer (lost capture from a notification, the pen leaving
   // range, a window switch) keeps the ink instead of discarding the stroke.
   {
