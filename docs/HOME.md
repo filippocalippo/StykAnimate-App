@@ -55,6 +55,8 @@ The list is the main process's (`desktop/project-library.cjs`), stored in `userD
 - The renderer sees opaque ids, never paths it did not choose. Opening a listed project goes through
   `readImportFile`, as File › Open does. A listed project that is already open (its file is a document of this
   window, `projectFiles.documents`) carries that document's token, and Home brings its tab to the front instead.
+- Open-tab matching and preview updates resolve linked folders and file aliases to the same path used when
+  remembering a project, so opening through a link still returns to the existing tab and stores its picture.
 - Pins and folders are the person's arrangement. A folder is a label: nothing moves, renames or deletes a file.
   Removing a project from the list leaves its file alone. At most 200 projects (pinned ones never leave; the
   oldest unpinned ones do, with their pictures) and 48 folders.
