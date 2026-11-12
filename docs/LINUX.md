@@ -118,8 +118,8 @@ command line (they are merged with the app's).
 Many profiling scripts need private sample projects. `corpusPath()` finds them under
 your home directory (`Downloads/…`) or in the folder `STYK_CORPUS_DIR` names, and a
 missing file fails at once with that instruction. Tests that need the Pivot sample
-corpus beside the repository skip with the reason unless it is there or
-`STYK_REQUIRE_FIXTURES=1`.
+corpus beside the repository or such a sample project skip with the reason unless it is
+there or `STYK_REQUIRE_FIXTURES=1`; `npm run test:browser` counts those as skipped, not failed.
 
 Known gaps on Linux, all outside the shipping editor's runtime: most of
 the `tests/*.browser.mjs` scripts are not run by CI. `npm run test:browser` runs them all and

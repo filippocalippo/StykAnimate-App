@@ -8,14 +8,25 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
+ * Where a sample project is looked for, whether or not it is there. A test that can do
+ * without it passes this to `skipWithoutFixtures` (tests/helpers/local-fixtures.mjs).
+ * @param {string} relative Path under the home directory, for example "Downloads/scene.piv".
+ * @param {{env?: object, home?: string}} [options]
+ * @returns {string}
+ */
+export function corpusFile(relative, { env = process.env, home = os.homedir() } = {}) {
+  return env.STYK_CORPUS_DIR ? path.join(env.STYK_CORPUS_DIR, path.basename(relative)) : path.join(home, ...relative.split('/'));
+}
+
+/**
  * @param {string} relative Path under the home directory, for example "Downloads/scene.piv".
  * @param {{env?: object, home?: string, exists?: (file: string) => boolean}} [options]
  * @returns {string} The file to read. Throws, saying what to do, when it is missing.
  */
 export function corpusPath(relative, { env = process.env, home = os.homedir(), exists = existsSync } = {}) {
-  const name = path.basename(relative);
-  const file = env.STYK_CORPUS_DIR ? path.join(env.STYK_CORPUS_DIR, name) : path.join(home, ...relative.split('/'));
+  const file = corpusFile(relative, { env, home });
   if (!exists(file)) {
+    const name = path.basename(relative);
     throw new Error(`Sample project not found: ${file}\nPass its path as the first argument, or set STYK_CORPUS_DIR to the folder that contains "${name}".`);
   }
   return file;
