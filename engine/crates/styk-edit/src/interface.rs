@@ -236,8 +236,9 @@ impl Editor {
         let mut caches = self.shown.borrow_mut();
         let cache = &mut caches[usize::from(motion)];
         // The held read is this one's predecessor: the objects built since are the ones that changed. Another read, or one of another
-        // frame, is all of them.
-        let reuse = since.is_some() && since == Some(cache.token) && cache.count == count;
+        // frame, is all of them. So is a scene older than the read held (one the stage drew of this frame before the interface read
+        // another): its objects' builds say nothing of what changed since that read.
+        let reuse = since.is_some() && since == Some(cache.token) && cache.count == count && shown.serial >= cache.through;
         let slots: Vec<usize> = (0..count).filter(|&slot| !reuse || shown.built_in[slot] > cache.through).collect();
         let full = slots.len() == count;
         let mut groups = Vec::new();

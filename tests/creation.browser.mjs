@@ -24,6 +24,8 @@ const selection = () => value(() => [...styk.editor.selectedUids]);
 const poses = () => value(() => styk.editor.selectionFrame.objects.map(o => ({uid: o.unique_id, x: o.root_x, y: o.root_y, scale: o.scale, join: o.join})));
 async function layer(uid, shift = false) {
   await page.evaluate(({uid, shift}) => styk.editor.select(uid, -1, {toggle: shift}), {uid, shift});
+  // The chrome (inspector, layers) updates in one pass a frame (src/ui/ui-invalidation.mjs).
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 async function point(x, y) {
   return page.evaluate(({x, y}) => {

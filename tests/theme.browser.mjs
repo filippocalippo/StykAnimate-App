@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 
-const base=process.env.STYK_TEST_URL || 'http://127.0.0.1:47831';
+const base=process.env.STYK_URL || process.env.STYK_TEST_URL || 'http://127.0.0.1:47831';
 const output=path.resolve('artifacts/themes');
 await mkdir(output,{recursive:true});
 const browser=await chromium.launch({channel:'chrome',headless:true});
@@ -76,7 +76,7 @@ try {
   check('Rendered artwork is pixel-identical in both themes',lightArtwork.equals(await artwork(stage)));
   // The panels are islands on the window's field: the stage, the inspector and the timeline are
   // surfaces, and the tool bar floats beside the canvas on the raised surface.
-  for(const selector of ['.titlebar','.right-panel > [data-island="right-0"]','.shell-stage','.layer-timeline'])
+  for(const selector of ['.titlebar','.shell-island[data-side="right"]','.shell-stage','.layer-timeline'])
     check(selector+' uses the dark palette',await background(selector)==='rgb(21, 22, 28)');
   const field=(await background('.workspace')).match(/\d+/g).slice(0,3).map(Number);
   check('The tool bar floats on the dark raised surface',await background('.studio-rail')==='rgb(27, 28, 35)'&&field.every(channel=>channel<32));
