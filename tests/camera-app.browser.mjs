@@ -14,12 +14,13 @@ async function setup(){
   const report=emptyDocument(); report.keyframes=[createFrame([createObject(report.figure_types[0],10,400,250)]),createFrame([createObject(report.figure_types[0],10,420,260)])];
   report.keyframes[0].camera={is_default:false,x:-45,y:25,scale:.65,angle_rad:.25};
   report.keyframes[1].camera={is_default:false,x:-15,y:30,scale:.9,angle_rad:-.2};
-  styk.editor.load(report,'Camera interaction'); styk.editor.select(10,0);styk.fit(); styk.settingsUI.commit({showCamera:false,onionCount:0});
+  window.stageLast=undefined; styk.editor.load(report,'Camera interaction'); styk.editor.select(10,0);styk.fit(); styk.settingsUI.commit({showCamera:false,onionCount:0});
   styk.state.onion=false;
   window.__project=p=>{const r=document.querySelector('#viewport').getBoundingClientRect(),v=styk.state.view;return{x:r.x+v.x+p.x*v.scale,y:r.y+v.y+p.y*v.scale};};
   window.__cam=async()=>{const {cameraViewport}=await import('/src/camera-overlay.mjs');return cameraViewport(styk.editor.report,styk.editor.evaluatedFrame,styk.state.view);};
  });
- await page.waitForTimeout(60);await page.locator('#viewport').focus();
+ // The stage draws the loaded document once the engine's session answers (the first document of a page takes longest).
+ await page.waitForFunction(()=>window.stageLast,undefined,{timeout:10000});await page.waitForTimeout(60);await page.locator('#viewport').focus();
 }
 async function handle(kind,index){return page.evaluate(async({kind,index})=>__project((await __cam()).handles.find(h=>h.kind===kind&&(index==null||h.index===index)).point),{kind,index});}
 async function drag(a,b){await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:4});await page.mouse.up();await page.waitForTimeout(45);}
