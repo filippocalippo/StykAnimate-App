@@ -2,7 +2,7 @@
 
 English is the default. Settings → Interface → Language persists through the
 existing editor preference service. The browser, touch interface and Electron
-menus use the same catalog and fallback rules. Existing accurate translations are preserved. All 26 non-English packs have complete catalog and plural coverage. Translation and independent context review use exclusive language batches; per-language results are recorded in [LOCALIZATION-REVIEW.md](LOCALIZATION-REVIEW.md).
+menus use the same catalog and fallback rules. Existing accurate translations are preserved. The 26 non-English packs translate most messages; messages added since a pack was last completed show in English until it is updated (`npm run locales:validate` reports how many per pack). Translation and independent context review use exclusive language batches; per-language results are recorded in [LOCALIZATION-REVIEW.md](LOCALIZATION-REVIEW.md).
 
 ## Ownership and lookup
 
