@@ -98,7 +98,7 @@ A new effect needs a registry schema, validation/interpolation semantics, identi
 - `node tests/vfx.browser.mjs`: binary native round-trip, lossy-format rejection, real slider and label drags, and tab navigation.
 - `node --test tests/vfx-strength.test.mjs`: compatible strength defaults, interpolation, zero-strength bypass, layer edits/undo/reopen, and turbulence bounds.
 
-Browser scripts use installed Chrome and a local server at `http://127.0.0.1:47832`; override with `STYK_TEST_URL`. Measurement output is in `artifacts/vfx/`. Results depend on hardware, area, radius, and animated content. The measured 1,000-figure camera-editing case improved from approximately 35 ms to 5 ms median after sharing retained GPU artwork. Rebuilding geometry while animating ten glows remains a heavier case (approximately 23 ms median on the measured NVIDIA Lovelace device). Cold shader initialization remains a separate cost.
+Browser scripts use installed Chrome and the server at `STYK_URL` (`http://127.0.0.1:47831` by default; `npm run test:browser` sets it). Measurement output is in `artifacts/vfx/`. Results depend on hardware, area, radius, and animated content. The measured 1,000-figure camera-editing case improved from approximately 35 ms to 5 ms median after sharing retained GPU artwork. Rebuilding geometry while animating ten glows remains a heavier case (approximately 23 ms median on the measured NVIDIA Lovelace device). Cold shader initialization remains a separate cost.
 
 ## Expanded controls and rendering
 

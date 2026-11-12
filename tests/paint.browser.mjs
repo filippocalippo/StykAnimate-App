@@ -5,7 +5,7 @@ const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chr
 const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 try{
- await page.goto('http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
+ await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
  await page.evaluate(async()=>{const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');const report=emptyDocument(),fig=report.figure_types[0];report.keyframes=[createFrame([createObject(fig,1,300,280)])];window.styk.editor.load(report);window.styk.editor.select(1,0);});
  await page.waitForTimeout(800);
  if(await page.locator('[data-property-scope="joint"]').count())await page.locator('[data-property-scope="joint"]').click();
@@ -45,7 +45,7 @@ try{
  await page.screenshot({path:'artifacts/color-picker/text.png'});await page.evaluate(()=>window.paintTextDialog.close());
 
  const exportChecks=await page.evaluate(async()=>{
-  const {DocumentExporter}=await import('/src/document-export.mjs');const ex=new DocumentExporter(),report=window.styk.editor.serialize();
+  const {DocumentExporter}=await import('/src/document-export.mjs');const ex=new DocumentExporter(),report=window.styk.editor.report;
   const {decodeDocument}=await import('/tests/support/native-files.mjs'),blob=await ex.export(report,{format:'styk',revision:window.styk.editor.revision});
   const {document:saved}=await decodeDocument(new Uint8Array(await blob.arrayBuffer()),'styk');
   let rejected=false;try{await ex.export(report,{format:'piv',revision:window.styk.editor.revision});}catch(e){rejected=e.message.includes('cannot represent');}

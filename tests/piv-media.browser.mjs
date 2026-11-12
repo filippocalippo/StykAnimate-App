@@ -1,5 +1,7 @@
 /** Verify real file input, worker decoding, editor publication and visible media.
- * node tests/piv-media.browser.mjs path/to/animation.piv [...]
+ * node tests/piv-media.browser.mjs [path/to/animation.piv ...]
+ * Without arguments it opens the Pivot media fixtures in the repository (sprites, glyphs and image backgrounds, compressed
+ * and raw). It starts its own desktop host and does not read STYK_URL. STYK_VERIFY_NATIVE_SAVE=1 also saves each as .styk and reopens it.
  */
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
@@ -7,13 +9,13 @@ import path from 'node:path';
 import {chromium} from './support/playwright.mjs';
 import backendTools from '../desktop/web-host.cjs';
 
-assert.ok(process.argv.length>2,'Supply one or more local PIV fixtures');
+const sources=process.argv.length>2?process.argv.slice(2):['modern-media.piv','modern-media-raw.piv'].map(name=>path.join(import.meta.dirname,'../engine/crates/styk-piv/tests/fixtures',name));
 const out=path.resolve('artifacts/piv-media');await mkdir(out,{recursive:true});
 const backend=await backendTools.startDesktopHost({appRoot:process.cwd()});let browser;
 try {
   browser=await chromium.launch({channel:'chrome',headless:true});
   const results=[];
-  for(const source of process.argv.slice(2)) {
+  for(const source of sources) {
     const page=await browser.newPage({viewport:{width:1440,height:960}}),errors=[];
     page.on('pageerror',e=>errors.push(e.message));
     await page.goto(backend.origin);await page.waitForFunction(()=>window.styk?.ready);
