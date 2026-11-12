@@ -7,7 +7,7 @@ const snapshot=()=>page.evaluate(()=>JSON.stringify(styk.editor.report._styk.vfx
 const history=()=>page.evaluate(()=>styk.editor._undo.length);
 const drag=async(locator,dx,{cancel=false}={})=>{await locator.scrollIntoViewIfNeeded();const b=await locator.boundingBox();await page.mouse.move(b.x+b.width/2,b.y+b.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width/2+dx,b.y+b.height/2,{steps:8});if(cancel)await page.keyboard.press('Escape');await page.mouse.up();};
 try{
- await page.goto(process.env.STYK_TEST_URL||'http://127.0.0.1:47832');await page.waitForFunction(()=>window.styk?.ready);
+ await page.goto(process.env.STYK_URL??'http://127.0.0.1:47831');await page.waitForFunction(()=>window.styk?.ready);
  await page.evaluate(async()=>{
   const {emptyDocument,createObject,createFrame}=await import('/src/demo.mjs'),{initializeLayerSheet}=await import('/src/editor-layer-sheet.mjs');
   const e=styk.editor,doc=emptyDocument();doc.keyframes=[createFrame([createObject(doc.figure_types[0],1,300,320)],80)];e.load(doc);initializeLayerSheet(e.report);e._invalidate({timing:true});e.select(1);
