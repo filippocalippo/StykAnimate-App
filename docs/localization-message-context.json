@@ -8577,20 +8577,20 @@
   },
   "desktop.projectLibrary.errors.aFolderNamedValueAlreadyExists": {
     "locations": [
-      "desktop/project-library.cjs:244"
+      "desktop/project-library.cjs:249"
     ],
     "context": "throw messageError(new Error(''), 'desktop.projectLibrary.errors.aFolderNamedValueAlreadyExists', {value: folder});"
   },
   "desktop.projectLibrary.errors.aProjectPictureMustBeASmallPNG": {
     "locations": [
-      "desktop/project-library.cjs:277"
+      "desktop/project-library.cjs:288"
     ],
     "context": "throw messageError(new Error(''), 'desktop.projectLibrary.errors.aProjectPictureMustBeASmallPNG', {});"
   },
   "desktop.projectLibrary.errors.giveTheFolderAName": {
     "locations": [
-      "desktop/project-library.cjs:228",
-      "desktop/project-library.cjs:242"
+      "desktop/project-library.cjs:233",
+      "desktop/project-library.cjs:247"
     ],
     "context": "if (!folder) throw messageError(new Error(''), 'desktop.projectLibrary.errors.giveTheFolderAName', {});"
   },
@@ -8614,14 +8614,14 @@
   },
   "desktop.projectLibrary.errors.thereCanBeAtMostFolders": {
     "locations": [
-      "desktop/project-library.cjs:231"
+      "desktop/project-library.cjs:236"
     ],
     "context": "if (this.state.folders.length >= MAX_FOLDERS) throw messageError(new Error(''), 'desktop.projectLibrary.errors.thereCanBeAtMostFolders', {count: MAX_FOLDERS});"
   },
   "desktop.projectLibrary.errors.thisFolderNoLongerExists": {
     "locations": [
-      "desktop/project-library.cjs:207",
-      "desktop/project-library.cjs:240"
+      "desktop/project-library.cjs:212",
+      "desktop/project-library.cjs:245"
     ],
     "context": "if (folder === undefined) throw messageError(new Error(''), 'desktop.projectLibrary.errors.thisFolderNoLongerExists', {});"
   },
@@ -8639,7 +8639,7 @@
   },
   "desktop.projectLibrary.errors.valueWasMovedOrDeleted": {
     "locations": [
-      "desktop/project-library.cjs:189"
+      "desktop/project-library.cjs:194"
     ],
     "context": "throw messageError(new Error(''), 'desktop.projectLibrary.errors.valueWasMovedOrDeleted', {value: path.basename(project.path)});"
   },

@@ -165,8 +165,13 @@ class ProjectLibrary {
   list({ open = [] } = {}) {
     return this.enqueue(async () => {
       const tokens = new Map();
-      for (const item of Array.isArray(open) ? open : [])
-        if (typeof item?.filename === 'string' && typeof item.documentToken === 'string') tokens.set(canonicalPathKey(path.normalize(item.filename)), item.documentToken);
+      for (const item of Array.isArray(open) ? open : []) {
+        if (typeof item?.filename !== 'string' || typeof item.documentToken !== 'string') continue;
+        let filename = path.normalize(item.filename);
+        // remember() stores resolved paths; a tab may have opened through a linked folder instead.
+        try { filename = await fs.realpath(filename); } catch { /* A missing open file can still match its stored path. */ }
+        tokens.set(canonicalPathKey(filename), item.documentToken);
+      }
       const projects = await Promise.all(this.state.projects.map(async project => {
         let stat = null;
         try { stat = await fs.stat(project.path); } catch { /* A missing project stays listed so it can be removed. */ }
@@ -266,7 +271,13 @@ class ProjectLibrary {
   setPreview(absolutePath, { thumbnail, stats } = {}) {
     return this.enqueue(async () => {
       if (typeof absolutePath !== 'string') return { stored: false };
-      const key = canonicalPathKey(path.normalize(absolutePath));
+      let filename;
+      try { filename = await fs.realpath(absolutePath); }
+      catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return { stored: false };
+        throw error;
+      }
+      const key = canonicalPathKey(filename);
       const project = this.state.projects.find(item => canonicalPathKey(item.path) === key);
       if (!project) return { stored: false };
       const next = { ...project, stats: cleanStats(stats) ?? project.stats };
