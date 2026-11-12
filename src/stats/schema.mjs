@@ -13,6 +13,11 @@ export const STATS_VERSION = 1;
 /** One upload: at most this many bytes of JSON (as UTF-8) and this many reports. */
 export const MAX_BATCH_BYTES = 32 * 1024;
 export const MAX_REPORTS = 16;
+/**
+ * The share of sessions, in percent, the service may ask apps to report (docs/STATISTICS.md, "How much is sent"). Every
+ * report carries the share that was in force when its session was chosen, so a total can be estimated from a sample.
+ */
+export const SAMPLE_STEPS = Object.freeze([100, 50, 25, 10, 5, 2, 1]);
 
 // ---------------------------------------------------------------------------------------------------- words
 
@@ -211,6 +216,7 @@ const MESSAGE_KEY = /^[A-Za-z][\w.]{0,119}$/;
 
 const day = (v, at) => typeof v === 'string' && DAY.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v ? v : refuse(at);
 const sessionId = match(SESSION_ID, 32);
+const sample = (v, at) => SAMPLE_STEPS.includes(v) ? v : refuse(at);
 const stages = table(name => STAGES.includes(name), millis(3.6e6), STAGES.length);
 const frameTimes = (v, at) => Array.isArray(v) && v.length === FRAME_BOUNDS.length + 1 ? v.map((n, i) => whole(1e7)(n, `${at}[${i}]`)) : refuse(at);
 
@@ -225,7 +231,7 @@ const fileCount = record({ op: word(FILE_OPS), format: word(FORMATS), made: mayb
   failed: whole(1e5), cancelled: whole(1e5), ms: millis(8.64e7) });
 
 const session = record({
-  kind: word(['session']), sid: sessionId, day,
+  kind: word(['session']), sid: sessionId, day, sample,
   /** Minutes in use (the window in front, with input in the last minute or an animation playing) and minutes open. */
   minutes: whole(2880), open: whole(2880),
   end: word(ENDINGS),
@@ -251,7 +257,7 @@ const session = record({
 });
 
 const problem = record({
-  kind: word(['problem']), sid: sessionId, day,
+  kind: word(['problem']), sid: sessionId, day, sample,
   type: word(PROBLEM_TYPES),
   message: match(/^[^\u0000-\u001f\u007f]*$/, 240),
   /** The message key, when the app raised the error itself. */
@@ -268,7 +274,7 @@ const problem = record({
 });
 
 const fileFailure = record({
-  kind: word(['file']), sid: sessionId, day,
+  kind: word(['file']), sid: sessionId, day, sample,
   op: word(FILE_OPS), format: word(FORMATS), made: maybe(match(MADE_WITH, 36)),
   size: word(FILE_SIZES), scene: maybe(word(SCENES)),
   stage: word(FILE_STAGES), reason: word(FILE_REASONS), key: maybe(match(MESSAGE_KEY, 120)),

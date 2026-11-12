@@ -69,6 +69,20 @@ Statistics are on unless a person turns them off.
 - **Development runs** (an unpackaged app) collect and show "the last report" but upload only when
   `STYK_SITE_URL` names a local site. Tests and smoke scripts never reach the network.
 
+## How much is sent
+
+The app has many more users than the service needs reports from, and the service runs on a free hosting plan. So
+the service says, in its answer to every upload, what share of sessions it wants: one of 100, 50, 25, 10, 5, 2
+or 1 percent (`SAMPLE_STEPS`). The app remembers the share. When a session starts, the app draws a random
+number: a session that is not chosen counts nothing and sends nothing, exactly as if statistics were off for
+that session, except that the day still counts for the installation's own `first` facts. A chosen session's
+reports all carry the share in force when it was chosen (`sample`), so the dashboard can estimate totals from
+the sample. An installation reports every session until an answer tells it otherwise, so its first session is
+always reported.
+
+The service sets the share once a night from how many sessions the day before would have been at 100 percent
+and how many it aims to store a day.
+
 ## The numbers
 
 **Frames.** While a person drags, plays, scrubs, moves the view or draws, every frame the interface thread
@@ -91,6 +105,9 @@ started. Its summary is sent once; a repeat is a retried upload, and the intake 
 window in front and either input in the last minute or an animation playing. A session ends `clean` when
 the app quit in order, `crashed` when the window's process was lost, and `unknown` when the next start finds
 it was never closed (power loss, a forced end, a crash of the whole app).
+
+**`when`** is the local weekday (0 is Sunday) and part of the day (`dayPartOf` of the local hour) at which the
+session started.
 
 **The four `first` facts** use UTC days and weeks that run from Monday to Sunday: `ever` is the first session of
 the installation, `day` its first on this day, `week` its first in this week, and `back` its first on days 7
@@ -119,7 +136,10 @@ once a minute, and each problem and failed file operation as it happens. The des
 everything with `schema.mjs`, keeps a bounded queue in the app's data folder (at most 64 reports and 7 days),
 and uploads when the app starts, when it quits (waiting at most two seconds), and every 30 minutes while
 reports other than the running session are waiting. An upload the intake refuses as invalid is dropped, never
-retried; one it cannot take now is retried later.
+retried; one it cannot take now is retried later. The intake answers 200 `{"ok":true,"sample":25}` when it
+stored the batch (the share to use from the next session on), 400, 413 or 422 for a batch it will never take,
+429 or a 5xx when it cannot take it now (with `Retry-After`), and 410 when collection is paused: the app then
+drops what is waiting and does not upload again for a day.
 
 The bridge the preload script exposes (`window.stykDesktop`), all of it:
 

@@ -7,11 +7,11 @@ import { STATS_VERSION, MAX_REPORTS, MAX_BATCH_BYTES, FRAME_BOUNDS, StatsError, 
 const today = '2026-11-12';
 const sid = 'a'.repeat(32);
 const times = (...pairs) => { const out = emptyFrameTimes(); for (const [ms, n] of pairs) out[frameStep(ms)] += n; return out; };
-const session = (extra = {}) => ({ kind: 'session', sid, day: today, minutes: 42, open: 55, end: 'clean',
+const session = (extra = {}) => ({ kind: 'session', sid, day: today, sample: 100, minutes: 42, open: 55, end: 'clean',
   first: { ever: false, day: true, week: false, back: false }, age: 'month', when: { weekday: 4, part: 'evening' }, language: 'it',
   mode: { simple: 30, advanced: 12 }, features: ['onion', 'library'], reached: ['edit', 'play', 'save'],
   counts: { edits: 310, undos: 22, frames: 48, plays: 9, playSeconds: 140, saves: 3 }, ...extra });
-const problem = (extra = {}) => ({ kind: 'problem', sid, day: today, type: 'engine', message: 'index out of bounds: the len is 0 but the index is 0',
+const problem = (extra = {}) => ({ kind: 'problem', sid, day: today, sample: 25, type: 'engine', message: 'index out of bounds: the len is 0 but the index is 0',
   stack: ['styk_eval::drawlist::encode_strokes styk-eval/src/drawlist.rs:412', 'render engine-export-worker.mjs:280'], doing: 'exporting',
   trail: ['open', 'toggle-onion', 'play', 'export-video'], scene: '10k-50k', features: ['onion'], times: 1, ...extra });
 const batch = (...reports) => ({ v: STATS_VERSION, app: { version: '1.2.6', channel: 'stable', platform: 'win32', arch: 'x64' },
@@ -24,7 +24,7 @@ test('a report passes unchanged and nothing outside the description passes at al
     files: [{ op: 'open', format: 'sticknodes', made: 'sticknodes/4.2', ok: 2, failed: 1, cancelled: 0, ms: 840 }],
     project: { scene: '50k-200k', figures: '21-100', frames: '200-1k', rate: '12-15' }, commands: { undo: 22, 'add-frame': 48 },
     recovery: { offered: true, restored: true, failed: false } }), problem(),
-  { kind: 'file', sid, day: today, op: 'save', format: 'styk', size: '1-10mb', scene: '1k-10k', stage: 'write', reason: 'disk-full', kept: 'untouched', ms: 91 });
+  { kind: 'file', sid, day: today, sample: 100, op: 'save', format: 'styk', size: '1-10mb', scene: '1k-10k', stage: 'write', reason: 'disk-full', kept: 'untouched', ms: 91 });
   const clean = validateBatch(sent, { today });
   assert.equal(clean.reports[0].smooth[0].worst, 120, 'milliseconds keep one decimal');
   assert.equal(clean.reports[0].smooth[0].stages.geometry, 900.3);
@@ -38,6 +38,8 @@ test('a report passes unchanged and nothing outside the description passes at al
   refusedAt(batch(session({ commands: { 'Goku punches': 1 } })), 'batch.reports[0].commands.Goku punches');
   refusedAt(batch(session({ files: [{ op: 'open', format: 'styk', made: 'C:/Users/me', ok: 1, failed: 0, cancelled: 0, ms: 1 }] })), 'batch.reports[0].files[0].made');
   refusedAt(batch(session({ sid: 'A'.repeat(32) })), 'batch.reports[0].sid');
+  refusedAt(batch(session({ sample: 30 })), 'batch.reports[0].sample');
+  refusedAt(batch(problem({ sample: undefined })), 'batch.reports[0].sample');
   refusedAt(batch({ kind: 'screenshot' }), 'batch.reports[0].kind');
   refusedAt(batch(), 'batch.reports');
   refusedAt(batch(...Array.from({ length: MAX_REPORTS + 1 }, () => problem())), 'batch.reports');
