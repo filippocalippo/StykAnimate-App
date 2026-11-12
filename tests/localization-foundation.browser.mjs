@@ -200,9 +200,9 @@ try {
   check('Localized timeline menu commands retain their action',await page.evaluate(()=>timelineCaptionActionRan));
   await page.evaluate(()=>{timelineCaptionHost.scroll.remove();styk.localization.localization.setPseudo(null);});
   await page.locator('.brand[data-action=menu]').click();
-  await page.locator('#menu [data-action=save]').focus();
+  await page.locator('#menu [data-action=settings]').focus();
   await page.evaluate(()=>{window.menuRow=document.activeElement;styk.localization.localization.setPseudo('long');});
-  check('Open menu rows update long captions while retaining focus, row and shortcut nodes',await page.evaluate(()=>document.activeElement===menuRow&&menuRow.isConnected&&menuRow.querySelector('span').textContent.includes('［')&&menuRow.querySelector('kbd').textContent==='Ctrl+S'));
+  check('Open menu rows update long captions while retaining focus, row and shortcut nodes',await page.evaluate(()=>document.activeElement===menuRow&&menuRow.isConnected&&menuRow.querySelector('span').textContent.includes('［')&&menuRow.querySelector('kbd').textContent==='Ctrl+,'));
   await page.keyboard.press('Escape');
   await page.evaluate(async()=>{
     const {createDialog}=await import('/src/ui/ui-dialog.mjs');

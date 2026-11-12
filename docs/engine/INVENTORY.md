@@ -468,6 +468,7 @@ Interface: stays in JS.
 | `src/camera-motion-localization.mjs` |  | stays |  |
 | `src/camera-motion-timeline.mjs` |  | stays |  |
 | `src/camera-motion-ui.mjs` |  | stays |  |
+| `src/canvas-context-menu.mjs` |  | stays |  |
 | `src/canvas-guides.mjs` |  | stays |  |
 | `src/canvas-handle-overlay.mjs` |  | stays |  |
 | `src/canvas-handles.mjs` |  | stays |  |

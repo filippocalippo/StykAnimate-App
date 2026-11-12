@@ -523,14 +523,14 @@ try {
     await settle(200);
     await page.click('.brand');
     await settle();
-    assert.equal(await page.evaluate(() => document.getElementById('menu').hasAttribute('data-more-below')), true, 'the mark menu fades while rows wait below');
     await page.getByRole('menuitem', {name: 'View', exact: true}).click();
     await settle();
     const view = await page.evaluate(() => {
       const menu = document.querySelector('.ui-menu[aria-label="View"]'), box = menu.getBoundingClientRect();
-      return {inside: box.left >= 0 && box.right <= innerWidth, cut: [...menu.querySelectorAll('.ui-menu-item > span')].filter(span => span.scrollWidth > span.clientWidth + 1).map(span => span.textContent)};
+      return {inside: box.left >= 0 && box.right <= innerWidth, cut: [...menu.querySelectorAll('.ui-menu-item > span')].filter(span => span.scrollWidth > span.clientWidth + 1).map(span => span.textContent),
+        more: menu.hasAttribute('data-more-below')};
     });
-    assert.deepEqual(view, {inside: true, cut: []});
+    assert.deepEqual(view, {inside: true, cut: [], more: true}, 'the View menu fades while rows wait below');
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
     await page.setViewportSize({width: 1440, height: 900});
@@ -750,6 +750,9 @@ try {
     assert.deepEqual(await row.evaluate(item => [item.querySelector(':scope > span').textContent, item.querySelector('kbd').textContent,
       item.getAttribute('aria-keyshortcuts'), item === item.parentElement.querySelector('[data-action]')]),
     ['Search commands…', 'Ctrl+P', 'Control+P Control+Shift+P F1', true], 'the first row of the StykAnimate menu');
+    assert.deepEqual(await page.locator('#menu').evaluate(menu => [...menu.querySelectorAll('.ui-menu-item')].map(item => item.dataset.action ?? item.textContent.trim())),
+      ['command-palette', 'File', 'Edit', 'View', 'Joint', 'Animation', 'Help', 'settings'],
+      'the StykAnimate menu holds Search commands, the application menus and Settings, and repeats none of their commands');
     await row.click();
     assert.deepEqual(await page.evaluate(() => [styk.ui.palette.isOpen, document.getElementById('menu').hidden]), [true, true]);
     await page.keyboard.press('Escape');

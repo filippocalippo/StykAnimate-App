@@ -94,3 +94,19 @@ export function applicationMenuItems(name, editor, desktop) {
   };
   return (menus[name] || menus.file).map(item => item && HOTKEY_BY_ID.has(item[0]) ? messageTuple([item[0], item[1], item[2], shortcutLabel(undefined, item[0]), item[4]], tupleMessages(item)) : item);
 }
+/**
+ * The mark's menu (the StykAnimate menu, top left): Search commands…, then File, Edit, View, Joint, Animation and
+ * Help as submenus (`menus`), the open projects where the band has no room for them (`projects`, or null) and
+ * Settings. Every other command has its home in one of those menus, the band or the canvas, so it is not repeated
+ * here. `palette` is the Search commands… row, which the command registry labels.
+ */
+export function markMenuItems({palette, menus, projects = null}) {
+  return [
+    palette,
+    null,
+    ...menus,
+    ...(projects ? [null, projects] : []),
+    null,
+    messageTuple(['settings', 'settings', interfaceText("app.settings"), 'Ctrl ,'], {2: {key: "app.settings", params: {}}}),
+  ];
+}
