@@ -586,7 +586,7 @@ rig conversion or vector tracing.
 Run `node --test tests/drawing.test.mjs`; the browser suites
 (`tests/drawing-*.browser.mjs`) run against the local app at port 47839 (or set
 `STYK_URL`). See [verification report](../artifacts/drawing/VERIFICATION.md).
-`tests/drawing-latency.browser.mjs` measures input-to-frame latency.
+`scripts/benchmark-drawing-latency.mjs` measures input-to-frame latency (run by hand; not part of the browser tests).
 The pan, expansion and shortcut refinements have a separate regression suite:
 `node tests/drawing-ux.browser.mjs`; see its [report](../artifacts/drawing-ux/VERIFICATION.md). A run writes its
 screenshots and ux.json to the ignored `artifacts/drawing-ux-latest`; set
