@@ -1,10 +1,15 @@
-/** Real export worker, native PIV encode/decode, and Canvas pixel comparisons. */
+/** Real export worker, native PIV encode/decode, and Canvas pixel comparisons. The source-backed exports open three Pivot
+ * samples from the folder beside the repository (desktop/samples.cjs); without them the test skips. */
 import {chromium} from './support/playwright.mjs';
 import {createRequire} from 'node:module';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {exposeWorkspaceSamples} from './support/workspace-samples.mjs';
+import {missingFixture} from './helpers/local-fixtures.mjs';
+const SAMPLES = ['Pivot Animator v5/Animations/tween_NY_day-night.piv', 'Pivot Animator v5/Animations/text_bike.piv', 'Pivot Animator v5/Animations/Legacy/sprite_demo.piv'];
+const missing = missingFixture(...SAMPLES.map(name => `../${name}`));
+if (missing) { console.log(`SKIP authored-export: ${missing}`); process.exit(0); }
 const require = createRequire(import.meta.url), {startDesktopHost} = require('../desktop/web-host.cjs');
 const appRoot = fileURLToPath(new URL('..', import.meta.url)), out = path.join(appRoot, 'artifacts');
 const backend = await startDesktopHost({appRoot}); let browser;
@@ -14,7 +19,7 @@ try {
   await exposeWorkspaceSamples(page);
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(backend.origin); await page.waitForFunction(() => window.styk?.ready);
-  const result = await page.evaluate(async () => {
+  const result = await page.evaluate(async samples => {
     const [{emptyDocument, createFrame, createObject}, {DocumentExporter}, {ImportClient}, {pageEditor}] = await Promise.all([
       import('/src/demo.mjs'), import('/src/document-export.mjs'), import('/src/import-client.mjs'), import('/tests/support/page-editor.mjs'),
     ]);
@@ -65,7 +70,7 @@ try {
     const stykFile = await exporter.export(editor.report, {format: 'styk', name: 'Authored channels', revision: editor.revision}), restored = await importer.importFile(new File([stykFile], 'authored.styk'));
     check(JSON.stringify(restored.document._styk.animation) === originalChannels, 'STYK changed sparse authored keys.');
     const sourceFiles = [];
-    for (const name of ['Pivot Animator v5/Animations/tween_NY_day-night.piv', 'Pivot Animator v5/Animations/text_bike.piv', 'Pivot Animator v5/Animations/Legacy/sprite_demo.piv']) {
+    for (const name of samples) {
       const opened = await importer.openSample(name, {open: {layerTimeline: true}}), sourceEditor = styk.editor.load(opened.document);
       sourceEditor.addAnimationKeys([{target: {kind: 'camera'}, property: 'x', tick: 0, value: 23},
         {target: {kind: 'scene'}, property: 'color', tick: 0, value: 0xffbada55}]);
@@ -89,7 +94,7 @@ try {
     window.exportFiles = {piv, styk: stykFile}; exporter.dispose(); importer.dispose();
     return {pivBytes: piv.size, stykBytes: stykFile.size, pivTimings, outputFrames: native.total_output_frames, frames, sourceFiles,
       mainThreadLongTasks: tasks, maxAnimationFrameGapMs: maxGap, nativePosesUntouched: true, stykChannelsExact: true};
-  });
+  }, SAMPLES);
   await mkdir(out, {recursive: true});
   for (const kind of ['piv', 'styk']) {
     const bytes = await page.evaluate(async kind => Array.from(new Uint8Array(await window.exportFiles[kind].arrayBuffer())), kind);
