@@ -6,7 +6,7 @@ members = ["crates/*"]
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
-license = "UNLICENSED"
+license = "GPL-3.0-or-later"
 publish = false
 
 [profile.release]

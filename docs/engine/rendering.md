@@ -858,7 +858,7 @@ frames equal the stage's.
 
 **Testing**: `cargo test -p styk-engine --test thumbnails` (thumbnail frames prepared on workers and
 never evaluated by asking, the library fit and wrap-around, a file's own pictures),
-`cargo test -p styk-engine --lib` (the card's framing), `cargo test -p styk-eval --test vfx_layers`
+`cargo test -p styk-engine --lib` (the card's framing), `cargo test -p styk-eval --test suite -- vfx_layers::`
 (`artwork_bounds` with effect padding) and `--test generators` (`Batch::bounds` holds every live
 particle), `node --test tests/engine-previews.test.mjs` (which renderer draws a thumbnail, the
 preview worker's CPU thumbnails from the engine's document, the thumbnails not drawn, the preview
@@ -1146,7 +1146,7 @@ translucent faces blending in drawing order, filtered layers; each fails on the 
 rasterizer; on a GPU, six repository documents by D13 against styk-render, and the generator
 fixture), `styk raster-parity [--export] [--crisp] [--library] [--census] [--ticks N]
 [--out dir] --list …` (the CPU against the GPU over a corpus, above);
-`cargo test -p styk-render -p styk-raster`; text: `cargo test -p styk-eval --test text`
+`cargo test -p styk-render -p styk-raster`; text: `cargo test -p styk-eval --test suite -- text::`
 (raster entries, glyph records and their mask layouts against numbers the editor printed,
 finer curves for large text; each fails without its rule), `-p styk-render --test glyphs`
 (masks draw the glyphs, are kept across frames, give way to triangles past density 8) and

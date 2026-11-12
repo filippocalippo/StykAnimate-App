@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, {after} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, readFile, readdir, rm, stat} from 'node:fs/promises';
 import os from 'node:os';
@@ -9,6 +9,10 @@ import {sanitizeError} from '../src/telemetry-schema.mjs';
 import {appEntries, bundledIndex, buildApp} from '../scripts/build-app.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** The application built once for the tests below, which only read it: where it is and what the build answered. */
+let built;
+const bundle = () => built ??= mkdtemp(path.join(os.tmpdir(), 'styk-bundle-')).then(async output => ({output, result: await buildApp({root, output})}));
+after(async () => { if (built) await rm((await built).output, {recursive: true, force: true}); });
 async function* sources(directory) {
   for (const entry of await readdir(directory, {withFileTypes: true})) {
     const full = path.join(directory, entry.name);
@@ -60,10 +64,8 @@ test('the bundled page preloads the bundle where the page preloaded the modules'
   assert.throws(() => bundledIndex('<head></head>', []), /no modulepreload links/);
 });
 
-test('the bundle holds the page, its workers and the chunks they share, and refers to nothing it lacks', async t => {
-  const output = await mkdtemp(path.join(os.tmpdir(), 'styk-bundle-'));
-  t.after(() => rm(output, {recursive: true, force: true}));
-  const result = await buildApp({root, output});
+test('the bundle holds the page, its workers and the chunks they share, and refers to nothing it lacks', async () => {
+  const {output, result} = await bundle();
   const {page, workers} = await appEntries(root);
   for (const file of [...Object.values(page), ...Object.values(workers)]) assert.ok((await stat(path.join(output, file))).isFile(), `${file} is built`);
   const index = await readFile(path.join(output, 'index.html'), 'utf8');
@@ -79,10 +81,8 @@ test('the bundle holds the page, its workers and the chunks they share, and refe
   for (const file of [...Object.values(page), ...Object.values(workers)]) assert.ok(!(await readFile(path.join(output, file), 'utf8')).includes('import.meta.url'), `${file} has no import.meta.url`);
 });
 
-test('the bundled stylesheet is one file whose fonts and images are found from where it is served', async t => {
-  const output = await mkdtemp(path.join(os.tmpdir(), 'styk-bundle-css-'));
-  t.after(() => rm(output, {recursive: true, force: true}));
-  await buildApp({root, output});
+test('the bundled stylesheet is one file whose fonts and images are found from where it is served', async () => {
+  const {output} = await bundle();
   const css = await readFile(path.join(output, 'src/styles/app.css'), 'utf8');
   assert.ok(!/@import/.test(css), 'no @import is left to fetch');
   assert.match(css, /@layer\s+legacy,\s*reset,\s*tokens,\s*base,\s*layout,\s*components,\s*features,\s*states,\s*utilities\s*;/);
@@ -99,10 +99,8 @@ async function builtLines(output) {
   return new Map(await Promise.all(files.map(async file => [file, (await readFile(path.join(output, file), 'utf8')).split('\n')])));
 }
 
-test('the bundle is readable, keeps the vendored licence header, and leaves no source maps behind', async t => {
-  const output = await mkdtemp(path.join(os.tmpdir(), 'styk-bundle-readable-'));
-  t.after(() => rm(output, {recursive: true, force: true}));
-  await buildApp({root, output});
+test('the bundle is readable, keeps the vendored licence header, and leaves no source maps behind', async () => {
+  const {output} = await bundle();
   const lines = await builtLines(output);
   const all = [...lines.values()].flat();
   assert.ok(all.includes('// src/engine/engine-owner.mjs'), 'modules are told apart by their path comments, as unminified output does');
@@ -110,10 +108,8 @@ test('the bundle is readable, keeps the vendored licence header, and leaves no s
   for (const directory of ['src', 'src/chunks', 'src/engine']) assert.ok(!(await readdir(path.join(output, directory))).some(name => name.endsWith('.map')), `no source map in ${directory}`);
 });
 
-test('a frame in a built script is reported as the module and source line it came from', async t => {
-  const output = await mkdtemp(path.join(os.tmpdir(), 'styk-bundle-frames-'));
-  t.after(() => rm(output, {recursive: true, force: true}));
-  await buildApp({root, output});
+test('a frame in a built script is reported as the module and source line it came from', async () => {
+  const {output} = await bundle();
   const index = await readFile(path.join(output, 'index.html'), 'utf8');
   assert.ok(index.indexOf('src/frame-map.js') > 0 && index.indexOf('src/frame-map.js') < index.indexOf('src/theme-bootstrap.js'), 'the tables load before anything else');
   const context = vm.createContext({});

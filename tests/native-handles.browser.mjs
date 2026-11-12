@@ -3,7 +3,10 @@ import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import {corpusPath} from './support/corpus.mjs';
+import {corpusFile} from './support/corpus.mjs';
+import {missingFixture} from './helpers/local-fixtures.mjs';
+// The last part poses the private Akane sample project; without it (or with STYK_SKIP_AKANE=1) that part is skipped.
+const akaneSource=corpusFile('Downloads/16 Akane vs Akato Segundo round (3).piv'),akaneMissing=missingFixture(akaneSource);
 const out=path.resolve('artifacts/native-handle-pointer'); await mkdir(out,{recursive:true});
 const browser=await chromium.launch({channel:'chrome',headless:true});
 const page=await browser.newPage({viewport:{width:1600,height:1000}}), errors=[],checks=[],routes=[];
@@ -24,9 +27,10 @@ async function setup() {
       createObject(figure,3,640,420,{scale:.6})]),createFrame([createObject(figure,1,300,220)])];
     styk.editor.load(report,'Native handle pointer test'); styk.editor.select(2,0); styk.state.handles=true;
     styk.state.settings.showUnselectedHandles=true;styk.state.settings.handleSize=5;styk.fit();
+    // Where the editing view draws a point: without the scene camera, as the canvas does while not playing.
     const {worldToScreen}=await import('/src/renderer-geometry.mjs');
     window.__screen=point=>{const r=document.querySelector('#viewport').getBoundingClientRect();
-      const p=worldToScreen(point,{report:styk.editor.report,frame:styk.editor.evaluatedFrame,view:styk.state.view});return{x:r.x+p.x,y:r.y+p.y};};
+      const p=worldToScreen(point,{report:styk.editor.report,frame:styk.editor.evaluatedFrame,view:styk.state.view,cameraEnabled:false});return{x:r.x+p.x,y:r.y+p.y};};
     window.__points=()=>[...styk.editor.geometry.objects].flatMap(([slot,g])=>[...g.joints].map(([id,p])=>({slot,uid:g.obj.unique_id,id,...p})));
     window.__before=__points(); window.__frameBefore=JSON.stringify(styk.editor.evaluatedFrame);
   });
@@ -87,9 +91,10 @@ try {
   const rightR=await drag(1,1,{x:432,y:236},{keys:['r','Shift'],button:'right',name:'R-shift-right-bend'});
   check('R plus Shift + right drag repositions with tangent-preserving bend mode',rightR.kind==='handle-edit'&&await page.evaluate(()=>styk.editor.evaluatedFrame.objects[0].bend_flag===1));
   await page.screenshot({path:path.join(out,'small-handle-edit.png')});
-  if(process.env.STYK_SKIP_AKANE!=='1') {
+  if(akaneMissing)console.log('SKIP PART Akane',akaneMissing);
+  else if(process.env.STYK_SKIP_AKANE!=='1') {
     await page.evaluate(()=>styk.editor.markSaved());
-    await page.locator('#file-input').setInputFiles(corpusPath('Downloads/16 Akane vs Akato Segundo round (3).piv'));
+    await page.locator('#file-input').setInputFiles(akaneSource);
     await page.waitForFunction(()=>styk.editor.report.keyframes.length===1479&&!styk.state.importing,null,{timeout:180000});
     await page.evaluate(()=>{styk.editor.selectFrame(1478);styk.editor.select(460611,0);styk.fit();window.__before=__points();});await settle();
     const point=await worldPoint(460616,1),raw=await page.evaluate(()=>({angles:styk.editor.evaluatedFrame.objects.map(o=>({uid:o.unique_id,angles:o.angles.slice(),x:o.root_x,y:o.root_y,joined:!!o.join}))}));

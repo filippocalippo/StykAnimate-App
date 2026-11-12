@@ -377,7 +377,8 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   rather than a copy. The scenes, the draw lists and every read are the ones the plain builds give
   (`styk-eval/tests/build_throughput.rs`).
 - A geometry read names the read the interface holds (`since`). The session sends the groups of the objects built since that
-  read, or all of them when the read named is not the one the session last answered. The groups held stay as they are, so the
+  read, or all of them when the read named is not the one the session last answered or the scene on show is older than that read
+  (a scene the stage drew of this frame before the interface read another). The groups held stay as they are, so the
   descriptors the canvas keeps by their identity stay valid while a gesture moves other figures. Unchanged: the same
   geometry object comes back.
 - The values the interface shows of the frame (`animationValue`, `vfxEffects`, `segmentAnimationTarget`,

@@ -7,7 +7,7 @@ use std::path::Path;
 use styk_doc::{Value, json};
 use styk_edit::load::prepare_for_editor;
 
-mod damage;
+use crate::damage;
 use damage::{paths, read, replace, wrong_values};
 
 fn run(name: &str, document: &Value, stride: usize) {

@@ -22,7 +22,8 @@ const site = remote
   : await startWebServer({ root: existing ?? (await buildWeb({ output: path.join(temp, 'site') })).output });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const checks = [];
-const check = (name, condition) => { assert.ok(condition, name); checks.push(name); console.log('PASS', name); };
+// `measured` is what a failure reports beside the name: a run that fails on a runner can then be read from its log.
+const check = (name, condition, measured) => { assert.ok(condition, measured === undefined ? name : `${name} (measured ${JSON.stringify(measured)})`); checks.push(name); console.log('PASS', name); };
 
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
@@ -131,11 +132,15 @@ try {
   const tone = Float32Array.from({ length: 48000 }, (_, i) => 0.5 * Math.sin(2 * Math.PI * 440 * i / 48000));
   const recording = path.join(temp, 'tone.wav');
   await writeFile(recording, new Uint8Array(await pcmWave([tone]).arrayBuffer()));
+  // The recording goes in at the playhead. Playback above leaves that wherever it stopped, which on a slow machine
+  // is sometimes the first tick, where the placement check below would say nothing: put it on a known later tick.
+  const playhead = await page.evaluate(() => { const { editor } = window.styk; editor.seek(Math.min(3, editor.totalTicks - 1)); return { tick: editor.tick, ticks: editor.totalTicks }; });
+  assert.ok(playhead.tick > 0, `the scene has a tick after the first to place the recording on (${JSON.stringify(playhead)})`);
   await page.getByRole('button', { name: 'Audio', exact: true }).click();
   await page.getByLabel('Choose audio recording').setInputFiles(recording);
   await page.waitForFunction(() => window.styk.editor.report._styk.audio?.tracks[0]?.clips.length === 1, undefined, { timeout: 30000 });
   // The recording starts at the playhead and the scene grows to fit it.
-  const place = await page.evaluate(() => { const { editor } = window.styk, report = editor.report; return { start: report._styk.audio.tracks[0].clips[0].start, seconds: editor.totalTicks / (report.frame_delay_ms ? 1000 / report.frame_delay_ms : report.fps) }; });
+  const place = await page.evaluate(() => { const { editor } = window.styk, report = editor.report; return { start: report._styk.audio.tracks[0].clips[0].start, tick: editor.tick, seconds: editor.totalTicks / (report.frame_delay_ms ? 1000 / report.frame_delay_ms : report.fps) }; });
   const heard = async (action, name) => {
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: 120000 }),
@@ -159,7 +164,7 @@ try {
   if (aacSupported) {
     const withMp4 = await heard('export-mp4', 'sound.mp4');
     check('An MP4 carries the project\'s sound (AAC): the same pitch, level and stereo layout', Math.abs(withMp4.hertz - 440) < 6 && Math.abs(withMp4.rms - 0.354) < 0.05 && withMp4.channels === 2);
-    check('The MP4 soundtrack lasts as long as the animation', Math.abs(withMp4.seconds - place.seconds) < 0.1);
+    check('The MP4 soundtrack lasts as long as the animation', Math.abs(withMp4.seconds - place.seconds) < 0.1, {sound: withMp4, place});
   } else {
     // AAC encoding is unavailable in Linux Chromium. Verify the supported error
     // path rather than leaving a pending download or silently losing sound.
@@ -172,7 +177,7 @@ try {
   }
   const withWebm = await heard('export-video', 'sound.webm');
   check('A WebM carries the project\'s sound (Opus): the same pitch and level', Math.abs(withWebm.hertz - 440) < 6 && Math.abs(withWebm.rms - 0.354) < 0.05);
-  check('The soundtrack is as long as the animation, with the recording where it was placed', Math.abs(withWebm.seconds - place.seconds) < 0.1 && place.start > 0);
+  check('The soundtrack is as long as the animation, with the recording where it was placed', Math.abs(withWebm.seconds - place.seconds) < 0.1 && place.start > 0, {sound: withWebm, place});
 
   const capabilities = await page.evaluate(async () => (await import('/src/export-capabilities.mjs')).getExportCapabilities());
   const offered = capabilities.formats.find((item) => item.id === 'mp4');

@@ -1,7 +1,7 @@
 /**
  * Builds the engine's three WebAssembly modules into src/engine/pkg/ (git-ignored):
  *
- *   node scripts/engine-build.mjs            release build (wasm-opt when available)
+ *   node scripts/engine-build.mjs            release build (wasm-opt when it is installed; releases require it)
  *   node scripts/engine-build.mjs --dev      iteration build (profile wasm-dev): seconds, for diagnosis, never for a measured result
  *   node scripts/engine-build.mjs --names    release build that keeps the function names, for a CPU profile of the app (the code is the
  *                                            release build's; only the name section is kept)
@@ -27,8 +27,8 @@ const engine = path.join(root, 'engine');
 const out = path.join(root, 'src/engine/pkg');
 export const TOOLCHAIN = 'nightly-2026-09-15';
 export const WASM_BINDGEN = '0.2.129';
-// The codec needs no atomics, so the stable toolchain builds it.
-export const CODEC_TOOLCHAIN = 'stable';
+// The codec and the drawing engine need no atomics: the repository's pinned stable Rust builds them (rust-toolchain.toml).
+export const CODEC_TOOLCHAIN = readFileSync(path.join(root, 'rust-toolchain.toml'), 'utf8').match(/^channel = "([^"]+)"/m)[1];
 // WebAssembly SIMD (+simd128) is on in all three modules: it is in every browser the editor already needs (Chrome 91,
 // Firefox 89, Safari 16.4, the version OffscreenCanvas sets), and the compiler only uses it where IEEE results stay
 // exact (docs/engine/threading.md, Build). The codec and drawing modules take it through RUSTFLAGS: they need nothing else.
@@ -54,6 +54,8 @@ function has(command, args = ['--version']) {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
+// A release asks for wasm-opt (the engine-build action): it fails here instead of shipping the larger modules silently.
+if (!dev && process.env.STYK_REQUIRE_WASM_OPT === '1' && !has('wasm-opt')) throw new Error('wasm-opt is required for this build (STYK_REQUIRE_WASM_OPT=1): install binaryen.');
 const bindgen = has('wasm-bindgen');
 if (!bindgen?.endsWith(WASM_BINDGEN))
   throw new Error(`wasm-bindgen ${WASM_BINDGEN} is required (found ${bindgen ?? 'none'}): cargo install wasm-bindgen-cli --version ${WASM_BINDGEN} --locked`);

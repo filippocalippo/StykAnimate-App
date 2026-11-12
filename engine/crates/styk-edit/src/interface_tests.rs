@@ -772,6 +772,38 @@ fn the_groups_the_interface_holds_stay_those_of_a_whole_read_through_gestures_un
 }
 
 #[test]
+fn a_read_of_a_frame_the_stage_drew_before_the_last_read_sends_its_groups() {
+    // The stage draws the first row, the interface reads it, then the second row, then the first again. In a document without effects
+    // the stage's scene of the first row is the one held for it, older than the read of the second row: the interface must be sent
+    // that scene's groups, not told that nothing changed.
+    let mut tried = 0;
+    for name in ["gestures-sheet", "rig-sheet", "startup-sheet"] {
+        let (mut reading, _) = tape(name);
+        let rows = read(&mut reading, "timeline", "{}");
+        let starts: Vec<String> = rows.elements().unwrap().iter().take(2).map(|row| format!("[{}]", row.item(0).unwrap().as_f64().unwrap())).collect();
+        if starts.len() < 2 {
+            continue;
+        }
+        tried += 1;
+        let (mut held, mut token) = (std::collections::BTreeMap::new(), None);
+        call(&mut reading, "seek", &starts[0]);
+        reading.editor.shown_scene(false, crate::Flavor::Sampled).unwrap().unwrap();
+        for tick in [&starts[0], &starts[1], &starts[0]] {
+            call(&mut reading, "seek", tick);
+            let read = geometry(&mut reading, token);
+            token = read.get("token").and_then(Value::as_f64);
+            hold(&mut held, &read);
+            let (mut whole, _) = tape(name);
+            call(&mut whole, "seek", tick);
+            let mut expected = std::collections::BTreeMap::new();
+            hold(&mut expected, &geometry(&mut whole, None));
+            assert_eq!(held, expected, "{name} seek {tick}: the interface holds the groups a whole read of the frame gives");
+        }
+    }
+    assert!(tried > 0, "a tape with two rows");
+}
+
+#[test]
 fn a_session_has_counted_the_figures_of_its_frames_before_its_first_edit() {
     for name in ["gestures-sheet", "rig-sheet", "startup-sheet", "channels-pose-sheet"] {
         let (session, _) = tape(name);

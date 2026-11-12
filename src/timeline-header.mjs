@@ -467,9 +467,10 @@ export function createTimelineHeader(ctx, host) {
   }
   const resize = new ResizeObserver(() => requestFold());
   resize.observe(toolbar);
-  // A tier change folds or restores controls without resizing the header.
+  // A tier change folds or restores controls without resizing the header, and so does a new language (the
+  // root's lang changes before the words do; the fold measures them on the next frame).
   const tiers = new MutationObserver(() => { syncFolds(); requestFold(); });
-  tiers.observe(document.documentElement, {attributes: true, attributeFilter: ['data-tier']});
+  tiers.observe(document.documentElement, {attributes: true, attributeFilter: ['data-tier', 'lang']});
   if (workspace) tiers.observe(workspace, {attributes: true, attributeFilter: ['data-mode']});
   syncFolds();
 

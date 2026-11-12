@@ -40,8 +40,9 @@ in `robots.txt`. Deploy the verified editor before deploying the site's launch l
 
 The reusable `web-verify.yml` workflow builds and tests the production files on
 Windows and Linux. Windows must export real MP4/AAC sound; Linux verifies a clear
-AAC-unavailable result where necessary and real WebM/Opus sound. Firefox and WebKit
-run the storage, library and browser-support checks on Linux. The release workflow
+AAC-unavailable result where necessary and real WebM/Opus sound. The storage, library
+and editor suites do not run there (see Browsers below). In the Tests
+workflow it takes the engine build of the same run; a release builds its own. The release workflow
 retains the exact deployable `browser-release` artifact for 30 days; it does not
 deploy it automatically. Record the deployed build hash from `build-info.json`
 and run the live checks after an authorized deployment.
@@ -185,9 +186,11 @@ goes through the counting route and is remembered in `localStorage`, later ones 
 The 1.2 candidate workflow runs real browsers through
 `tests/support/cross-browser.mjs`, using the locked Playwright version:
 
-Since the Rust engine (2026-11), the workflow runs the storage, library and editor suites (`npm run test:web:browsers`)
-in Chrome on Windows only: the Linux runner has no GPU, and its browsers either offer no WebGPU or WebGL 2 (Firefox,
-WebKit) or stop offering an adapter partway through. The Firefox and WebKit columns below describe the 1.2 candidate
+Since the Rust engine (2026-11), the workflow no longer runs the storage, library and editor suites
+(`npm run test:web:browsers`): they open several editors in one browser, the runners have no GPU, and on a software
+renderer some of those editors do not start, on Windows as on Linux (two failed runs of two on 2026-11-12). Run them,
+with every other browser test, on a machine with a GPU: `npm run test:browser`, about fifteen minutes, before a
+release and after a change to the interface. The Firefox and WebKit columns below describe the 1.2 candidate
 run and are not checked by the workflow today; run them by hand with `STYK_BROWSER=firefox|webkit` on a machine with a GPU.
 
 | Check | Chromium on Windows/Linux | Firefox on Linux | WebKit on Linux |

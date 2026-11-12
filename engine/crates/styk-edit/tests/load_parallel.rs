@@ -7,7 +7,7 @@ use styk_doc::fanout::StdThreads;
 use styk_doc::{Value, json};
 use styk_edit::load::{prepare_for_editor, prepare_for_editor_with};
 
-mod damage;
+use crate::damage;
 use damage::{paths, read, replace, wrong_values};
 
 /// The outcome of a load as something comparable: the document and its indexes as JSON text, or the refusal's text.

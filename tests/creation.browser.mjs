@@ -9,6 +9,7 @@ import {createHash} from 'node:crypto';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {missingFixture} from './helpers/local-fixtures.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(appRoot, 'artifacts'), url = process.env.STYK_URL || 'http://127.0.0.1:47831';
@@ -24,6 +25,8 @@ const selection = () => value(() => [...styk.editor.selectedUids]);
 const poses = () => value(() => styk.editor.selectionFrame.objects.map(o => ({uid: o.unique_id, x: o.root_x, y: o.root_y, scale: o.scale, join: o.join})));
 async function layer(uid, shift = false) {
   await page.evaluate(({uid, shift}) => styk.editor.select(uid, -1, {toggle: shift}), {uid, shift});
+  // The chrome (inspector, layers) updates in one pass a frame (src/ui/ui-invalidation.mjs).
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 async function point(x, y) {
   return page.evaluate(({x, y}) => {
@@ -152,6 +155,10 @@ try {
   await page.locator('#file-input').setInputFiles(nativePath); await page.waitForFunction(() => styk.editor.name === 'creation-authored');
   check('Reopening the saved native file retains text editing metadata and group joins', await value(() => styk.editor.report.figure_types.some(f => f._styk?.textAuthoring?.text === 'Move together\nCafé • Привет') && creationSamples.sampleSheet(styk.editor.report,0).objects.filter(o => o.join).length === 2));
 
+  // The rest edits a Pivot sample that is not in the repository: without it that part is skipped, and says so.
+  const samplesMissing = missingFixture('../Pivot Animator v5/Animations/tween_pendulum.piv', '../Pivot Animator v5/Figures/sheep.stk');
+  if (samplesMissing) console.log('SKIP PART Pivot samples', samplesMissing);
+  else {
   const sourcePath = path.resolve(appRoot, '../Pivot Animator v5/Animations/tween_pendulum.piv');
   const sourceDigest=createHash('sha256').update(await readFile(sourcePath)).digest('hex');
   await page.locator('#file-input').setInputFiles(sourcePath); await page.waitForFunction(() => styk.editor.name === 'tween_pendulum');
@@ -189,6 +196,7 @@ try {
   }, [...await readFile(pivPath)]);
   check('Source-bearing PIV export preserves edited timeline and includes the newly authored text', reopened.total_output_frames === exportedTicks && reopened.figure_types.some(f => f.text_assets?.some(a => a.text === 'A new Pivot title')));
   check('Source-bearing PIV export retains the added text instance in its edited frame', reopened.keyframes[0].objects.some(o => reopened.figure_types.some(f => f.figure_type_id === o.figure_type_id && f.text_assets?.some(a => a.text === 'A new Pivot title'))));
+  }
   assert.deepEqual(errors, []); check('Creation workflow has no uncaught browser exceptions');
   assert.deepEqual(findings, []);
   await writeFile(path.join(out, 'creation-verification.json'), JSON.stringify({checks, errors, findings, timestamp: new Date().toISOString()}, null, 2));

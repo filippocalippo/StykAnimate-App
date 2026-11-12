@@ -114,6 +114,13 @@ try {
   await appendFile(path.join(second, 'src', 'theme-bootstrap.js'), '\n// second version\n');
   const next = await writeServiceWorker(second);
   check('A changed file gives the new build a new version', next.version !== info.offline);
+  // The browser can find the new version by itself the moment it is served, and the notice closes after ten seconds:
+  // it is watched for from here on, whenever it comes (looking for it only later missed it most of the time).
+  await page.evaluate(() => {
+    const told = () => document.body.textContent.includes('A new version of StykAnimate is ready');
+    window.__updateNotice = told();
+    new MutationObserver(() => { if (told()) window.__updateNotice = true; }).observe(document.body, {subtree: true, childList: true, characterData: true});
+  });
   server = await startWebServer({ root: second, port });
   workerRequests.length = 0;
   // Notices queue one after another: let the ones from the exports above close first, so the update notice
@@ -122,7 +129,17 @@ try {
   await page.evaluate(() => navigator.serviceWorker.getRegistration().then((registration) => registration.update()));
   await until('the new version to install', () => page.evaluate(() => navigator.serviceWorker.getRegistration().then((registration) => registration.waiting?.state === 'installed')));
   check('The new version downloads only the file that changed', JSON.stringify(workerRequests.filter((name) => name !== '/sw.js')) === JSON.stringify(['/src/theme-bootstrap.js']));
-  check('The open app is told a new version is ready', await until('the notice', () => page.evaluate(() => document.body.textContent.includes('A new version of StykAnimate is ready')), 10000));
+  // When the notice never comes, say what the page shows instead and what the worker's state is.
+  const told = await until('the notice', () => page.evaluate(() => window.__updateNotice === true), 60000).catch(async (error) => {
+    console.error('The page shows these notices:', JSON.stringify(await page.evaluate(async () => ({
+      toasts: [...document.querySelectorAll('.ui-toast')].map((node) => node.textContent.trim().slice(0, 160)),
+      controller: Boolean(navigator.serviceWorker.controller),
+      waiting: (await navigator.serviceWorker.getRegistration())?.waiting?.state ?? null,
+      language: document.documentElement.lang,
+    }))));
+    throw error;
+  });
+  check('The open app is told a new version is ready', told);
   check('The open window keeps running the version it started with', (await workerStatus(page)).version === info.offline);
   check('Both versions are stored until the old one is closed', (await page.evaluate(() => caches.keys())).length === 2);
 

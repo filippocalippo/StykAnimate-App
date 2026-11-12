@@ -96,7 +96,7 @@ import { dragSlop, beyondSlop, installPenMenuGuard } from "./pen-input.mjs";
 import { installCanvasPinch } from "./canvas-pinch.mjs";
 import { createWheelZoom, smoothWheelZoom } from "./canvas-wheel-zoom.mjs";
 import { createPoseInputQueue } from './canvas-pose-input.mjs';
-import { CanvasHandleOverlay } from './canvas-handle-overlay.mjs';
+import { createCanvasHandles } from './canvas-handles.mjs';
 import { installTouchMode } from "./touch/touch-mode.mjs";
 import { installTouchShell } from "./touch/touch-shell.mjs";
 import { installLongPress } from "./touch/long-press.mjs";
@@ -125,10 +125,6 @@ import {
   getNativePropertyValue,
 } from "./native-property-edit.mjs";
 import {
-  getPivotHandles,
-  rescalePivotHandles,
-  frameHandleCount,
-  denseHandles,
   PIVOT_HANDLE_COLORS,
   pickCanvasHandle,
   pickCanvasSegment,
@@ -144,7 +140,7 @@ import {
   drawCameraViewport,
   drawCameraOutline,
 } from "./camera-overlay.mjs";
-import { EditorSettings, normalizeEditorSettings } from "./settings.mjs";
+import { EditorSettings, normalizeEditorSettings, storedEditorSettings } from "./settings.mjs";
 import { HotkeyManager, HOTKEY_BY_ID, isHotkeyInput } from "./hotkeys.mjs";
 import { hotkeyCommandId, refreshHotkeyHints } from "./hotkey-hints.mjs";
 import { runTimelineHotkey } from "./timeline-hotkeys.mjs";
@@ -1382,124 +1378,9 @@ function boundsOf(g) {
   }
   return b;
 }
-// Keep one surface alive to avoid deferred GPU-context destruction on input.
-// A pan moves the painted joints once there are enough of them that repainting costs more than moving (measured: a few hundred).
-const canvasHandleOverlay = new CanvasHandleOverlay(new OffscreenCanvas(1, 1), {panShiftFrom: 500});
-let handleCache = null;
-const handleDescriptors = {};
-const selectionHandleCache = new WeakMap();
-const selectionHandleDescriptors = {};
-/** What the joints of the frame on show depend on besides the view, worked out once per frame and per change of what hides or
- * locks a figure: whether the frame is dense (docs/SCENE-EDITING.md, "Joints in dense frames"; counted from the figures'
- * definitions and announced once a document) and which of its figures are hidden or locked. */
-let handleFrame = {frame: null, key: '', bound: null, dense: false, announced: false, hidden: null, locked: null};
-/** Whether each figure is hidden (1) or locked (2), and the figure types by id, kept while nothing that hides or locks a
- * figure changes: a gesture shows a new frame each step, with the same figures. */
-let handleFigures = {key: null, bound: null, types: null, flags: new Map(), figures: new Map()};
-function frameHandles(frame) {
-  const key = `${editor.layerViewKey}|${[...state.hidden].join(',')}|${[...state.locked].join(',')}`, bound = builderMode?.boundUids ?? null;
-  if (handleFrame.frame === frame && handleFrame.key === key && handleFrame.bound === bound) return handleFrame;
-  const types = editor.report.figure_types;
-  if (handleFigures.key !== key || handleFigures.bound !== bound || handleFigures.types !== types) handleFigures = {key, bound, types, flags: new Map(), figures: new Map()};
-  const {flags, figures} = handleFigures;
-  const flagsOf = uid => {
-    let value = flags.get(uid);
-    if (value === undefined) flags.set(uid, value = (isHidden(uid) ? 1 : 0) | (isLocked(uid) ? 2 : 0));
-    return value;
-  };
-  const known = new Set();
-  for (const object of frame.objects) known.add(object.unique_id);
-  // A figure the frame does not hold (a drawing's first stroke previews one) is hidden as it says, locked only by hand.
-  const hidden = {has: uid => (flagsOf(uid) & 1) !== 0}, locked = {has: uid => known.has(uid) ? (flagsOf(uid) & 2) !== 0 : state.locked.has(uid)};
-  const figureOf = object => {
-    let figure = figures.get(object.figure_type_id);
-    if (figure === undefined) figures.set(object.figure_type_id, figure = findFigureType(types, object.figure_type_id) ?? null);
-    return figure;
-  };
-  const count = frameHandleCount(frame, figureOf, {hiddenUids: hidden, lockedUids: locked});
-  const dense = denseHandles(count, handleFrame.dense), announce = dense && !handleFrame.announced && state.settings.showUnselectedHandles;
-  if (announce) status({messageKey: "app.denseFrameShowsOrigins", messageParams: {}});
-  handleFrame = {frame, key, bound, dense, announced: handleFrame.announced || announce, hidden, locked};
-  return handleFrame;
-}
-function canvasHandles(geometry, {selectStatic = false} = {}) {
-  const frame = currentFrame(),
-    settings = state.settings;
-  // In a dense frame the figures not selected show their origin only, as with the setting off: drawing and picking share these descriptors.
-  const shown = frameHandles(frame), showUnselected = settings.showUnselectedHandles && !shown.dense;
-  const unscaled = [
-    builderMode?.active ? [...editor.selectedSegmentIds].join(',') : '',
-    editor.layerViewKey,
-    showStaticHandles(),
-    state.tool,
-    state.figureJoin?.uid,
-    state.handleEditHeld,
-    usesBuilderBranch(),
-    editor.selectedJoint,
-    spatialControlMode(editor),
-    rigDetailsShown(editor),
-    showUnselected,
-    settings.handleSize,
-    settings.autoSizeHandles,
-    settings.outlineHandles,
-    frame.camera?.scale,
-    builderMode?.session?.typeId ?? "none",
-    ...selection(),
-    ...state.hidden,
-    ...state.locked,
-  ].join("|"), key = `${unscaled}|${state.view.scale}`;
-  const cached = selectStatic ? selectionHandleCache.get(geometry) : handleCache;
-  if (cached?.key === key && (selectStatic || cached.geometry === geometry)) return cached.handles;
-  // A zoom changes the joints' sizes alone: the descriptors are resized, not built again.
-  if (!selectStatic && cached?.unscaled === unscaled && cached.geometry === geometry) {
-    const handles = rescalePivotHandles(cached.handles, {viewScale: state.view.scale, autoSize: settings.autoSizeHandles, minDiameter: 4, maxDiameter: settings.handleSize * 2});
-    handleCache = {geometry, key, unscaled, handles};
-    return handles;
-  }
-  const {hidden, locked} = shown;
-  const handles = getPivotHandles(geometry, {
-    showDetailed: rigDetailsShown(editor),
-    spatialMode: builderMode?.active || !['select','pose'].includes(state.tool) ? 'pose' : spatialControlMode(editor),
-    descriptorCache: selectStatic ? selectionHandleDescriptors : handleDescriptors,
-    selectStatic,
-    joinTargetUids: state.figureJoin?.targets,
-    frame,
-    selectedUid: editor.selectedUid,
-    selectedUids: selection(),
-    hiddenUids: hidden,
-    lockedUids: locked,
-    showUnselected,
-    showStatic: showStaticHandles(),
-    selectedJoint: editor.selectedJoint,
-    selectedHandleIds: builderMode?.active ? editor.selectedSegmentIds : undefined,
-    selectedBranch: usesBuilderBranch(),
-    builder: isBuilderContext(state.tool),
-    attaching: state.tool === "attach",
-    allowStaticManipulation:
-      state.tool === "rig" ||
-      state.handleEditHeld,
-    viewScale: state.view.scale,
-    autoSize: settings.autoSizeHandles,
-    maxDiameter: settings.handleSize * 2,
-  });
-  if (selectStatic) selectionHandleCache.set(geometry, {key, handles});
-  else handleCache = { geometry, key, unscaled, handles };
-  return handles;
-}
-function drawCanvasHandles(geometry) {
-  const handles = canvasHandles(geometry),
-    translations = state.drag?.translations;
-  const d = window.devicePixelRatio || 1;
-  // The view and the camera are affine: the matrix carries the projection, and its translation alone changing is a pan.
-  const drawn = canvasHandleOverlay.draw(ctx, handles, {matrix: affineProjection(screenPoint), projectionKey: handleCache.key,
-    width: overlay.width / d, height: overlay.height / d, dpr: d, translations,
-    outline: state.settings.outlineHandles, rest: handlesResting});
-  // A pan moves the joints' pixels: once the view has rested a moment, they are painted afresh (see CanvasHandleOverlay).
-  handlesResting = false;
-  clearTimeout(handleSettleTimer);
-  if (drawn.settle) handleSettleTimer = setTimeout(() => { handlesResting = true; requestOverlayRender(); }, 150);
-}
-let handleSettleTimer = 0, handlesResting = false;
+const canvasHandleView = createCanvasHandles({editor, state, builderMode: () => builderMode, isHidden, isLocked, selection, currentFrame,
+  showStaticHandles, usesBuilderBranch, status, project: screenPoint, ctx, overlay, requestOverlayRender});
+const canvasHandles = canvasHandleView.handles, drawCanvasHandles = canvasHandleView.draw;
 let onionControls;
 const onionController = new OnionController({editor,
   getSettings: () => state.settings, getEnabled: () => state.onion,
@@ -5484,14 +5365,16 @@ const projectProvider = {
         ranges: match.ranges, run: () => { selectTrack({ id: layer.id, target: { kind: "layer", id: layer.id } }); timelineUI?.selectTrack?.(layer.id); } });
     }
     if (context?.mode !== "draw") {
-      const names = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row.name]));
+      // The rows of the figure types say which are movieclips, with no type fetched from the engine.
+      const types = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row]));
       for (const object of editor.selectionFrame?.objects ?? []) {
-        const name = names.get(object.figure_type_id);
+        const type = types.get(object.figure_type_id), name = type?.name;
         const match = name && fuzzyMatch(query, name);
         if (!match) continue;
         const layer = editor.getLayer(editor.layerForUid(object.unique_id))?.name ?? "";
-        rows.push({ id: `figure:${object.unique_id}`, label: name, icon: isMovieclip(figure) ? "frame" : "person",
-          meta: kitText(kitT, isMovieclip(figure) ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn", { layer }), metaKey: isMovieclip(figure) ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn", metaParams: { layer }, match, ranges: match.ranges,
+        const metaKey = type.kind === "Movieclip" ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn";
+        rows.push({ id: `figure:${object.unique_id}`, label: name, icon: type.kind === "Movieclip" ? "frame" : "person",
+          meta: kitText(kitT, metaKey, { layer }), metaKey, metaParams: { layer }, match, ranges: match.ranges,
           run: () => selectTrack({ uid: object.unique_id, target: { kind: "figure", uid: object.unique_id } }) });
       }
     }
@@ -5716,9 +5599,7 @@ editor.addEventListener("change", (e) => {
     kind === "document"
   ) {
     invalidatePivotHandleTopology();
-    handleCache = null;
-    canvasHandleOverlay.clear();
-    if (kind === "document") handleFrame = {frame: null, key: '', bound: null, dense: false, announced: false, hidden: null, locked: null};
+    canvasHandleView.invalidate({document: kind === "document"});
     assetLibrary?.invalidate();
   }
   if (["edit", "history", "document", "frame-draft"].includes(kind))
@@ -6078,7 +5959,8 @@ async function init() {
     ? await window.stykInitialEditorSettings
     : desktop?.getEditorSettings
     ? await desktop.getEditorSettings()
-    : undefined;
+    : storedEditorSettings();
+  // The saved language is loaded before anything chooses it.
   await loadLocale(settingsValue?.locale);
   appLocalization = new AppLocalization({ locale: settingsValue?.locale });
   editorSettings = new EditorSettings({
@@ -6104,7 +5986,7 @@ async function init() {
       if (!state.motionPaths) { state.hoverPathPoint = null; syncPathTooltip(); trails.clear(); }
       if (patch.motionPathFalloffRadius !== undefined || patch.motionPathFalloffShape !== undefined || patch.motionPaths !== undefined) syncPathFalloff();
       appLocalization.setLocale(next.locale);
-      canvasHandleOverlay.clear();
+      canvasHandleView.repaint();
       scheduleRecovery();
       requestRender();
       queueUI();

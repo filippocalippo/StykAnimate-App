@@ -39,3 +39,17 @@ test('the startup graph carries the language index but no language messages', as
   assert.deepEqual(loaded, [], 'a language module joins the startup graph and is fetched by every launch');
   assert.ok(seen.has(new URL('../src/locales/locale-index.mjs', import.meta.url).href));
 });
+
+test('the browser app reads the language it saved, and an unreadable store reads as no settings', async () => {
+  const {EDITOR_SETTINGS_KEY, storedEditorSettings} = await import('../src/settings.mjs');
+  const saved = new Map([[EDITOR_SETTINGS_KEY, JSON.stringify({locale: 'fr'})]]);
+  globalThis.localStorage = {getItem: key => saved.get(key) ?? null};
+  try {
+    // app.mjs init loads this language before Settings chooses it (localization-app.browser.mjs reloads with one saved).
+    assert.equal(storedEditorSettings().locale, 'fr');
+    saved.set(EDITOR_SETTINGS_KEY, '{not json');
+    assert.deepEqual(storedEditorSettings(), {});
+    globalThis.localStorage = {getItem() { throw new Error('Storage denied'); }};
+    assert.deepEqual(storedEditorSettings(), {});
+  } finally { delete globalThis.localStorage; }
+});

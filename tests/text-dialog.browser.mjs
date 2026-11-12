@@ -3,6 +3,8 @@ import { chromium } from "./support/playwright.mjs";
 import assert from "node:assert/strict";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { skipWithoutFixtures } from "./helpers/local-fixtures.mjs";
+skipWithoutFixtures("../reports/browser_corpus/text_speech_bubble_0f3b81ef/scene.json", "../reports/browser_corpus/text_abc_66903de7/scene.json");
 const output = path.resolve("artifacts/text-dialog");
 await mkdir(output, { recursive: true });
 const native = JSON.parse(

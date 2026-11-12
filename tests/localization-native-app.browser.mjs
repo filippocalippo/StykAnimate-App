@@ -16,7 +16,7 @@ async function settings() {
   await page.locator('#menu [data-action=settings]').click();
 }
 try {
-  await page.goto(process.env.STYK_TEST_URL || 'http://127.0.0.1:47831');
+  await page.goto(process.env.STYK_URL || process.env.STYK_TEST_URL || 'http://127.0.0.1:47831');
   await page.waitForFunction(()=>window.styk?.ready&&styk.localization);
   check('Arabic browser preference still starts in explicit English',await page.evaluate(()=>styk.state.settings.locale==='en'));
   await page.evaluate(()=>styk.editor.newDocument());

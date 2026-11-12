@@ -1,0 +1,8 @@
+# The Rust version of the engine's tests and of its codec and drawing modules, on every machine and in CI.
+# The engine module itself needs a nightly, pinned in scripts/engine-build.mjs
+# (docs/engine/decisions/0006-pinned-nightly-wasm.md). Moving either is a deliberate change: rebuild and run
+# `npm run engine:parity`.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+targets = ["wasm32-unknown-unknown"]

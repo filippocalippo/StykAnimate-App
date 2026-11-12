@@ -9,8 +9,9 @@ try{
   await page.evaluate(async()=>{
     const {emptyDocument}=await import('/src/demo.mjs');styk.state.settings.autosaveSeconds=0;
     window.startFixture=()=>{
-      // Worker preparation serves the stroke worker and history replay.
-      const e=styk.editor,d=styk.drawing;e.load(emptyDocument());e.createDrawingLayer();d.tool='brush';Object.assign(d.settings,{size:700,resolution:1,color:'#203ed8',hardness:1,opacity:1,pressureSize:false,pressureOpacity:false,stabilization:0});
+      // Worker preparation serves the stroke worker and history replay. Replays up to 4 MiB of tiles apply in the step itself
+      // (docs/DRAWING.md); a 1400 px dot is about 380 tiles (6 MiB), so its undo and redo are prepared in batches.
+      const e=styk.editor,d=styk.drawing;e.load(emptyDocument());e.createDrawingLayer();d.tool='brush';Object.assign(d.settings,{size:1400,resolution:1,color:'#203ed8',hardness:1,opacity:1,pressureSize:false,pressureOpacity:false,stabilization:0});
       window.fixtureRevision=e.revision;window.fixtureUndo=e._undo.length;window.preparationHeld=false;window.barrierSettled=false;
       const request=d.owner.worker.request.bind(d.owner.worker);window.preparationCount=0;
       d.owner.worker.request=(kind,payload,options)=>{if(kind==='prepare-tiles')window.preparationCount++;return request(kind,payload,options);};

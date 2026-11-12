@@ -13,13 +13,13 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
 | `styk-drawing` | 36 | 164 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
-| `styk-edit` | 93 | 599 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
+| `styk-edit` | 93 | 600 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
 | `styk-eval` | 80 | 312 KiB | 10 | 32 | 2 | 2 | 34 | 31 % | 56 % | 18 % |
 | `styk-export` | 14 | 58 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
-| `styk-formats` | 55 | 709 KiB | 21 | 7 | 1 | 22 | 4 | 68 % | 8 % | 7 % |
+| `styk-formats` | 55 | 711 KiB | 20 | 7 | 1 | 22 | 5 | 68 % | 8 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1971 KiB | 81 | 61 | 12 | 28 | 173 | 54 % | 18 % | 27 % |
+| **Total** | 355 | 1973 KiB | 80 | 61 | 12 | 28 | 174 | 54 % | 18 % | 27 % |
 
 ## Engine modules
 
@@ -281,7 +281,7 @@ Engine logic: ported to Rust.
 | `src/document-lift.mjs` | `styk-formats::container` | partial | Rust: container::lift writes the skeleton and sections a save stores, and container::ViewLifter hands a document to the editor in pieces; what stays here is restoreLifted, which puts a skeleton the reader or the engine lifted back into the editor's objects |
 | `src/native-container.mjs` | `styk-formats::container` | removed | read and wrote the containers in JavaScript; the workers open and save through styk-formats::files in the codec module (src/native-file-codec.mjs), and the lifting the mirror and saves need is src/document-lift.mjs (46226 bytes) |
 | `src/pose-sequences.mjs` | `styk-formats::container` | removed | Deleted with src/editor-load.mjs, its only caller: the engine interns pose sequences as it opens a document (styk-edit load) |
-| `src/source-record.mjs` | `styk-formats::container` | js |  |
+| `src/source-record.mjs` | `styk-formats::container` | removed | Deleted: a Pivot project carries its original in its document (1440 bytes) |
 | `src/zlib-sync.mjs` | `styk-formats::container` | partial | Rust: inflate of drawing tiles (PNG decoder); deflate still JS |
 | `backend/fast_decode.py` | `styk-formats::piv` | verified | the app runs styk-piv (styk-piv piv/frames.rs); kept only as the development test oracle (not shipped) |
 | `backend/import_wire.py` | `styk-formats::piv` | verified | the app runs styk-piv (wire.rs, STYKPIV1); kept only as the development test oracle (not shipped) |
@@ -391,12 +391,14 @@ Browser, Electron or operating-system service: stays in JS (or native), driven b
 | --- | --- | --- | --- |
 | `desktop/appimage-updater.cjs` |  | stays | Electron shell and services |
 | `desktop/audio-service.cjs` |  | stays | Electron shell and services |
+| `desktop/devtools.cjs` |  | stays | Electron shell and services: the developer launch's half of the developer tools, never packaged |
 | `desktop/file-streams.cjs` |  | stays | Electron shell and services |
 | `desktop/font-service.cjs` |  | stays | Electron shell and services |
 | `desktop/gpu-switches.cjs` |  | stays | Electron shell and services |
 | `desktop/library-store.cjs` |  | stays | Electron shell and services |
 | `desktop/localization.cjs` |  | stays | Electron shell and services |
 | `desktop/main.cjs` |  | stays | Electron shell and services |
+| `desktop/page-pushes.cjs` |  | stays | Electron shell and services |
 | `desktop/preferences.cjs` |  | stays | Electron shell and services |
 | `desktop/preload.cjs` |  | stays | Electron shell and services |
 | `desktop/project-files.cjs` |  | stays | Electron shell and services |
@@ -468,11 +470,20 @@ Interface: stays in JS.
 | `src/camera-motion-ui.mjs` |  | stays |  |
 | `src/canvas-guides.mjs` |  | stays |  |
 | `src/canvas-handle-overlay.mjs` |  | stays |  |
+| `src/canvas-handles.mjs` |  | stays |  |
 | `src/canvas-pinch.mjs` |  | stays |  |
 | `src/canvas-pose-input.mjs` |  | stays |  |
 | `src/canvas-wheel-zoom.mjs` |  | stays |  |
 | `src/color-picker-magnifier.mjs` |  | stays |  |
 | `src/color-picker.mjs` |  | stays |  |
+| `src/devtools-gate.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/capture.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/control.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/devtools.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/early.js` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/inspector.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/sampler.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/drawing-brush-labels.mjs` |  | stays |  |
 | `src/drawing-cel-prefetch.mjs` |  | stays | which drawing cels the decode queue loads ahead and which it keeps (moved out of onion-skin.mjs) |
 | `src/drawing-controller.mjs` |  | stays |  |
@@ -488,6 +499,7 @@ Interface: stays in JS.
 | `src/export-sheet.mjs` |  | stays | export dialog and request |
 | `src/export-video-quality.mjs` |  | stays | export dialog and request |
 | `src/figure-join-action.mjs` |  | stays |  |
+| `src/figure-types.mjs` |  | stays | what the interface asks of a document's figure types, through the read view |
 | `src/home/home-model.mjs` |  | stays |  |
 | `src/home/home-view.mjs` |  | stays |  |
 | `src/home/home.mjs` |  | stays |  |
@@ -509,6 +521,7 @@ Interface: stays in JS.
 | `src/keyframe-easing-view.mjs` |  | stays |  |
 | `src/layer-timeline.mjs` |  | stays |  |
 | `src/lazy-payload.mjs` |  | stays | the editor view's picture fields: a getter that asks the engine for the text on first read (styk_doc::payload names it), and the copies that keep it unread |
+| `src/lazy-table.mjs` |  | stays | the read view's tables, whose records the interface fetches from the engine's session when it reads them |
 | `src/library-drag.mjs` |  | stays |  |
 | `src/library-hover-preview.mjs` |  | stays |  |
 | `src/library-matte.mjs` |  | stays |  |
@@ -538,11 +551,16 @@ Interface: stays in JS.
 | `src/sheet-filmstrip.mjs` |  | stays |  |
 | `src/shell/dock-host.mjs` |  | stays |  |
 | `src/shell/dock-keyboard.mjs` |  | stays |  |
+| `src/shell/dock-migrate.mjs` |  | stays |  |
+| `src/shell/dock-model.mjs` |  | stays |  |
+| `src/shell/dock-solve.mjs` |  | stays |  |
+| `src/shell/dock-store.mjs` |  | stays |  |
 | `src/shell/dock-tabs.mjs` |  | stays |  |
+| `src/shell/dock-workspaces.mjs` |  | stays |  |
 | `src/shell/layout-popover.mjs` |  | stays |  |
 | `src/shell/layout-schema.mjs` |  | stays |  |
 | `src/shell/layout-solver.mjs` |  | stays |  |
-| `src/shell/layout-store.mjs` |  | stays |  |
+| `src/shell/layout-store.mjs` |  | removed | Deleted with the docking model: src/shell/dock-store.mjs persists arrangements |
 | `src/shell/panel-registry.mjs` |  | stays |  |
 | `src/shell/project-switcher.mjs` |  | stays |  |
 | `src/shell/project-tabs-view.mjs` |  | stays |  |
@@ -645,6 +663,7 @@ Telemetry, support, updates: stays in JS.
 | `src/telemetry-performance.mjs` |  | stays | telemetry, support, updates |
 | `src/telemetry-schema.mjs` |  | stays | telemetry, support, updates |
 | `src/telemetry-workload.mjs` |  | stays | telemetry, support, updates |
+| `src/trace.mjs` |  | stays | the instrumentation layer: spans, counters and live parameters (docs/DEVTOOLS.md) |
 | `src/update-ui.mjs` |  | stays | telemetry, support, updates |
 
 ## Tools of removed subsystems

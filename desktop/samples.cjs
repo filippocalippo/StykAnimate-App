@@ -68,8 +68,8 @@ async function sampleRoot({appRoot, packaged}) {
   return path.dirname(await fs.realpath(appRoot));
 }
 
-/** {ok: true, samples: [{path, name, kind, size}]}: walked top-down, a folder's files before its subfolders. */
-async function listSamples(root) {
+/** {ok: true, samples: [{path, name, kind, size}]}: walked top-down, a folder's files before its subfolders, at most `limit` of them. */
+async function listSamples(root, {limit = MAX_SAMPLE_COUNT} = {}) {
   if (!root) return {ok: true, samples: []};
   const result = [];
   async function walk(directory) {
@@ -94,7 +94,7 @@ async function listSamples(root) {
         size = (await fs.stat(full)).size;
       } catch { continue; }
       result.push({path: path.relative(root, full).split(path.sep).join('/'), name: entry.name, kind: kind.slice(1), size});
-      if (result.length >= MAX_SAMPLE_COUNT) return true;
+      if (result.length >= limit) return true;
     }
     for (const subdirectory of subdirectories) if (await walk(subdirectory)) return true;
     return false;
