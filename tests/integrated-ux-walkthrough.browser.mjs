@@ -2,8 +2,11 @@ import { chromium } from "./support/playwright.mjs";
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 
-import {corpusPath} from './support/corpus.mjs';
-const akaneSource = process.env.STYK_AKANE_SOURCE || corpusPath("Downloads/16 Akane vs Akato Segundo round (3).piv");
+import {corpusFile} from './support/corpus.mjs';
+import {missingFixture} from './helpers/local-fixtures.mjs';
+// The "akane" step needs this private sample project; without it that step is skipped and the others run.
+const akaneSource = process.env.STYK_AKANE_SOURCE || corpusFile("Downloads/16 Akane vs Akato Segundo round (3).piv");
+const akaneMissing = missingFixture(akaneSource);
 const out = "artifacts/integrated-ux-walkthrough";
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -51,6 +54,7 @@ async function mode(value) {
 }
 async function step(name, fn) {
   if (requestedSteps && !requestedSteps.includes(name)) return;
+  if (name === "akane" && akaneMissing) return console.log("SKIP STEP akane", akaneMissing);
   console.log("STEP", name);
   try {
     await fn();
@@ -342,7 +346,7 @@ try {
       return chosen;
     });
     await settle();
-    await page.locator('[data-tool="pose"]').click();
+    await page.locator('[data-tool="select"]').click();
     const p = await canvasPoint(attached.point);
     await page.mouse.move(p.x, p.y);
     await page.mouse.down();
@@ -463,6 +467,7 @@ try {
     await page.setViewportSize({ width: 1100, height: 740 });
     await mode("simple");
     await settle();
+    // A card is a key time of the shown layers, not a keyframe index (Akane has fewer key times than keyframes).
     check(
       "Switching to Simple reveals the current late native frame",
       await page.evaluate(() => {
@@ -471,7 +476,7 @@ try {
           .getBoundingClientRect();
         const card = document
           .querySelector(
-            `.sheet-filmstrip-card[data-frame="${styk.editor.frameIndex}"] .sheet-preview`,
+            ".sheet-filmstrip-card[data-current=\"true\"] .sheet-preview",
           )
           ?.getBoundingClientRect();
         return card && card.left >= strip.left && card.right <= strip.right;
@@ -480,7 +485,7 @@ try {
     await page.waitForFunction(
       () =>
         document.querySelector(
-          `.sheet-filmstrip-card[data-frame="${styk.editor.frameIndex}"] canvas`,
+          ".sheet-filmstrip-card[data-current=\"true\"] canvas",
         ),
       null,
       { timeout: 15000 },
