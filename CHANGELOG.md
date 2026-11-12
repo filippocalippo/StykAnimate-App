@@ -19,6 +19,7 @@ What's new in each version of StykAnimate.
 - Right-click a joint and choose Disconnect segment to turn that part of a figure into a figure of its own.
 - Arrange panels freely: drag any panel beside the stage or another panel, group panels as tabs, float them, or collapse them to icon strips, with a preview of where each one will land.
 - Save your own panel layouts for each workspace, and export or import them to share.
+- Auto-rig a figure from a picture: choose an image and get an editable stick figure with moveable joints, clearly marked as a heuristic preview rather than AI pose detection.
 
 ### Changed
 

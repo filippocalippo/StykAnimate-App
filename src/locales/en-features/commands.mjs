@@ -157,6 +157,7 @@ export default Object.freeze({
   "commands.pasteBuilderAppearance": "Paste appearance",
   "commands.toggleBuilderBranch": "Edit whole branch",
   "commands.addSpriteSegment": "Attach image…",
+  "commands.autoRigFromImage": "Auto-rig from image (heuristic)…",
   "commands.rigConnect": "Connect joints…",
   "commands.rigWeighted": "Add weighted joint",
   "commands.rigPickStart": "Pick start joint",

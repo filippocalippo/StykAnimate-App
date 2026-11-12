@@ -127,6 +127,7 @@ src/canvas-pinch.mjs	ui	-	stays
 src/canvas-pose-input.mjs	ui	-	stays	
 src/canvas-raster-refinement.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/canvas-wheel-zoom.mjs	ui	-	stays	
+src/claude-figure-data.mjs	engine	styk-edit	js	Claude mascot figure data: builds the figure the engine then owns as document data
 src/clipboard-asset-plan.mjs	engine	styk-edit	removed	deleted with the native frame clipboard: nothing in the interface copied or pasted keyframes on a native timeline (4009 bytes)
 src/clipboard-assets.mjs	engine	styk-edit	removed	Deleted: nothing called it; the engine makes the portable figure (styk-edit/src/export/figure.rs) (3252 bytes)
 src/clipboard-legacy-upgrade.mjs	engine	styk-edit	removed	deleted with the native frame clipboard (its legacy destination upgrade) (9681 bytes)
@@ -403,10 +404,12 @@ src/playback-worker.mjs	engine	styk-engine::playback	removed	deleted: the engine
 src/playback.mjs	engine	styk-engine::playback	removed	deleted: the engine prepares playback on its worker threads and the app reads its tickets (src/engine/engine-playback.mjs)
 src/polygon-draft.mjs	engine	styk-edit	js	
 src/polygon-preview.mjs	engine	styk-eval::picking	js	handles, picking, snapping geometry (drawn by the JS overlay)
+src/pose-estimation-client.mjs	platform	-	stays	Web Worker client for pose estimation; dispatches off-thread and falls back in-process when workers are unavailable
 src/pose-property-split.mjs	engine	styk-edit	removed	deleted: only the editor's authored pose and range bodies used it (6996 bytes)
 src/pose-sequence-storage.mjs	engine	styk-edit	removed	packed pose channels for a save and expanded them on load; both are styk-edit (export::pose_sequences, load::frames)
 src/pose-sequences.mjs	engine	styk-formats::container	removed	Deleted with src/editor-load.mjs, its only caller: the engine interns pose sequences as it opens a document (styk-edit load)
 src/pose-snapshot.mjs	engine	styk-eval	removed	Deleted: the stored pose is styk_eval::records; the tests keep the recorded form in tests/support/pose-snapshot.mjs (3056 bytes)
+src/pose-topology.mjs	engine	styk-edit	js	synthesizes the figure definition (segments, 2-bone IK controllers) that the engine owns once imported
 src/prepared-frames.mjs	engine	styk-render	removed	deleted: the engine uploads and draws its own prepared frames (styk-render)
 src/preview-image-worker.mjs	engine	styk-render::images	js	image decoding and variants
 src/preview-image.mjs	engine	styk-render::images	js	image decoding and variants
@@ -549,6 +552,7 @@ src/tutorials/tutorials.mjs	ui	-	stays
 src/tweener-controls.mjs	ui	-	stays	
 src/ui-scale.mjs	ui	-	stays	
 src/ui/anchor-position.mjs	ui	-	stays	
+src/ui/auto-rig-dialog.mjs	ui	-	stays	
 src/ui/command-catalog.mjs	ui	-	stays	
 src/ui/command-palette.mjs	ui	-	stays	
 src/ui/command-registry.mjs	ui	-	stays	
@@ -618,6 +622,7 @@ src/video-export.mjs	platform	styk-export	js	encoders and sinks (WebCodecs, FFmp
 src/web-library.mjs	platform	-	stays	file, storage and network services
 src/web-offline.mjs	platform	-	stays	file, storage and network services
 src/web-support.js	ui	-	stays	
+src/workers/pose-estimation-worker.mjs	platform	-	stays	off-thread image rasterization and heuristic silhouette pose estimation
 src/yield-task.mjs	platform	-	stays	gives the browser its turn between slices of work (scheduler.yield, else a message)
 src/zlib-sync.mjs	engine	styk-formats::container	partial	Rust: inflate of drawing tiles (PNG decoder); deflate still JS
 src/lazy-payload.mjs	ui	-	stays	the editor view's picture fields: a getter that asks the engine for the text on first read (styk_doc::payload names it), and the copies that keep it unread

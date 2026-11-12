@@ -23,6 +23,7 @@ export default Object.freeze({
   'quick.part': 'Part actions',
   'quick.build': 'Figure actions',
   'quick.imagePart': 'Image',
+  'quick.autoRig': 'Auto-Rig',
   'quick.examples': 'Examples',
   'quick.connect': 'Connect',
   'quick.fit': 'Fit',

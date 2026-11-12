@@ -13,13 +13,13 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
 | `styk-drawing` | 36 | 164 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
-| `styk-edit` | 93 | 600 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
+| `styk-edit` | 95 | 614 KiB | 24 | 11 | 1 | 4 | 55 | 66 % | 9 % | 61 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
 | `styk-eval` | 80 | 312 KiB | 10 | 32 | 2 | 2 | 34 | 31 % | 56 % | 18 % |
 | `styk-export` | 14 | 58 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
 | `styk-formats` | 55 | 711 KiB | 20 | 7 | 1 | 22 | 5 | 68 % | 8 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1973 KiB | 80 | 61 | 12 | 28 | 174 | 54 % | 18 % | 27 % |
+| **Total** | 357 | 1987 KiB | 82 | 61 | 12 | 28 | 174 | 54 % | 18 % | 27 % |
 
 ## Engine modules
 
@@ -68,6 +68,7 @@ Engine logic: ported to Rust.
 | `src/animation-history.mjs` | `styk-edit` | removed | Deleted with the editor command bodies: the session weighs its history entries (styk-edit) |
 | `src/builder-appearance.mjs` | `styk-edit` | partial | Rust: pasting runs updateBuilderSegmentStyle (styk-edit/src/builder.rs); copying reads the figure on show (a view) |
 | `src/builder-session.mjs` | `styk-edit` | js |  |
+| `src/claude-figure-data.mjs` | `styk-edit` | js | Claude mascot figure data: builds the figure the engine then owns as document data |
 | `src/clipboard-asset-plan.mjs` | `styk-edit` | removed | deleted with the native frame clipboard: nothing in the interface copied or pasted keyframes on a native timeline (4009 bytes) |
 | `src/clipboard-assets.mjs` | `styk-edit` | removed | Deleted: nothing called it; the engine makes the portable figure (styk-edit/src/export/figure.rs) (3252 bytes) |
 | `src/clipboard-legacy-upgrade.mjs` | `styk-edit` | removed | deleted with the native frame clipboard (its legacy destination upgrade) (9681 bytes) |
@@ -145,6 +146,7 @@ Engine logic: ported to Rust.
 | `src/polygon-draft.mjs` | `styk-edit` | js |  |
 | `src/pose-property-split.mjs` | `styk-edit` | removed | deleted: only the editor's authored pose and range bodies used it (6996 bytes) |
 | `src/pose-sequence-storage.mjs` | `styk-edit` | removed | packed pose channels for a save and expanded them on load; both are styk-edit (export::pose_sequences, load::frames) |
+| `src/pose-topology.mjs` | `styk-edit` | js | synthesizes the figure definition (segments, 2-bone IK controllers) that the engine owns once imported |
 | `src/project-tabs.mjs` | `styk-edit` | js |  |
 | `src/range-figure-operations.mjs` | `styk-edit` | removed | deleted: only the editor's range command bodies used it; the session plans figure operations (styk-edit range_plan.rs) (34665 bytes) |
 | `src/rig-examples-3d.mjs` | `styk-edit` | js |  |
@@ -425,9 +427,11 @@ Browser, Electron or operating-system service: stays in JS (or native), driven b
 | `src/frame-clipboard-storage.mjs` |  | removed | deleted with the native frame clipboard (its persistence between runs) (3299 bytes) |
 | `src/library-files.mjs` |  | stays | file, storage and network services |
 | `src/native-files.mjs` |  | stays | file, storage and network services |
+| `src/pose-estimation-client.mjs` |  | stays | Web Worker client for pose estimation; dispatches off-thread and falls back in-process when workers are unavailable |
 | `src/svg-export.mjs` |  | removed | removed; styk_export::svg writes the frame's draw list as vector SVG (a picture of the frame where it has no vector form) |
 | `src/web-library.mjs` |  | stays | file, storage and network services |
 | `src/web-offline.mjs` |  | stays | file, storage and network services |
+| `src/workers/pose-estimation-worker.mjs` |  | stays | off-thread image rasterization and heuristic silhouette pose estimation |
 | `src/yield-task.mjs` |  | stays | gives the browser its turn between slices of work (scheduler.yield, else a message) |
 | `src/audio-encode.mjs` | `styk-export` | js | encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine |
 | `src/export-capabilities.mjs` | `styk-export` | js | encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine |
@@ -607,6 +611,7 @@ Interface: stays in JS.
 | `src/tweener-controls.mjs` |  | stays |  |
 | `src/ui-scale.mjs` |  | stays |  |
 | `src/ui/anchor-position.mjs` |  | stays |  |
+| `src/ui/auto-rig-dialog.mjs` |  | stays |  |
 | `src/ui/command-catalog.mjs` |  | stays |  |
 | `src/ui/command-palette.mjs` |  | stays |  |
 | `src/ui/command-registry.mjs` |  | stays |  |
