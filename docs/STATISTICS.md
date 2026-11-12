@@ -45,7 +45,8 @@ listed separately with the same breakdown.
   installs, new installs and people who came back are sums of those facts.
 - **Ranges, not values.** Sizes, memory, processor count and project dimensions are steps.
 - **The service stores no network address.** It uses the address to answer the request and to limit abuse
-  for a minute, and writes nothing derived from it.
+  for a minute, and writes nothing derived from it to its database. Cloudflare, which hosts the service,
+  handles addresses to deliver requests, as any web host does.
 - **Small groups stay hidden.** The dashboard shows a comparison only when at least 20 sessions stand
   behind it.
 
@@ -82,18 +83,27 @@ in five ranges (`sceneOf`).
 
 **Where the time went.** Each late frame's time is split over the stages of `STAGES`, measured by the spans
 of `src/trace.mjs`, the same spans the developer tools record. A cell sums the stages of its late frames;
-a slow moment keeps its own.
+a slow moment keeps its own. Every slow moment is one of the frames counted in the cell with the same
+`doing` and scene size.
 
-**A session** starts when the window is ready and ends when the app quits. `minutes` counts time with the
+**A session** starts when the window is ready and ends when the app quits. Its `day` is the UTC day on which it
+started. Its summary is sent once; a repeat is a retried upload, and the intake keeps one. `minutes` counts time with the
 window in front and either input in the last minute or an animation playing. A session ends `clean` when
 the app quit in order, `crashed` when the window's process was lost, and `unknown` when the next start finds
 it was never closed (power loss, a forced end, a crash of the whole app).
+
+**The four `first` facts** use UTC days and weeks that run from Monday to Sunday: `ever` is the first session of
+the installation, `day` its first on this day, `week` its first in this week, and `back` its first on days 7
+to 13 after the day of the first run.
 
 **Files.** A session counts each open, save, autosave, export and recovery by format: succeeded, failed,
 cancelled, and the time the successes took. A failure also becomes a `file` report with its stage and
 reason. `made` is the program and format version that wrote an opened file, as its reader reports it.
 
-**Problems.** The same problem in the same session is one report with a count. The stack is our own code
+**Problems.** The same problem in the same session is one report, sent once; `times` is how often the session
+hit it before the report was uploaded. `message` is the text the code wrote, in English, never a translated
+interface message: an error the app raised with a message key sends the key, and as its message the English
+text of that key with its placeholders left unfilled. The stack is our own code
 only: module and line for JavaScript (through the bundle's line tables), function names for the engine,
 and the Rust file and line from the engine's panic message.
 

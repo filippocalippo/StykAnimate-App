@@ -10,7 +10,7 @@
  */
 
 export const STATS_VERSION = 1;
-/** One upload: at most this many bytes of JSON and this many reports. */
+/** One upload: at most this many bytes of JSON (as UTF-8) and this many reports. */
 export const MAX_BATCH_BYTES = 32 * 1024;
 export const MAX_REPORTS = 16;
 
@@ -302,6 +302,6 @@ export function validateBatch(value, { today = new Date().toISOString().slice(0,
   // A clock can be a day ahead of UTC's.
   const newest = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
   clean.reports.forEach((report, i) => { if (report.day < oldest || report.day > newest) refuse(`batch.reports[${i}].day`); });
-  if (JSON.stringify(clean).length > MAX_BATCH_BYTES) refuse('batch');
+  if (new TextEncoder().encode(JSON.stringify(clean)).length > MAX_BATCH_BYTES) refuse('batch');
   return clean;
 }

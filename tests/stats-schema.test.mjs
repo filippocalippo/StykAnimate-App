@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STATS_VERSION, MAX_REPORTS, FRAME_BOUNDS, StatsError, validateBatch, validateReport, sanitizeMessage, stackFrame,
+import { STATS_VERSION, MAX_REPORTS, MAX_BATCH_BYTES, FRAME_BOUNDS, StatsError, validateBatch, validateReport, sanitizeMessage, stackFrame,
   sceneOf, fileSizeOf, memoryOf, coresOf, refreshOf, dayPartOf, installAgeOf, figureCountOf, frameCountOf, frameRateOf,
   machineClassOf, isLate, emptyFrameTimes, frameStep, frameQuantile } from '../src/stats/schema.mjs';
 
@@ -121,4 +121,14 @@ test('a late frame is one that took more than one and a half refreshes, and a hi
   assert.equal(frameQuantile(seen, 1, 2400), 2400);
   assert.equal(frameQuantile(times([14, 5]), 0.5, 13.2), 13.2, 'never above the worst frame');
   assert.equal(frameQuantile(emptyFrameTimes(), 0.5), null);
+});
+
+test('an upload is measured in bytes, not characters', () => {
+  // Nine problems as large as a problem may be, with messages in a script of three bytes a character: under the
+  // limit counted in characters, over it counted in bytes.
+  const stack = Array.from({ length: 12 }, () => `${'f'.repeat(96)} ${'m'.repeat(60)}.mjs:1234567`), trail = Array.from({ length: 20 }, () => 'c'.repeat(48));
+  const large = Array.from({ length: 9 }, (_, i) => problem({ message: '漢'.repeat(239) + i, stack, trail }));
+  assert.ok(JSON.stringify(batch(...large)).length < MAX_BATCH_BYTES);
+  refusedAt(batch(...large), 'batch');
+  assert.equal(validateBatch(batch(...large.slice(0, 8)), { today }).reports.length, 8);
 });
