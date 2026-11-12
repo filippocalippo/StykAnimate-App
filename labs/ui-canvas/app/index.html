@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI Canvas</title>
+<link rel="icon" href="/symbol.svg">
+<link rel="stylesheet" href="/src/styles/base/fonts.css">
+<link rel="stylesheet" href="/src/styles/tokens.css">
+<link rel="stylesheet" href="/app/app.css">
+<script src="/kit/icons.js"></script>
+</head>
+<body>
+<main id="stage" aria-label="Canvas">
+  <div id="world"></div>
+  <div id="marquee" hidden></div>
+</main>
+
+<div id="empty" hidden>
+  <h1>What should we try?</h1>
+  <p>Say what you want and how many. The agent works out the rest.</p>
+  <div id="starters"></div>
+</div>
+
+<header id="brand" class="float">
+  <img src="/symbol.svg" alt="" width="15" height="19">
+  <b>UI Canvas</b>
+  <span id="model">Opus · high</span>
+</header>
+
+<nav id="tags" class="float" aria-label="Filter by tag" hidden></nav>
+
+<div id="status" class="float">
+  <span id="running" hidden></span>
+  <button id="stop" class="pill" type="button" hidden>Stop</button>
+  <span id="meter" title="Tokens used on this board"></span>
+  <span class="rule"></span>
+  <button id="theme" class="ic" type="button" aria-label="Switch theme" title="Switch theme"></button>
+  <button id="fit" class="ic" type="button" aria-label="Fit everything" title="Fit everything · Shift+1"></button>
+  <button id="zoom" class="value" type="button" title="Zoom to 100%">100%</button>
+</div>
+
+<div id="selbar" class="float" hidden></div>
+<div id="tagmenu" class="pop" hidden></div>
+<aside id="critique" class="pop" aria-label="Critique" hidden></aside>
+
+<form id="composer" autocomplete="off">
+  <div id="context" hidden></div>
+  <textarea id="prompt" rows="1" aria-label="Describe what you want" spellcheck="false"></textarea>
+  <div id="options">
+    <div id="create-options">
+      <select id="device" aria-label="Screen size"></select>
+    </div>
+    <button id="send" type="submit" aria-label="Generate" title="Generate · Enter"></button>
+  </div>
+</form>
+
+<div id="present" hidden>
+  <div id="present-bar"><b id="present-title"></b><nav id="present-screens" aria-label="Screens in this flow" hidden></nav><span>Esc to close</span></div>
+  <div id="present-holder"></div>
+</div>
+<div id="toast" role="status" hidden></div>
+<script type="module" src="/app/main.mjs"></script>
+</body>
+</html>

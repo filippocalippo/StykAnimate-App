@@ -32,7 +32,6 @@ native/bin/darwin-*/
 
 # Not part of the app: kept outside the public repository.
 /AssetReleases/
-/labs/
 /videos/
 /website/
 /cloud/
