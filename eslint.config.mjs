@@ -55,6 +55,9 @@ export default [
   {files: ['desktop/**/*.cjs'], languageOptions: {sourceType: 'commonjs', globals: globals.node}},
   // Tools and tests run in Node; a browser test also holds functions that run in the page, where `styk` is the app's handle.
   {files: ['scripts/**', 'tests/**', 'backend/**/*.mjs', 'engine/tools/**', '*.mjs'], languageOptions: {globals: {...globals.node, ...globals.browser, styk: 'readonly'}}},
+  // The UI canvas lab: a local server and its fake CLI in Node; the board, the screen frame and its mockup kit in the browser.
+  {files: ['labs/ui-canvas/server.mjs', 'labs/ui-canvas/lib/**', 'labs/ui-canvas/test/**'], languageOptions: {globals: globals.node}},
+  {files: ['labs/ui-canvas/app/**', 'labs/ui-canvas/frame/**', 'labs/ui-canvas/kit/**', 'labs/ui-canvas/shared/**'], languageOptions: {globals: globals.browser}},
   {files: ['**/*.cjs'], languageOptions: {sourceType: 'commonjs'}},
   // The Stick Nodes reader also runs in Node (its tests, the tools): it asks whether `process` and `Buffer` exist before using them.
   {files: ['src/sticknodes/**'], languageOptions: {globals: {process: 'readonly', Buffer: 'readonly'}}},

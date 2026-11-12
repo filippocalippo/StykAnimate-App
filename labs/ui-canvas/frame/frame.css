@@ -1,0 +1,31 @@
+/* What a generated screen needs beyond the hub kit: the root, the macros and the picker. */
+#root { height: 100%; }
+#root > :not(style) { min-height: 0; }
+#root > :not(style):only-of-type, #root > x-editor { height: 100%; }
+x-i { display: inline-flex; flex: none; vertical-align: middle; }
+x-fig { display: inline-block; line-height: 0; }
+x-fig svg { width: 100%; height: 100%; overflow: visible; }
+x-scene { display: block; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+x-scene .thumb { width: 100%; height: 100%; }
+x-project { display: block; min-width: 0; }
+x-editor { display: flex; flex-direction: column; min-height: 0; }
+x-editor > .ed { flex: 1; min-height: 0; }
+[data-slot-replaced] { min-width: 0; min-height: 0; }
+
+x-tl { display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-radius: var(--radius-xl); overflow: hidden; font: var(--type-small); color: var(--text-2); }
+.xtl-ruler, .xtl-row { display: grid; grid-template-columns: 168px 1fr; align-items: stretch; flex: none; }
+.xtl-ruler { height: 28px; color: var(--text-3); font: var(--type-micro); box-shadow: inset 0 -1px 0 var(--line-1); }
+.xtl-row { height: 32px; box-shadow: inset 0 -1px 0 var(--line-1); }
+.xtl-row[data-system] { height: 24px; color: var(--text-3); }
+.xtl-name { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); min-width: 0; white-space: nowrap; }
+.xtl-name b { font: var(--type-small-strong); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
+.xtl-cells { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; min-width: 0; }
+.xtl-cells i { display: block; box-shadow: inset -1px 0 0 var(--line-1); }
+.xtl-cells i[data-key] { position: relative; }
+.xtl-cells i[data-key]::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: 8px; height: 8px; margin: -4px; border-radius: 50%; background: var(--tint-select); }
+.xtl-cells i[data-span] { background: var(--surface-well); }
+.xtl-tick { display: flex; align-items: center; padding-left: 4px; box-shadow: inset 1px 0 0 var(--line-1); overflow: hidden; }
+.xtl-head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent-line); pointer-events: none; }
+
+html[data-mode="pick"], html[data-mode="pick"] * { cursor: crosshair !important; }
+#pick-box { position: fixed; z-index: 9999; pointer-events: none; outline: 2px solid var(--accent-line); outline-offset: -1px; background: var(--accent-soft); opacity: 0.55; border-radius: 2px; display: none; }

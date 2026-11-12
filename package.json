@@ -20,6 +20,8 @@
     "start": "electron .",
     "dev": "electron . --styk-developer",
     "serve": "node scripts/serve.mjs",
+    "canvas": "node labs/ui-canvas/server.mjs",
+    "test:canvas:ui": "node tests/ui-canvas.browser.mjs",
     "check": "node scripts/check.mjs",
     "lint": "eslint .",
     "engine:build": "node scripts/engine-build.mjs",
