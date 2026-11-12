@@ -1,0 +1,48 @@
+name: Browser tests
+# Every browser test (npm run test:browser), not only the few the Tests workflow runs on each pull request.
+# About two hundred scripts take too long for every change, so they run once a week and on request, and a failure
+# here is a behaviour that broke since the last run.
+on:
+  pull_request:
+    # A change to this workflow or to the runner is tried by running it.
+    paths:
+      - .github/workflows/browser-tests.yml
+      - scripts/run-browser-tests.mjs
+  schedule:
+    - cron: '47 3 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: browser-tests-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  browser:
+    # Windows: the Linux runner's software renderer stops offering an adapter partway through (docs/WEB.md, Browsers).
+    name: Browser tests
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.11.0'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - uses: ./.github/actions/engine-build
+      - name: Every browser test
+        run: npm run test:browser -- --jobs 3 --timeout 240
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-test-results
+          path: artifacts/browser-tests/results.json
+          retention-days: 30
