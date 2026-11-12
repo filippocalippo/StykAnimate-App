@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { execFile, spawnSync } from 'node:child_process';
 import os from 'node:os';
@@ -42,4 +43,10 @@ process.stderr.write(locales.stderr ?? '');
 const inventory = spawnSync(process.execPath, ['scripts/engine-inventory.mjs'], { cwd: appRoot, encoding: 'utf8', windowsHide: true });
 if (inventory.status !== 0) process.stderr.write(`${inventory.stdout ?? ''}${inventory.stderr || (inventory.error ? `${inventory.error.message}\n` : '')}`);
 else console.log('Engine inventory: every source module has a row.');
-process.exitCode = failures || css.status !== 0 || locales.status !== 0 || inventory.status !== 0 ? 1 : 0;
+// src/app.mjs wires the application together and has grown far past what one module should hold. It may shrink, not grow:
+// a feature goes in a module of its own that app.mjs calls, and this number goes down when code moves out.
+const APP_MODULE_LINES = 6500;
+const appLines = readFileSync(path.join(appRoot, 'src/app.mjs'), 'utf8').split('\n').length;
+const appGrew = appLines > APP_MODULE_LINES;
+if (appGrew) console.error(`src/app.mjs has ${appLines} lines; its limit is ${APP_MODULE_LINES}. Put the new code in its own module (see AGENTS.md) instead of raising the limit.`);
+process.exitCode = failures || css.status !== 0 || locales.status !== 0 || inventory.status !== 0 || appGrew ? 1 : 0;
