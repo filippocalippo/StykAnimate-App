@@ -65,10 +65,15 @@ jobs:
         run: |
           npm run web:build
           npm run web:verify
-          npm run test:web
-          # The suites that start several editors in one browser run on Windows only: the Linux runner has no GPU, and
-          # its software renderer stops offering an adapter partway through them (docs/WEB.md, Browsers).
-          if [ "$RUNNER_OS" != Linux ]; then npm run test:web:browsers; fi
+          # The tests of the npm scripts test:web and test:web:browsers, two at a time; each starts its own server on
+          # the built site. The runner tries a test once more when the runner's software renderer loses its adapter.
+          # The suites that start several editors in one browser run on Windows only: on the Linux runner the
+          # renderer stops offering an adapter partway through nearly every time (docs/WEB.md, Browsers).
+          if [ "$RUNNER_OS" = Linux ]; then
+            node scripts/run-browser-tests.mjs --no-server --jobs 2 --script test:web
+          else
+            node scripts/run-browser-tests.mjs --no-server --jobs 2 --script test:web --script test:web:browsers
+          fi
       - name: Verify browser Cloudflare configuration
         if: runner.os == 'Linux'
         run: |

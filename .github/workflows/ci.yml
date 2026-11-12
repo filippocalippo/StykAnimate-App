@@ -31,6 +31,7 @@ jobs:
       app: ${{ steps.scope.outputs.app }}
       oracle: ${{ steps.scope.outputs.oracle }}
       unit-os: ${{ steps.scope.outputs.unit-os }}
+      engine-os: ${{ steps.scope.outputs.engine-os }}
     steps:
       - name: Decide which checks this change needs
         id: scope
@@ -56,7 +57,12 @@ jobs:
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
           echo "app=$app" >> "$GITHUB_OUTPUT"
           echo "oracle=$oracle" >> "$GITHUB_OUTPUT"
+          # What ships is the engine's WebAssembly build, which the unit tests exercise on both platforms. Its native
+          # tests are the same Rust on either, so a pull request runs them on Linux (5 minutes against 14 on Windows)
+          # and main runs both.
+          if [ -n "$PR" ]; then engine_os='["ubuntu-24.04"]'; else engine_os='["ubuntu-24.04","windows-latest"]'; fi
           echo "unit-os=$unit_os" >> "$GITHUB_OUTPUT"
+          echo "engine-os=$engine_os" >> "$GITHUB_OUTPUT"
           echo "Rust tests: $engine. Windows, browser and packaged checks: $app. Python oracle tests: $oracle." >> "$GITHUB_STEP_SUMMARY"
 
   engine-wasm:
@@ -181,7 +187,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04]
+        os: ${{ fromJSON(needs.changes.outputs.engine-os) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
