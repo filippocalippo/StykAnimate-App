@@ -8,8 +8,10 @@
  * reads the app hands over (the engine's loader, the lazy tables' reader), since a module of the app imported from here
  * would be a second copy.
  */
+import {meterBoundary} from './boundary.mjs';
 import {Capture, DEVELOPER, ringEvents} from './capture.mjs';
 import {createControl} from './control.mjs';
+import {frameCountAt, frameWindow, inputCountAt, inputWindow} from './frames.mjs';
 import {createPanels} from './panels.mjs';
 import {Sampler} from './sampler.mjs';
 import {useTableReader} from './inspector.mjs';
@@ -24,12 +26,16 @@ export async function start(app, owners = {}) {
   useTableReader(owners.tableOf);
   const engine = owners.loadEngine ? await owners.loadEngine().catch(() => null) : null;
   const trace = globalThis.__stykTrace;
-  const sampler = new Sampler({app, early, engine});
-  const capture = new Capture(early.ring);
+  // Every call the interface makes into the engine, counted where the generated classes define them (boundary.mjs).
+  const boundary = meterBoundary(engine?.boundary, early, trace);
+  const sampler = new Sampler({app, early, engine, boundary});
+  const capture = new Capture(early.ring, {frames: early.frames, boundary});
 
   let watchers = 0, counterTimer = 0;
   const runtime = {
-    app, early, sampler, capture, engine,
+    app, early, sampler, capture, engine, boundary,
+    /** When the app finished starting (performance.now ms): it starts the tools as its last step (src/devtools-gate.mjs). */
+    readyAt: owners.readyAt ?? performance.now(),
     /** Frames and counters are sampled only while something watches (the overlay, a capture). */
     watch(on) {
       early.watchFrames(on);
@@ -37,13 +43,14 @@ export async function start(app, owners = {}) {
       if (watchers && !counterTimer) counterTimer = setInterval(() => { try { sampler.sampleCounters(trace); } catch { /* a read that fails skips a sample */ } }, 250);
       if (!watchers && counterTimer) { clearInterval(counterTimer); counterTimer = 0; }
     },
+    /** The last `ms` of the rings, shaped as a capture (capture.mjs `analyze` reads either). Frames exist only for the time something watched. */
     recent(ms) {
-      const since = performance.now() - ms, {events} = ringEvents(early.ring, Math.max(0, early.ring.total - early.ring.capacity));
-      return events.filter(event => event.start >= since);
+      const stoppedAt = performance.now(), startedAt = stoppedAt - ms, {events} = ringEvents(early.ring, Math.max(0, early.ring.total - early.ring.capacity));
+      return {label: 'recent', startedAt, stoppedAt, startedTime: Date.now() - ms, events: events.filter(event => event.start >= startedAt), dropped: 0,
+        frames: frameWindow(early.frames, frameCountAt(early.frames, startedAt)), inputs: inputWindow(early.frames, inputCountAt(early.frames, startedAt)), boundary: null};
     },
     startCapture(label) { runtime.watch(true); return capture.start(label); },
     stopCapture() { const taken = capture.stop(); runtime.watch(false); return taken; },
-    lateMs: () => trace.parameter('devtools.lateFrameMs', 25, {min: 8, max: 200, description: 'A display frame longer than this is late (overlay and summaries)'}),
     setParameter(name, value) {
       const entry = early.parameters.registry.get(name);
       if (!entry) return;
@@ -72,7 +79,6 @@ export async function start(app, owners = {}) {
       return name;
     },
   };
-  runtime.lateMs();
   runtime.panels = createPanels(runtime);
   runtime.control = createControl(runtime);
   connectDesktop(runtime.control);

@@ -1,12 +1,17 @@
-// The developer tools' pure parts (docs/DEVTOOLS.md): the span ring's reads, summaries and Perfetto export, the log
-// filter, the shipping check, and the instrumentation layer doing nothing without the developer build.
+// The developer tools' pure parts (docs/DEVTOOLS.md): the span ring's reads, summaries and Perfetto export, the frame
+// recorder's reads, the engine boundary meter, the log filter, the shipping check, and the instrumentation layer doing
+// nothing without the developer build.
 import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
+import {createRequire} from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {Capture, perfettoTrace, ringEvents, summarize} from '../src/devtools/capture.mjs';
-import {filterLogs} from '../src/devtools/control.mjs';
+import {meterBoundary} from '../src/devtools/boundary.mjs';
+import {analyze, Capture, perfettoTrace, ringEvents, summarize} from '../src/devtools/capture.mjs';
+import {filterLogs, preparationSince} from '../src/devtools/control.mjs';
+import {frameCountAt, frameSeries, frameWindow, inputWindow, summarizeFrames} from '../src/devtools/frames.mjs';
+import {distribution, median, quantile, spread} from '../src/devtools/stats.mjs';
 import {treePage, preview} from '../src/devtools/inspector.mjs';
 import {MARKERS, isDeveloperPath, scanBinary, scanCapabilities, scanWeb} from '../scripts/check-devtools-shipping.mjs';
 import {selectFiles} from '../scripts/build-web.mjs';
@@ -44,22 +49,125 @@ test('a capture takes only what was recorded while it ran', () => {
   assert.throws(() => capture.stop(), /No capture/);
 });
 
-test('summaries group spans (edit calls by method), count late frames and keep counters', () => {
+/**
+ * A frame recorder shaped as src/devtools/early.js makes it. `add` records one frame of [interval, handlers, script,
+ * render] after the last one (the first begins at time 100).
+ */
+function recorder(rows = [], capacity = 8) {
+  const frames = {intervals: new Float32Array(capacity), at: new Float64Array(capacity), handlers: new Float32Array(capacity), script: new Float32Array(capacity), render: new Float32Array(capacity),
+    head: 0, total: 0, watching: 1, inputs: {latency: new Float32Array(4), at: new Float64Array(4), head: 0, total: 0}};
+  let at = 100;
+  frames.add = ([interval, handlers, script, render]) => {
+    at += interval;
+    const slot = frames.head;
+    frames.intervals[slot] = interval; frames.at[slot] = at; frames.handlers[slot] = handlers; frames.script[slot] = script; frames.render[slot] = render;
+    frames.head = (slot + 1) % capacity; frames.total++;
+  };
+  rows.forEach(frames.add);
+  return frames;
+}
+
+test('summaries group spans (edit calls by method, interface updates by surface), name their thread and keep counters; display frames are not spans to rank', () => {
   const r = ring(64);
   for (const ms of [10, 12, 40, 16]) push(r, 'display frame', 0, ms, {thread: 1});
+  push(r, 'interface update', 0, 2, {args: {surface: 'inspector'}});
   push(r, 'edit session call', 1, 3, {args: {method: 'poseJoint'}});
   push(r, 'edit session call', 2, 5, {args: {method: 'poseJoint'}});
   push(r, 'edit session call', 3, 1, {args: {method: 'beginDrag'}});
   push(r, 'queue', 4, -2, {value: 3});
   push(r, 'queue', 5, -2, {value: 1});
   push(r, 'opened', 6, -1);
-  const summary = summarize(ringEvents(r).events, {lateMs: 25});
-  assert.deepEqual(summary.frames, {count: 4, p50: 12, p95: 40, worst: 40, late: 1, lateMs: 25});
+  const summary = summarize(ringEvents(r).events);
+  assert.equal(summary.frames, undefined);
+  assert.ok(!summary.spans.some(row => row.name === 'display frame'));
   const pose = summary.spans.find(row => row.name === 'edit session call poseJoint');
-  assert.deepEqual([pose.count, pose.totalMs, pose.worst], [2, 8, 5]);
+  assert.deepEqual([pose.count, pose.totalMs, pose.worst, pose.thread], [2, 8, 5, 'interface']);
+  assert.equal(summary.spans.find(row => row.name === 'interface update inspector').count, 1);
   assert.deepEqual(summary.counters.queue, {last: 1, min: 1, max: 3, samples: 2});
   assert.equal(summary.instants.opened, 1);
   assert.equal(summary.slowest[0].name, 'edit session call poseJoint');
+});
+
+test('one percentile everywhere: nearest rank, a median that averages the middle pair, and a spread one stray run does not move', () => {
+  const list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 100];
+  assert.deepEqual([quantile(list, .5), quantile(list, .95), quantile(list, 1), quantile([], .5)], [5, 100, 100, null]);
+  assert.deepEqual([median([4, 1, 3, 2]), median([3, 1, 2]), median([NaN])], [2.5, 2, null]);
+  assert.deepEqual(distribution([10, 20, NaN, 30]), {count: 3, mean: 20, p50: 20, p95: 30, p99: 30, worst: 30});
+  assert.deepEqual(spread([10, 11, 12, 500]), {n: 4, median: 11.5, mad: 1, min: 10, max: 500});
+});
+
+test('frames are read by window, oldest first, and the newest one waits until its rendering was measured', () => {
+  const frames = recorder([[7, 0, 1, 1], [7, 1, 2, 1], [30, 20, 5, 2], [7, 0, 1, 0]]);
+  const settled = frameWindow(frames, 0);
+  assert.deepEqual([settled.interval, settled.handlers, settled.dropped], [[7, 7, 30], [0, 1, 20], 0]);
+  assert.deepEqual(frameWindow(frames, 0, {settled: false}).interval, [7, 7, 30, 7]);
+  assert.deepEqual(frameWindow(frames, 2).interval, [30]);
+  // The frames began at 107, 114, 144 and 151: a window from time 120 starts at the third.
+  assert.equal(frameCountAt(frames, 120), 2);
+  // A ring that wrapped says how many frames it no longer holds.
+  const kept = frameWindow(recorder(Array.from({length: 12}, (_, index) => [index + 1, 0, 0, 0])), 0);
+  assert.deepEqual([kept.dropped, kept.interval[0], kept.interval.length], [4, 5, 7]);
+});
+
+test('a frame summary judges frames against the display period and says what the interface thread spent, by phase', () => {
+  const window = frameWindow(recorder([[7, 0, 1, 1], [7, 1, 2, 1], [30, 20, 5, 2], [7, 0, 2, 0], [7, 0, 0, 0]]), 0);
+  const summary = summarizeFrames(window, {periodMs: 7, seconds: .051});
+  assert.deepEqual([summary.count, summary.late, summary.lateShare, summary.over16, summary.over33, summary.worst, summary.lateOverMs], [4, 1, .25, 1, 0, 30, 10.5]);
+  // Work per frame: 2, 4, 27 and 2 ms; handlers took 21 of those 35 ms.
+  assert.deepEqual([summary.work.worst, summary.work.p50, summary.phases.handlers.worst, summary.phases.script.mean, summary.phases.handlers.share], [27, 2, 20, 2.5, .6]);
+  // Without a measured period the frames' own median is the period.
+  assert.equal(summarizeFrames(frameWindow(recorder(Array.from({length: 10}, () => [8, 0, 0, 0]), 16), 0)).periodMs, 8);
+  // A chart series keeps the worst frame of each bucket.
+  assert.deepEqual(frameSeries(window, 2).interval, [7, 30]);
+});
+
+test('a capture takes its frames, its inputs and the calls into the engine, and analyze turns them into one summary', () => {
+  const r = ring(16), frames = recorder([[7, 0, 1, 1]]);
+  const calls = [{name: 'Stage.draw', calls: 3, totalMs: 1.23456, worstMs: .9}];
+  const capture = new Capture(r, {frames, boundary: {reset() { calls[0].calls = 0; }, rows: () => calls}});
+  capture.start('drag');
+  assert.equal(calls[0].calls, 0, 'the meter starts afresh with the capture');
+  // Three frames and two inputs arrive while it runs.
+  for (const row of [[7, 1, 2, 1], [9, 0, 3, 1], [7, 0, 0, 0]]) frames.add(row);
+  for (const ms of [12, 20]) { frames.inputs.latency[frames.inputs.head++] = ms; frames.inputs.total++; }
+  push(r, 'paint', 1, 2);
+  const taken = capture.stop();
+  assert.deepEqual([taken.frames.interval, inputWindow(frames, 0).latency], [[7, 9], [12, 20]]);
+  const summary = analyze(taken, {periodMs: 7});
+  assert.deepEqual([summary.frames.count, summary.inputs.count, summary.inputs.worst, summary.spans[0].name], [2, 2, 20, 'paint']);
+  assert.deepEqual(summary.boundary, [{name: 'Stage.draw', calls: 0, totalMs: 1.235, worstMs: .9}]);
+});
+
+test('the engine boundary meter counts every call of the generated classes while something watches, by method name for session calls, and costs nothing otherwise', () => {
+  class EditSession { call(method) { return `ran ${method}`; } query() { return 1; } free() {} static from_document() { return new EditSession(); } get revision() { return 7; } }
+  const early = {frames: {watching: 0}}, spans = [];
+  const meter = meterBoundary({EditSession}, early, {nested: name => spans.push(name)});
+  const session = EditSession.from_document();
+  assert.equal(session.call('poseJoint'), 'ran poseJoint');
+  assert.deepEqual(meter.rows(), [], 'nothing is counted while nothing watches');
+  early.frames.watching = 1;
+  session.call('poseJoint'); session.call('poseJoint'); session.call('commitDrag'); session.query(); session.free();
+  EditSession.from_document();
+  assert.equal(session.revision, 7);
+  assert.deepEqual(Object.fromEntries(meter.rows().map(row => [row.name, row.calls])),
+    {'EditSession.call(poseJoint)': 2, 'EditSession.call(commitDrag)': 1, 'EditSession.query': 1, 'EditSession.from_document': 1});
+  assert.deepEqual(spans, [], 'calls shorter than a quarter of a millisecond leave no span');
+  meter.reset();
+  assert.deepEqual(meter.rows(), []);
+  assert.doesNotThrow(() => meterBoundary(undefined, early, {}), 'a page whose engine is not loaded has no boundary to meter');
+});
+
+test('what the engine prepared between two reads survives its counters starting afresh for a new document', () => {
+  assert.deepEqual(preparationSince({prepared: 10, totalMs: 100, inline: 1}, {prepared: 14, totalMs: 120, inline: 1}), {frames: 4, msPerFrame: 5, inline: 0});
+  assert.deepEqual(preparationSince({prepared: 90, totalMs: 900, inline: 4}, {prepared: 3, totalMs: 6, inline: 0}), {frames: 3, msPerFrame: 2, inline: 0});
+  assert.equal(preparationSince(null, {prepared: 1, totalMs: 1, inline: 0}), null);
+});
+
+test('the environment a profiling run asks for reaches the page only as the three keys it may set', () => {
+  const {profilingEnvironment} = createRequire(import.meta.url)('../desktop/devtools.cjs');
+  assert.deepEqual(profilingEnvironment(JSON.stringify({deviceMemoryGiB: 4, hardwareConcurrency: 4, parameters: {'engine.workers': 2, 'bad name!': 1, nested: {}}, other: 'dropped'})),
+    {deviceMemoryGiB: 4, hardwareConcurrency: 4, parameters: {'engine.workers': 2}});
+  for (const text of [undefined, '', 'not json', '[]', '{}', '{"deviceMemoryGiB": -1}']) assert.equal(profilingEnvironment(text), null);
 });
 
 test('the Perfetto export is Chrome trace JSON with named threads', () => {

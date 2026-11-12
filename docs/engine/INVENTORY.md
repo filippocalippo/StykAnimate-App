@@ -478,13 +478,16 @@ Interface: stays in JS.
 | `src/color-picker-magnifier.mjs` |  | stays |  |
 | `src/color-picker.mjs` |  | stays |  |
 | `src/devtools-gate.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/boundary.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/capture.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/control.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/devtools.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/early.js` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/frames.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/inspector.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/panels.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/sampler.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/stats.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/drawing-brush-labels.mjs` |  | stays |  |
 | `src/drawing-cel-prefetch.mjs` |  | stays | which drawing cels the decode queue loads ahead and which it keeps (moved out of onion-skin.mjs) |
 | `src/drawing-controller.mjs` |  | stays |  |

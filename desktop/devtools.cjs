@@ -6,7 +6,7 @@
 // It gives the page's preload script the early script (src/devtools/early.js, run before any page script) and the name
 // of the bridge the page answers through, turns on the inspector, and serves the control channel: a named pipe (a
 // socket file outside Windows) that only this user reaches, one JSON request per line, answered in order.
-const { ipcMain } = require('electron');
+const { app, ipcMain } = require('electron');
 const { readFileSync, unlinkSync } = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
@@ -22,12 +22,45 @@ function developerLaunch(app) {
 }
 
 /**
+ * The machine a profiling run asks this launch to behave as (perf/environments.mjs sets STYK_DEVTOOLS_ENVIRONMENT):
+ * live parameters' starting values, and the memory and processor count the page reports. Only these three keys pass,
+ * and only as numbers, booleans and short strings; anything else is dropped, and a value that is not JSON is ignored.
+ */
+function profilingEnvironment(text) {
+  let asked;
+  try { asked = JSON.parse(text ?? 'null'); } catch { return null; }
+  if (!asked || typeof asked !== 'object' || Array.isArray(asked)) return null;
+  const environment = {};
+  for (const key of ['deviceMemoryGiB', 'hardwareConcurrency']) if (Number.isFinite(asked[key]) && asked[key] > 0) environment[key] = asked[key];
+  if (asked.parameters && typeof asked.parameters === 'object' && !Array.isArray(asked.parameters)) {
+    environment.parameters = {};
+    for (const [name, value] of Object.entries(asked.parameters).slice(0, 64)) {
+      if (/^[\w.-]{1,64}$/.test(name) && (typeof value === 'boolean' || Number.isFinite(value) || (typeof value === 'string' && value.length <= 64))) environment.parameters[name] = value;
+    }
+  }
+  return Object.keys(environment).length ? environment : null;
+}
+
+/** The app's processes as the operating system counts them: type, CPU seconds so far, and memory in bytes. */
+function processMetrics() {
+  return app.getAppMetrics().map(metric => ({
+    pid: metric.pid, type: metric.type, name: metric.serviceName || metric.name || '',
+    cpuSeconds: metric.cpu?.cumulativeCPUUsage ?? null, cpuPercent: metric.cpu?.percentCPUUsage ?? null,
+    workingSetBytes: (metric.memory?.workingSetSize ?? 0) * 1024, peakWorkingSetBytes: (metric.memory?.peakWorkingSetSize ?? 0) * 1024,
+    privateBytes: Number.isFinite(metric.memory?.privateBytes) ? metric.memory.privateBytes * 1024 : null,
+  }));
+}
+
+/**
  * Starts the desktop half. `page()` returns the editor's webContents, or null while there is none; `openFile(path)`
  * opens a file as the app opens one from outside.
  * Returns the argument the preload script looks for and a `close` that ends the pipe.
  */
 function startDevtools({ appRoot, page, openFile }) {
-  const early = readFileSync(path.join(appRoot, 'src', 'devtools', 'early.js'), 'utf8');
+  const environment = profilingEnvironment(process.env.STYK_DEVTOOLS_ENVIRONMENT);
+  // The environment is defined in the page before the early script reads it.
+  const asked = environment ? `globalThis.__stykDevtoolsEnvironment = ${JSON.stringify(environment)};\n` : '';
+  const early = asked + readFileSync(path.join(appRoot, 'src', 'devtools', 'early.js'), 'utf8');
   // The preload script asks once, before the page's first script: a synchronous answer keeps the early script first.
   ipcMain.on('styk:developer-early', event => { event.returnValue = { script: early, bridge: BRIDGE }; });
 
@@ -71,10 +104,11 @@ function startDevtools({ appRoot, page, openFile }) {
     await openFile(path.resolve(request.args.path));
     return askPage({ id, op: 'document.wait', args: { token: marked.result.token, timeoutMs: request.args.timeoutMs }, detail: request.detail });
   };
-  /** One request line to one answer line. */
+  /** One request line to one answer line. `process.metrics` is the main process's own answer: the page cannot see the other processes. */
   const ask = line => {
     let request;
     try { request = JSON.parse(line); } catch { return Promise.resolve(failure(null, 'The request is not JSON.', 'Send one JSON object per line.')); }
+    if (request?.op === 'process.metrics') return Promise.resolve(JSON.stringify({ id: Number.isInteger(request.id) ? request.id : null, ok: true, result: { rows: processMetrics() } }));
     return request?.op === 'open' && typeof request.args?.path === 'string' ? openPath(request) : askPage(request);
   };
 
@@ -112,4 +146,4 @@ function startDevtools({ appRoot, page, openFile }) {
   };
 }
 
-module.exports = { developerLaunch, startDevtools };
+module.exports = { developerLaunch, startDevtools, profilingEnvironment };

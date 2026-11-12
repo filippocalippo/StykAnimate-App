@@ -6,10 +6,10 @@
  * redraws while they are closed; open, they refresh at most four times a second and never wait on the engine.
  * These panels are developer-only English text, outside the localized catalogue.
  */
-import {perfettoTrace, spanKey, summarize} from './capture.mjs';
+import {analyze, perfettoTrace, spanKey, summarize} from './capture.mjs';
 import {commandLog, documentSummary, framePage, historyPage, treePage} from './inspector.mjs';
 import {filterLogs} from './control.mjs';
-import {frameIntervals} from './sampler.mjs';
+import {frameWindow} from './frames.mjs';
 
 const STYLE = `
 #styk-devtools, #styk-devtools-overlay { --dt-bg: var(--surface-raised, #1b1c23); --dt-fg: var(--text-1, #e8e9ee); --dt-dim: var(--text-3, #8b90a0);
@@ -130,8 +130,7 @@ export function createPanels(runtime) {
         if (capture.running) { state.lastCapture = runtime.stopCapture(); state.selected = null; state.view = {from: 0, to: 1}; profiler(true); }
         else { runtime.startCapture('panel'); profiler(true); }
       }, 'Record spans until you stop');
-      const recent = button('Last 5 s', () => { const events = runtime.recent(5000); const now = performance.now();
-        state.lastCapture = {label: 'recent', startedAt: now - 5000, stoppedAt: now, events, dropped: 0}; state.selected = null; state.view = {from: 0, to: 1}; profiler(true); },
+      const recent = button('Last 5 s', () => { state.lastCapture = runtime.recent(5000); state.selected = null; state.view = {from: 0, to: 1}; profiler(true); },
       'What the ring holds of the last five seconds (a hitch, after it happened)');
       const exportButton = button('Export Perfetto', () => {
         if (!state.lastCapture) return;
@@ -147,11 +146,11 @@ export function createPanels(runtime) {
       exportButton.disabled = !state.lastCapture;
       wireTimeline(canvas);
       if (state.lastCapture) {
-        const summary = summarize(state.lastCapture.events);
+        const summary = analyze(state.lastCapture, {periodMs: sampler.displayPeriod().periodMs});
         stats.replaceChildren(
           element('div', {className: 'dt-row dt-dim', textContent: `${state.lastCapture.events.length} events over ${format((state.lastCapture.stoppedAt - state.lastCapture.startedAt) / 1000, 1)} s`
-            + `${state.lastCapture.dropped ? `, ${state.lastCapture.dropped} dropped (ring full)` : ''}. Display frames: p50 ${format(summary.frames.p50)} ms, p95 ${format(summary.frames.p95)} ms, `
-            + `worst ${format(summary.frames.worst)} ms, ${summary.frames.late} late.`}),
+            + `${state.lastCapture.dropped ? `, ${state.lastCapture.dropped} dropped (ring full)` : ''}. Display frames: p50 ${format(summary.frames?.p50)} ms, p95 ${format(summary.frames?.p95)} ms, `
+            + `worst ${format(summary.frames?.worst)} ms, ${format(summary.frames?.late)} late.`}),
           table(['Span', 'Count', 'Total ms', 'p50', 'p95', 'Worst'], summary.spans.slice(0, 40).map(row => [row.name, row.count, row.totalMs, row.p50, row.p95, row.worst]), [1, 2, 3, 4, 5]));
       }
     }
@@ -192,7 +191,7 @@ export function createPanels(runtime) {
     const context = canvas.getContext('2d');
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
-    const taken = state.lastCapture ?? (capture.running ? {events: runtime.recent(performance.now() - capture.running.startedAt), startedAt: capture.running.startedAt, stoppedAt: performance.now()} : null);
+    const taken = state.lastCapture ?? (capture.running ? runtime.recent(performance.now() - capture.running.startedAt) : null);
     const style = getComputedStyle(root);
     context.font = '10px ui-monospace, monospace';
     if (!taken) { context.fillStyle = style.getPropertyValue('--dt-dim'); context.fillText('Record, or take the last 5 s, to see spans here.', 8, 16); canvas.hit = null; return; }
@@ -325,14 +324,14 @@ export function createPanels(runtime) {
   function paintOverlay() {
     const stage = document.getElementById('viewport')?.getBoundingClientRect();
     if (stage) { overlayRoot.style.left = `${stage.left + 8}px`; overlayRoot.style.top = `${stage.top + 8}px`; }
-    const snapshot = sampler.snapshot({lateMs: runtime.lateMs()}), f = snapshot.frames, jobsNow = snapshot.jobs, memory = snapshot.memory;
+    const snapshot = sampler.snapshot(), f = snapshot.frames, jobsNow = snapshot.jobs, memory = snapshot.memory;
     overlayText.textContent = [
-      `frame ${format(f.last, 1)} ms  p50 ${format(f.p50, 1)}  p95 ${format(f.p95, 1)}  worst ${format(f.worst, 1)}`,
-      `late ${f.late}/${f.count} (>${format(f.lateMs, 0)} ms)  paint p95 ${format(snapshot.paint.p95, 1)} ms${snapshot.presentation?.fps ? `  play ${format(snapshot.presentation.fps, 1)}/${format(snapshot.presentation.targetFps, 0)} fps` : ''}`,
+      `frame p50 ${format(f.p50, 1)} ms  p95 ${format(f.p95, 1)}  worst ${format(f.worst, 1)}  work p95 ${format(f.work.p95, 1)}`,
+      `late ${format(f.late)}/${f.count} (>${format(f.lateOverMs, 0)} ms)  paint p95 ${format(snapshot.paint.p95, 1)} ms${snapshot.presentation?.fps ? `  play ${format(snapshot.presentation.fps, 1)}/${format(snapshot.presentation.targetFps, 0)} fps` : ''}`,
       `queues  pictures ${format(jobsNow.engine?.imagesPending)}  cached ${format(jobsNow.engine?.cachedFrames)}  threads ${jobsNow.threads.live}${jobsNow.engine?.busy ? '  busy' : ''}`,
       `memory  js ${megabytes(memory.jsHeap?.usedBytes)}  engine ${megabytes(memory.engine?.liveBytes)}  gpu ${megabytes(memory.gpuBytes)}`,
     ].join('\n');
-    const values = frameIntervals(early.frames, 110), context = spark.getContext('2d'), w = spark.width, h = spark.height, late = runtime.lateMs();
+    const values = frameWindow(early.frames, Math.max(0, early.frames.total - 110)).interval, context = spark.getContext('2d'), w = spark.width, h = spark.height, late = f.lateOverMs ?? 25;
     context.clearRect(0, 0, w, h);
     const top = Math.max(50, ...values);
     values.forEach((ms, i) => { context.fillStyle = ms > late ? '#e5484d' : '#3e9b4f'; const bar = (ms / top) * h; context.fillRect(i * 4, h - bar, 3, bar); });

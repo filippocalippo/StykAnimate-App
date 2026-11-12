@@ -407,7 +407,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       const span = traceBegin('stage draw');
       try {
         const drawn = drawEdit(request);
-        if (span !== 0) traceEnd(span, {drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs});
+        if (span !== 0) traceEnd(span, {tick: request.tick, drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs});
         if (drawn) { engineShown = true; preparePickSoon(); }
         if (renderer.measureFrame) renderer.telemetryStages = {geometry: side.stats.lastSendMs, submit: side.stats.lastDrawMs};
         return drawn;

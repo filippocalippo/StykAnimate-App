@@ -1,33 +1,40 @@
 /**
- * What the performance overlay, the jobs panel and the control channel's `metrics` read, through the narrow reads the app
- * already offers (`window.styk.performance()`, the stage's and the engine's statistics). Developer build only.
+ * What the performance panel, the overlay, the jobs panel and the control channel's `metrics` read, through the narrow
+ * reads the app already offers (`window.styk.performance()`, the stage's and the engine's statistics) and the frame
+ * recorder (frames.mjs). Developer build only.
  *
  * Reading never waits: the engine's statistics are `try_lock` reads that answer `busy` instead (styk-wasm `EngineHandle::stats`).
  */
-const percentile = (values, q) => {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))];
-};
-const round = (value, digits = 2) => (typeof value === 'number' && Number.isFinite(value) ? Number(value.toFixed(digits)) : value ?? null);
-const parsed = (read) => { try { return read(); } catch (error) { return {error: String(error?.message ?? error)}; } };
+import {displayPeriod, frameCountAt, frameWindow, inputCountAt, inputWindow, summarizeFrames, summarizeInputs} from './frames.mjs';
+import {distribution, round} from './stats.mjs';
 
-/** The display frames the early script measured, newest last: up to `count` intervals (ms). */
-export function frameIntervals(frames, count = 240) {
-  const available = Math.min(frames.total, frames.intervals.length, count), values = new Array(available);
-  for (let i = 0; i < available; i++) values[i] = frames.intervals[(frames.head - available + i + frames.intervals.length) % frames.intervals.length];
-  return values;
-}
+const parsed = (read) => { try { return read(); } catch (error) { return {error: String(error?.message ?? error)}; } };
+/** The period assumed until the display's own has been seen (60 Hz). */
+const ASSUMED_PERIOD = 1000 / 60;
 
 export class Sampler {
-  /** `engine` is the loaded engine (src/engine/engine.mjs loadEngine's result), or null while it loads. */
-  constructor({app, early, engine = null}) { this.app = app; this.early = early; this.engine = engine; }
+  /** `engine` is the loaded engine (src/engine/engine.mjs loadEngine's result), or null while it loads; `boundary` the engine boundary meter. */
+  constructor({app, early, engine = null, boundary = null}) { this.app = app; this.early = early; this.engine = engine; this.boundary = boundary; this.period = null; }
 
-  /** Frame times of the last `count` display frames, late frames over `lateMs` (default: one and a half refresh periods at 60 Hz). */
-  frames({count = 240, lateMs = 25} = {}) {
-    const values = frameIntervals(this.early.frames, count);
-    return {count: values.length, last: round(values.at(-1)), p50: round(percentile(values, .5)), p95: round(percentile(values, .95)),
-      worst: round(values.length ? Math.max(...values) : null), late: values.filter(ms => ms > lateMs).length, lateMs, watching: this.early.frames.watching > 0};
+  /**
+   * The display's period (ms). Frames never come faster than the display takes them, so the shortest run of frames
+   * seen so far is the period; until 30 frames were recorded, 60 Hz is assumed. `measured` says which.
+   */
+  displayPeriod() {
+    const seen = displayPeriod(frameWindow(this.early.frames, Math.max(0, this.early.frames.total - 240)).interval);
+    if (seen !== null && this.early.frames.total >= 30 && (this.period === null || seen < this.period)) this.period = seen;
+    return {periodMs: this.period ?? ASSUMED_PERIOD, measured: this.period !== null};
+  }
+
+  /** The frames of the last `ms` (default 2 s), with the interface thread's work by phase: `summarizeFrames`' shape. */
+  frames({ms = 2000} = {}) {
+    const since = performance.now() - ms, {periodMs, measured} = this.displayPeriod();
+    return {...summarizeFrames(frameWindow(this.early.frames, frameCountAt(this.early.frames, since)), {periodMs}), periodMeasured: measured, watching: this.early.frames.watching > 0};
+  }
+
+  /** The latency of the inputs of the last `ms`: from each input to the end of the frame that followed its handler. */
+  inputs({ms = 2000} = {}) {
+    return summarizeInputs(inputWindow(this.early.frames, inputCountAt(this.early.frames, performance.now() - ms)));
   }
 
   /** The page's memory, the engine's and the GPU's as the stage counts it. */
@@ -38,6 +45,12 @@ export class Sampler {
     return {jsHeap: heap, engine, engineMemoryBytes: this.engine?.memoryBytes ?? null, engineMaximumBytes: this.engine?.memoryMaximumBytes ?? null,
       gpuBytes: renderer?.gpuBytes ?? null, gpu: renderer?.engine ? {spriteBytes: renderer.engine.spriteBytes, targetBytes: renderer.engine.targetBytes, effectBytes: renderer.engine.effectBytes,
         layerBytes: renderer.engine.layerBytes, glyphBytes: renderer.engine.glyphBytes, softBytes: renderer.engine.softBytes} : null};
+  }
+
+  /** The engine's frame preparation counters since it started: frames prepared on its threads, their total and worst time. Null when it is busy or not loaded. */
+  preparation() {
+    const stats = this.engine ? parsed(() => JSON.parse(this.engine.handle.stats())) : null;
+    return stats && !stats.error && !stats.busy ? {prepared: stats.prepared, totalMs: stats.totalMs, worstMs: stats.worstMs, inline: stats.inline, cached: stats.cached, cachedBytes: stats.cachedBytes, imagesPending: stats.imagesPending} : null;
   }
 
   /** Queues and jobs: the engine's preparation, pictures waiting, playback's buffer, exports, imports and the page's workers. */
@@ -52,13 +65,13 @@ export class Sampler {
     for (const row of live) { const key = row.name || row.url.split('/').pop(); byName[key] = (byName[key] ?? 0) + 1; }
     return {
       engine: engine ? {threaded: engine.threaded, workers: engine.workers, workersLost: parsed(() => engine.handle.workers_lost()), generation: parsed(() => engine.handle.generation()),
-        prepared: handleStats?.prepared ?? null, preparedTotalMs: round(handleStats?.totalMs), preparedWorstMs: round(handleStats?.worstMs), inline: handleStats?.inline ?? null,
+        prepared: handleStats?.prepared ?? null, preparedTotalMs: round(handleStats?.totalMs, 2), preparedWorstMs: round(handleStats?.worstMs, 2), inline: handleStats?.inline ?? null,
         cachedFrames: handleStats?.cached ?? null, cachedBytes: handleStats?.cachedBytes ?? null, imagesPending: handleStats?.imagesPending ?? null, busy: handleStats?.busy ?? null} : null,
-      playback: playback && !playback.error ? {preparedFrames: playback.preparedFrames, readyFrames: playback.readyFrames, bytes: playback.bytes, lastCompileMs: round(playback.lastCompileMs)} : playback,
-      stage: stage && !stage.error ? {frames: stage.frames, lastSendMs: round(stage.lastSendMs), lastDrawMs: round(stage.lastDrawMs), refusal: stage.refusal ?? null, backend: stage.backend ?? null} : stage,
+      playback: playback && !playback.error ? {preparedFrames: playback.preparedFrames, readyFrames: playback.readyFrames, bytes: playback.bytes, lastCompileMs: round(playback.lastCompileMs, 2)} : playback,
+      stage: stage && !stage.error ? {frames: stage.frames, lastSendMs: round(stage.lastSendMs, 2), lastDrawMs: round(stage.lastDrawMs, 2), refusal: stage.refusal ?? null, backend: stage.backend ?? null} : stage,
       importing: Boolean(app.state?.importing), playing: Boolean(app.state?.playing), buffering: Boolean(app.state?.buffering),
       threads: {live: live.length, started: this.early.workers.sequence, byName},
-      browser: {longTasks: this.early.browser.longTasks, longTaskMs: round(this.early.browser.longTaskMs), slowInputs: this.early.browser.slowInputs, worstInputMs: round(this.early.browser.worstInputMs)},
+      browser: {longTasks: this.early.browser.longTasks, longTaskMs: round(this.early.browser.longTaskMs, 2), slowInputs: this.early.browser.slowInputs, worstInputMs: round(this.early.browser.worstInputMs, 2)},
     };
   }
 
@@ -72,11 +85,13 @@ export class Sampler {
   snapshot(options) {
     const perf = parsed(() => this.app.performance?.() ?? null);
     const paints = Array.isArray(perf?.samples) ? perf.samples : [];
+    const paint = distribution(paints, 2);
     return {
       at: round(performance.now(), 1),
       frames: this.frames(options),
-      paint: {count: paints.length, p50: round(percentile(paints, .5)), p95: round(percentile(paints, .95)), worst: round(paints.length ? Math.max(...paints) : null)},
-      presentation: perf?.presentation ? {fps: round(perf.presentation.fps, 1), targetFps: perf.presentation.targetFps, bufferingMs: round(perf.presentation.bufferingMs), bufferingEvents: perf.presentation.bufferingEvents} : null,
+      inputs: this.inputs(options),
+      paint: {count: paint.count, p50: paint.p50, p95: paint.p95, worst: paint.worst},
+      presentation: perf?.presentation ? {fps: round(perf.presentation.fps, 1), targetFps: perf.presentation.targetFps, bufferingMs: round(perf.presentation.bufferingMs, 2), bufferingEvents: perf.presentation.bufferingEvents} : null,
       memory: this.memory(),
       jobs: this.jobs(),
     };

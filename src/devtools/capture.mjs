@@ -1,7 +1,10 @@
 /**
  * Reading the span ring (src/devtools/early.js): captures, Perfetto (Chrome trace) export and the statistics the profiler
- * panel, the control channel and the profiling command share. Developer build only.
+ * panel, the control channel and the profiling runner share. Developer build only.
  */
+import {frameSeries, frameWindow, inputWindow, summarizeFrames, summarizeInputs} from './frames.mjs';
+import {quantile, round} from './stats.mjs';
+
 export const DEVELOPER = 'styk-devtools';
 
 /** Events of the ring from absolute index `from` (ring.total counts every event ever pushed) up to now, oldest first. */
@@ -18,12 +21,17 @@ export function ringEvents(ring, from = 0) {
   return {events, dropped: first - from > 0 ? first - from : 0};
 }
 
-/** One capture at a time: `start()` marks the ring, `stop()` takes what was recorded since, with any samples taken meanwhile. */
+/**
+ * One capture at a time: `start()` marks the ring, `stop()` takes what was recorded since. With the frame recorder
+ * (`frames`, the early script's) and the engine boundary meter (`boundary`) it also takes the frames, the inputs'
+ * latencies and the calls into the engine of that stretch.
+ */
 export class Capture {
-  constructor(ring) { this.ring = ring; this.running = null; this.last = null; }
+  constructor(ring, {frames = null, boundary = null} = {}) { this.ring = ring; this.frames = frames; this.boundary = boundary; this.running = null; this.last = null; }
   start(label = '') {
     if (this.running) throw new Error('A capture is already running: stop it first.');
-    this.running = {label, from: this.ring.total, startedAt: performance.now(), startedTime: Date.now()};
+    this.boundary?.reset();
+    this.running = {label, from: this.ring.total, framesFrom: this.frames?.total ?? 0, inputsFrom: this.frames?.inputs.total ?? 0, startedAt: performance.now(), startedTime: Date.now()};
     return {started: true, label};
   }
   stop() {
@@ -31,23 +39,59 @@ export class Capture {
     if (!running) throw new Error('No capture is running.');
     this.running = null;
     const {events, dropped} = ringEvents(this.ring, running.from);
-    this.last = {label: running.label, startedAt: running.startedAt, startedTime: running.startedTime, stoppedAt: performance.now(), events, dropped};
+    this.last = {label: running.label, startedAt: running.startedAt, startedTime: running.startedTime, stoppedAt: performance.now(), events, dropped,
+      frames: this.frames ? frameWindow(this.frames, running.framesFrom) : null, inputs: this.frames ? inputWindow(this.frames, running.inputsFrom) : null,
+      boundary: this.boundary?.rows() ?? null};
     return this.last;
   }
 }
 
-const quantile = (sorted, q) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))] : null;
-const round = value => value === null || value === undefined ? null : Math.round(value * 1000) / 1000;
-
-/** The name a span is grouped under: an edit session call is grouped by its method. */
-export const spanKey = event => event.args?.method ? `${event.name} ${event.args.method}` : event.name;
+/** The name a span is grouped under: an edit session call by its method, an interface update by its surface. */
+export const spanKey = event => { const detail = event.args?.method ?? event.args?.surface; return detail ? `${event.name} ${detail}` : event.name; };
 
 /**
- * Statistics of a list of events: per span name the count, total, p50, p95 and worst (ms); per counter its last, least and
- * most; the slowest single spans; frame times and late frames (display frames longer than `lateMs`).
+ * Everything a capture says, as numbers: the spans' statistics (`summarize`), the display frames with the interface
+ * thread's work by phase (`frames`), the inputs' latencies and the calls into the engine. `taken` is a capture, or
+ * any {startedAt, stoppedAt, events, dropped, frames, inputs, boundary} (the last five seconds of the rings).
+ * `periodMs` is the display's period when the caller measured it; `series` adds the frames as chart series.
  */
-export function summarize(events, {lateMs = 1000 / 60 * 1.5, slowest = 10} = {}) {
-  const spans = new Map(), counters = new Map(), instants = new Map(), top = [];
+export function analyze(taken, {periodMs = null, slowest, series = false} = {}) {
+  const seconds = (taken.stoppedAt - taken.startedAt) / 1000;
+  return {
+    ms: round(taken.stoppedAt - taken.startedAt, 1), events: taken.events.length, dropped: taken.dropped,
+    ...summarize(taken.events, {slowest}),
+    frames: taken.frames ? summarizeFrames(taken.frames, {periodMs, seconds}) : null,
+    inputs: taken.inputs ? summarizeInputs(taken.inputs) : null,
+    boundary: taken.boundary ? taken.boundary.slice(0, 40).map(row => ({name: row.name, calls: row.calls, totalMs: round(row.totalMs), worstMs: round(row.worstMs)})) : null,
+    shown: shownFrames(taken),
+    ...(series && taken.frames ? {series: frameSeries(taken.frames)} : {}),
+  };
+}
+
+/**
+ * The pictures the stage showed during a capture and the inputs it received, as times in milliseconds from the
+ * capture's start: `at` and `tick` of every frame the stage drew (`prepared`: a frame the engine's threads made, as
+ * playback and a dense scrub show), and `inputs`, when each input happened. With both, a scenario can say how long a
+ * key press or a pointer move took to show its frame, which the frame after its handler does not tell when the
+ * picture is made off the interface thread. At most the last 2,000 of each.
+ */
+export function shownFrames(taken) {
+  const at = [], tick = [], prepared = [];
+  for (const event of taken.events) {
+    if ((event.name !== 'stage draw' && event.name !== 'stage draw prepared') || event.args?.drawn !== true || !Number.isFinite(event.args.tick)) continue;
+    at.push(round(event.start + event.duration - taken.startedAt, 1)); tick.push(event.args.tick); prepared.push(event.name === 'stage draw prepared' ? 1 : 0);
+  }
+  const keep = list => list.slice(-2000);
+  return {at: keep(at), tick: keep(tick), prepared: keep(prepared), inputs: keep((taken.inputs?.at ?? []).map(time => round(time - taken.startedAt, 1)))};
+}
+
+/**
+ * Statistics of a list of events: per span name its thread, count, total, p50, p95 and worst (ms); per counter its last,
+ * least and most; and the slowest single spans. Display frames are the frame recorder's (`analyze`), not spans to rank.
+ * Threads: `interface` (the app's own spans), `tasks` (an open, a save), `long tasks` and `input` (the browser's reports).
+ */
+export function summarize(events, {slowest = 10} = {}) {
+  const spans = new Map(), threads = new Map(), counters = new Map(), instants = new Map(), top = [];
   for (const event of events) {
     if (event.duration === -2) {
       const counter = counters.get(event.name) ?? {count: 0, last: 0, min: Infinity, max: -Infinity};
@@ -55,29 +99,26 @@ export function summarize(events, {lateMs = 1000 / 60 * 1.5, slowest = 10} = {})
       counters.set(event.name, counter);
     } else if (event.duration === -1) instants.set(event.name, (instants.get(event.name) ?? 0) + 1);
     else {
+      if (event.name === 'display frame') continue;
       const key = spanKey(event);
-      const list = spans.get(key) ?? [];
-      list.push(event.duration); spans.set(key, list);
-      if (event.name !== 'display frame') {
-        top.push(event);
-        if (top.length > slowest * 4) { top.sort((a, b) => b.duration - a.duration); top.length = slowest; }
-      }
+      let list = spans.get(key);
+      if (!list) { spans.set(key, list = []); threads.set(key, event.thread); }
+      list.push(event.duration);
+      top.push(event);
+      if (top.length > slowest * 4) { top.sort((a, b) => b.duration - a.duration); top.length = slowest; }
     }
   }
   const spanRows = [...spans].map(([name, list]) => {
     list.sort((a, b) => a - b);
     const total = list.reduce((sum, value) => sum + value, 0);
-    return {name, count: list.length, totalMs: round(total), p50: round(quantile(list, .5)), p95: round(quantile(list, .95)), worst: round(list.at(-1))};
+    return {name, thread: threads.get(name), count: list.length, totalMs: round(total), p50: round(quantile(list, .5)), p95: round(quantile(list, .95)), worst: round(list.at(-1))};
   }).sort((a, b) => b.totalMs - a.totalMs);
   top.sort((a, b) => b.duration - a.duration);
-  const frames = spans.get('display frame') ?? [];
   return {
     spans: spanRows,
     counters: Object.fromEntries([...counters].map(([name, c]) => [name, {last: round(c.last), min: round(c.min), max: round(c.max), samples: c.count}])),
     instants: Object.fromEntries(instants),
     slowest: top.slice(0, slowest).map(event => ({name: spanKey(event), thread: event.thread, ms: round(event.duration), at: round(event.start), args: event.args ?? undefined})),
-    frames: {count: frames.length, p50: round(quantile(frames, .5)), p95: round(quantile(frames, .95)), worst: round(frames.at(-1) ?? null),
-      late: frames.filter(ms => ms > lateMs).length, lateMs: round(lateMs)},
   };
 }
 

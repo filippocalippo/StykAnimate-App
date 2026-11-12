@@ -91,13 +91,16 @@ export function waitForEngineProgress(progress, threaded, seen, timeoutMs = 250)
 /** Live parameters' ranges (src/trace.mjs `tuned`): constants, so reading a parameter allocates nothing. */
 const WORKERS_SPEC = Object.freeze({min: 0, max: 16, description: 'Preparation threads (applies when the app reloads; 0 runs without workers)'});
 const ATLAS_PAGES_SPEC = Object.freeze({min: 0, max: 64, description: 'Sprite layout pages kept in the texture (documents opened from now on; 0: the default)'});
+const MEMORY_MAXIMUM_SPEC = Object.freeze({min: 0, max: 2048, description: 'The most the engine memory may reserve, in MiB: 512, 1024 or 2048, as a device with little address space gets (applies when the app reloads; 0: the largest the device accepts)'});
 
 async function load({workers = tuned('engine.workers', defaultWorkerCount(), WORKERS_SPEC),
   deviceMemory = globalThis.navigator?.deviceMemory} = {}) {
   const span = traceBegin('engine load');
   const source = new URL('./pkg/styk_engine_bg.wasm', import.meta.url);
   const {module, pages} = await compile(source);
-  const reserved = createEngineMemory(pages);
+  // A profiling run can hold the memory to what a small device reserves; the shipping build always asks for the largest.
+  const most = tuned('engine.memoryMaximumMiB', 0, MEMORY_MAXIMUM_SPEC) * 16;
+  const reserved = createEngineMemory(pages, most > 0 && MEMORY_MAXIMA.some(maximum => maximum <= most) ? MEMORY_MAXIMA.filter(maximum => maximum <= most) : MEMORY_MAXIMA);
   const wasm = await init({module_or_path: module, memory: reserved});
   if (api_version() !== API_VERSION) throw new Error(`The engine module has API ${api_version()}, this page expects ${API_VERSION}. Reload the page.`);
   const memory = wasm.memory;
@@ -166,6 +169,8 @@ async function load({workers = tuned('engine.workers', defaultWorkerCount(), WOR
      * the progress counter. Call `handle.address()` for the engine itself, once per thread.
      */
     join: {module, memory, stack: WORKER_STACK_BYTES, progress: handle.progress_address()},
+    /** The generated classes whose methods are this thread's calls into the engine: the developer tools meter them (src/devtools/boundary.mjs). */
+    boundary: {EditSession, EngineHandle, Stage},
     /** The engine's memory now, and the most it may grow to (chosen by createEngineMemory). */
     get memoryBytes() { return memory.buffer.byteLength; },
     memoryMaximumBytes: reserved.maximumBytes,
