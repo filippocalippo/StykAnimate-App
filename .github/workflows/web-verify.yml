@@ -55,9 +55,12 @@ jobs:
         with:
           name: ${{ inputs.engine-artifact }}
           path: src/engine/pkg
+      # A release builds its own modules, with wasm-opt as the desktop release does.
       - name: Engine build
         if: inputs.engine-artifact == ''
         uses: ./.github/actions/engine-build
+        with:
+          optimize: 'true'
       - name: Build and verify the browser release
         run: |
           npm run web:build

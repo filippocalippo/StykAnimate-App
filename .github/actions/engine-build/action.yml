@@ -1,17 +1,25 @@
 name: Build the Rust engine
 description: >
   Builds the engine's WebAssembly modules into src/engine/pkg with the pinned
-  toolchain (docs/engine/decisions/0006-pinned-nightly-wasm.md) and fails when
-  the output is missing, so no web or desktop artifact ships without it.
+  toolchains (rust-toolchain.toml, docs/engine/decisions/0006-pinned-nightly-wasm.md)
+  and fails when the output is missing, so no web or desktop artifact ships without it.
+inputs:
+  optimize:
+    description: >
+      Also run wasm-opt on the modules, as a release does. It makes them a few percent smaller and
+      takes minutes, so the Tests workflow leaves it off.
+    default: 'false'
 runs:
   using: composite
   steps:
-    - name: Rust toolchain (pinned nightly with its source, and stable)
+    - name: Rust toolchains (the pinned nightly with its source, and the pinned stable)
       shell: bash
       run: |
+        stable=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
         rustup toolchain install nightly-2026-09-15 --profile minimal --component rust-src --target wasm32-unknown-unknown
-        rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+        rustup toolchain install "$stable" --profile minimal --target wasm32-unknown-unknown
         rustc +nightly-2026-09-15 --version
+        rustc --version
     # Only the downloads and the wasm-bindgen binary are kept. The build folder is not: the module links with
     # whole-program optimisation, so a kept folder saved no build time and took minutes to restore.
     - name: Cache cargo downloads and wasm-bindgen
@@ -23,7 +31,7 @@ runs:
           ~/.cargo/git/db
           ~/.cargo/bin/wasm-bindgen*
           ~/.cargo/bin/wasm2es6js*
-        key: engine-tools-${{ runner.os }}-wasm-bindgen-0.2.129-${{ hashFiles('engine/Cargo.lock') }}
+        key: engine-tools-${{ runner.os }}-wasm-bindgen-0.2.129-${{ hashFiles('rust-toolchain.toml', 'engine/Cargo.lock') }}
         restore-keys: engine-tools-${{ runner.os }}-wasm-bindgen-0.2.129-
     - name: wasm-bindgen 0.2.129
       shell: bash
@@ -31,8 +39,27 @@ runs:
         if ! wasm-bindgen --version 2>/dev/null | grep -q '0.2.129'; then
           cargo install wasm-bindgen-cli --version 0.2.129 --locked
         fi
+    - name: wasm-opt (binaryen version_133)
+      if: inputs.optimize == 'true'
+      shell: bash
+      run: |
+        version=version_133
+        case "$RUNNER_OS" in
+          Linux) platform=x86_64-linux; sum=2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489 ;;
+          Windows) platform=x86_64-windows; sum=17a2cbeac6b5693c5fbafab3838d3c65fd9c1eb38b05f5baec6c657e8c84995b ;;
+          *) echo "No pinned binaryen for $RUNNER_OS."; exit 1 ;;
+        esac
+        # Relative names: tar reads a path with a drive letter as a remote host.
+        cd "$RUNNER_TEMP"
+        curl -fsSL --retry 3 -o binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/$version/binaryen-$version-$platform.tar.gz"
+        echo "$sum  binaryen.tar.gz" | sha256sum -c -
+        tar -xzf binaryen.tar.gz
+        echo "$RUNNER_TEMP/binaryen-$version/bin" >> "$GITHUB_PATH"
     - name: Build the engine
       shell: bash
+      env:
+        # A build that asked for wasm-opt fails without it, instead of shipping the larger modules silently.
+        STYK_REQUIRE_WASM_OPT: ${{ inputs.optimize == 'true' && '1' || '0' }}
       run: node scripts/engine-build.mjs
     - name: Require the engine build output
       shell: bash

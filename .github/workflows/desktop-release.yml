@@ -67,6 +67,8 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The unit tests open Pivot files through the codec module the engine build produces.
       - uses: ./.github/actions/engine-build
+        with:
+          optimize: 'true'
       - name: Validate release and source
         run: |
           npm run changelog:check
