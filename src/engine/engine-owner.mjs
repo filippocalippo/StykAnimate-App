@@ -860,9 +860,9 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
         : dirty.get.call(this);
     },
     set(value) {
-      if (!(session && document === editor.report)) return dirty.set.call(this, value);
+      if (!(session && document === editor.report)) { dirty.set.call(this, value); return; }
       // The project is marked changed or saved outside a command: a new revision without history, or the saved one.
-      if (!value) return this.markSaved();
+      if (!value) { this.markSaved(); return; }
       if (!this.dirty) send('@touch', []);
       this._emit('edit', {label: 'Project metadata'});
     }});

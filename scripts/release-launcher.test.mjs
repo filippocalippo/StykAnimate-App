@@ -33,6 +33,7 @@ async function fixture(run) {
     await run({create,launch,directory});
   } finally {
     const artifacts=path.resolve(root,'artifacts')+path.sep;
+    // eslint-disable-next-line no-unsafe-finally -- the guard must stop the removal below, whatever the test did
     if(!path.resolve(directory).startsWith(artifacts))throw new Error('Refusing cleanup outside the launcher test artifacts.');
     await rm(directory,{recursive:true,force:true});
   }

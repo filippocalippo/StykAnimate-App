@@ -21,6 +21,7 @@
     "dev": "electron . --styk-developer",
     "serve": "node scripts/serve.mjs",
     "check": "node scripts/check.mjs",
+    "lint": "eslint .",
     "engine:build": "node scripts/engine-build.mjs",
     "engine:test": "cargo test --manifest-path engine/Cargo.toml --workspace --exclude styk-wasm",
     "engine:parity": "node scripts/engine-parity.mjs",
@@ -105,6 +106,8 @@
     "electron": "39.8.10",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
+    "eslint": "10.14.0",
+    "globals": "17.14.0",
     "playwright": "1.63.0",
     "ws": "8.22.0"
   },

@@ -177,6 +177,7 @@ try {
   await source(page, 'public');
   await until('the community cards again', async () => (await cards(page).count()) === 1);
   await cards(page).first().dblclick();
+  // eslint-disable-next-line no-self-compare -- two reads of the page: the count has stopped changing
   await until('the insert after reload', async () => (await figureCount(page)) === (await figureCount(page)) && /added to the scene/i.test(await message(page)));
   check('A later visit reads the public file directly and does not count again', community.state.counted.length === 1);
   check('No console errors, page errors or CSP violations', problems.length === 0 || (console.error(problems), false));
