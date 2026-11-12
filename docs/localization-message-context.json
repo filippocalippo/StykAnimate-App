@@ -24986,7 +24986,7 @@
     "locations": [
       "src/app.mjs:5417"
     ],
-    "context": "meta: kitText(kitT, isMovieclip(figure) ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\", { layer }), metaKey: isMovieclip(figure) ? \"overlays.pal"
+    "context": "meta: kitText(kitT, movieclip ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\", { layer }), metaKey: movieclip ? \"overlays.palette.movieclipIn\" : "
   },
   "overlays.palette.goTo": {
     "locations": [
@@ -25017,7 +25017,7 @@
     "locations": [
       "src/app.mjs:5417"
     ],
-    "context": "meta: kitText(kitT, isMovieclip(figure) ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\", { layer }), metaKey: isMovieclip(figure) ? \"overlays.pal"
+    "context": "meta: kitText(kitT, movieclip ? \"overlays.palette.movieclipIn\" : \"overlays.palette.figureIn\", { layer }), metaKey: movieclip ? \"overlays.palette.movieclipIn\" : "
   },
   "overlays.palette.open": {
     "locations": [

@@ -5407,14 +5407,14 @@ const projectProvider = {
         ranges: match.ranges, run: () => { selectTrack({ id: layer.id, target: { kind: "layer", id: layer.id } }); timelineUI?.selectTrack?.(layer.id); } });
     }
     if (context?.mode !== "draw") {
-      const names = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row.name]));
+      const types = new Map(figureRows(editor.report.figure_types).map((row) => [row.id, row]));
       for (const object of editor.selectionFrame?.objects ?? []) {
-        const name = names.get(object.figure_type_id);
+        const type = types.get(object.figure_type_id), name = type?.name, movieclip = type?.kind === "Movieclip";
         const match = name && fuzzyMatch(query, name);
         if (!match) continue;
         const layer = editor.getLayer(editor.layerForUid(object.unique_id))?.name ?? "";
-        rows.push({ id: `figure:${object.unique_id}`, label: name, icon: isMovieclip(figure) ? "frame" : "person",
-          meta: kitText(kitT, isMovieclip(figure) ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn", { layer }), metaKey: isMovieclip(figure) ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn", metaParams: { layer }, match, ranges: match.ranges,
+        rows.push({ id: `figure:${object.unique_id}`, label: name, icon: movieclip ? "frame" : "person",
+          meta: kitText(kitT, movieclip ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn", { layer }), metaKey: movieclip ? "overlays.palette.movieclipIn" : "overlays.palette.figureIn", metaParams: { layer }, match, ranges: match.ranges,
           run: () => selectTrack({ uid: object.unique_id, target: { kind: "figure", uid: object.unique_id } }) });
       }
     }
