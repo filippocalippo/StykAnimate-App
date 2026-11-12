@@ -14046,32 +14046,32 @@
   },
   "errors.exportSink.theExportDestinationIsClosed": {
     "locations": [
-      "src/export-sink.mjs:31",
-      "src/export-sink.mjs:55",
-      "src/export-sink.mjs:89",
-      "src/export-sink.mjs:95",
-      "src/export-sink.mjs:126",
-      "src/export-sink.mjs:133"
+      "src/export-sink.mjs:30",
+      "src/export-sink.mjs:53",
+      "src/export-sink.mjs:84",
+      "src/export-sink.mjs:90",
+      "src/export-sink.mjs:121",
+      "src/export-sink.mjs:128"
     ],
     "context": "if (this.finished || this.aborted) throw messageError(new Error(''), \"errors.exportSink.theExportDestinationIsClosed\", {});"
   },
   "errors.exportSink.theExportDestinationWasCancelled": {
     "locations": [
-      "src/export-sink.mjs:63",
-      "src/export-sink.mjs:101",
-      "src/export-sink.mjs:144"
+      "src/export-sink.mjs:60",
+      "src/export-sink.mjs:96",
+      "src/export-sink.mjs:139"
     ],
     "context": "if (this.aborted) throw messageError(new Error(''), \"errors.exportSink.theExportDestinationWasCancelled\", {});"
   },
   "errors.exportSink.theExportOutputCannotBePatchedInMemory": {
     "locations": [
-      "src/export-sink.mjs:140"
+      "src/export-sink.mjs:135"
     ],
     "context": "if (!(part instanceof Uint8Array)) throw messageError(new Error(''), \"errors.exportSink.theExportOutputCannotBePatchedInMemory\", {});"
   },
   "errors.exportSink.theExportPatchIsTooLarge": {
     "locations": [
-      "src/export-sink.mjs:57"
+      "src/export-sink.mjs:55"
     ],
     "context": "if (data.byteLength > this.chunkSize) throw messageError(new Error(''), \"errors.exportSink.theExportPatchIsTooLarge\", {});"
   },
@@ -15550,7 +15550,7 @@
   },
   "errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming2": {
     "locations": [
-      "src/native-files.mjs:52"
+      "src/native-files.mjs:48"
     ],
     "context": "if (typeof desktop.beginRecoveryRead !== 'function') throw messageError(new Error(''), \"errors.nativeFiles.restartTheLatestDesktopAppToEnableStreaming2\", {});"
   },
@@ -15562,19 +15562,19 @@
   },
   "errors.nativeFiles.theRecoveryFileTransferWasIncomplete": {
     "locations": [
-      "src/native-files.mjs:74"
+      "src/native-files.mjs:70"
     ],
     "context": "if (received !== transfer.size) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryFileTransferWasIncomplete\", {});"
   },
   "errors.nativeFiles.theRecoveryTransferExceededItsDeclaredSize": {
     "locations": [
-      "src/native-files.mjs:69"
+      "src/native-files.mjs:65"
     ],
     "context": "if (received > transfer.size) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryTransferExceededItsDeclaredSize\", {});"
   },
   "errors.nativeFiles.theRecoveryTransferReturnedInvalidBytes": {
     "locations": [
-      "src/native-files.mjs:67"
+      "src/native-files.mjs:63"
     ],
     "context": "if (!(chunk.bytes instanceof ArrayBuffer)) throw messageError(new Error(''), \"errors.nativeFiles.theRecoveryTransferReturnedInvalidBytes\", {});"
   },
