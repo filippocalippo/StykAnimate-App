@@ -69,7 +69,12 @@ try {
     await page.evaluate(() => window.styk.stats.flush());
     const waiting = await page.waitForFunction(async () => (await window.stykDesktop.previewStats()).waiting.find(report => report.kind === 'session') ?? null, undefined, { timeout: 10000 }).then(handle => handle.jsonValue()).catch(() => null);
     expect('The running session reaches the desktop process and passes its checks', waiting?.kind === 'session' && /^[a-f0-9]{32}$/.test(waiting.sid), waiting ? `${waiting.minutes} min, ${waiting.smooth?.length ?? 0} cells` : 'none');
-    const onDisk = JSON.parse(await readFile(path.join(profile, 'stats-session.json'), 'utf8').catch(() => '{}'));
+    // The desktop process writes it a moment later (an atomic replace of the file).
+    let onDisk = {};
+    for (let tries = 0; tries < 50 && !onDisk.running?.summary; tries++) {
+      onDisk = JSON.parse(await readFile(path.join(profile, 'stats-session.json'), 'utf8').catch(() => '{}'));
+      if (!onDisk.running?.summary) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     expect('The session is kept on disk for an unknown ending', Boolean(onDisk.running?.summary), Object.keys(onDisk).join(', '));
   }
   expect('The page raised no errors', errors.length === 0, errors[0]);

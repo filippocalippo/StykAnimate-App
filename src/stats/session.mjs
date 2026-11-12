@@ -95,7 +95,8 @@ export class SessionSummary {
       ...(this.files.size ? {files: [...this.files.values()].map(row => ({...row, ms: Math.round(row.ms * 10) / 10}))} : {}),
       ...(this.recovery ? {recovery: {...this.recovery}} : {}),
       ...(typeof unsaved === 'boolean' ? {unsaved} : {}),
-      ...frames,
+      // The responsiveness numbers, without the ones there are none of: a report holds no undefined field.
+      ...Object.fromEntries(Object.entries(frames ?? {}).filter(([, value]) => value !== undefined)),
     };
   }
 }

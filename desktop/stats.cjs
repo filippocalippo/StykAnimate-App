@@ -185,9 +185,12 @@ class StatsService {
     if (facts) this.setFacts(facts);
     const { unsaved, ...rest } = summary;
     const r = this.running;
-    try { this.schema.validateReport({ ...rest, kind: 'session', sid: r.sid, day: r.day, end: 'clean', first: r.first, age: r.age, when: r.when }); }
+    let clean;
+    try { clean = this.schema.validateReport({ ...rest, kind: 'session', sid: r.sid, day: r.day, end: 'clean', first: r.first, age: r.age, when: r.when }); }
     catch { return false; }
-    r.summary = rest;
+    // The checked copy is what is kept: nothing the schema does not describe, not even an undefined field, reaches the disk.
+    const { kind, sid, day, end, first, age, when, ...kept } = clean;
+    r.summary = kept;
     if (typeof unsaved === 'boolean') r.unsaved = unsaved;
     void this.persist().catch(() => {});
     return true;

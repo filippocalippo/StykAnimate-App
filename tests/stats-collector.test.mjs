@@ -146,6 +146,7 @@ test('the summary counts commands, features, files and time, and passes the sche
     assert.deepEqual(summary.recovery, {offered: true, restored: true, failed: false});
     assert.equal(summary.language, 'it');
     assert.ok(!JSON.stringify(summary).includes('Walk cycle'), 'a file name never reaches a summary');
+    assert.ok(Object.values(summary).every(value => value !== undefined), 'no field without a value: the desktop process\'s store refuses them');
     validateReport(asSent(summary));
     await settle();
     assert.equal(desktop.sent.sessions.length, 1);

@@ -37,11 +37,13 @@ async function folder() { const dir = await mkdtemp(path.join(os.tmpdir(), 'styk
 test.afterEach(async () => { await Promise.all(services.map(s => s.settled())); services = []; await Promise.all(folders.map(dir => rm(dir, { recursive: true, force: true }))); folders = []; });
 
 // A file written through desktop/preferences.cjs is synced to disk (about 0.2 s each on Windows), so most tests keep the two files in
-// memory; the tests that look at the files on disk (`disk: true`) use the real store.
+// memory; the tests that look at the files on disk (`disk: true`) use the real store. The memory store checks a value as the real
+// one does (`serialize`), so what the real store would refuse fails here too.
+const { WorkspacePreferences } = require('../desktop/preferences.cjs');
 const memory = new Map();
-const memoryStore = (dir, { filename }) => ({
-  get: async () => JSON.parse(memory.get(path.join(dir, filename)) ?? '{}'),
-  set: async value => { memory.set(path.join(dir, filename), JSON.stringify(value)); return { saved: true }; },
+const memoryStore = (dir, options) => ({
+  get: async () => JSON.parse(memory.get(path.join(dir, options.filename)) ?? '{}'),
+  set: async value => { memory.set(path.join(dir, options.filename), new WorkspacePreferences(dir, options).serialize(value)); return { saved: true }; },
 });
 async function service(dir, { clock = { t: START }, fetch = intake().fetch, disk = false, ...options } = {}) {
   const stats = new StatsService({ directory: dir, schemaPath, version: '1.2.6', channel: 'stable', siteUrl: 'https://stats.example', env: {},
@@ -301,4 +303,14 @@ test('the packaged app carries the service, src/stats and the schema the service
   const main = await readFile('desktop/main.cjs', 'utf8');
   assert.match(main, /path\.join\(app\.isPackaged \? path\.join\(process\.resourcesPath, 'web'\) : APP_ROOT, 'src', 'stats', 'schema\.mjs'\)/);
   for (const file of ['collector', 'frames', 'session', 'problems', 'stack', 'files', 'schema']) await readFile(`src/stats/${file}.mjs`);
+});
+
+test('the running summary reaches the disk as the schema checked it, even when the page sent fields without a value', async () => {
+  const dir = await folder(), stats = await service(dir, { disk: true });
+  // A page's summary crosses the bridge by structured clone, which keeps a field whose value is undefined; the store refuses those.
+  assert.equal(stats.recordSession(summary({ smooth: undefined, slow: undefined, unsaved: true })), true);
+  await stats.settled();
+  const { running } = await sessionFile(dir);
+  assert.deepEqual(running.summary, summary());
+  assert.equal(running.unsaved, true);
 });
