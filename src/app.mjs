@@ -29,8 +29,9 @@ import {resolveInstanceFigure, polygonIdentity} from './animation-style.mjs';
 import { applicationMenuItems } from "./application-menu.mjs";
 import { Editor } from "./editor.mjs";
 import { worldToScreen, screenToWorld, objectBounds } from "./renderer-geometry.mjs";
-import { createStage } from "./engine/engine-stage.mjs";
+import { createStage, startStage } from "./engine/engine-stage.mjs";
 import { createStagePlayback } from "./engine/engine-playback.mjs";
+import { createScrubPreview, createSeekCosts } from "./engine/engine-scrub.mjs";
 import { installEngineOwner } from "./engine/engine-owner.mjs";
 import { loadEngine } from "./engine/engine.mjs";
 import { useEngine, prepareOpen } from "./engine/engine-open.mjs";
@@ -95,7 +96,7 @@ import { dragSlop, beyondSlop, installPenMenuGuard } from "./pen-input.mjs";
 import { installCanvasPinch } from "./canvas-pinch.mjs";
 import { createWheelZoom, smoothWheelZoom } from "./canvas-wheel-zoom.mjs";
 import { createPoseInputQueue } from './canvas-pose-input.mjs';
-import { CanvasHandleOverlay } from './canvas-handle-overlay.mjs';
+import { createCanvasHandles } from './canvas-handles.mjs';
 import { installTouchMode } from "./touch/touch-mode.mjs";
 import { installTouchShell } from "./touch/touch-shell.mjs";
 import { installLongPress } from "./touch/long-press.mjs";
@@ -124,7 +125,6 @@ import {
   getNativePropertyValue,
 } from "./native-property-edit.mjs";
 import {
-  getPivotHandles,
   PIVOT_HANDLE_COLORS,
   pickCanvasHandle,
   pickCanvasSegment,
@@ -645,7 +645,22 @@ function warmPlayback({immediate = false} = {}) {
     if(current())await prepareAhead(tick,lookahead(),{bidirectional:true,idle:true});
   }, immediate||playback.report!==report ? 0 : 150);
 }
+// A playhead drag in a scene whose editing frame is dear shows the engine's prepared frames; elsewhere scrubbing is editing
+// (docs/TIMELINE.md, "Scrubbing a dense scene").
+const seekCosts = createSeekCosts();
+const scrubPreview = createScrubPreview({
+  playback, total: () => editor.totalTicks, engine: () => state.renderer?.engineSide?.engine ?? null,
+  prepare: (ticks, playhead) => { syncPlayback(); void playback.prepareRange(ticks, {playhead}).catch(error => { if (error.name !== "AbortError") fail(error); }); },
+});
+/** Whether steering the playhead shows prepared frames. The prepared frames have the scene's background: Build's canvas colour keeps the editing scrub. */
+const scrubDear = () => seekCosts.dear(editor.report) && builderBackgroundColor(state.settings, state) === undefined;
+function scrubStarted({steps = false} = {}) {
+  // Decided once for the drag (or a run of frame steps). A selected layer's figures are found in the frame of the tick it ends on.
+  if (scrubDear()) { scrubPreview.begin(editor.tick, {steps}); editor.holdSheetFollow(true); }
+}
+function scrubEnded() { scrubPreview.end(); editor.holdSheetFollow(false); }
 function previewScrub() {
+  if (scrubPreview.active) scrubPreview.point(editor.tick);
   // Scrubbing is editing: render the current pose with selection and onions.
   requestRender();
 }
@@ -1090,12 +1105,15 @@ function previewPacket() {
   const packet = playback.has(editor.tick) ? playback.get(editor.tick) : null;
   return packet && packet.cameraEnabled !== false ? packet : null;
 }
+// The frame is read only through the scene camera: the editing view does not depend on it (`effectiveCamera`).
 function screenPoint(p) {
-  return worldToScreen(p,{report:editor.report,frame:currentFrame(),view:state.view,cameraEnabled:state.playing||state.previewing});
+  const cameraEnabled = state.playing || state.previewing;
+  return worldToScreen(p,{report:editor.report,frame:cameraEnabled?currentFrame():null,view:state.view,cameraEnabled});
 }
 function worldPoint(event) {
   const r = viewport.getBoundingClientRect();
-  return screenToWorld({x:(event.clientX-r.left)*viewport.clientWidth/r.width,y:(event.clientY-r.top)*viewport.clientHeight/r.height},{report:editor.report,frame:currentFrame(),view:state.view,cameraEnabled:state.playing||state.previewing});
+  const cameraEnabled = state.playing || state.previewing;
+  return screenToWorld({x:(event.clientX-r.left)*viewport.clientWidth/r.width,y:(event.clientY-r.top)*viewport.clientHeight/r.height},{report:editor.report,frame:cameraEnabled?currentFrame():null,view:state.view,cameraEnabled});
 }
 function cameraSelected() {
   return state.inspectorContext === 'camera' && state.selectedTrackId === 'camera';
@@ -1360,94 +1378,9 @@ function boundsOf(g) {
   }
   return b;
 }
-// Keep one surface alive to avoid deferred GPU-context destruction on input.
-const canvasHandleOverlay = new CanvasHandleOverlay(new OffscreenCanvas(1, 1));
-let handleCache = null;
-const handleDescriptors = {};
-const selectionHandleCache = new WeakMap();
-const selectionHandleDescriptors = {};
-function canvasHandles(geometry, {selectStatic = false} = {}) {
-  const frame = currentFrame(),
-    settings = state.settings;
-  const key = [
-    builderMode?.active ? [...editor.selectedSegmentIds].join(',') : '',
-    editor.layerViewKey,
-    showStaticHandles(),
-    state.tool,
-    state.figureJoin?.uid,
-    state.handleEditHeld,
-    usesBuilderBranch(),
-    editor.selectedJoint,
-    spatialControlMode(editor),
-    rigDetailsShown(editor),
-    settings.showUnselectedHandles,
-    settings.handleSize,
-    settings.autoSizeHandles,
-    settings.outlineHandles,
-    state.view.scale,
-    frame.camera?.scale,
-    builderMode?.session?.typeId ?? "none",
-    ...selection(),
-    ...state.hidden,
-    ...state.locked,
-  ].join("|");
-  const cached = selectStatic ? selectionHandleCache.get(geometry) : handleCache;
-  if (cached?.key === key && (selectStatic || cached.geometry === geometry)) return cached.handles;
-  const bound = builderMode?.boundUids;
-  const hidden = effectiveHidden(frame),
-    locked = new Set(state.locked);
-  for (const object of frame.objects)
-    if (layerLocked(editor.report, object.unique_id) || (bound && !bound.has(object.unique_id)))
-      locked.add(object.unique_id);
-  const handles = getPivotHandles(geometry, {
-    showDetailed: rigDetailsShown(editor),
-    spatialMode: builderMode?.active || !['select','pose'].includes(state.tool) ? 'pose' : spatialControlMode(editor),
-    descriptorCache: selectStatic ? selectionHandleDescriptors : handleDescriptors,
-    selectStatic,
-    joinTargetUids: state.figureJoin?.targets,
-    frame,
-    selectedUid: editor.selectedUid,
-    selectedUids: selection(),
-    hiddenUids: hidden,
-    lockedUids: locked,
-    showUnselected: settings.showUnselectedHandles,
-    showStatic: showStaticHandles(),
-    selectedJoint: editor.selectedJoint,
-    selectedHandleIds: builderMode?.active ? editor.selectedSegmentIds : undefined,
-    selectedBranch: usesBuilderBranch(),
-    builder: isBuilderContext(state.tool),
-    attaching: state.tool === "attach",
-    allowStaticManipulation:
-      state.tool === "rig" ||
-      state.handleEditHeld,
-    viewScale: state.view.scale,
-    autoSize: settings.autoSizeHandles,
-    maxDiameter: settings.handleSize * 2,
-  });
-  if (selectStatic) selectionHandleCache.set(geometry, {key, handles});
-  else handleCache = { geometry, key, handles };
-  return handles;
-}
-function drawCanvasHandles(geometry) {
-  const handles = canvasHandles(geometry),
-    translations = state.drag?.translations;
-  const d = window.devicePixelRatio || 1;
-  const key = [
-    handleCache.key,
-    state.view.x,
-    state.view.y,
-    state.view.rotation ?? 0,
-    state.view.flip ?? false,
-    editor.report.canvas_width,
-    editor.report.canvas_height,
-    currentFrame().camera?.x,
-    currentFrame().camera?.y,
-    currentFrame().camera?.angle_rad,
-  ].join("|");
-  canvasHandleOverlay.draw(ctx, handles, {project: screenPoint, projectionKey: key,
-    width: overlay.width / d, height: overlay.height / d, dpr: d, translations,
-    outline: state.settings.outlineHandles});
-}
+const canvasHandleView = createCanvasHandles({editor, state, builderMode: () => builderMode, isHidden, isLocked, selection, currentFrame,
+  showStaticHandles, usesBuilderBranch, status, project: screenPoint, ctx, overlay, requestOverlayRender});
+const canvasHandles = canvasHandleView.handles, drawCanvasHandles = canvasHandleView.draw;
 let onionControls;
 const onionController = new OnionController({editor,
   getSettings: () => state.settings, getEnabled: () => state.onion,
@@ -1732,9 +1665,14 @@ function loop(now) {
     const sampled=telemetry.isForeground&&telemetry.performance.sampleFrame(),stages=sampled?{}:null;
     state.renderer.measureFrame=sampled;state.renderer.telemetryStages=null;
     let stageStarted=sampled?performance.now():0;
+    // A dense scene's scrub shows the prepared frame of the newest tick the pointer passed, in the editing view; until one is ready the picture stays.
+    const scrubFrame = scrubPreview.active && !state.playing ? scrubPreview.next() : null;
     const packet = state.playing ? state.playbackPacket : previewPacket();
     let preparedPresented = false;
-    if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
+    if (scrubFrame) {
+      preparedPresented = state.renderer.renderPrepared(scrubFrame.packet.key, {view: state.view, cameraEnabled: false}) === true;
+      if (preparedPresented) { scrubPreview.presented(scrubFrame); ctx.clearRect(0, 0, overlay.width, overlay.height); }
+    } else if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
       preparedPresented = state.renderer.renderPrepared(packet.key, {view: state.view, cameraEnabled: !state.scrubbing}) === true;
       if (preparedPresented) {
         if (playbackAwaitsDraw) recordPlaybackPresentation();
@@ -1743,7 +1681,8 @@ function loop(now) {
       } else if (state.playing) state.dirtyRender = true; // The picture on show stays and the frame is drawn on the next animation frame.
     }
     // Playback shows prepared frames only: the editing view is unclipped and would blink at the artboard's edge.
-    if (!preparedPresented && !state.playing) {
+    if (!preparedPresented && !state.playing && !scrubPreview.active) {
+      const editStarted = performance.now();
       const drawingPreview=drawingController?.renderPreview;
       // The geometry the overlay reads. The engine draws from its session, so the picture does not wait for it: it is read after the picture.
       const heldGeometry = drawingPreview?.geometry || motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
@@ -1776,6 +1715,8 @@ function loop(now) {
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
       overlayRender(() => heldGeometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
+      // What a paint at a new tick costs the interface decides how the next playhead drag of this document scrubs.
+      if (editingDrawn && !drawingPreview) seekCosts.record(editor.report, editor.tick, performance.now() - editStarted);
       setHidden($('preview-quality'), !(images.reduced || state.previewGovernor?.index));
     }
     if(pendingColorSample && (!state.playing || !state.buffering || preparedPresented)){
@@ -1794,8 +1735,8 @@ function loop(now) {
       requestRender(); // The joints left out of the picture come back.
     }
     if(sampled){stages.scene=performance.now()-stageStarted;stageStarted=performance.now();Object.assign(stages,state.renderer.telemetryStages);}
-    // Final editor overlay pass: keep the actual camera above artwork and tool feedback.
-    drawFinalOverlay();
+    // Final editor overlay pass: keep the actual camera above artwork and tool feedback (over a picture drawn in this paint).
+    if (!scrubPreview.active || preparedPresented) drawFinalOverlay();
     if(sampled){stages.overlay=performance.now()-stageStarted;stageStarted=performance.now();}
     state.dirtyMonitor = false;
     paintCameraMonitor();
@@ -1824,9 +1765,10 @@ function loop(now) {
   if (prepareFrom !== null) prepareAhead(prepareFrom, lookahead());
   // Hover, previews and path sampling change only tool feedback. Keep the
   // displayed artwork intact; document edits still request a scene render.
+  if (scrubPreview.active) scrubPreview.watch(requestRender);
   if (state.dirtyOverlay && !scenePainted) {
     state.dirtyOverlay = false;
-    if (!state.playing && !state.previewing) {
+    if (!state.playing && !state.previewing && !scrubPreview.active) {
       overlayRender(() => drawingController?.renderPreview?.geometry ?? motionDisplay()?.geometry ??
         state.drag?.geometry ?? keyboardHandleGesture?.geometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
@@ -1858,7 +1800,8 @@ function loop(now) {
 }
 /** The camera inspector's readouts and monitor, for the frame on show. */
 function paintCameraMonitor() {
-  if (state.inspectorContext !== 'camera') return;
+  // A dense scene's scrub reads no frame: the monitor follows on release, as the inspector does.
+  if (state.inspectorContext !== 'camera' || scrubPreview.active) return;
   const frame = currentFrame();
   syncCameraControls($('inspector'), frame, {activeKey:propertyControls?.activeKey,guides:state.cameraGuides});
   drawCameraMonitor($('inspector').querySelector('[data-camera-monitor]'), {
@@ -1866,9 +1809,19 @@ function paintCameraMonitor() {
     stage:state.renderer,report:editor.report,frame,
   });
 }
+/** What the camera outline is drawn from: only its camera is read, and the edit frame the stage drew holds it, so the overlay after a seek
+ * does not read the whole frame for it. */
+function cameraOutlineFrame() {
+  // A dense scene's scrub: the camera of the prepared frame on show, else of the editing frame still on show.
+  if (scrubPreview.active) return { camera: editor.report._styk?.layers?.fixed?.camera?.visible === false ? null : scrubPreview.shown?.frame.camera ?? state.renderer?.shownCamera?.() ?? null };
+  if (state.playing || state.previewing || motionDisplay() || drawingController?.renderPreview) return currentFrame();
+  const camera = state.renderer?.shownCamera?.();
+  if (!camera) return currentFrame();
+  return { camera: editor.report._styk?.layers?.fixed?.camera?.visible === false ? null : camera };
+}
 function drawFinalOverlay() {
   ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
-  drawCameraOutline(ctx, cameraViewport(editor.report, currentFrame(), state.view), screenPoint);
+  drawCameraOutline(ctx, cameraViewport(editor.report, cameraOutlineFrame(), state.view), screenPoint);
   vfxGizmos?.draw(ctx);
 }
 async function play() {
@@ -4457,17 +4410,18 @@ const actions = {
       return timelineUI.selectFrame(0);
     editor.seek(0, { evaluate: false });
   },
-  "previous-frame": () => {
+  // `evaluate: false`: a step of a run of steps in a dense scene (runKeyboardCommand), which shows prepared frames.
+  "previous-frame": ({evaluate = true} = {}) => {
     pause();
     if (state.settings.timelineMode === "simple")
-      return timelineUI.selectFrame(Math.max(0, timelineUI.selectedIndex - 1));
+      return timelineUI.selectFrame(Math.max(0, timelineUI.selectedIndex - 1), {evaluate});
     editor.seek(Math.max(0, editor.tick - 1), { evaluate: false });
   },
-  "next-frame": () => {
+  "next-frame": ({evaluate = true} = {}) => {
     pause();
     if (state.settings.timelineMode === "simple")
       return timelineUI.selectFrame(
-        Math.min(timelineUI.frameCount - 1, timelineUI.selectedIndex + 1),
+        Math.min(timelineUI.frameCount - 1, timelineUI.selectedIndex + 1), {evaluate},
       );
     editor.seek(Math.min(editor.totalTicks - 1, editor.tick + 1), { evaluate: false });
   },
@@ -4477,8 +4431,8 @@ const actions = {
       return timelineUI.selectFrame(timelineUI.frameCount - 1);
     editor.seek(Math.max(0, editor.totalTicks - 1), { evaluate: false });
   },
-  "previous-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'previous-keyframe'); },
-  "next-keyframe": () => { pause(); runTimelineHotkey(timelineUI, 'next-keyframe'); },
+  "previous-keyframe": ({evaluate = true} = {}) => { pause(); runTimelineHotkey(timelineUI, 'previous-keyframe', {evaluate}); },
+  "next-keyframe": ({evaluate = true} = {}) => { pause(); runTimelineHotkey(timelineUI, 'next-keyframe', {evaluate}); },
   "add-frame": () => addFrameKeepingDrag(() => {
     if(editor.getLayer(editor.activeLayerId)?.drawing)return editor.addDrawingFrame();
     if(state.settings.timelineMode !== 'simple')
@@ -5240,6 +5194,8 @@ function cancelKeyboardCommand() {
   if (state.tool === 'attach') setTool('select');
   closeMenu("cancel");
 }
+/** The commands that step the playhead, which a held key repeats. */
+const FRAME_STEPS = new Set(['previous-frame', 'next-frame', 'previous-keyframe', 'next-keyframe', 'previous-exposure', 'next-exposure']);
 function runKeyboardCommand(id, event, modifiers = {shift: event.shiftKey}) {
   if(id!=='cancel'&&id!=='play-pan'&&(drawingController?.gesture?.kind==='stroke'||drawingController?.loading||drawingController?.selection?.committing||drawingController?.operation))
     return drawingController.afterGesture(()=>runKeyboardCommand(id,event,modifiers));
@@ -5294,10 +5250,12 @@ function runKeyboardCommand(id, event, modifiers = {shift: event.shiftKey}) {
     return setTool(id.slice(5));
   }
   if (id === 'segment-values') return showSegmentValues({hover: true});
+  // From the second step of a run (a held key) a dense scene's steps seek without evaluating and show prepared frames (docs/TIMELINE.md).
+  const evaluate = !(FRAME_STEPS.has(id) && timelineHost?.steps.step(event));
   if (id === 'previous-exposure' || id === 'next-exposure')
-    return timelineUI.selectFrame(timelineUI.selectedIndex + (id === 'previous-exposure' ? -1 : 1), {extend: modifiers.shift});
-  if (event.target.closest?.('.layer-timeline,.sheet-filmstrip') && runTimelineHotkey(timelineUI, id, {shiftKey:modifiers.shift})) return;
-  return actions[id]?.();
+    return timelineUI.selectFrame(timelineUI.selectedIndex + (id === 'previous-exposure' ? -1 : 1), {extend: modifiers.shift, evaluate});
+  if (event.target.closest?.('.layer-timeline,.sheet-filmstrip') && runTimelineHotkey(timelineUI, id, {shiftKey:modifiers.shift, evaluate})) return;
+  return FRAME_STEPS.has(id) ? actions[id]?.({evaluate}) : actions[id]?.();
 }
 function releaseKeyboardCommand(id, event) {
   if (id === 'handle-edit-hold') { state.handleEditHeld = false; requestRender(); }
@@ -5321,7 +5279,7 @@ overlays.hotkeys = hotkeys;
 timelineHost = createTimelineHost({
   editor, state, $, actions, guarded, audioEngine, onionController, hotkeys, overlays, play, pause, finishKeyboardHandle,
   cancelPolygonDraft, interruptRecovery, cancelWarmPlayback: () => clearTimeout(warmTimer), warmPlayback, scheduleRecovery,
-  requestRender, queueUI, renderInspector, syncSelectionControls, rangeFrames, selectTrack, previewScrub, scrubAudio, stopAudioScrub,
+  requestRender, queueUI, renderInspector, syncSelectionControls, rangeFrames, selectTrack, previewScrub, scrubStarted, scrubEnded, scrubDear, scrubAudio, stopAudioScrub,
   changeFigureLayer, confirmDiscardFrame: dialogs.confirmDiscardFrame, simpleFrameCount, fail,
   setTimelineMode: (mode) => editorSettings?.commit({ timelineMode: mode }),
   onMount: (timeline) => { timelineUI = timeline; window.styk.timeline = timeline; },
@@ -5524,10 +5482,17 @@ document.addEventListener('keyup', guarded(event => {
   state.builderShiftHeld = event.shiftKey;
   refreshOriginDragModifiers(event);
   if(!event.shiftKey && state.tool==='polygon'){state.bucketPreview=null;overlay.style.cursor='';requestRender();}
+  // A held frame step's run ends with its key: the exact frame is drawn.
+  timelineHost?.steps.keyup(event);
   hotkeys.keyup(event);
 }), true);
+// Any other key or press ends a run of frame steps first: every other command acts on the exact frame and its selection.
+document.addEventListener('keydown', event => {
+  if (timelineHost?.steps.active && !FRAME_STEPS.has(hotkeys.resolve(event, hotkeyScopes(event))?.id)) guarded(() => timelineHost.steps.finish())();
+}, true);
+document.addEventListener('pointerdown', () => { if (timelineHost?.steps.active) guarded(() => timelineHost.steps.finish())(); }, true);
 window.addEventListener('blur', () => {
-  hotkeys.releaseAll(); finishKeyboardHandle();
+  hotkeys.releaseAll(); finishKeyboardHandle(); timelineHost?.steps.finish();
   if (state.drag) cancelDrag();
   state.builderShiftHeld = false;
 });
@@ -5634,8 +5599,7 @@ editor.addEventListener("change", (e) => {
     kind === "document"
   ) {
     invalidatePivotHandleTopology();
-    handleCache = null;
-    canvasHandleOverlay.clear();
+    canvasHandleView.invalidate({document: kind === "document"});
     assetLibrary?.invalidate();
   }
   if (["edit", "history", "document", "frame-draft"].includes(kind))
@@ -5671,6 +5635,8 @@ editor.addEventListener("change", (e) => {
       queueUI();
       warmPlayback();
     }
+    // A scrub's readout follows the playhead; the rest of the chrome waits for the release (it reads the frame on show).
+    else if (state.scrubbing) { ui.update("transport"); timelineHost?.stepped(); }
     return;
   }
   if (kind === "preview" || e.detail?.live || state.drag || state.scrubbing) {
@@ -5873,6 +5839,8 @@ window.styk = {
   actions,
   // The playback adapter: tools drive exports and playback through the app's own objects.
   playback,
+  // How a playhead drag scrubs: the rule's measurements and the prepared-frame presenter (docs/TIMELINE.md).
+  scrub: { costs: seekCosts, preview: scrubPreview },
   importFiles,
   acceptImport,
   fit,
@@ -6018,7 +5986,7 @@ async function init() {
       if (!state.motionPaths) { state.hoverPathPoint = null; syncPathTooltip(); trails.clear(); }
       if (patch.motionPathFalloffRadius !== undefined || patch.motionPathFalloffShape !== undefined || patch.motionPaths !== undefined) syncPathFalloff();
       appLocalization.setLocale(next.locale);
-      canvasHandleOverlay.clear();
+      canvasHandleView.repaint();
       scheduleRecovery();
       requestRender();
       queueUI();
@@ -6225,7 +6193,7 @@ async function init() {
   // The desktop app keeps the library in its Documents folder; in a browser it lives in that browser's own storage.
   window.styk.library = new UserLibrary({editor, desktop: desktop ?? createBrowserLibraryApi({library: new LocalLibrary(),
     community: new CommunityLibrary({downloads: new DownloadLedger(localStorageLedgerStorage())})}), exporter:documentExporter, importer, pause, finishEdit:finishCurrentEdit, setTool, vfxInspector, hotkeys,
-    activate: id => shell.showPanel(id, {focus: false})});
+    activate: id => shell.showPanel(id, {focus: false}), playheadHeld: () => state.scrubbing});
   shell.define({id: 'library', root: () => $('user-library'), onVisibility: visible => window.styk.library.panelVisible(visible)});
   const libraryInsert = (asset, point) =>
     builderMode?.active ? toast(interfaceText("app.finishTheFigureOrReturnToAnimateTo2"), "app.finishTheFigureOrReturnToAnimateTo2", {}) : window.styk.library.insert(asset, point);
@@ -6292,8 +6260,11 @@ async function init() {
   window.styk.thumbnails = thumbnailRenderer;
   timelineHost.mount();
   status({messageKey: "app.preparingCanvasAndEffects", messageParams: {}}, false, true);
-  // A stage that cannot start is reported by the catch of init() below: nothing else draws the scene.
-  state.renderer = await createRenderer(canvas, rendererOptions());
+  // A stage that cannot start is reported by the catch of init() below: nothing else draws the scene. A start that fails or
+  // never settles is tried again over a new canvas first (startStage).
+  state.renderer = await startStage(surface => createRenderer(surface, rendererOptions()), canvas, {
+    replace: () => { const replacement = canvas.cloneNode(false); canvas.replaceWith(replacement); canvas = replacement; return canvas; },
+  });
   // The document was loaded into playback before the stage existed: the engine takes it now.
   state.playbackRevision = null;
   new ResizeObserver(resize).observe(viewport);

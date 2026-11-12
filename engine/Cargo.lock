@@ -1218,6 +1218,7 @@ dependencies = [
  "styk-alloc",
  "styk-doc",
  "styk-draw",
+ "styk-edit",
  "styk-engine",
  "styk-eval",
  "styk-raster",

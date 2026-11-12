@@ -523,6 +523,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Çokgenler eklemlere bağlanır. Kırmızı, turuncu veya gri bir ekleme tıklayın.",
     "app.chooseAtLeastThreeDifferentJoints": "En az üç farklı eklem seçin.",
     "app.polygonAdded": "Çokgen eklendi",
+    "app.denseFrameShowsOrigins": "Tüm eklemleri aynı anda göstermek için çok fazla eklem var: seçili olmayan figürler yalnızca orijinlerini gösterir. Eklemlerini görmek için bir figür seçin.",
     "app.spriteAttached": "Sprite bağlandı",
     "app.camera": "Kamera: {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Bu figürün bir eklemini seçin. Escape iptal eder.",

@@ -37,6 +37,8 @@ const perStage = () => ({
   pictureWait: 0,
   /** Frames in a row the engine did not yet hold the editor's revision for. */
   waiting: 0,
+  /** The session of the edit frame drawn last, told when the frame stays on show (`EditSession.rest`). */
+  restSession: null,
   monitor: undefined, monitorCanvas: null, workerMonitor: null,
   thumbnails: undefined, thumbnailCanvas: null,
 });
@@ -67,6 +69,10 @@ const STRIP = new Set(['runtime_segments']);
 const THUMBNAIL_WAIT_MS = 60000;
 /** How long a frame shown while its pictures decode waits for the engine's workers to finish one. */
 const PICTURE_WAIT_MS = 60000;
+/** How long an edit frame stays on show before what a pick of it needs is worked out on a worker (`Stage::prepare_pick`): not while frames follow
+ * each other (a drag, a scrub), and before a pointer comes back to the stage. Then too the session and the stage let go of the frame before
+ * it, which they keep while frames follow each other to build and encode the next one over (`Stage::rest`, `EditSession.rest`). */
+const PICK_PREPARE_MS = 60;
 /** How often the device is asked whether it was lost (a page that draws nothing would not notice). */
 const DEVICE_POLL_MS = 1000;
 /** A pose as JSON, without derived caches. */
@@ -118,13 +124,51 @@ export function uploadRemainingPictures(side, schedule = setTimeout) {
   schedule(step, IDLE_UPLOAD_MS);
 }
 
+/** How long a stage's start is waited for before it is started again over a new canvas, and how many times it is started again. */
+const STAGE_START_MS = 20000, STAGE_RESTARTS = 2;
+
+/**
+ * Starts the page's stage and does not give up at the first start that fails or never settles: the browser's graphics
+ * process can fail while the device is being made (machines without a GPU, several editors in one browser), and the
+ * request it was answering then never comes back, while a new request is served by the process the browser starts
+ * again. A canvas keeps the context type it was first asked for, so each new start gets a new canvas (`replace()`
+ * returns it). The last start is waited for without a limit and its failure is the one reported.
+ * @param {(canvas: HTMLCanvasElement) => Promise<object>} start starts a stage over a canvas (`createStage`)
+ * @param {HTMLCanvasElement} canvas the scene canvas
+ * @param {{replace(): HTMLCanvasElement, waitMs?: number, restarts?: number, warn?(message: string): void}} options
+ */
+export async function startStage(start, canvas, {replace, waitMs = STAGE_START_MS, restarts = STAGE_RESTARTS, warn = message => console.warn(message)}) {
+  for (let attempt = 0; ; attempt++) {
+    const started = start(canvas);
+    if (attempt >= restarts) return started;
+    let timer;
+    const stalled = new Promise(resolve => { timer = setTimeout(resolve, waitMs, startStage); });
+    try {
+      const stage = await Promise.race([started, stalled]);
+      if (stage !== startStage) return stage;
+      warn(`The stage did not start in ${waitMs} ms; starting it again.`);
+      // The start left behind installs nothing should it ever finish: its canvas has left the page (createStage).
+      started.catch(() => {});
+    } catch (error) {
+      warn(`The stage could not start (${error?.message ?? error}); starting it again.`);
+    } finally { clearTimeout(timer); }
+    canvas = replace();
+  }
+}
+
+/** How long the stage's start waits for the browser's description of its adapter before using the engine's name of it. */
+const ADAPTER_NAME_MS = 1500;
+
 /**
  * What the status line and telemetry call the graphics adapter: the browser's own description of it
  * (vendor, architecture, device) where WebGPU exists, else the name the engine got from the backend.
  */
-async function adapterName(stage) {
+async function adapterName(stage, waitMs = ADAPTER_NAME_MS) {
   try {
-    const info = (await expectedAdapterInfo()) ?? (await globalThis.navigator?.gpu?.requestAdapter?.())?.info;
+    // The name is a label: the stage exists by now, and a browser whose graphics process never answers the question
+    // (seen on machines without a GPU, a later page of one browser) must not keep the editor from starting.
+    const described = (async () => (await expectedAdapterInfo()) ?? (await globalThis.navigator?.gpu?.requestAdapter?.())?.info)();
+    const info = await Promise.race([described, new Promise(resolve => setTimeout(resolve, waitMs, null))]);
     const name = [info?.vendor, info?.architecture, info?.device].filter(Boolean).join(' · ');
     if (name) return name;
   } catch { /* the engine's own name will do */ }
@@ -145,14 +189,32 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
   let stage;
   try { stage = await side.engine.createStage(canvas); }
   catch (error) { throw messageError(error, 'errors.engineStage.theDrawingEngineCouldNotStart', {reason: error?.message ?? error}); }
+  // A start that was given up on (startStage) finishes late: the page has another canvas and stage by now, which stay the engine's.
+  if (canvas.isConnected === false) {
+    stage.free?.();
+    throw messageError(new Error('its canvas is no longer in the page'), 'errors.engineStage.theDrawingEngineCouldNotStart', {reason: 'its canvas is no longer in the page'});
+  }
   // The engine keeps the document; a stage on a new device starts from empty poses.
   Object.assign(side, perStage(), {stage, live: new LiveCels(stage), failed: null, failure: null});
   /** The stage's pixels per CSS pixel (the last `resize`), and a frame the stage has drawn. */
-  let deviceRatio = 1, engineShown = false, destroyed = false, lost = '', retrying = false, redrawQueued = false, preparedError = null;
+  let deviceRatio = 1, engineShown = false, destroyed = false, lost = '', retrying = false, redrawQueued = false, preparedError = null, pickTimer = 0;
+  /** A pick of the frame drawn is prepared once no other frame follows it for a moment. */
+  const preparePickSoon = () => {
+    if (typeof stage.prepare_pick !== 'function') return;
+    clearTimeout(pickTimer);
+    pickTimer = setTimeout(() => {
+      if (destroyed || lost) return;
+      stage.prepare_pick();
+      stage.rest?.();
+      // The session may have been closed meanwhile (another document): nothing of it is kept then.
+      try { side.restSession?.rest?.(); } catch { /* a session already freed holds nothing */ }
+      side.restSession = null;
+    }, PICK_PREPARE_MS);
+  };
   const warnings = [];
   /** The engine's counters, read from the stage once per frame drawn. */
   let statsAt = -1, gpuStats = null;
-  const backend = {name: stage.backend().startsWith('BrowserWebGpu') ? 'WebGPU' : 'WebGL2', adapter: await adapterName(stage)};
+  const backend = {name: stage.backend().startsWith('BrowserWebGpu') ? 'WebGPU' : 'WebGL2', adapter: await adapterName(stage, options.adapterNameMs)};
 
   const invalidate = () => options.onInvalidate?.();
   /** Another attempt at a frame the engine could not draw yet, on the next animation frame. */
@@ -262,6 +324,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     if (source) {
       // The session publishes what it changed after the call; a frame asked for before that landed is drawn when the engine holds it.
       if (!stage.edit_session(source.session, source.view, source.motion)) notYet('the engine does not hold the document the session edits yet');
+      side.restSession = source.session;
       // The poses the engine holds are the session's: the next frame sent as poses is sent whole.
       side.groups = []; side.count = -1; side.fields = null;
     } else {
@@ -345,7 +408,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       try {
         const drawn = drawEdit(request);
         if (span !== 0) traceEnd(span, {drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs});
-        if (drawn) engineShown = true;
+        if (drawn) { engineShown = true; preparePickSoon(); }
         if (renderer.measureFrame) renderer.telemetryStages = {geometry: side.stats.lastSendMs, submit: side.stats.lastDrawMs};
         return drawn;
       } catch (error) {
@@ -364,6 +427,15 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       if (destroyed || lost || side.failed || !engineShown) return null;
       try { return JSON.parse(stage.pick_artwork(JSON.stringify({x: point.x, y: point.y, scale, hidden: [...hiddenUids], locked: [...lockedUids]}))); }
       catch (error) { options.onError?.(error); return null; }
+    },
+    /**
+     * The camera of the edit frame the stage drew last, as a frame record holds it (`{is_default, x, y, scale, angle_rad}`), or null when it
+     * holds none: what the camera outline reads, without a read of the whole frame.
+     */
+    shownCamera() {
+      if (destroyed || lost || !engineShown || typeof stage.edit_camera !== 'function') return null;
+      const [isDefault, x, y, scale, angle] = stage.edit_camera();
+      return isDefault === undefined ? null : {is_default: isDefault === 1, x, y, scale, angle_rad: angle};
     },
     // Prepared playback frames: a packet is a ticket for a tick the engine has ready.
     hasPreparedFrame(key) {
@@ -488,7 +560,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     destroy() {
       if (destroyed) return;
       destroyed = true; engineShown = false;
-      clearInterval(poller);
+      clearInterval(poller); clearTimeout(pickTimer);
       side.pictureWait++;
       side.workerMonitor?.destroy(); side.workerMonitor = null;
       if (side.stage === stage) { side.stage = null; stage.free(); }

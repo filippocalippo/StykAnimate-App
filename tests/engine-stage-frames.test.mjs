@@ -372,6 +372,62 @@ test('the slots of the figures not drawn and dragged come from the engine, and a
   renderer.destroy();
 });
 
+test('a stage whose start never settles or fails is started again over a new canvas, and the last failure is the one reported', async () => {
+  const {startStage} = await import('../src/engine/engine-stage.mjs');
+  const quiet = {waitMs: 20, warn: () => {}};
+  // The first start never settles: the second, over the replacement, is the stage.
+  let canvases = ['first', 'second', 'third'], at = 0;
+  const seen = [];
+  const stage = await startStage(canvas => { seen.push(canvas); return canvas === 'first' ? new Promise(() => {}) : Promise.resolve({over: canvas}); },
+    canvases[0], {...quiet, replace: () => canvases[++at]});
+  assert.deepEqual(stage, {over: 'second'});
+  assert.deepEqual(seen, ['first', 'second']);
+  // A start that fails is tried again too; a start that settles in time is not.
+  at = 0; seen.length = 0;
+  assert.deepEqual(await startStage(async canvas => { seen.push(canvas); if (canvas === 'first') throw new Error('no device'); return {over: canvas}; },
+    canvases[0], {...quiet, replace: () => canvases[++at]}), {over: 'second'});
+  at = 0; seen.length = 0;
+  assert.deepEqual(await startStage(async canvas => { seen.push(canvas); return {over: canvas}; }, canvases[0], {...quiet, replace: () => canvases[++at]}), {over: 'first'});
+  assert.deepEqual(seen, ['first']);
+  // Every start fails: the last one's error, after the restarts allowed.
+  at = 0; seen.length = 0;
+  await assert.rejects(startStage(async canvas => { seen.push(canvas); throw new Error(`no device for ${canvas}`); }, canvases[0], {...quiet, replace: () => canvases[++at]}),
+    /no device for third/);
+  assert.deepEqual(seen, ['first', 'second', 'third']);
+  // The last start is waited for however long it takes.
+  at = 0;
+  const slow = await startStage(canvas => canvas === 'third' ? new Promise(resolve => setTimeout(resolve, 80, {over: canvas})) : new Promise(() => {}),
+    canvases[0], {...quiet, replace: () => canvases[++at]});
+  assert.deepEqual(slow, {over: 'third'});
+});
+
+test('a start that was given up on installs nothing when it finishes: its canvas left the page', async () => {
+  const stage = standInStage();
+  let freed = 0;
+  stage.free = () => { freed++; };
+  const createStage = await freshStage();
+  const engine = {handle: {}, threaded: false, progressSeen: () => 0, whenProgress: () => new Promise(() => {}), createStage: async () => stage};
+  await assert.rejects(createStage({width: 300, height: 150, isConnected: false}, {}, async () => engine), /could not start|no longer in the page/i);
+  assert.equal(freed, 1);
+});
+
+test('a stage starts although the browser never describes its adapter: it takes the engine\'s name of it', async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const {expectAdapterInfo} = await import('../src/engine/engine.mjs');
+  try {
+    // The warm-up worker never answers.
+    expectAdapterInfo(new Promise(() => {}));
+    assert.equal((await open({}, {adapterNameMs: 20})).renderer.stats.adapter, 'Test GPU');
+    // No worker, and the browser's own answer never comes.
+    expectAdapterInfo(Promise.resolve(null));
+    Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {gpu: {requestAdapter: () => new Promise(() => {})}}});
+    assert.equal((await open({}, {adapterNameMs: 20})).renderer.stats.adapter, 'Test GPU');
+  } finally {
+    expectAdapterInfo(null);
+    if (original) Object.defineProperty(globalThis, 'navigator', original); else delete globalThis.navigator;
+  }
+});
+
 test('the stage names its adapter from the warm-up worker\'s description, and asks the browser only when it has none', async () => {
   let asked = 0;
   const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');

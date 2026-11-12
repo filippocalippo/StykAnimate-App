@@ -185,8 +185,12 @@ export function createStagePlayback({stage, maxTickets}) {
       dropPackets();
       return playback;
     },
-    /** Asks the engine to prepare `ticks`. `idle`: nobody is waiting for them (the warm-up while the editor rests), so the engine's remaining threads are not started for it. */
-    async prepareRange(ticks, {idle = false} = {}) {
+    /**
+     * Asks the engine to prepare `ticks`, in that order. `idle`: nobody is waiting for them (the warm-up while the editor rests), so the
+     * engine's remaining threads are not started for it. `playhead` (the first tick by default) is where the engine's cache counts from
+     * when it is full: it keeps the frames it reaches first going forward from there, and never drops the playhead's own.
+     */
+    async prepareRange(ticks, {idle = false, playhead} = {}) {
       // A busy earlier admission stays cold, but cannot suppress newer demand.
       if (!held() || !ticks.length || !sample(ticks[0])) return;
       const engine = side().engine;
@@ -197,7 +201,7 @@ export function createStagePlayback({stage, maxTickets}) {
         if (sample(tick) && !requested.includes(tick)) requested.push(tick === 0 ? 0 : tick);
       }
       prunePackets(engine.handle);
-      pendingRequest = {playhead: ticks[0], samples: new Float64Array(ticks), order: ++controlOrder};
+      pendingRequest = {playhead: sample(playhead) ? playhead : ticks[0], samples: new Float64Array(ticks), order: ++controlOrder};
       flushControls();
     },
     get(tick) { return packetFor(tick); },

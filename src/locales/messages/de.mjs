@@ -1006,6 +1006,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Polygone werden an Gelenken befestigt. Klicke auf ein rotes, oranges oder graues Gelenk.",
   "app.chooseAtLeastThreeDifferentJoints": "Wähle mindestens drei verschiedene Gelenke.",
   "app.polygonAdded": "Polygon hinzugefügt",
+  "app.denseFrameShowsOrigins": "Zu viele Gelenke, um alle gleichzeitig anzuzeigen: Nicht ausgewählte Figuren zeigen nur ihren Ursprung. Wähle eine Figur aus, um ihre Gelenke zu sehen.",
   "app.spriteAttached": "Sprite befestigt",
   "app.camera": "Kamera: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Wähle ein Gelenk dieser Figur. Escape bricht ab.",

@@ -521,6 +521,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Đa giác gắn vào khớp. Nhấp vào khớp màu đỏ, cam hoặc xám.",
     "app.chooseAtLeastThreeDifferentJoints": "Chọn ít nhất ba khớp khác nhau.",
     "app.polygonAdded": "Đã thêm đa giác",
+    "app.denseFrameShowsOrigins": "Có quá nhiều khớp để hiển thị cùng lúc: các hình chưa được chọn chỉ hiện gốc tọa độ. Chọn một hình để xem các khớp của nó.",
     "app.spriteAttached": "Đã gắn ảnh sprite",
     "app.camera": "Camera: {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Chọn một khớp trên hình này. Escape để hủy.",

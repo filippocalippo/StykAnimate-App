@@ -698,6 +698,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Veelhoeken worden aan gewrichten bevestigd. Klik op een rood, oranje of grijs gewricht.",
   "app.chooseAtLeastThreeDifferentJoints": "Kies ten minste drie verschillende gewrichten.",
   "app.polygonAdded": "Veelhoek toegevoegd",
+  "app.denseFrameShowsOrigins": "Te veel gewrichten om alle tegelijk te tonen: niet-geselecteerde figuren tonen alleen hun oorsprong. Selecteer een figuur om de gewrichten te zien.",
   "app.spriteAttached": "Sprite bevestigd",
   "app.camera": "Camera: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Kies een gewricht op deze figuur. Escape annuleert.",

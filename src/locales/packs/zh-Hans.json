@@ -526,6 +526,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "多边形连接到关节。请点击红色、橙色或灰色关节。",
     "app.chooseAtLeastThreeDifferentJoints": "请选择至少三个不同的关节。",
     "app.polygonAdded": "已添加多边形",
+    "app.denseFrameShowsOrigins": "关节过多，无法同时全部显示：未选中的图形只显示原点。选择一个图形即可查看其关节。",
     "app.spriteAttached": "已连接精灵图像",
     "app.camera": "{value}摄像机",
     "app.chooseAJointOnThisFigureEscapeCancels": "请选择此图形上的一个关节。Escape 取消。",

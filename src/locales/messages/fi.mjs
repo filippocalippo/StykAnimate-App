@@ -514,6 +514,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Monikulmiot kiinnittyvät niveliin. Napsauta punaista, oranssia tai harmaata niveltä.",
   "app.chooseAtLeastThreeDifferentJoints": "Valitse vähintään kolme eri niveltä.",
   "app.polygonAdded": "Monikulmio lisätty",
+  "app.denseFrameShowsOrigins": "Niveliä on liikaa näytettäväksi kerralla: valitsemattomat hahmot näyttävät vain origonsa. Valitse hahmo nähdäksesi sen nivelet.",
   "app.spriteAttached": "Sprite-kuva kiinnitetty",
   "app.camera": "Kamera: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Valitse tämän hahmon nivel. Escape peruuttaa.",

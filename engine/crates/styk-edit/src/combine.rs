@@ -84,7 +84,7 @@ struct Drawn<'a> {
 
 fn drawn_of(scene: &Scene, slot: usize, segments: usize, fills: usize) -> Drawn<'_> {
     let mut drawn = Drawn { segments: vec![None; segments], fills: vec![None; fills] };
-    for item in scene.measured.iter().filter(|item| item.slot as usize == slot) {
+    for item in scene.measured_in_order(slot) {
         let place = match item.kind {
             ItemKind::Mesh => continue,
             ItemKind::Poly => drawn.fills.get_mut(item.index as usize),

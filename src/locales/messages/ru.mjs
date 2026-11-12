@@ -518,6 +518,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Полигоны крепятся к суставам. Нажмите на красный, оранжевый или серый сустав.",
   "app.chooseAtLeastThreeDifferentJoints": "Выберите не менее трёх разных суставов.",
   "app.polygonAdded": "Полигон добавлен",
+  "app.denseFrameShowsOrigins": "Суставов слишком много, чтобы показать все сразу: невыбранные фигуры показывают только начало координат. Выберите фигуру, чтобы увидеть её суставы.",
   "app.spriteAttached": "Спрайт прикреплён",
   "app.camera": "Камера: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Выберите сустав на этой фигуре. Escape отменяет.",

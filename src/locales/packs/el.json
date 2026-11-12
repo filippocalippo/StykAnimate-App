@@ -523,6 +523,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Τα πολύγωνα προσαρτώνται σε αρθρώσεις. Κάντε κλικ σε μια κόκκινη, πορτοκαλί ή γκρίζα άρθρωση.",
     "app.chooseAtLeastThreeDifferentJoints": "Επιλέξτε τουλάχιστον τρεις διαφορετικές αρθρώσεις.",
     "app.polygonAdded": "Προστέθηκε πολύγωνο",
+    "app.denseFrameShowsOrigins": "Υπάρχουν πάρα πολλές αρθρώσεις για να εμφανιστούν όλες μαζί: οι μη επιλεγμένες φιγούρες δείχνουν μόνο την αρχή τους. Επιλέξτε μια φιγούρα για να δείτε τις αρθρώσεις της.",
     "app.spriteAttached": "Προσαρτήθηκε sprite",
     "app.camera": "Κάμερα · {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Επιλέξτε μια άρθρωση σε αυτή τη φιγούρα. Escape για ακύρωση.",

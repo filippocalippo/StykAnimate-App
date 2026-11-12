@@ -811,3 +811,79 @@ fn a_session_has_counted_the_figures_of_its_frames_before_its_first_edit() {
         assert!(!counts.is_empty() && seen.len() == counts.len(), "{name}: every figure of a pose is counted");
     }
 }
+
+/// A light group (`interface::LIGHT`) as words: `(flags, root, rows of index, length and z, bounds)`.
+fn light_group(words: &[f64]) -> (u32, [f64; 2], Vec<[f64; 3]>, Option<[f64; 4]>) {
+    use styk_eval::geometry::interface::BOUNDS;
+    let flags = words[0] as u32;
+    let rows = words[3] as usize;
+    let list = (0..rows).map(|n| [words[4 + 3 * n], words[5 + 3 * n], words[6 + 3 * n]]).collect();
+    let bounds = (flags & BOUNDS != 0).then(|| [words[4 + 3 * rows], words[5 + 3 * rows], words[6 + 3 * rows], words[7 + 3 * rows]]);
+    assert_eq!(words.len(), 4 + 3 * rows + if bounds.is_some() { 4 } else { 0 }, "a light group holds nothing else");
+    (flags, [words[1], words[2]], list, bounds)
+}
+
+/// The groups of a packet after its header, by slot: their words.
+fn group_words(packet: &[f64], header: bool) -> Vec<(usize, Vec<f64>)> {
+    let mut at = 0;
+    let mut groups = packet.len();
+    if header {
+        groups = packet[3] as usize;
+        at = 5;
+        for _ in 0..packet[4] as usize {
+            at += 1 + packet[at] as usize;
+        }
+    }
+    let mut out = Vec::new();
+    while at < packet.len() && out.len() < groups {
+        let (slot, length) = (packet[at] as usize, packet[at + 1] as usize);
+        out.push((slot, packet[at + 2..at + 2 + length].to_vec()));
+        at += 2 + length;
+    }
+    out
+}
+
+#[test]
+fn a_dense_read_sends_free_figures_light_and_their_whole_groups_when_asked() {
+    use styk_eval::geometry::interface::LIGHT;
+    for name in ["gestures-sheet", "rig-sheet", "startup-sheet"] {
+        let (mut session, _) = tape(name);
+        let view = view(&session);
+        let whole = session.query_packet("geometry", "{}", &view).unwrap();
+        // Any figure counts as dense here.
+        let dense = session.query_packet("geometry", "{\"lightAbove\":0}", &view).unwrap();
+        assert_eq!(&dense[1..5], &whole[1..5], "{name}: the same read of the same frame (full, count, groups, warnings)");
+        let record = session.editor.shown_frame().unwrap();
+        let objects: Vec<Value> = record.get("objects").unwrap().elements().unwrap().iter().collect();
+        let (whole_groups, dense_groups) = (group_words(&whole, true), group_words(&dense, true));
+        let mut light = Vec::new();
+        for ((slot, full), (dense_slot, words)) in whole_groups.iter().zip(&dense_groups) {
+            assert_eq!(slot, dense_slot);
+            let joined = objects[*slot].get("join").is_some_and(|join| !matches!(join, Value::Null));
+            if words.is_empty() || words[0] as u32 & LIGHT == 0 {
+                assert_eq!(words, full, "{name} slot {slot}: a group sent whole is the full read's");
+                continue;
+            }
+            assert!(!joined, "{name} slot {slot}: a figure joined to another keeps its joints and is sent whole");
+            light.push(*slot);
+            // What the light group says is what the whole group says.
+            let unpacked = unpack(&[&[0.0, 1.0, objects.len() as f64, 1.0, 0.0, *slot as f64, full.len() as f64][..], &full[..]].concat());
+            let g = group(&unpacked, *slot);
+            let (flags, root, rows, bounds) = light_group(words);
+            assert_eq!(flags & !LIGHT, full[0] as u32 & 3, "{name} slot {slot}: drawn and bounds");
+            assert_eq!(root.map(f64::to_bits), point(g.get("root").unwrap()).map(f64::to_bits), "{name} slot {slot}: root");
+            let full_rows: Vec<[f64; 3]> = g.get("segs").unwrap().elements().unwrap().iter().map(|shape| { let r = row(&shape); [r[0], r[3], r[5]] }).collect();
+            assert_eq!(format!("{rows:?}"), format!("{full_rows:?}"), "{name} slot {slot}: each row's index, length and depth");
+            assert_eq!(format!("{bounds:?}"), format!("{:?}", g.get("bounds").map(|b| numbers(&b))), "{name} slot {slot}: bounds");
+        }
+        assert!(!light.is_empty(), "{name}: free figures are sent light");
+        // The rest of them, asked for: the full read's groups.
+        let asked = session.query_packet("geometryGroups", &format!("{{\"slots\":{light:?}}}"), &view).unwrap();
+        let asked = group_words(&asked, false);
+        assert_eq!(asked.len(), light.len());
+        for (slot, words) in asked {
+            let full = &whole_groups.iter().find(|(s, _)| *s == slot).unwrap().1;
+            assert_eq!(format!("{words:?}"), format!("{full:?}"), "{name} slot {slot}: the whole group");
+        }
+    }
+}

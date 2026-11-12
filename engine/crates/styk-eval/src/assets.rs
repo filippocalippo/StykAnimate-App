@@ -178,6 +178,12 @@ impl Assets {
         self.id
     }
 
+    /// How many of the drawing cels placed have their tight bounds resolved by a decode ([`DrawingTiles::decoded_bounds`]). A cel's bounds
+    /// are resolved once and never again, so a list encoded when this number was the same read the same bounds.
+    pub fn decoded_cels(&self) -> usize {
+        self.cels.values().filter(|(cel, _)| cel.decoded_bounds.get().is_some()).count()
+    }
+
     pub fn build(doc: &Document) -> Assets {
         Assets::default().extended(doc)
     }

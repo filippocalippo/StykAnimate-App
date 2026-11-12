@@ -79,7 +79,8 @@ export class Editor extends EventTarget {
   set selectedUid(uid) { this._polygonSelection = null; this._segmentSelection = null; this._branchSelection = null; this._selectedUid = uid ?? null; this.selectedUids = new Set(uid === null || uid === undefined ? [] : [uid]); }
   // With nothing selected there is nothing to look up: the frame on show is not built for it (the library reads this on every tick of playback).
   get selectedObjects() { return this.selectedUids?.size ? this.selectionFrame?.objects.filter(o => this.selectedUids.has(o.unique_id)) ?? [] : []; }
-  get object() { return this.selectionFrame?.objects.find(o => o.unique_id === this.selectedUid) ?? this.selectedObjects.at(-1) ?? null; }
+  // With nothing selected there is no object to find: the frame on show is not read for it (the inspector asks on every update).
+  get object() { if (!this.selectedUids?.size) return null; return this.selectionFrame?.objects.find(o => o.unique_id === this.selectedUid) ?? this.selectedObjects.at(-1) ?? null; }
   get figure() { const typeId = this.object?.figure_type_id; return findFigureType(this.report.figure_types, typeId) ?? null; }
   get selectedSlot() { return this.selectionFrame?.objects.findIndex(o => o.unique_id === this.selectedUid) ?? -1; }
   get timeline() {
@@ -119,7 +120,7 @@ export class Editor extends EventTarget {
   _emit(kind, detail = {}) {
     if(kind==='document')this.clearLayerFocus({notify:false});
     else if(detail.layers||detail.structural||kind==='history')this.reconcileLayerFocus();
-    if(kind==='seek')this._followSheetSelection();
+    if(kind==='seek'){if(this._sheetFollowHeld)this._sheetFollowPending=true;else this._followSheetSelection();}
     if(kind==='selection'&&!detail.sheetSelection)this._sheetSelection=null;
     if (kind === 'document' || detail.definition || (detail.structural && !detail.layerSheet)) this._definitionRevision = this.definitionRevision + 1;
     if (this._layerEventPending && ['edit', 'history', 'document'].includes(kind)) {

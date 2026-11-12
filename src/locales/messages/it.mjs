@@ -516,6 +516,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "I poligoni si collegano alle articolazioni. Fai clic su un’articolazione rossa, arancione o grigia.",
   "app.chooseAtLeastThreeDifferentJoints": "Scegli almeno tre articolazioni diverse.",
   "app.polygonAdded": "Poligono aggiunto",
+  "app.denseFrameShowsOrigins": "Troppe articolazioni per mostrarle tutte insieme: le figure non selezionate mostrano solo la loro origine. Seleziona una figura per vederne le articolazioni.",
   "app.spriteAttached": "Sprite collegato",
   "app.camera": "Camera: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Scegli un’articolazione su questa figura. Escape per annullare.",

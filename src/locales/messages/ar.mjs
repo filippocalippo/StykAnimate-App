@@ -506,6 +506,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "تُثبّت المضلعات بالمفاصل. انقر على مفصل أحمر أو برتقالي أو رمادي.",
   "app.chooseAtLeastThreeDifferentJoints": "اختر ثلاثة مفاصل مختلفة على الأقل.",
   "app.polygonAdded": "تمت إضافة مضلع",
+  "app.denseFrameShowsOrigins": "عدد المفاصل كبير جدًا لعرضها معًا: تُظهر الأشكال غير المحددة نقطة أصلها فقط. حدد شكلًا لرؤية مفاصله.",
   "app.spriteAttached": "تم تثبيت العنصر الرسومي",
   "app.camera": "الكاميرا: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "اختر مفصلًا على هذا الشكل. Escape للإلغاء.",

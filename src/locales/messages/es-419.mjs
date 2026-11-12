@@ -516,6 +516,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Los polígonos se unen a articulaciones. Haz clic en una articulación roja, naranja o gris.",
   "app.chooseAtLeastThreeDifferentJoints": "Elige al menos tres articulaciones distintas.",
   "app.polygonAdded": "Polígono agregado",
+  "app.denseFrameShowsOrigins": "Hay demasiadas articulaciones para mostrarlas todas a la vez: las figuras no seleccionadas solo muestran su origen. Selecciona una figura para ver sus articulaciones.",
   "app.spriteAttached": "Sprite unido",
   "app.camera": "Cámara: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Elige una articulación de esta figura. Escape cancela.",

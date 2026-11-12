@@ -498,7 +498,13 @@ A gesture changes a few objects of a frame of hundreds. The edit frame is the se
 ([evaluation.md](evaluation.md#the-interfaces-frame)), built over the one before it, and its scene says which build made each
 object's geometry (`Scene::built_in`, numbered across every memory). `EditScene` keeps what the last frame was encoded as
 (`drawlist::EncodeMemory`), and `encode_composed_remembering` encodes only the objects whose build is not the one it kept; the list
-is the list encoded whole (`styk-eval/tests/build_memory.rs`). Only a plain frame is kept: nothing in it draws effects, 3D faces or
+is the list encoded whole (`styk-eval/tests/build_memory.rs`). A frame drawn again with nothing it is encoded from changed (a pan, a zoom, a redraw for the overlay) is the list
+drawn last (`EditScene` keeps it with what it was encoded from: the document, its pictures and how many drawing cels a decode has
+resolved the bounds of, the frame and scene, the hidden slots, drags, background, effects, camera and onion skins; live drawing cels are
+always encoded), so nothing is encoded or uploaded again (`Renderer::set_list` keeps a list it holds; what the renderer works out of a
+list, each group's primitives and where its composites are, is worked out when the list is set). On 2,000 figures of 100 segments a
+pan frame fell from about 20 ms to under 1 ms of the interface thread, a zoom step from about 76 ms to about 5 ms
+(`styk-engine/tests/edit_session_frames.rs`). Only a plain frame is kept: nothing in it draws effects, 3D faces or
 text, no drawing cel is live, and an object being dragged is encoded afresh (its translation is applied after encoding).
 What the encoder keeps is judged by numbers, never by addresses: the assets by `Assets::id` (an `Assets::extended` that adds a picture, cel or glyph is numbered anew; one that adds nothing keeps the number, so a pose commit does not forget what was encoded) and a
 scene by its `Scene::stamp` (each build is numbered, and a built scene is never changed). The onion skins are kept the same way: a ghost
@@ -507,6 +513,25 @@ gesture does not encode them at every step, nor when the document is published a
 every such list with the list encoded whole. A pose kept for an onion skin is also brought to each new document before it is drawn: its styled
 objects are resolved again against a figure that was redefined (`Loader::restyle_frame`; `styk-engine/tests/ghost_scenarios.rs` draws every
 step of the recorded editing scenarios with a kept stage and a fresh one and compares them).
+
+A list is put together from pieces (`Builder` keeps, per group, the parts of the encoded objects it places, `Arc<ObjectOut>` with the
+bases of their tables, and the primitives made for the list: backgrounds, composites, generated effects), and its primitives are written
+once, when it is put together, not copied into groups and again into the list. The edit frame's lists are shared
+(`encode_composed_shared`): the memory keeps the list it returned and the one before it, and the next list is written over the one before
+it in place when nothing else holds that one any more (the renderer and the stage hold the newer) and it is laid out as the new one (the
+same pieces of the same lengths in the same groups): only the pieces that are not the same parts of the same encoded objects are written.
+The list also says how it differs from the list before it (`ListChanges`: ranges of primitives), and the stage tells the renderer
+(`Renderer::note_changes`): a renderer that holds that list writes only those ranges of its primitive buffer, and keeps what it worked out of
+the list's primitives unless a changed one composites, draws faces or adds light (`styk-render` `lifetime_tests`, drawn against the list set
+whole). An encoder that finds an object's items reads where they lie (`Scene::spans`) rather than every item of the frame. The list before
+the last is let go of once the frame stays on show (`Stage::rest`, with the session's `rest` when the stage prepares a pick), so a frame at
+rest holds one list. `styk-eval/tests/build_memory.rs` compares every list, written over or not, with and without onion skins, with the list
+encoded whole, and the ranges it reports applied to the list before it with the list.
+
+Measured on 2,000 figures of 100 segments in the desktop app (2026-11-11, medians of three runs, same sitting): a joint drag frame fell from
+about 41 ms to about 6 ms of the interface thread (the stage's part from about 33 ms to about 3.4 ms), a figure move frame from about 18 ms to
+about 4 ms; natively (`styk-engine/tests/dense_bench.rs`) the drag step's session frame fell from 21 ms to under 1 ms, its geometry read from
+6 ms to under 0.1 ms and its list from 19 ms to under 1 ms.
 
 ## In the app
 
@@ -548,6 +573,19 @@ locked left out, and each whose measured bounds reach the point (a movieclip's c
 background or effects, into a three-pixel surface centred on the point at the view's scale by the CPU rasterizer. The first
 whose centre pixel has any coverage is the answer, `{slot, uid}`. A click hits what is painted: fills, curves, pictures,
 meshes, movieclip contents and transparency. The pictures it samples stay decoded between clicks within the rasterizer's budget.
+
+The stage asks on every pointer move over the stage, so what a pick works out of the frame is kept while the frame is on show
+(`styk_export::pick::shown`): the scene is the session's scene of the frame (`EditScene::shapes`, the kind `build_shapes` builds, not
+built again), and the figures' measured bounds and where each figure's items lie in the scene are worked out at the first pick of a
+frame. Each candidate is then encoded from its own items alone (`drawlist::encode_composed_span`: the items outside the span all belong
+to hidden figures, so the list is the one the whole scene's encoding gives but for their empty runs), so a pick costs the figures under
+the point, not the frame. `pick::artwork` works everything out on each call and is what `shown` answers (`styk-export/tests/pick_shown.rs`
+compares the two on ordinary documents and on a dense frame of overlapping figures). What a pick works out of a frame is worked out
+on an idle engine worker once the frame has stayed on show for 60 ms (`Stage::prepare_pick`, `pick::prepare`; never while frames follow
+each other, as in a drag or a scrub), and the first pick of the frame takes it; a pick that comes sooner works it out itself. What picks
+kept of a frame (its scene is a dense frame's worth of memory) is let go of, on a worker, as soon as another frame is drawn. Measured on
+2,000 figures of 100 segments: a pick fell from about 370 ms to about 35 ms when it works the frame out, and to 4 to 10 ms (the
+rasterization of the figures under the point) when the frame was prepared.
 
 ### Every document
 

@@ -241,8 +241,132 @@ is not implemented by this range-baking workflow.
 The host must suppress normal scene evaluation while scrubbing, show available
 prepared worker previews, and settle the exact editable frame at completion.
 Timeline pointer seeks use `editor.seek(tick, {evaluate:false})`; keyboard seeks
-retain normal evaluation. The latest pending move is consumed at most once per
+retain normal evaluation, except the steps of a run in a dense scene
+([below](#stepping-through-a-dense-scene)). The latest pending move is consumed at most once per
 RAF. Pointer release cancels any older pending move and flushes its exact tick.
+While the playhead is dragged the chrome waits for the release: the inspector, the
+library's selection state and the camera monitor read the frame on show, and none
+of them is updated for an intermediate tick.
+
+### Scrubbing a dense scene
+
+In a scene of a few figures the drag draws the exact editing frame (onion skins,
+joints, selection) at every tick it reaches. Drawing the editing frame at a new
+tick is all interface-thread work: on 2,000 figures of 100 segments it is about
+110 ms of evaluation, building, encoding and upload, and a drag showed about five
+frames a second with the interface frozen in between (tasks of up to 750 ms).
+
+`src/engine/engine-scrub.mjs` decides and runs the other way of scrubbing:
+
+- **The rule** (`createSeekCosts`): the paint loop records the interface time of
+  every editing paint that showed another tick than the paint before it (a redraw
+  of the tick on show, after a pan or an edit, is not a seek). A drag scrubs from
+  prepared frames when the lower median of the document's last three such paints is
+  over 12 ms: a stage paint over that cannot follow a pointer at the display's rate,
+  and a prepared frame costs the interface a few milliseconds whatever the scene.
+  The rule is asked once, at the press (`scrubStarted`, through `timeline-host.mjs`),
+  and holds until the release. A new document is measured anew. Build's canvas
+  colour keeps the editing scrub (prepared frames carry the scene's background).
+- **The drag** (`createScrubPreview`): nothing evaluates or reads the frame on the
+  interface thread, and the stage shows the frames the engine's workers prepare,
+  as playback does (`renderPrepared`, the editor's view, without the scene camera;
+  hidden figures and layers and the effects switch are part of the prepared frame,
+  `engine-playback.mjs`). The joints, onion skins and selection are not drawn, the
+  camera outline follows the prepared frame's camera. Until a frame is ready the
+  picture on show stays. The interface never waits on a worker: readiness is one
+  nonblocking read per tick, and a paint is asked for when the engine's progress
+  counter moves.
+- **Which frames:** every tick the pointer crosses is marked with the order it was
+  crossed in; a paint shows the ready frame of the tick crossed last after the one
+  on show, so a frame of an older place of the pointer that is ready late is never
+  shown over a newer one. At most three frames are prepared at once
+  (`scrub.framesInFlight`): the pointer's tick first, then up to two ticks past it
+  in the drag's direction (`scrub.aheadFrames`); a frame asked for when one of them
+  finishes is the pointer's tick of that moment. Each request replaces the one
+  before (the engine drops what it had not started) and asks again for the frames
+  still wanted. With eight at once every frame took about twice as long, as many
+  were shown, and they lagged further behind the pointer. The engine's cache counts
+  from the low end of the wanted ticks (`prepareRange(ticks, {playhead})`): it drops
+  the frames furthest forward from its playhead first, and counted from the pointer
+  a forward drag lost each frame finished just behind it before a paint could show it.
+- **The picture:** a prepared frame leaves out what lies well outside the artboard
+  ([rendering.md](engine/rendering.md#prepared-frames-leave-out-what-the-artboard-clips)),
+  so it is drawn clipped to the artboard, the editing view's background around it.
+  Figures beyond the artboard's edge show again on release. Past the document's
+  end the last tick stays on show.
+- **The release** draws the exact editing frame once, with onion skins, joints and
+  selection, and the inspector updates. A selected layer's figures (a cell of the
+  layer sheet selects them) are looked up in the frame of the tick the drag ends on,
+  once (`editor.holdSheetFollow`); followed at every tick, each move read the whole
+  frame.
+
+Measured 2026-11-11 (desktop app, the stress document of 2,000 figures of 100
+segments, joints hidden, a pointer drag of 60 moves across 101 ticks of the ruler):
+no task over 50 ms during the drag (265 to 750 ms before, one a tick), paint p95
+5 to 6 ms (about 190 ms), and 12 to 16 distinct frames a second (about 6), bounded
+by the workers: a frame of that scene costs a worker about 170 ms with three at
+once. The frame under a pointer that stops shows 110 to 190 ms later. The
+release's editing frame costs about 120 ms of the interface, as a seek does. With
+the joints shown the drag is the same (before: 2.9 s tasks, a 60-move drag took
+over two minutes); the release then also draws the joints (about 1.5 s on that scene).
+
+### Stepping through a dense scene
+
+The frame steps (`previous-frame`, `next-frame`, the keyframe steps and Simple's
+exposure steps) draw the exact editing frame of the new tick, on the stage or in the
+timeline. Held down, a key repeats them about 30 times a second; in the stress
+document each exact step cost the interface 130 to 200 ms, so a held key showed
+about 4 frames a second with the interface frozen in between (tasks of 450 to
+600 ms), and the steps queued behind it kept landing after the key up.
+
+A run of steps in a dense scene is a scrub (`createStepRun` in
+`src/engine/engine-scrub.mjs`, owned by `timeline-host.mjs` beside the drag's hooks):
+
+- **One press is exact**, as before: the editing frame with joints, onion skins and
+  the inspector.
+- **A run** starts at its second step: a key's auto-repeat, or a step within 250 ms
+  of the one before (`STEP_RUN_MS`: exact steps that close leave the interface no
+  time between them, and a person who looks at each frame steps more slowly than four
+  a second). The rule of the drag decides whether the scene is dense, asked at that
+  second step; in an ordinary scene, and while the playhead is dragged, every step
+  stays exact. From there each step seeks without evaluating
+  (`runTimelineHotkey(..., {evaluate:false})`, the timeline's `seek`, `jumpKey`,
+  `_selectCell` and the filmstrip's `selectFrame` take the option) and moves the
+  scrub preview's pointer, as a drag's move does: the stage shows the prepared frame of
+  the newest tick the run passed, the audio scrubs, and the chrome waits for the end.
+  A step lands where it does one at a time: the steps stop at the first and last tick,
+  the keyframe steps go from key to key, and a loop range, which belongs to playback,
+  does not change them. A step in the timeline selects the cell of its tick and tells
+  the host of a track only when the track changed.
+- **Which frames:** at most two at once (`scrub.stepFramesInFlight`), the playhead's
+  tick and the next one in the run's direction. The playhead moves one tick at a time:
+  of three asked for together, the two finished just behind it were passed over for
+  the third, and they still held the workers when the run ended. A drag keeps three.
+- **The end:** the key up ends a held key's run at once; a run of taps ends 250 ms
+  after its last step; another key or a press ends it first, so every other
+  command acts on the exact frame and its selection; the window losing focus ends it
+  too. The end draws the exact editing frame of the tick the run reached, and the
+  inspector updates. A drag that starts during a run takes it over.
+
+Measured 2026-11-11 (desktop app, the stress document of 2,000 figures of 100
+segments, joints hidden; a key held through the page: one key down, after 500 ms
+auto-repeats every 33 ms for 2 s, key up; medians of three runs, the same sitting
+before and after):
+
+| | Before | After |
+| --- | --- | --- |
+| Longest task during the run, stage focused | 456 ms | none over 50 ms |
+| Paint p95 | 398 ms | 5.7 ms |
+| Distinct frames a second | 3.5 | 17.2 (a playhead drag on the same build: 13.2) |
+| Key up to the exact frame | 199 ms | 127 ms |
+| Longest task, timeline focused (a layer's cell selected) | 1,317 ms | none over 50 ms |
+| Distinct frames a second, timeline focused | 0.5 | 14.2 |
+| Key up to the exact frame, timeline focused | 1,445 ms (queued steps) | 176 ms |
+
+Every step lands (tick 62 of 62 steps, before and after), no picture of another
+tick is shown after the key up, and one press costs what it did (110 to 150 ms to
+its exact frame). The demo document (three figures) is unchanged: 22.7 distinct
+frames a second, paint p95 1.5 ms, the exact frame 4 to 8 ms after the key up.
 
 ## Recorded evidence and remaining acceptance
 

@@ -379,6 +379,8 @@ pub struct Editor {
     pub(crate) events: Vec<Value>,
     /// Typed views and evaluated frames of the current document.
     pub(crate) eval: RefCell<frame::Cache>,
+    /// The numbers the last packed read of the frame left out of its text (`Editor::interface_frame_packed`).
+    pub(crate) frame_numbers: RefCell<Vec<f64>>,
     /// What the interface was last told of the geometry of the frame on show (and of the motion-path display).
     pub(crate) shown: RefCell<[interface::Cache; 2]>,
     /// What the interface reads besides the frame on show: the motion-path trails, the onion skins and the camera's views.
@@ -514,6 +516,7 @@ impl Editor {
             events: Vec::new(),
             eval: RefCell::default(),
             shown: RefCell::default(),
+            frame_numbers: RefCell::default(),
             trails: RefCell::default(),
             onions: RefCell::default(),
             camera_views: RefCell::default(),

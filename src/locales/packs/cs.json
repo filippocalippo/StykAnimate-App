@@ -527,6 +527,7 @@
     "app.polygonsAttachToJointsClickARedOrange": "Mnohoúhelníky se připojují ke kloubům. Klikněte na červený, oranžový nebo šedý kloub.",
     "app.chooseAtLeastThreeDifferentJoints": "Vyberte alespoň tři různé klouby.",
     "app.polygonAdded": "Mnohoúhelník přidán",
+    "app.denseFrameShowsOrigins": "Kloubů je příliš mnoho na zobrazení najednou: nevybrané figury ukazují jen svůj počátek. Vyberte figuru, abyste viděli její klouby.",
     "app.spriteAttached": "Sprite připojen",
     "app.camera": "Kamera: {value}",
     "app.chooseAJointOnThisFigureEscapeCancels": "Vyberte kloub na této figuře. Escape zruší operaci.",

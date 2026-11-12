@@ -334,12 +334,9 @@ impl Renderer {
             executor.prepare(&self.device, &self.queue, [0, 0]);
         }
         // Each group's prims are one run inside its depth's pass (the encoder emits them by group).
-        let mut runs = vec![(u32::MAX, 0u32); n];
-        for (i, p) in list.prims.iter().enumerate() {
-            let run = &mut runs[p.group as usize];
-            run.0 = run.0.min(i as u32);
-            run.1 = i as u32 + 1;
-        }
+        // (Worked out when the list was set: `Renderer::set_list`.)
+        let runs = self.group_runs.clone();
+        debug_assert_eq!(runs.len(), n);
         // One uniform slot per layer pass (round, depth, page) and one for the frame.
         let mut passes: Vec<(usize, u32, u32, u32, u32)> = Vec::new(); // round, depth, page, start, end
         for (r, round) in rounds.iter().enumerate() {
@@ -425,11 +422,9 @@ impl Renderer {
         let bg = if foreground { 0 } else { list.background_prims.min(root.1 - root.0) };
         let mut stops = vec![root.1; rounds.len()];
         let mut next = 1;
-        for i in root.0 + bg..root.1 {
+        let first = self.composites.partition_point(|&i| i < root.0 + bg);
+        for &i in self.composites[first..].iter().take_while(|&&i| i < root.1) {
             let p = &list.prims[i as usize];
-            if p.kind & 255 != K_COMPOSITE {
-                continue;
-            }
             let r = round_of.get(p.b[0].to_bits() as usize).copied().unwrap_or(usize::MAX);
             while next < rounds.len() && r != usize::MAX && r >= next {
                 stops[next - 1] = i;

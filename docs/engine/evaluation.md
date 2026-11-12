@@ -316,7 +316,12 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   keeps on show, else the document at the playhead (`Records::evaluated_editor_with`). `document` is the document's
   own frame under any of them, the base a gesture's draft is composed on. Each carries the time the document's effect clips are
   read at when it has any (`_vfxTimelineTick`, the playhead), which the effect gizmos compose the figures' effects at. The camera is read as the
-  shot (`shot` below), not from a time on the frame.
+  shot (`shot` below), not from a time on the frame. `engine-shown.mjs` reads both packed (`{packed: true}`,
+  `Editor::interface_frame_packed`): each array of finite numbers at the top of an object (a pose's angles, lengths and bends, most of a
+  dense frame's text: 2.9 MB for 2,000 figures of 100 segments) is the string `"\u0000"` in the text, and its numbers follow as words in the
+  `frameNumbers` packet (per object, per such key in key order, a length and the numbers; a negative zero as the zero the text would
+  write); the reader puts each array back where the text leaves it out, so the frame is the frame the whole text gives
+  (`tests/engine-shown-packed-frame.test.mjs`).
 - `motion` is the pose a motion-path edit shows at the playhead while it changes it
   (`Editor::motion_display_frame_worker`), `null` outside the ticks it changes.
 - `timeline` is the rows (`[[start, count], …]`, `timeline::rows`).
@@ -328,7 +333,21 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   (`drawlist::app_bounds`). `pack_groups` writes them as a packet of 64-bit floats, not text (`EditSession.query_packet`; the layout is documented in `styk-eval/src/geometry/interface.rs`: a segment is a row of numbers that leaves out what the reader works out: where it starts is where its parent ends, where it ends is its joint; nothing is formatted or parsed on the way, and a non-finite number stays non-finite, which the reader takes for the `null` it once was); `engine-shown.mjs` reads the words where they lie and makes them the groups the canvas, the
   handles and the pickers read (`{objects: Map<slot, group|null>, orderedObjects, drawables, token, changedSlots,
   warnings}`; a group `{slot, obj, fig, root, joints, segments, polys, bounds, solvedAngles, solvedLengths}`, `drawables`
-  built when read, with Stick Nodes shapes expanded). The groups carry no drawables for a 3D mesh or a movieclip's contents: the
+  built when read, with Stick Nodes shapes expanded). A packet of up to 12,000 segments (`shownLimits.eagerSegments`) is built
+  at once: with every joint shown, every group is read. Above that a group's `slot`, `obj`, `fig`, `root`, `bounds` and `drawn`
+  are read at once and its joints, segments, faces, solved values and drawables are built from the words the first time any of
+  them is read, the same values as built at once (`tests/dense-handles.test.mjs`). In a dense frame the joints of the figures not selected show
+  their origin only ([SCENE-EDITING.md](../SCENE-EDITING.md#joints-in-dense-frames)) and the picture is the engine's, so most groups
+  are never built; what the handles need of one comes without building it (`segmentCount`, `segmentLengths()`, `segmentIndex(n)`,
+  `segmentZ(n)`). So above the same limit (the read asks with `lightAbove`) the session sends a figure that is not joined to another
+  *light* (`interface::LIGHT`): its flags, root and bounds and, a row each, the index, length and depth of its segments as the full
+  rows hold them, about a fifth of the words; a group built from it asks the session for the rest (`geometryGroups`, one call for
+  every group a read of the geometry's `drawables` builds) and is the group the full read would have sent. The session answers from
+  its latest read, the frame on show once the interface has read it: a group a read sent is its figure's in every later read that did
+  not send it again, so the groups the interface holds build as they were sent, and only a group of an earlier geometry whose figure
+  a later read sent again would build as that figure is now (`tests/dense-handles.test.mjs`,
+  `styk-edit/src/interface_tests.rs`). A group not yet built keeps the packet it came in; past two packets kept by the groups on show, the groups of
+  the older ones copy their own words out. The groups carry no drawables for a 3D mesh or a movieclip's contents: the
   stage draws them in the engine, and a click on artwork asks the engine which figure the stage's frame paints at the point ([rendering.md](rendering.md#picking-artwork)).
 - **One scene for every reader.** The typed frame of the record on show and the scene built from it are one `ShownScene`
   (`styk-edit/src/shown.rs`), kept for as long as the record, the playhead and the document's views are what it was made
@@ -338,7 +357,25 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   Each build is made over the one before it (`BuildMemory`): an object whose typed node, figure, root and inverse-kinematics
   solution are the ones its last build had is not built again, so a gesture builds the figure it changes and the figures that hang
   from what moved, not the frame. The scene is the same scene whether objects were built or kept
-  (`styk-eval/tests/build_memory.rs`).
+  (`styk-eval/tests/build_memory.rs`). A built scene says where each object's items, measured primitives and points lie
+  (`Scene::spans`, with what they hold that an encoder asks of the whole frame: text, meshes, faces, effects for an export), so a reader
+  of a few figures (the geometry read, `app_bounds_of`, the encoder finding its runs) does not pass over the frame's items. The session's
+  builds are shared (`build_remembering_shared`): the memory keeps the scene it returned and the one before it, and the next scene is
+  written over the one before it, in place, when nothing else holds that one any more (the stage and the interface have moved to the
+  newer one) and every object built since holds as many items, measured primitives and points as before, nothing in the frame being
+  movieclip content, meshes, faces or colour transitions: only those objects' parts are written. A drag step of one figure of 2,000 so
+  writes that figure, not the 200,000 items of the frame. The older scene is let go of once the frame stays on show (`EditSession.rest`,
+  called by the stage when it prepares a pick, `BuildMemory::rest`), so a frame at rest holds one scene.
+- **Building a whole frame.** A seek builds every figure again; what it costs is mostly writing items (160 bytes a segment) and
+  allocating. An object that is built again is built in the buffers of the build the memory kept of it (`BuildMemory::recycled`):
+  a seek of 2,000 figures allocates nothing for figures of the same size. A figure of segments alone, every one drawn in the
+  figure's order, has measured primitives that are its items: the scene keeps none of them in `Scene::measured` and reads its
+  items in their place (`SPAN_MEASURED_ITEMS`; read through `Scene::measured_of` and `Scene::measured_items`, never the field).
+  Where nothing is built in parallel (the WebAssembly build: its parallelism is whole frames on workers), a frame without joins
+  built for no memory (a worker's frame, a movieclip's scene) is built and spliced one object at a time in draw order, each in
+  the buffers of the one before (`build_streamed` in the tests), and a build nothing else holds gives the scene its geometry
+  rather than a copy. The scenes, the draw lists and every read are the ones the plain builds give
+  (`styk-eval/tests/build_throughput.rs`).
 - A geometry read names the read the interface holds (`since`). The session sends the groups of the objects built since that
   read, or all of them when the read named is not the one the session last answered or the scene on show is older than that read
   (a scene the stage drew of this frame before the interface read another). The groups held stay as they are, so the

@@ -67,3 +67,39 @@ fn primitives_reuse_capacity_and_release_at_close() {
     drop((capacity,r));
     no_owners(&device, &["styk prims"]);
 }
+/// Rectangles in a row, one colour each: the list a drag step changes a few of.
+fn rectangles(colors: &[u32]) -> Arc<DrawList> {
+    use styk_draw::*;
+    let mut list = DrawList::default();
+    list.groups.push(Group { parent:0, depth:0, opacity:1., bounds:[0.,0.,64.,64.], layer:NO_LAYER });
+    for (n, &color) in colors.iter().enumerate() {
+        let (x0, x1) = (n as f32 * 8., n as f32 * 8. + 8.);
+        list.prims.push(Prim { kind:K_TRI, group:0, color, paint:NO_PAINT, a:[x0,0.,x1,0.], b:[x1,64.,0.,0.], c:[0.;4] });
+        list.prims.push(Prim { kind:K_TRI, group:0, color, paint:NO_PAINT, a:[x0,0.,x1,64.], b:[x0,64.,0.,0.], c:[0.;4] });
+    }
+    list.passes.push(Pass { depth:0, start:0, end:list.prims.len() as u32 });
+    Arc::new(list)
+}
+fn pixels(r: &mut Renderer, list: &Arc<DrawList>) -> Vec<u8> {
+    draw(r, list);
+    present::read_frame(&r.device, &r.queue, r.frame_texture().expect("a frame")).2
+}
+#[test]
+fn a_list_noted_as_changed_in_ranges_draws_as_the_list_set_whole() {
+    let Some(mut r) = renderer() else { eprintln!("skipped: no graphics adapter"); return; };
+    let before = rectangles(&[0xff0000ff, 0xff00ff00, 0xffff0000, 0xff00ffff, 0xffffff00, 0xffff00ff, 0xff808080, 0xff404040]);
+    let after = rectangles(&[0xff0000ff, 0xff00ff00, 0xff102030, 0xff00ffff, 0xffffff00, 0xff302010, 0xff808080, 0xff404040]);
+    let whole = pixels(&mut renderer().unwrap(), &after);
+    pixels(&mut r, &before);
+    // The rectangles that changed, as their primitives: written alone, the frame is the list's.
+    r.note_changes(&after, &before, vec![(4, 6), (10, 12)]);
+    assert_eq!(pixels(&mut r, &after), whole, "the ranges written over the list held draw the new list");
+    // Only the ranges are written: a range left out keeps the list held's primitives (what the note promises is what is drawn).
+    let again = rectangles(&[0xff0000ff, 0xff00ff00, 0xff102030, 0xff00ffff, 0xffffff00, 0xff302010, 0xff808080, 0xff111111]);
+    r.note_changes(&again, &after, Vec::new());
+    assert_eq!(pixels(&mut r, &again), whole, "nothing outside the ranges is written");
+    // A note about another list than the one held is not taken: the list is written whole.
+    let other = rectangles(&[0xff111111; 8]);
+    r.note_changes(&other, &before, vec![(0, 2)]);
+    assert_eq!(pixels(&mut r, &other), pixels(&mut renderer().unwrap(), &other), "a list noted against another is set whole");
+}

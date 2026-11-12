@@ -436,7 +436,13 @@ impl Session {
         styk_doc::json::to_string(&answer)
     }
 
-    /// The geometry of the frame on show (`geometry`: `args` `{since, motion}`; empty where a motion-path edit shows the document) or of
+    /// The frame on show stays on show: what is kept to build the next frame over a dense one is let go of ([`Editor::rest`]).
+    pub fn rest(&mut self) {
+        self.editor.rest();
+    }
+
+    /// The geometry of the frame on show (`geometry`: `args` `{since, motion, lightAbove}`; empty where a motion-path edit shows the document), the
+    /// whole groups of figures its latest read sent light (`geometryGroups`: `{slots, motion}`) or the geometry of
     /// a frame the document does not hold (`previewGeometry`), as a packet of words (`interface.rs`), at `view` (its playhead). Errors are
     /// those of [`Session::query`].
     pub fn query_packet(&mut self, kind: &str, args: &str, view: &str) -> Result<Vec<f64>, String> {
@@ -445,6 +451,8 @@ impl Session {
         let packet = match kind {
             "geometry" => self.editor.interface_geometry(&args),
             "previewGeometry" => self.editor.interface_preview_geometry(&args),
+            "geometryGroups" => self.editor.interface_geometry_groups(&args),
+            "frameNumbers" => Ok(self.editor.take_frame_numbers()),
             other => Err(EditError::Invalid(format!("the session answers no packet '{other}'"))),
         };
         packet.map_err(|error| match error {
@@ -465,6 +473,8 @@ impl Session {
                 match kind {
                     "timeline" => Ok(self.editor.interface_timeline()),
                     "figureDocument" => self.editor.interface_figure_document(&args),
+                    // `{packed: true}`: the numbers of the objects' arrays come as words from the next `frameNumbers` packet.
+                    other if args.get("packed").is_some_and(Value::truthy) => self.editor.interface_frame_packed(other),
                     other => self.editor.interface_frame(other),
                 }
             }

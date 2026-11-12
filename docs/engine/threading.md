@@ -245,6 +245,24 @@ wall time: the cost of a grow rises with the machine's load.
 The engine's threads share one heap. `styk-alloc` gives each thread a bounded cache of small blocks (at most 125 KiB, a few KiB in practice) behind a lock of its own that spins ([memory.md](memory.md#the-allocator-and-its-threads)). A thread that ends through `__wbindgen_thread_destroy` hands its cache back when it frees its thread-local block; a thread that is terminated or traps takes its cache with it (it stays
 allocated, as the rest of what that thread held does), and one that traps while it holds the lock leaves it held, as it did when the toolchain's allocator spun on it.
 
+Measured 2026-11-11 (desktop app, 2,000 figures of 100 segments with onion skins, a figure selected): making a seek's frame on a worker
+(the session's conversion and build of the frame, its onion skins and its draw list, taken by the stage when it was made; the picture on
+show stays meanwhile) cut the stage's own time per seek from about 140 ms to about 22 ms, but the interface's reads of the frame made
+meanwhile (the inspector evaluates and reads the whole frame on every update while a figure is selected) took 120 to 146 ms instead
+of 50 to 60, and a seek's picture took about 0.6 s to appear. Both threads allocate heavily at once and the large blocks and the
+caches' refills go through the one lock, so neither gains: interface time per seek was no better than before and the picture came
+later. The approach was dropped. It would pay with workers that allocate from heaps of their own and with an interface that reads only
+the objects it shows of a dense frame (the inspector's `figureDescriptor` and `joinedDrawingSetsView` read the whole frame).
+
+A playhead drag in such a scene (or a run of frame steps, a held key: [TIMELINE.md](../TIMELINE.md#stepping-through-a-dense-scene)) does not make the editing frame at all until the release: it shows the frames the preparation
+workers make for playback, and nothing on the interface thread evaluates or reads a frame meanwhile (the inspector, the library's
+selection and the camera monitor wait for the release; a seek queued a pass of the chrome through the drawing controller until
+then). `src/engine/engine-scrub.mjs` keeps at most three of those frames being made at once and shows the newest one ready; the
+rule, the order and the measurements are in [TIMELINE.md](../TIMELINE.md#scrubbing-a-dense-scene). The request names where the
+cache counts from when it is full (`playhead` of `try_request_samples`, `prepareRange(ticks, {playhead})` in
+`engine-playback.mjs`): the cache drops first the frames furthest forward from it, which in a forward drag counted from the
+pointer were the frames finished just behind it.
+
 ## Testing
 
 `cargo test -p styk-engine` (scheduler, opening and publishing documents, export frames prepared ahead, thumbnail frames never

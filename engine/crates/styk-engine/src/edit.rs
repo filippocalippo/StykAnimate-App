@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use styk_doc::Value;
-use styk_eval::drawlist::{DrawList, EncodeMemory, Ghost, Overrides, encode_composed_remembering};
+use styk_eval::drawlist::{DrawList, EncodeMemory, Ghost, Overrides, encode_composed_shared};
 use styk_eval::eval::Frame;
 use styk_eval::geometry::{BuildMemory, Scene, build_remembering_plain, build_remembering_plain_over};
 use styk_eval::load::Loader;
@@ -54,6 +54,9 @@ struct Pose {
     prepared: Option<Arc<styk_eval::eval::Prepared>>,
     /// What the pose's scene was built of, for the build after the document is published anew.
     memory: BuildMemory,
+    /// `scene` is the session's scene of the frame (`styk_eval::geometry::build_shapes` of it, [`EditScene::update_shown`]), not a
+    /// plain build: what a click on artwork reads ([`EditScene::shapes`]).
+    shapes: bool,
 }
 
 #[cfg(test)]
@@ -107,7 +110,7 @@ impl Pose {
     }
 
     fn shared(frame: Arc<Frame>, used: u64, times: Times) -> Pose {
-        Pose { frame, scene: None, built_for: 0, used, motion_tick: times.motion, shot: None, vfx_tick: times.vfx, generators: None, record: None, prepared: None, memory: BuildMemory::default() }
+        Pose { frame, scene: None, built_for: 0, used, motion_tick: times.motion, shot: None, vfx_tick: times.vfx, generators: None, record: None, prepared: None, memory: BuildMemory::default(), shapes: false }
     }
 
     /// What the scene camera does to this pose, worked out once per document generation
@@ -140,6 +143,7 @@ fn scene_of(pose: &mut Pose, doc: &styk_eval::doc::Document, generation: u64) ->
     if let Some(scene) = pose.scene.as_ref().filter(|_| pose.built_for == generation) {
         return scene.clone();
     }
+    pose.shapes = false;
     let scene = match pose.scene.take() {
         Some(previous) => match build_remembering_plain_over(doc, &pose.frame, &mut pose.memory, &previous) {
             Some(built) => Arc::new(built),
@@ -168,6 +172,54 @@ pub struct EditScene {
     camera_pending: Option<f64>,
     /// What the last frame was encoded as, for the objects the next frame keeps.
     encoded: EncodeMemory,
+    /// The last draw list and everything it was encoded from: a frame drawn again with nothing of that changed (a pan, a zoom, a
+    /// redraw for the overlay) is that list, not encoded again, and the renderer does not upload it again (`Renderer::set_list`).
+    last: Option<(ListKey, Arc<DrawList>)>,
+    /// How the list encoded last differs from the one before it, for a renderer that holds that one ([`EditScene::take_changes`]).
+    changes: Option<styk_eval::drawlist::ListChanges>,
+}
+
+/// What a draw list was encoded from. The scenes, frames, batch and views are held, so an address compared here is never another
+/// value's: a key equal to the last one describes the same inputs, and the list encoded from them is the same.
+struct ListKey {
+    generation: u64,
+    /// The drawing cels whose bounds a decode had resolved ([`styk_eval::assets::Assets::decoded_cels`]): the encoder reads them.
+    decoded: usize,
+    prepared: Arc<styk_eval::eval::Prepared>,
+    assets: Arc<styk_eval::assets::Assets>,
+    frame: Arc<Frame>,
+    scene: Arc<Scene>,
+    generators: Option<Arc<Batch>>,
+    hidden: Vec<u32>,
+    translations: Vec<(u32, [u64; 2])>,
+    background: Option<u32>,
+    bypass_effects: bool,
+    camera: bool,
+    /// Per onion skin: its frame and scene, opacity, tint, whether it is drawn on top and its hidden slots.
+    ghosts: Vec<(Arc<Frame>, Arc<Scene>, u64, Option<[u8; 3]>, bool, Vec<u32>)>,
+}
+
+impl ListKey {
+    fn same(&self, other: &ListKey) -> bool {
+        self.generation == other.generation
+            && self.decoded == other.decoded
+            && Arc::ptr_eq(&self.prepared, &other.prepared)
+            && Arc::ptr_eq(&self.assets, &other.assets)
+            && Arc::ptr_eq(&self.frame, &other.frame)
+            && Arc::ptr_eq(&self.scene, &other.scene)
+            && match (&self.generators, &other.generators) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
+            && self.hidden == other.hidden
+            && self.translations == other.translations
+            && self.background == other.background
+            && self.bypass_effects == other.bypass_effects
+            && self.camera == other.camera
+            && self.ghosts.len() == other.ghosts.len()
+            && self.ghosts.iter().zip(&other.ghosts).all(|(a, b)| Arc::ptr_eq(&a.0, &b.0) && Arc::ptr_eq(&a.1, &b.1) && a.2 == b.2 && a.3 == b.3 && a.4 == b.4 && a.5 == b.5)
+    }
 }
 
 /// One onion skin of a frame.
@@ -237,6 +289,7 @@ impl EditScene {
             self.current = None;
             self.ghosts.clear();
             self.encoded = EncodeMemory::default();
+            self.last = None;
             self.lineage = generation.lineage;
         }
         if self.generation != generation.id {
@@ -253,6 +306,7 @@ impl EditScene {
             }
             if let Some(pose) = &mut self.current {
                 pose.scene = None;
+                pose.shapes = false;
                 pose.generators = None;
             }
         }
@@ -300,6 +354,7 @@ impl EditScene {
         let mut pose = Pose::shared(shown.frame.clone(), self.draws, times);
         pose.scene = Some(shown.scene.clone());
         pose.built_for = generation.id;
+        pose.shapes = true;
         self.current = Some(pose);
         true
     }
@@ -322,6 +377,18 @@ impl EditScene {
         Ok(())
     }
 
+    /// How the list [`EditScene::draw_list`] encoded last differs from the list encoded before it (`None` when it was not encoded over it, or
+    /// was drawn again as it was): a renderer that holds that list writes only those primitives ([`styk_render::Renderer::note_changes`]).
+    pub fn take_changes(&mut self) -> Option<styk_eval::drawlist::ListChanges> {
+        self.changes.take()
+    }
+
+    /// The frame stays on show: what is kept to encode the next frame over (the list before the last) is let go of.
+    pub fn rest(&mut self) {
+        self.encoded.rest();
+        self.changes = None;
+    }
+
     /// Whether ghost `id` is kept and was made from `record` (the same node: the session's frame has not changed).
     pub fn has_ghost(&self, id: u32, record: &Value) -> bool {
         self.ghosts.get(&id).and_then(|pose| pose.record.as_ref()).is_some_and(|held| held.same_node(record))
@@ -338,6 +405,15 @@ impl EditScene {
 
     pub fn has_frame(&self) -> bool {
         self.current.is_some()
+    }
+
+    /// The frame the stage shows and its scene as [`styk_eval::geometry::build_shapes`] builds it, when the stage holds that scene
+    /// (a frame of the session, [`EditScene::update_shown`], for the document it was last drawn against): what a click on artwork
+    /// reads without building the frame again.
+    pub fn shapes(&self) -> Option<(Arc<Frame>, Arc<Scene>)> {
+        let pose = self.current.as_ref()?;
+        let scene = pose.scene.as_ref().filter(|_| pose.shapes && pose.built_for == self.generation)?;
+        Some((pose.frame.clone(), scene.clone()))
     }
 
     /// The frame the stage shows: the pose last received, converted.
@@ -419,18 +495,49 @@ impl EditScene {
             }
         }
         let overrides = Overrides { hidden: &hidden, translations, background: options.background, bypass_effects: options.bypass_effects, generators: batch.as_deref(), live: options.live.map(|cels| styk_eval::live::LiveView { cels, base: generation.assets.pages }) };
-        if options.onions.is_empty() {
-            let frame_scene = scene;
-            let list = Arc::new(encode_composed_remembering(doc, &generation.assets, &frame_scene, &overrides, &[], None, &mut self.encoded));
-            self.release_idle_ghosts();
-            return Ok(Some(list));
-        }
+        let frame = current.frame.clone();
         let mut scenes = Vec::with_capacity(options.onions.len());
+        let mut ghost_keys = Vec::with_capacity(options.onions.len());
         for onion in options.onions {
             let pose = self.ghosts.get_mut(&onion.id).ok_or_else(|| format!("onion skin {} was never sent", onion.id))?;
             pose.used = self.draws;
             let ghost_scene = scene_of(pose);
+            ghost_keys.push((pose.frame.clone(), ghost_scene.clone(), onion.opacity.to_bits(), onion.tint, onion.show_on_top, onion.hidden.to_vec()));
             scenes.push((ghost_scene, flags(onion.hidden, pose.frame.objects.len())));
+        }
+        // Live drawing cels change without the frame changing: a frame that draws them is always encoded.
+        let key = options.live.is_none().then(|| ListKey {
+            generation: generation.id,
+            decoded: generation.assets.decoded_cels(),
+            prepared: generation.prepared.clone(),
+            assets: generation.assets.clone(),
+            frame,
+            scene: scene.clone(),
+            generators: batch.clone(),
+            hidden: options.hidden.to_vec(),
+            translations: translations.iter().map(|(slot, [x, y])| (*slot, [x.to_bits(), y.to_bits()])).collect(),
+            background: options.background,
+            bypass_effects: options.bypass_effects,
+            camera: options.camera,
+            ghosts: ghost_keys,
+        });
+        if let (Some(key), Some((held, list))) = (&key, &self.last)
+            && key.same(held)
+        {
+            let list = list.clone();
+            self.release_idle_ghosts();
+            self.trim_ghosts();
+            return Ok(Some(list));
+        }
+        self.last = None;
+        self.changes = None;
+        if options.onions.is_empty() {
+            let frame_scene = scene;
+            let (list, changes) = encode_composed_shared(doc, &generation.assets, &frame_scene, &overrides, &[], None, &mut self.encoded);
+            self.changes = changes;
+            self.release_idle_ghosts();
+            self.last = key.map(|key| (key, list.clone()));
+            return Ok(Some(list));
         }
         let current = self.current.as_ref().expect("checked above");
         let places: Vec<GhostPlace<'_>> = options
@@ -451,9 +558,17 @@ impl EditScene {
             .zip(&scenes)
             .map(|(onion, (ghost_scene, ghost_hidden))| Ghost { scene: ghost_scene, opacity: onion.opacity, tint: onion.tint, hidden: ghost_hidden })
             .collect();
-        let list = Arc::new(encode_composed_remembering(doc, &generation.assets, &scene, &overrides, &ghosts, Some(&order), &mut self.encoded));
+        let (list, changes) = encode_composed_shared(doc, &generation.assets, &scene, &overrides, &ghosts, Some(&order), &mut self.encoded);
+        self.changes = changes;
         drop(places);
         self.release_idle_ghosts();
+        self.last = key.map(|key| (key, list.clone()));
+        self.trim_ghosts();
+        Ok(Some(list))
+    }
+
+    /// Drops the least recently shown ghosts beyond [`MAX_GHOSTS`].
+    fn trim_ghosts(&mut self) {
         if self.ghosts.len() > MAX_GHOSTS {
             let mut by_age: Vec<(u64, u32)> = self.ghosts.iter().map(|(&id, pose)| (pose.used, id)).collect();
             by_age.sort_unstable();
@@ -461,6 +576,5 @@ impl EditScene {
                 self.ghosts.remove(&id);
             }
         }
-        Ok(Some(list))
     }
 }

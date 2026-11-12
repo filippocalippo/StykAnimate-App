@@ -148,7 +148,7 @@ fn a_plain_build_over_the_last_is_the_build_whole() {
 fn scene_hash(scene: &geometry::Scene) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for text in [format!("{:?}", scene.items), format!("{:?}", scene.measured), format!("{:?}", scene.points), format!("{:?}", scene.objects), format!("{:?}", (&scene.owners, &scene.owner_scales, &scene.chains, &scene.depths, &scene.transitions, &scene.figure_of))] {
+    for text in [format!("{:?}", scene.items), format!("{:?}", scene.measured_items().collect::<Vec<_>>()), format!("{:?}", scene.points), format!("{:?}", scene.objects), format!("{:?}", (&scene.owners, &scene.owner_scales, &scene.chains, &scene.depths, &scene.transitions, &scene.figure_of))] {
         text.hash(&mut hasher);
     }
     hasher.finish()
@@ -345,4 +345,197 @@ fn objects_that_draw_no_live_cel_are_kept_and_the_one_that_does_is_not() {
         same_list(&remembered, &whole, &format!("drawing-cel, round {round}: the slots as they are now"));
         assert_eq!(encoded.kept(), 0, "the object that draws the live cel is not kept");
     }
+}
+
+/// `frame` with the first bend of object `slot` changed, when it has bends: a curve of another length holds another count of points.
+fn bent(frame: &Frame, slot: usize) -> Option<Frame> {
+    let mut object = (*frame.objects[slot]).clone();
+    let mut bends = object.bends.as_deref()?.to_vec();
+    *bends.first_mut()? += 2.5;
+    object.bends = Some(bends.into());
+    let mut next = frame.clone();
+    next.objects[slot] = Arc::new(object);
+    Some(next)
+}
+
+/// A shared build (`build_remembering_shared`) writes the scene two builds back in place when nothing else holds it and its objects lie where
+/// the new build's do; whether it does or not, the scene is the scene built whole (and its objects' spans read their own parts).
+#[test]
+fn a_shared_build_over_an_earlier_scene_is_the_build_whole() {
+    for name in FIXTURES {
+        let prepared = prepared(name);
+        let ticks = prepared.total_ticks.max(1);
+        let mut memory = BuildMemory::default();
+        let mut frames = Vec::new();
+        for tick in (0..ticks).step_by(((ticks / 4).max(1)) as usize) {
+            let frame = prepared.evaluate(tick as f64);
+            frames.push((format!("tick {tick}"), frame.clone()));
+            frames.push((format!("tick {tick} again"), frame.clone()));
+            for slot in (0..frame.objects.len()).filter(|&slot| !frame.objects[slot].angles.is_empty()).take(2) {
+                let next = turned(&frame, slot);
+                frames.push((format!("tick {tick} slot {slot} turned"), next.clone()));
+                frames.push((format!("tick {tick} slot {slot} turned twice"), turned(&next, slot)));
+                if let Some(bent) = bent(&next, slot) {
+                    frames.push((format!("tick {tick} slot {slot} bent"), bent));
+                }
+            }
+        }
+        let mut held = None;
+        for (n, (what, frame)) in frames.iter().enumerate() {
+            // Every third scene is still held when the next builds are made: those are not written over.
+            let scene = geometry::build_remembering_shared(&prepared.doc, frame, &mut memory);
+            same_scene(&scene, &geometry::build_shapes(&prepared.doc, frame, None), &format!("{name} {what}"));
+            for slot in 0..frame.objects.len() {
+                let items: Vec<String> = scene.items.iter().filter(|item| item.slot as usize == slot).map(|item| format!("{item:?}")).collect();
+                assert_eq!(scene.items_of(slot).expect("a built scene has spans").iter().map(|item| format!("{item:?}")).collect::<Vec<_>>(), items, "{name} {what}: the items of slot {slot}");
+            }
+            if n % 3 == 0 {
+                held = Some(scene);
+            }
+        }
+        drop(held);
+        // In a frame of loose figures, a turned object is written over the scene before last.
+        if name == "eval/follow-figures.json" {
+            assert!(memory.written_over() > 0, "{name}: some builds were written over an earlier scene");
+        }
+    }
+}
+
+/// A scene still held elsewhere is never written over, and one the memory let go of ([`BuildMemory::rest`]) cannot be.
+#[test]
+fn a_scene_held_elsewhere_or_let_go_of_is_not_written_over() {
+    let prepared = prepared("eval/follow-figures.json");
+    let frame = prepared.evaluate(3.0);
+    let slot = (0..frame.objects.len()).find(|&slot| !frame.objects[slot].angles.is_empty()).expect("a figure to turn");
+    let frames = [frame.clone(), turned(&frame, slot), turned(&turned(&frame, slot), slot), frame.clone()];
+    // Every scene held: nothing is written over, and each is unchanged by the builds after it.
+    let mut memory = BuildMemory::default();
+    let scenes: Vec<Arc<geometry::Scene>> = frames.iter().map(|frame| geometry::build_remembering_shared(&prepared.doc, frame, &mut memory)).collect();
+    assert_eq!(memory.written_over(), 0);
+    for (scene, frame) in scenes.iter().zip(&frames) {
+        same_scene(scene, &geometry::build_shapes(&prepared.doc, frame, None), "a scene held is not changed");
+    }
+    // None held: from the third build on each is written over the scene before last.
+    let mut memory = BuildMemory::default();
+    for frame in &frames {
+        geometry::build_remembering_shared(&prepared.doc, frame, &mut memory);
+    }
+    assert_eq!(memory.written_over(), 2);
+    // Let go of between builds: there is nothing to write over.
+    let mut memory = BuildMemory::default();
+    for frame in &frames {
+        geometry::build_remembering_shared(&prepared.doc, frame, &mut memory);
+        memory.rest();
+    }
+    assert_eq!(memory.written_over(), 0);
+}
+
+/// What a renderer that holds `since` writes when told how `list` differs from it: `since`'s primitives with the changed ranges taken from
+/// `list`.
+fn applied(changes: &styk_eval::drawlist::ListChanges, list: &styk_eval::drawlist::DrawList) -> Vec<styk_draw::Prim> {
+    let mut prims = changes.since.prims.clone();
+    assert_eq!(prims.len(), list.prims.len(), "a list that differs in ranges holds as many primitives");
+    let mut end = 0;
+    for &(a, b) in &changes.prims {
+        assert!(a >= end && a < b, "ranges are in order and not empty: {:?}", changes.prims);
+        prims[a as usize..b as usize].copy_from_slice(&list.prims[a as usize..b as usize]);
+        end = b;
+    }
+    prims
+}
+
+/// A shared encoding (`encode_composed_shared`) writes the list two frames back in place when nothing else holds it and it is laid out as the
+/// new one; the list is the list encoded whole either way, with and without onion skins, and the changes it reports, applied to the list before
+/// it, give it.
+#[test]
+fn a_list_encoded_over_an_earlier_one_is_the_list_encoded_whole() {
+    use styk_eval::drawlist::{encode_composed_shared, Ghost, Layer};
+    let mut written = 0;
+    for name in FIXTURES {
+        let prepared = prepared(name);
+        let assets = Assets::build(&prepared.doc);
+        let ticks = prepared.total_ticks.max(1);
+        for ghosts in [false, true] {
+            let (mut built, mut encoded) = (BuildMemory::default(), EncodeMemory::default());
+            let mut held = None;
+            let mut steps = 0;
+            for tick in (0..ticks).step_by(((ticks / 4).max(1)) as usize) {
+                let frame = prepared.evaluate(tick as f64);
+                let ghost_scene = geometry::build(&prepared.doc, &prepared.evaluate(((tick + 1) % ticks) as f64));
+                let hidden = vec![false; ghost_scene.objects.len()];
+                let layers: Vec<Layer> = (0..ghost_scene.objects.len() as u32).map(|slot| Layer::Ghost(0, slot)).chain((0..frame.objects.len() as u32).map(Layer::Current)).collect();
+                let mut frames = vec![frame.clone(), frame.clone()];
+                if let Some(slot) = (0..frame.objects.len()).find(|&slot| !frame.objects[slot].angles.is_empty()) {
+                    frames.push(turned(&frame, slot));
+                    frames.push(turned(&turned(&frame, slot), slot));
+                    frames.push(turned(&turned(&turned(&frame, slot), slot), slot));
+                }
+                for (n, frame) in frames.iter().enumerate() {
+                    let scene = geometry::build_remembering_shared(&prepared.doc, frame, &mut built);
+                    for translations in [&[][..], &[(0u32, [3.5, -2.0])][..]] {
+                        let what = format!("{name} tick {tick} frame {n} moved {} ghosts {ghosts}", !translations.is_empty());
+                        let overrides = Overrides { translations, ..Default::default() };
+                        let ghost = [Ghost { scene: &ghost_scene, opacity: 0.3, tint: Some([200, 10, 10]), hidden: &hidden }];
+                        let (ghost, order) = if ghosts { (&ghost[..], Some(&layers[..])) } else { (&[][..], None) };
+                        let (list, changes) = encode_composed_shared(&prepared.doc, &assets, &scene, &overrides, ghost, order, &mut encoded);
+                        let whole = encode_composed(&prepared.doc, &assets, &scene, &overrides, ghost, order);
+                        same_list(&list, &whole, &what);
+                        assert_eq!(format!("{:?}", (&list.groups, &list.passes, &list.layers.len(), &list.glyphs.len())), format!("{:?}", (&whole.groups, &whole.passes, &whole.layers.len(), &whole.glyphs.len())), "{what}: groups and passes");
+                        if let Some(changes) = &changes {
+                            assert_eq!(applied(changes, &list), list.prims, "{what}: the changes reported give the list");
+                        }
+                        // Every third list is still held when the next ones are encoded: it is not written over.
+                        steps += 1;
+                        if steps % 3 == 0 {
+                            held = Some((list.clone(), whole));
+                        }
+                        if let Some((list, whole)) = &held {
+                            same_list(list, whole, &format!("{what}: a list held is not changed"));
+                        }
+                    }
+                }
+            }
+            written += encoded.written_over();
+        }
+    }
+    assert!(written > 0, "some lists were written over an earlier one");
+}
+
+/// One figure moved of many: the list reports the primitives of that figure as changed, and no other.
+#[test]
+fn a_list_encoded_over_another_reports_the_figure_that_changed() {
+    use styk_eval::drawlist::encode_composed_shared;
+    let prepared = prepared("eval/follow-figures.json");
+    let assets = Assets::build(&prepared.doc);
+    let frame = prepared.evaluate(3.0);
+    let slot = (0..frame.objects.len()).find(|&slot| !frame.objects[slot].angles.is_empty() && frame.objects[slot].join.is_none()).expect("a loose figure");
+    let (mut built, mut encoded) = (BuildMemory::default(), EncodeMemory::default());
+    let mut next = frame.clone();
+    let mut changes = None;
+    let mut list = None;
+    for _ in 0..4 {
+        // What the last step reported holds the list before it: let go of, as a renderer does once it has written the changes.
+        drop(changes.take());
+        next = turned(&next, slot);
+        let scene = geometry::build_remembering_shared(&prepared.doc, &next, &mut built);
+        let (encoded_list, reported) = encode_composed_shared(&prepared.doc, &assets, &scene, &Overrides::default(), &[], None, &mut encoded);
+        changes = reported;
+        list = Some((encoded_list, scene));
+    }
+    let (list, scene) = list.unwrap();
+    let changes = changes.expect("a list laid out as the one before it says how it differs");
+    let changed: usize = changes.prims.iter().map(|(a, b)| (b - a) as usize).sum();
+    assert!(changed > 0, "the turned figure's primitives changed");
+    assert!(changed < list.prims.len() - list.background_prims as usize, "the other figures' primitives did not: {changed} of {}", list.prims.len());
+    let items = scene.items_of(slot).unwrap().len();
+    assert!(changed <= 2 * items, "no more than the turned figure's primitives (its items and their outline): {changed} for {items} items");
+    assert!(encoded.written_over() >= 2, "the lists from the third on are written over the one before last");
+    // At rest the list before the last is let go of: the next list has nothing to be written over.
+    drop(changes);
+    encoded.rest();
+    let written = encoded.written_over();
+    let scene = geometry::build_remembering_shared(&prepared.doc, &turned(&next, slot), &mut built);
+    let (after_rest, _) = encode_composed_shared(&prepared.doc, &assets, &scene, &Overrides::default(), &[], None, &mut encoded);
+    assert_eq!(encoded.written_over(), written, "a list after a rest is encoded whole");
+    same_list(&after_rest, &encode_composed(&prepared.doc, &assets, &scene, &Overrides::default(), &[], None), "after a rest");
 }

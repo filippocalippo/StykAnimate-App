@@ -514,6 +514,7 @@ const messages = {
   "app.polygonsAttachToJointsClickARedOrange": "Polygoner festes til ledd. Klikk på et rødt, oransje eller grått ledd.",
   "app.chooseAtLeastThreeDifferentJoints": "Velg minst tre forskjellige ledd.",
   "app.polygonAdded": "Polygon lagt til",
+  "app.denseFrameShowsOrigins": "For mange ledd til å vise alle samtidig: figurer som ikke er valgt, viser bare origo. Velg en figur for å se leddene.",
   "app.spriteAttached": "Sprite festet",
   "app.camera": "Kamera: {value}",
   "app.chooseAJointOnThisFigureEscapeCancels": "Velg et ledd på denne figuren. Escape avbryter.",
