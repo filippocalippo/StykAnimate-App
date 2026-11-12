@@ -54,7 +54,7 @@ export default [
   // The desktop shell.
   {files: ['desktop/**/*.cjs'], languageOptions: {sourceType: 'commonjs', globals: globals.node}},
   // Tools and tests run in Node; a browser test also holds functions that run in the page, where `styk` is the app's handle.
-  {files: ['scripts/**', 'tests/**', 'backend/**/*.mjs', 'engine/tools/**', '*.mjs'], languageOptions: {globals: {...globals.node, ...globals.browser, styk: 'readonly'}}},
+  {files: ['scripts/**', 'tests/**', 'perf/**', 'backend/**/*.mjs', 'engine/tools/**', '*.mjs'], languageOptions: {globals: {...globals.node, ...globals.browser, styk: 'readonly'}}},
   // The UI canvas lab: a local server and its fake CLI in Node; the board, the screen frame and its mockup kit in the browser.
   {files: ['labs/ui-canvas/server.mjs', 'labs/ui-canvas/lib/**', 'labs/ui-canvas/test/**'], languageOptions: {globals: globals.node}},
   {files: ['labs/ui-canvas/app/**', 'labs/ui-canvas/frame/**', 'labs/ui-canvas/kit/**', 'labs/ui-canvas/shared/**'], languageOptions: {globals: globals.browser}},
