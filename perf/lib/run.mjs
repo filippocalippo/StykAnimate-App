@@ -127,7 +127,8 @@ async function capture(app, scenario, context, state, {label, series, writes = f
 export async function threadHeaps(app) {
   const names = threadNames(app);
   const read = async (sessionId, name) => {
-    const usage = await app.inspector.send('Runtime.getHeapUsage', {}, sessionId).catch(() => null);
+    // A worker that ends while it is asked (the drawing workers end when idle) never answers: it is left out after two seconds.
+    const usage = await Promise.race([app.inspector.send('Runtime.getHeapUsage', {}, sessionId), sleep(2000).then(() => null)]).catch(() => null);
     return usage ? {thread: name, name: name.replace(/ \d+$/, ''), interface: sessionId === app.page, usedBytes: usage.usedSize, totalBytes: usage.totalSize, backingBytes: usage.backingStorageSize ?? null} : null;
   };
   return (await Promise.all([...names].map(([sessionId, name]) => read(sessionId, name)))).filter(Boolean);
@@ -273,7 +274,8 @@ export async function runPair({environment, workload, scenarios, open, passes = 
       const started = performance.now();
       const result = await runScenario(app, scenario, context, {passes, profile, raw});
       pair.scenarios.push(result);
-      pair.memory.push({after: scenario.id, ...await memoryNow(app).catch(() => ({}))});
+      // A checkpoint that cannot be read in half a minute is left empty: it never holds the run up.
+      pair.memory.push({after: scenario.id, ...await within(30000, 'the memory checkpoint', memoryNow(app)).catch(() => ({}))});
       log(`${environment.id}/${workload.id} ${scenario.id}: ${result.error ? `FAILED ${result.error}` : result.skipped ? `skipped (${result.skipped})` : `${result.grade ?? '–'}, ${result.judged?.decided} ${format(result.judged?.decided, result.judged?.value, result.definitions)}`} (${Math.round((performance.now() - started) / 100) / 10} s)`);
       if (scenario === open && result.error) throw new Error(`The workload did not open: ${result.error}`);
       if (app.inspector.closed) throw new Error('The app closed during the run.');
