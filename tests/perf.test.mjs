@@ -7,6 +7,7 @@ import test from 'node:test';
 import {ENVIRONMENTS} from '../perf/environments.mjs';
 import {processAttribution, profileAttribution, traceAttribution} from '../perf/lib/attribution.mjs';
 import {change, compare} from '../perf/lib/compare.mjs';
+import {experimentLine, parseParameters, withParameters} from '../perf/lib/experiment.mjs';
 import {paths} from '../perf/lib/input.mjs';
 import {seekLatency, shownTicks} from '../perf/lib/latency.mjs';
 import {displayName, layerOf, LAYERS, rustModule} from '../perf/lib/layers.mjs';
@@ -200,4 +201,17 @@ test('a suite\'s parts become one launch per pair of environment and workload, w
     {environment: 'software', workload: 'small', scenarios: []},
     {environment: 'software', workload: 'medium', scenarios: ['pose.drag-joint']},
   ]);
+});
+
+test('an experiment changes the launch it is asked for and nothing else, and its summary says it is one', () => {
+  assert.deepEqual(parseParameters('engine.workers=2, scrub.aheadFrames=0,flag=true,name=fast-cache'), {'engine.workers': 2, 'scrub.aheadFrames': 0, flag: true, name: 'fast-cache'});
+  assert.throws(() => parseParameters('engine.workers'), /name=value/);
+  // The environment's own parameters stay unless named, and the table of environments is never changed.
+  const slowed = withParameters(ENVIRONMENTS['low-end'], {'engine.workers': 1});
+  assert.deepEqual(slowed.page.parameters, {...ENVIRONMENTS['low-end'].page.parameters, 'engine.workers': 1});
+  assert.equal(ENVIRONMENTS['low-end'].page.parameters['engine.workers'], 2);
+  assert.equal(withParameters(ENVIRONMENTS.gpu, null), ENVIRONMENTS.gpu);
+  assert.equal(experimentLine({}), null);
+  assert.match(experimentLine({experiment: {name: 'no-overlay.js', sha256: 'abc'}, parameters: {'engine.workers': 1, typo: 3}, unreadParameters: ['typo']}),
+    /^EXPERIMENT, not the app as it is: the page script no-overlay\.js \(abc\) ran before the scenarios; live parameters engine\.workers=1, typo=3; the app never read typo/);
 });

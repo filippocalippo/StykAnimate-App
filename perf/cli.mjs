@@ -2,6 +2,7 @@
 //
 //   npm run perf -- run [suite] [--env gpu,software] [--workload small,stress] [--scenario canvas,pose.drag-joint]
 //                       [--passes 3] [--no-profile] [--no-startup] [--raw] [--label <name>]
+//                       [--param engine.workers=2] [--experiment <file.js>]
 //   npm run perf -- list                       scenarios, workloads, environments, suites and engine benchmarks
 //   npm run perf -- show [run] [scenario] [--env <id>] [--workload <id>]
 //   npm run perf -- compare <base run> [head run] [--all] [--fail-on-worse]
@@ -13,7 +14,8 @@
 // and writes artifacts/perf/runs/<label>/ (result.json, summary.txt). A suite (perf/suites.mjs) says which pairs and
 // which scenarios on each; --env, --workload and --scenario replace it with one part of their own, taking what they do
 // not name from the suite's first part. `show` prints a run's summary, or one scenario in full: its metrics, its frames
-// by phase, its spans and where the profiled pass found the time, thread by thread.
+// by phase, its spans and where the profiled pass found the time, thread by thread. --param and --experiment make a run an
+// experiment (perf/lib/experiment.mjs): live parameters' starting values, and a script evaluated in the page first.
 // `compare` says what changed between two runs beyond their own noise (the head defaults to the latest run).
 // `report` writes one HTML page of one or more runs (perf/report/): the grades of every scenario on every pair, what most
 // needs work, each scenario in full, memory and startup; several runs side by side, the first named the baseline of a
@@ -33,6 +35,7 @@ import {atSpeed, machineSpeed} from './engine/speed.mjs';
 import {engineOverview} from './engine/summary.mjs';
 import {ENVIRONMENTS, environment} from './environments.mjs';
 import {compare, compareEngine, comparisonText} from './lib/compare.mjs';
+import {parseParameters, readExperiment, withParameters} from './lib/experiment.mjs';
 import {build, ENGINE_RUNS, ENGINE_SCHEMA, machine, read, SCHEMA, slug, timeLabel, write} from './lib/result.mjs';
 import {runPair} from './lib/run.mjs';
 import {buildBundle, measureStartup} from './lib/startup.mjs';
@@ -50,7 +53,8 @@ function parse(argv, flags = []) {
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index];
     if (!argument.startsWith('--')) { words.push(argument); continue; }
-    const [name, inline] = argument.slice(2).split('=');
+    // The first "=" ends the name: a value may hold more (--param=engine.workers=2).
+    const at = argument.indexOf('='), name = argument.slice(2, at < 0 ? undefined : at), inline = at < 0 ? undefined : argument.slice(at + 1);
     if (flags.includes(name)) options[name] = true;
     else if (inline !== undefined) options[name] = inline;
     else if (index + 1 < argv.length) options[name] = argv[++index];
@@ -69,14 +73,17 @@ async function run(argv) {
   const parts = options.env || options.workload || options.scenario
     ? [{environments: options.env ? list(options.env) : first.environments, workloads: options.workload ? list(options.workload) : first.workloads, scenarios: options.scenario ? list(options.scenario) : first.scenarios}]
     : plan.parts;
-  const planned = launches(parts).map(pair => ({environment: environment(pair.environment), workload: workload(pair.workload), scenarios: select(pair.scenarios)}));
+  let parameters = null, experiment = null;
+  try { parameters = options.param ? parseParameters(options.param) : null; } catch (error) { throw new Usage(error.message); }
+  try { experiment = options.experiment ? readExperiment(options.experiment) : null; } catch (error) { throw new Usage(`--experiment: ${error.code === 'ENOENT' ? `no file at ${path.resolve(options.experiment)}` : error.message}`); }
+  const planned = launches(parts).map(pair => ({environment: withParameters(environment(pair.environment), parameters), workload: workload(pair.workload), scenarios: select(pair.scenarios)}));
   const passes = Number(options.passes ?? plan.passes);
   if (!Number.isInteger(passes) || passes < 1 || passes > 20) throw new Usage('--passes is 1 to 20.');
   const label = options.label ?? timeLabel(), profile = !options['no-profile'], started = performance.now();
   const log = text => console.error(`[perf] ${text}`);
   log(`${plural(planned.length, 'launch')}, ${plural(planned.reduce((total, pair) => total + pair.scenarios.length, 0), 'scenario run')}, ${passes} timed pass${passes === 1 ? '' : 'es'}${profile ? ' + 1 profiled' : ''} each`);
   // Startup is the launch itself: measured apart, on the bundle a packaged app starts from, unless the run names its scenarios.
-  const measuresStartup = !options['no-startup'] && !options.scenario;
+  const measuresStartup = !options['no-startup'] && !options.scenario && !experiment;
   const bundle = measuresStartup ? await buildBundle().catch(error => { log(`The bundle did not build (${String(error.message).split(/\r?\n/)[0]}): startup is measured from the sources.`); return null; }) : null;
   const pairs = [], startups = new Set(), at = new Date().toISOString(), described = {build: build(), machine: machine()};
   const resultOf = () => ({schema: SCHEMA, label, at, suite: name, passes, profile, seconds: (performance.now() - started) / 1000, ...described, pairs});
@@ -84,7 +91,7 @@ async function run(argv) {
     // An environment's startup is measured once and shown with its first workload.
     const startup = measuresStartup && chosen.host === 'desktop' && !startups.has(chosen.id) ? await measureStartup(chosen, {launches: Math.max(3, passes), bundle, log}) : null;
     startups.add(chosen.id);
-    const pair = await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), log});
+    const pair = await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), experiment, parameters, log});
     if (startup) pair.scenarios.unshift(startup);
     pairs.push(pair);
     // A long run keeps what it has measured: stopped now, its folder holds every launch finished so far, and says so.

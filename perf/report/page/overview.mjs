@@ -2,8 +2,8 @@
 // data and the current view ({columns, rows, open}) that returns its panel, or null when the runs hold nothing for it,
 // so a new kind of result (the engine's own benchmarks, say) is one more function in SECTIONS.
 import {bars, lineChart, bullet, legend, timeline} from './charts.mjs';
-import {capital, facts, h, mb, ms, number, panel, subhead, table, tableView, words} from './dom.mjs';
-import {chip, glyph, limitsText, metric, short, word} from './grades.mjs';
+import {capital, facts, h, mb, ms, number, panel, percent, subhead, table, tableView, words} from './dom.mjs';
+import {chip, glyph, limitsText, metric, short, STATUS, word} from './grades.mjs';
 
 /** "Graphics card · Stress scene": a column's name. */
 export const columnName = column => `${column.environment.title ?? column.environment.id} · ${column.workload.title ?? column.workload.id}`;
@@ -20,6 +20,31 @@ function cellText(model, column, scenario) {
   return `${scenario.title} on ${columnIds(column)}: ${word(scenario.status)}`
     + (scenario.error ? `, ${scenario.error}` : scenario.skipped ? `, ${scenario.skipped}` : decided ? `, ${short(scenario, decided)} ${metric(scenario, decided, scenario.judged.value)}` : '')
     + (verdict && verdict !== 'same' ? `, ${verdict} than in ${base}` : '');
+}
+
+/**
+ * 0. The page in one look: how many scenarios are in each state, in all and on each pair. A pair's row narrows the
+ * overview to that pair, and widens it again.
+ */
+function tally(model, view) {
+  const ids = new Set(view.rows.map(row => row.id)), order = Object.keys(STATUS);
+  const counted = view.columns.map(column => {
+    const counts = {};
+    for (const scenario of model.pairs[column.pair].scenarios) if (ids.has(scenario.id)) counts[scenario.status] = (counts[scenario.status] ?? 0) + 1;
+    return {column, counts, total: Object.values(counts).reduce((sum, count) => sum + count, 0)};
+  }).filter(row => row.total);
+  if (!counted.length) return null;
+  const all = {}, total = counted.reduce((sum, row) => sum + row.total, 0);
+  for (const row of counted) for (const [status, count] of Object.entries(row.counts)) all[status] = (all[status] ?? 0) + count;
+  const said = counts => order.filter(status => counts[status]).map(status => `${counts[status]} ${word(status).toLowerCase()}`).join(', ');
+  const only = counted.length === 1 && model.columns.length > 1;
+  return panel('summary', 'In short', `${total} scenario${total === 1 ? '' : 's'} measured on ${counted.length} pair${counted.length === 1 ? '' : 's'} of environment and workload. A pair's row shows only that pair below.`,
+    h('div', {class: 'tiles'}, order.filter(status => all[status]).map(status => h('div', {class: `tile st-${status}`},
+      h('span', {class: 'tile-count'}, String(all[status])), h('span', {class: 'tile-word'}, glyph(status), word(status)), h('span', {class: 'tile-share'}, percent(all[status], total))))),
+    h('div', {class: 'tally'}, counted.map(({column, counts}) => h('button', {type: 'button', class: 'tally-row', title: only ? 'Show every pair again' : 'Show only this pair', onclick: () => view.narrow(column)},
+      h('span', {class: 'tally-label'}, column.environment.title ?? column.environment.id, h('span', {class: 'muted'}, ` · ${column.workload.title ?? column.workload.id}`)),
+      h('span', {class: 'tally-bar', 'aria-hidden': 'true'}, order.filter(status => counts[status]).map(status => h('span', {class: `tally-part st-${status}`, style: `flex-grow:${counts[status]}`}))),
+      h('span', {class: 'tally-said'}, said(counts))))));
 }
 
 /** 1. Every scenario's grade on every pair, grouped by area: the page's first answer. */
@@ -192,7 +217,7 @@ function engine(model) {
 }
 
 /** The overview's sections, in the order of the page. */
-export const SECTIONS = [glance, needsWork, startup, memory, engine, trust];
+export const SECTIONS = [tally, glance, needsWork, startup, memory, engine, trust];
 
 /** Draws the overview into `root` for `view`. */
 export function renderOverview(root, model, view) {

@@ -40,7 +40,9 @@ export const START = Object.freeze({
  * `app.start` scenario's result, shaped as the runner's results are.
  */
 export async function measureStartup(environment, {launches = 3, bundle = null, log = () => {}} = {}) {
-  const result = {...START, definitions: START.metrics, grade: null, judged: null, passes: 0, metrics: {}, detail: null, attribution: null, notes: [bundle ? 'Measured on the bundle a packaged app starts from.' : 'Measured from the sources: a packaged app starts faster.'], error: null};
+  const result = {...START, definitions: START.metrics, grade: null, judged: null, passes: 0, metrics: {}, detail: null, attribution: null, notes: [bundle ? 'Measured on the bundle a packaged app starts from.' : 'Measured from the sources: a packaged app starts faster.',
+    // The inspector slows a page only once it can attach to it, which is after the launch.
+    ...(environment.cpuSlowdown > 1 ? [`The launch ran at this machine's full speed: the processor slowdown of this environment (${environment.cpuSlowdown}×) starts once the page is running.`] : [])], error: null};
   delete result.judge;
   const values = [];
   try {

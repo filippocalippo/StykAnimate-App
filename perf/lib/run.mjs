@@ -228,7 +228,7 @@ async function readTrace(app, pages) {
  * Returns {environment, workload, facts, startup, scenarios, memory, error}. Never throws for a scenario; an app that
  * cannot start or dies is `error` on the pair, with what had been measured until then.
  */
-export async function runPair({environment, workload, scenarios, open, passes = 3, profile = true, raw = false, log = () => {}}) {
+export async function runPair({environment, workload, scenarios, open, passes = 3, profile = true, raw = false, experiment = null, parameters = null, log = () => {}}) {
   const pair = {environment: {id: environment.id, title: environment.title, description: environment.description}, workload: {id: workload.id, title: workload.title, description: workload.description, ...workload.measured},
     facts: null, startup: null, scenarios: [], memory: [], error: null};
   let app = null;
@@ -237,11 +237,15 @@ export async function runPair({environment, workload, scenarios, open, passes = 
     const busy = await backgroundLoad();
     if (busy > BUSY_PERCENT) log(`the machine is busy with other work (${busy}% of its processor): expect slower and noisier numbers`);
     app = await launch(environment, {log});
+    // An experiment's script runs once, before anything is measured (perf/lib/experiment.mjs).
+    if (experiment) await app.evaluate(experiment.source);
     // The display's period is measured while the app rests: every frame of the run is judged against it.
     const display = await app.request('display.period');
     const facts = await app.request('environment');
     pair.facts = {host: app.kind, browser: app.inspector.browser, renderer: facts.renderer, engine: facts.engine, display: {periodMs: round(display.periodMs, 2), hz: round(1000 / display.periodMs, 0)},
       window: facts.window, reports: facts.navigator, asked: facts.asked, cpuSlowdown: environment.cpuSlowdown ?? 1, slowedTargets: app.slowed.length, backgroundLoadPercent: busy};
+    if (experiment) pair.facts.experiment = {name: experiment.name, sha256: experiment.sha256};
+    if (parameters) pair.facts.parameters = parameters;
     pair.startup = {readyMs: app.timings.readyMs, inspectorMs: app.timings.inspectorMs};
     const context = createContext(app, workload, pair.facts);
     pair.memory.push({after: 'start', ...await memoryNow(app)});
@@ -257,6 +261,11 @@ export async function runPair({environment, workload, scenarios, open, passes = 
     }
     // The engine starts the rest of its threads with the first document: what it ended with is what the scenarios ran on.
     pair.facts.engine = (await app.request('environment')).engine;
+    // A parameter the app never read was misspelt, or belongs to code these scenarios did not reach.
+    if (parameters) {
+      const read = new Set((await app.request('params.list')).rows.map(row => row.name));
+      pair.facts.unreadParameters = Object.keys(parameters).filter(name => !read.has(name));
+    }
   } catch (error) {
     pair.error = String(error?.message ?? error).split('\n')[0].slice(0, 500);
     log(`${environment.id}/${workload.id}: ${pair.error}`);

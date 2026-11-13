@@ -42,7 +42,14 @@ function currentView() {
     if (!state.needsWork) return true;
     return columns.some(column => notGood.has(model.pairs[column.pair].scenarios.find(scenario => scenario.id === row.id)?.status));
   });
-  return {columns, rows, open, close, neighbours};
+  return {columns, rows, open, close, neighbours, narrow};
+}
+
+/** Narrows the overview to one pair, or back to every pair when it already shows only that one. */
+function narrow(column) {
+  const only = state.env === column.environment.id && state.workload === column.workload.id;
+  state.env = only ? '' : column.environment.id; state.workload = only ? '' : column.workload.id;
+  writeAddress(false);
 }
 
 function open(id, column) {

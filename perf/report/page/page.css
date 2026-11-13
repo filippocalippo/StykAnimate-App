@@ -160,6 +160,20 @@ caption { text-align: left; color: var(--text-2); padding-bottom: 4px; }
 .glyph[class*="st-"], .chip .glyph, .cell .glyph, .pair-chip .glyph { color: var(--st); }
 .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px 1px 6px; border-radius: 10px; background: var(--st-wash); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .wash { fill: var(--st-wash); }
+
+/* The summary: the count of each state as a tile, then one proportion bar per pair. */
+.tiles { display: flex; flex-wrap: wrap; gap: 10px; }
+.tile { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 12px; min-width: 136px; padding: 10px 14px; border-radius: var(--radius); background: var(--st-wash); border-left: 3px solid var(--st); }
+.tile-count { grid-row: span 2; font-size: 30px; font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; }
+.tile-word { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.tile-share { color: var(--text-2); font-size: 12px; }
+.tally { display: flex; flex-direction: column; gap: 1px; }
+.tally-row { display: grid; grid-template-columns: minmax(170px, 300px) minmax(120px, 1fr) minmax(150px, 320px); gap: 14px; align-items: center; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tally-row:hover { background: var(--well); }
+.tally-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; }
+.tally-part { background: var(--st); min-width: 3px; }
+.tally-said { color: var(--text-2); font-size: 12.5px; }
+@media (max-width: 760px) { .tally-row { grid-template-columns: 1fr; gap: 3px; } }
 .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-2); }
 .legend li { display: inline-flex; align-items: center; gap: 6px; }
 .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--s1); flex: none; }

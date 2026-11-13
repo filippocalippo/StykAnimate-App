@@ -51,6 +51,28 @@ scenario failed or a launch did not complete; `compare --fail-on-worse` exits 1 
 For an engine change the faster loop is `npm run perf -- engine` and `engine-compare`: no window, the same documents,
 single-thread costs of each engine layer ([The engine tier](#the-engine-tier)).
 
+### Experiments
+
+Before changing code to make something faster, find out what the change would give. Two options turn a run into an
+experiment (`perf/lib/experiment.mjs`):
+
+```
+npm run perf -- run --scenario timeline.scrub --workload medium --experiment no-overlay.js --label exp-no-overlay
+npm run perf -- run --scenario playback --workload stress --param engine.workers=2 --label exp-two-workers
+npm run perf -- compare baseline exp-no-overlay
+```
+
+- `--experiment <file.js>` evaluates a script in the page once the app is ready, before any scenario: stub a
+  function, hide an element, skip a draw call. If the time goes away with the thing switched off, the thing was the
+  cost; if not, look elsewhere. The script is yours and stays out of the repository.
+- `--param name=value,…` gives live parameters their starting values, over the environment's own (the Developer
+  panel's Parameters tab lists them). A name the app never read is said in the summary.
+
+Every pair of such a run records the script's name and hash and the parameters, and its summary starts with
+`EXPERIMENT, not the app as it is`. An experiment measures no startup. For something a run's scenarios do not
+cover, a script of a few lines can drive the app with the runner's own parts: `launch` (`perf/lib/app.mjs`), then
+`app.open`, `app.request` (the control channel) and `app.evaluate`.
+
 ### Suites
 
 A suite (`perf/suites.mjs`) is sized by how long its answer is worth waiting for, so it is made of parts: every
@@ -161,7 +183,8 @@ method: how often, how long in all, the worst. It answers "what did the interfac
 - processor time by process.
 
 **Memory**: after every scenario, the memory of the page, the graphics process and the browser process, the engine's
-memory in use, its peak and what it has reserved, the JavaScript heap and the GPU memory the stage holds (its buffers, render targets and picture pages).
+memory in use, its peak and what it has reserved, the JavaScript heap and the GPU memory the stage holds (its
+buffers, render targets and picture pages).
 
 ### Layers
 
