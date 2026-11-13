@@ -16,7 +16,7 @@ const KEYS = {
   Enter: ['Enter', 'Enter', 13], Escape: ['Escape', 'Escape', 27], Space: [' ', 'Space', 32], Tab: ['Tab', 'Tab', 9], Backspace: ['Backspace', 'Backspace', 8],
   Delete: ['Delete', 'Delete', 46], ArrowLeft: ['ArrowLeft', 'ArrowLeft', 37], ArrowUp: ['ArrowUp', 'ArrowUp', 38], ArrowRight: ['ArrowRight', 'ArrowRight', 39],
   ArrowDown: ['ArrowDown', 'ArrowDown', 40], Home: ['Home', 'Home', 36], End: ['End', 'End', 35], PageUp: ['PageUp', 'PageUp', 33], PageDown: ['PageDown', 'PageDown', 34],
-  Comma: [',', 'Comma', 188], Period: ['.', 'Period', 190], Minus: ['-', 'Minus', 189], Equal: ['=', 'Equal', 187], BracketLeft: ['[', 'BracketLeft', 219], BracketRight: [']', 'BracketRight', 221],
+  Comma: [',', 'Comma', 188], Period: ['.', 'Period', 190], Minus: ['-', 'Minus', 189], Equal: ['=', 'Equal', 187], BracketLeft: ['[', 'BracketLeft', 219], BracketRight: [']', 'BracketRight', 221], Backslash: ['\\', 'Backslash', 220],
   Control: ['Control', 'ControlLeft', 17], Shift: ['Shift', 'ShiftLeft', 16], Alt: ['Alt', 'AltLeft', 18],
 };
 function keyOf(name) {
