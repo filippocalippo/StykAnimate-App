@@ -75,6 +75,18 @@ try {
   const metrics = await ok('metrics');
   assert.ok(metrics.jobs.engine && metrics.memory.engine, JSON.stringify(metrics).slice(0, 300));
   console.log('PASS metrics', JSON.stringify(metrics.jobs.engine));
+  // Memory by owner: the early script saw the stage's canvas and the overlay given their contexts, and the split names the engine and the heap.
+  const owned = await ok('memory', {owners: true});
+  const canvasKinds = owned.owners.filter(row => row.owner.startsWith('canvases: '));
+  assert.ok(canvasKinds.some(row => /WebGPU|WebGL/.test(row.owner) && row.where === 'graphics' && row.bytes > 0), JSON.stringify(owned.owners));
+  assert.ok(canvasKinds.some(row => row.owner.startsWith('canvases: 2D') && row.count > 0), JSON.stringify(owned.owners));
+  const split = await ok('memory.breakdown');
+  assert.deepEqual(split.parts.slice(0, 2).map(part => part.part), ['engine memory', 'JavaScript heap'], JSON.stringify(split.parts));
+  assert.ok(split.parts[0].bytes >= split.parts[0].rows[0].bytes, 'the engine memory holds what it uses');
+  // A browser cannot read its process's count, and no inspector read the workers: both are said.
+  assert.equal(split.unexplainedBytes, null);
+  assert.ok(split.missing.includes('workers'));
+  console.log('PASS memory by owner', split.parts.map(part => `${part.part} ${(part.bytes / 1048576).toFixed(1)} MB`).join(', '));
   const params = await ok('params.list');
   assert.ok(params.rows.some(row => row.name === 'playback.lookaheadFrames'), params.rows.map(row => row.name).join());
   assert.equal((await ok('params.set', {name: 'playback.lookaheadFrames', value: 1000})).value, 240, 'values clamp to their range');
