@@ -2,6 +2,7 @@ const TAU = Math.PI * 2;
 /** Parts of a backing pixel a handle's centre is placed to, along each axis: a stamp sits within an eighth of a backing
  * pixel of where its path would be, and every handle look has at most `STEPS²` pictures. */
 export const STEPS = 4;
+const SHIFT = Math.log2(STEPS);
 /** The atlas's side in backing pixels (4 MB): a busy frame needs a few hundred cells, a zoom as many again each frame. It
  * doubles once (16 MB) when one pass needs more (many sizes of joint, large handles at a high device-pixel ratio). */
 const ATLAS_SIZE = 1024, ATLAS_LIMIT = 2048;
@@ -44,26 +45,34 @@ export class HandleSprites {
   /** `make(width, height)`: a canvas made like the surfaces stamped on (a browser paints a canvas it reads back on the CPU). */
   constructor(make, {size = ATLAS_SIZE, limit = Math.max(size, ATLAS_LIMIT)} = {}) {
     this.make = make; this.size = size; this.limit = limit; this.atlas = null; this.context = null; this.dpr = 0;
-    this.looks = new Map(); this.shelves = []; this.bottom = 0; this.resets = 0;
-    this.cellOf = new Int32Array(0); this.missing = [];
+    this.looks = new Map(); this.count = 0; this.shelves = []; this.bottom = 0; this.resets = 0;
+    this.cellOf = this.dx = this.dy = new Int32Array(0); this.missing = [];
   }
   /** Forgets every picture (keeps the atlas). */
   reset(dpr = this.dpr) {
-    this.dpr = dpr; this.looks.clear(); this.shelves = []; this.bottom = 0; this.resets++;
+    this.dpr = dpr; this.looks.clear(); this.count = 0; this.shelves = []; this.bottom = 0; this.resets++;
     if (this.context) { this.context.setTransform(1, 0, 0, 1, 0, 0); this.context.clearRect(0, 0, this.size, this.size); }
   }
+  /** The look of `handle`: found by its size, then its colour, then its shape and outline, with no key to build (a
+   * pass asks once per handle, thousands of times). */
   look(handle, outline) {
-    const stroke = handleStroke(handle, outline), connector = Boolean(handle.connector), radius = handle.screenRadius;
-    const key = `${connector ? 'd' : 'c'}${radius}|${handle.color}|${stroke}`;
-    let look = this.looks.get(key);
+    const radius = handle.screenRadius, connector = Boolean(handle.connector), stroke = handleStroke(handle, outline);
+    let colors = this.looks.get(radius);
+    if (!colors) this.looks.set(radius, colors = new Map());
+    let kinds = colors.get(handle.color);
+    if (!kinds) colors.set(handle.color, kinds = new Array(6));
+    const kind = (connector ? 3 : 0) + (stroke === null ? 0 : stroke === '#000000' ? 1 : 2);
+    let look = kinds[kind];
     if (!look) {
       // Coverage reaches the shape's edge, half the outline (a diamond's miter √2 times more) and a pixel of antialiasing.
       const extent = radius * this.dpr + (stroke ? this.dpr : 0) + 1, pad = Math.ceil(extent);
-      look = {connector, radius, fill: handle.color, stroke, pad, size: 2 * pad + 1, cells: new Int32Array(STEPS * STEPS).fill(-1)};
-      this.looks.set(key, look);
+      kinds[kind] = look = {connector, radius, fill: handle.color, stroke, pad, size: 2 * pad + 1, cells: new Int32Array(STEPS * STEPS).fill(-1)};
+      this.count++;
     }
     return look;
   }
+  /** Every look with pictures. */
+  *allLooks() { for (const colors of this.looks.values()) for (const kinds of colors.values()) for (const look of kinds) if (look) yield look; }
   /** A free cell of `size` backing pixels as `y·size + x` of its corner, or -1 when the atlas is full. */
   allocate(size) {
     const cell = size + 1;
@@ -76,7 +85,7 @@ export class HandleSprites {
   }
   /** The look whose picture holds atlas pixel `x, y`, or undefined (for tests). */
   lookAt(x, y) {
-    for (const look of this.looks.values()) for (const cell of look.cells) {
+    for (const look of this.allLooks()) for (const cell of look.cells) {
       const sx = cell % this.size, sy = (cell - sx) / this.size;
       if (cell >= 0 && x >= sx && x < sx + look.size && y >= sy && y < sy + look.size) return look;
     }
@@ -95,7 +104,10 @@ export class HandleSprites {
       this.atlas = this.make(this.size, this.size);
       this.context = this.atlas.getContext('2d');
     }
-    if (this.cellOf.length < count) this.cellOf = new Int32Array(Math.max(count, 2 * this.cellOf.length));
+    if (this.cellOf.length < count) {
+      const length = Math.max(count, 2 * this.cellOf.length);
+      this.cellOf = new Int32Array(length); this.dx = new Int32Array(length); this.dy = new Int32Array(length);
+    }
     // Every picture this pass needs is painted before the first stamp: painting the atlas between stamps from it would
     // have the graphics process copy it.
     // A full atlas starts again once a pass (a zoom makes new sizes every frame); what one pass alone cannot fit is a path.
@@ -108,7 +120,7 @@ export class HandleSprites {
       this.reset(); this.resolve(handles, xs, ys, count, outline);
     }
     this.render();
-    const atlas = this.atlas, size = this.size, cellOf = this.cellOf, looks = this.lastLooks;
+    const atlas = this.atlas, size = this.size, cellOf = this.cellOf, looks = this.lastLooks, dxs = this.dx, dys = this.dy;
     const left = crop ? crop.x : -Infinity, top = crop ? crop.y : -Infinity,
       right = crop ? crop.x + crop.width : Infinity, bottom = crop ? crop.y + crop.height : Infinity;
     context.save();
@@ -124,8 +136,7 @@ export class HandleSprites {
         context.restore();
         continue;
       }
-      const look = looks[i], s = look.size, sx = cell % size, sy = (cell - sx) / size;
-      const dx = Math.floor(Math.floor(xs[i] * dpr * STEPS + .5) / STEPS) - look.pad, dy = Math.floor(Math.floor(ys[i] * dpr * STEPS + .5) / STEPS) - look.pad;
+      const look = looks[i], s = look.size, sx = cell % size, sy = (cell - sx) / size, dx = dxs[i] - look.pad, dy = dys[i] - look.pad;
       if (!crop) { context.drawImage(atlas, sx, sy, s, s, dx, dy, s, s); continue; }
       const x0 = Math.max(dx, left), y0 = Math.max(dy, top), x1 = Math.min(dx + s, right), y1 = Math.min(dy + s, bottom);
       if (x1 > x0 && y1 > y0) context.drawImage(atlas, sx + x0 - dx, sy + y0 - dy, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
@@ -134,7 +145,7 @@ export class HandleSprites {
   }
   /** Finds or allocates each handle's cell; false when the atlas ran out (those handles have -1). */
   resolve(handles, xs, ys, count, outline) {
-    const dpr = this.dpr, cellOf = this.cellOf, looks = this.lastLooks = this.lastLooks?.length >= count ? this.lastLooks : new Array(count);
+    const dpr = this.dpr, cellOf = this.cellOf, dxs = this.dx, dys = this.dy, looks = this.lastLooks = this.lastLooks?.length >= count ? this.lastLooks : new Array(count);
     let fits = true;
     this.missing.length = 0;
     for (let i = 0; i < count; i++) {
@@ -143,6 +154,7 @@ export class HandleSprites {
       // The centre in quarters of a backing pixel, rounded: its whole pixel places the stamp, its fraction picks the picture.
       const X = Math.floor(xs[i] * dpr * STEPS + .5), Y = Math.floor(ys[i] * dpr * STEPS + .5);
       const variant = (Y & (STEPS - 1)) * STEPS + (X & (STEPS - 1));
+      dxs[i] = X >> SHIFT; dys[i] = Y >> SHIFT;
       let cell = look.cells[variant];
       if (cell === -1) {
         cell = this.allocate(look.size);
