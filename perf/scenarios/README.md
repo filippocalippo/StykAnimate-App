@@ -38,7 +38,10 @@ export const pan = {
 
 ## What the runner does around `run`
 
-1. `context.rest()`: nothing playing, nothing covering the stage, the first frame, nothing selected, the scene fitted.
+1. `context.rest()`: nothing playing, nothing covering the stage, no recovery copy about to be written, the first
+   frame, nothing selected, the scene fitted. (An edit starts the app's autosave timer, and its write would land in
+   whatever is measured 2.5 s later. An edit that `reset` undoes leaves nothing due; a scenario that leaves the document
+   changed between its own passes calls `context.recoveryQuiet()` in `reset`.)
 2. `when`, then `setup`.
 3. For each timed pass: start the app's capture, `run`, wait for the frame, stop the capture, `reset`.
 4. One profiled pass with the sampling profiler on every thread and the browser's trace. An operation repeats here

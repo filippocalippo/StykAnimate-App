@@ -15,7 +15,7 @@
  */
 import {scratchFolder, written} from '../lib/files.mjs';
 import {LIMITS} from '../lib/metrics.mjs';
-import {desktopOnly, documentExportEnds, recoveryQuiet, statusLine} from './save.mjs';
+import {desktopOnly, documentExportEnds, statusLine} from './save.mjs';
 
 /** Frames a sequence, GIF or video exports: one second at 24 frames a second, short enough for every workload. */
 const RANGE = 24;
@@ -29,7 +29,7 @@ const SIZE = '720';
  */
 async function prepareDialog(context, {category, action, project, frames}) {
   // An export started on a project with unsaved changes schedules a recovery copy for after it: not inside the next pass.
-  await recoveryQuiet(context);
+  await context.recoveryQuiet();
   await context.app.quiet();
   await context.request('command.run', {command: 'export'});
   await context.until(() => document.querySelector('#export-dialog[open] #export-submit'), {what: 'the export dialog'});

@@ -71,9 +71,31 @@ function createContext(app, workload, facts) {
         await sleep(25);
       }
     },
-    /** The resting state every scenario starts from: nothing playing, nothing covering the stage, the first frame, nothing selected, the whole scene in view. */
+    /**
+     * Waits for a recovery copy that is due, so that it is not written inside the next measured stretch. An edit (or a
+     * save or export started with unsaved changes) starts the app's autosave timer, and 2.5 s later it writes the whole
+     * project from a worker, wherever the run has got to by then. This waits until the timer has fired and the copy is
+     * written. An edit that was undone leaves nothing due, and the wait is then no wait. At most half a minute.
+     */
+    async recoveryQuiet() {
+      await app.evaluate(async () => {
+        const {styk} = globalThis, before = styk.state.lastExport, until = performance.now() + 30000;
+        // No timer: nothing is due (a project with unsaved changes whose copy was already written stays as it is).
+        if (!styk.state.recoveryTimer) return;
+        const pause = () => new Promise(resolve => setTimeout(resolve, 20));
+        // The timer fires (it sets itself again while something keeps the app busy), then the write replaces `lastExport`;
+        // a timer that finds nothing unsaved writes nothing.
+        while (styk.state.recoveryTimer && performance.now() < until) await pause();
+        while (styk.editor.dirty && styk.state.lastExport === before && performance.now() < until) await pause();
+      });
+    },
+    /**
+     * The resting state every scenario starts from: nothing playing, nothing covering the stage, no recovery copy about
+     * to be written, the first frame, nothing selected, the whole scene in view.
+     */
     async rest() {
       await app.quiet();
+      await context.recoveryQuiet();
       await app.evaluate(() => { const {styk} = globalThis; if (styk.state.playing) styk.actions.play(); styk.editor.select(null); if (styk.editor.tick !== 0) styk.editor.seek(0); styk.fit(); });
       await context.settle();
     },

@@ -78,20 +78,6 @@ async function saveWith(context, file, press) {
   return saveMetrics(ended.ms, ended.timings, await written(file, {what: 'the saved project'}));
 }
 
-/**
- * Waits for a recovery write that is due (an edit, or an export or save that started while the project had unsaved
- * changes, schedules one), so that it does not run inside the next measured stretch: until the timer has fired and the
- * copy is written, or the project has nothing unsaved (the timer then writes nothing). At most half a minute.
- */
-export async function recoveryQuiet(context) {
-  await context.evaluate(async () => {
-    const {styk} = globalThis, before = styk.state.lastExport, until = performance.now() + 30000;
-    const pause = () => new Promise(resolve => setTimeout(resolve, 20));
-    while (styk.state.recoveryTimer && performance.now() < until) await pause();
-    while (styk.state.lastExport === before && styk.editor.dirty && performance.now() < until) await pause();
-  });
-}
-
 export const saveAs = {
   id: 'file.save-as', area: 'files', title: 'Save a project as a new file', kind: 'operation',
   description: 'Ctrl+Shift+S, the save dialog answered with a new file: the engine writes the .styk from a snapshot of the session on the export worker, the desktop writes it to a staged file that replaces the destination, the project is marked saved.',
@@ -133,7 +119,7 @@ export const saveAgain = {
   reset: (context, state) => edit(context, state),
   async teardown(context, state) {
     for (let undo = 0; undo < state.edits; undo++) await context.request('undo');
-    await recoveryQuiet(context);
+    await context.recoveryQuiet();
     state.files.remove();
   },
 };
@@ -177,7 +163,7 @@ export const recovery = {
     return seconds === 0 ? 'the recovery copy is turned off in the settings' : undefined;
   },
   async setup(context) {
-    await recoveryQuiet(context);
+    await context.recoveryQuiet();
     return {edits: 0};
   },
   async run(context, state) {
@@ -202,7 +188,7 @@ export const recovery = {
   },
   async teardown(context, state) {
     for (let undo = 0; undo < state.edits; undo++) await context.request('undo');
-    await recoveryQuiet(context);
+    await context.recoveryQuiet();
   },
 };
 
