@@ -197,6 +197,18 @@ try {
   });
   assert.deepEqual(quiet, {watching: 0, frames: 0}, 'with everything closed nothing ticks');
   console.log('PASS closed: nothing watches, no display frame recorded');
+  // A capture started the moment another stopped (a profiling run's next pass) records each display frame once: the frame
+  // loop of the first does not run on beside the second's.
+  const backToBack = await page.evaluate(async () => {
+    const request = (op, args = {}) => window.stykDevtools.request({id: 1, op, args, detail: 'full'}), wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+    await request('trace.start'); await wait(600);
+    const first = (await request('trace.stop')).result.summary.frames;
+    await request('trace.start'); await wait(600);
+    const second = (await request('trace.stop')).result.summary.frames;
+    return {first: first.perSecond, second: second.perSecond, p50: second.p50};
+  });
+  assert.ok(backToBack.second < backToBack.first * 1.4 && backToBack.p50 > 1, `back-to-back captures count each frame once: ${JSON.stringify(backToBack)}`);
+  console.log('PASS back-to-back captures', JSON.stringify(backToBack));
   assert.deepEqual(errors, []);
 
   // The shipping page (no early script) knows no developer panel, and a developer layout stored in it opens cleanly.

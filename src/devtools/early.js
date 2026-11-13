@@ -143,13 +143,19 @@
   };
   // The first task after a frame's callbacks and the browser's rendering: the frame's work on this thread is over.
   afterFrame.port1.onmessage = (event) => { if (open?.sequence === event.data) finishFrame(now()); };
-  /** Counts its callers: each calls `watchFrames(false)` when it stops needing frames. With the tools closed nothing ticks. */
+  /**
+   * Counts its callers: each calls `watchFrames(false)` when it stops needing frames. With the tools closed nothing ticks.
+   * Each start of the loop is a new generation: when the last watcher stops and another starts before the next display
+   * frame (the overlay closed and the panel opened), the loop already scheduled ends instead of recording every frame twice.
+   */
+  let generation = 0;
   const watchFrames = (on = true) => {
     frames.watching = Math.max(0, frames.watching + (on ? 1 : -1));
     if (!on || frames.watching !== 1) return;
     frames.last = 0; open = null; pending.handlers = 0; pending.script = 0; pending.inputs.length = 0;
+    const loop = ++generation;
     const tick = (time) => {
-      if (!frames.watching) return;
+      if (!frames.watching || loop !== generation) return;
       const began = now();
       // A thread too busy to run the task between two frames: the frame before ends where this one begins.
       if (open) finishFrame(began);
