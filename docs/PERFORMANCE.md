@@ -12,16 +12,27 @@ The live view of the same measurements, inside the running app, is the Developer
 Both read the same recorders through the same code, so a number in a report and a number in the panel mean the same.
 
 ```
-npm run perf -- run                      the quick suite: about three minutes
-npm run perf -- run standard             more workloads and passes; `list` shows every suite
+npm run perf -- run                      the quick suite: about four minutes
+npm run perf -- run standard             every scenario; `list` shows every suite
 npm run perf -- run --scenario pose --workload stress --env software
 npm run perf -- show                     the latest run on a page
 npm run perf -- show pose.drag-joint     one scenario in full: metrics, frames, spans, attribution
 npm run perf -- compare before           the latest run against the run labelled "before"
 npm run perf -- report                   the run as one HTML page (artifacts/perf/runs/<label>/report.html)
-npm run perf -- engine                   the engine by itself, in Node, in seconds
-npm run perf -- list                     scenarios, workloads, environments, suites
+npm run perf -- engine                   the engine by itself, in Node, in about a minute
+npm run perf -- engine-compare before    the latest engine run against the one labelled "before"
+npm run perf -- list                     scenarios, workloads, environments, suites, engine benchmarks
 ```
+
+| The question | Ask |
+| --- | --- |
+| Did my change make something a person does slower or faster? | `run --label before`, the change, `run --label after`, `compare before after` |
+| Why is this scenario slow? | `show <run> <scenario>`: the frames by phase, the spans, the calls into the engine, the layers and functions of every thread, the interface writes |
+| What does an engine layer cost, and how does it grow with the scene? | `engine`, `engine --scale` ([perf/engine/README.md](../perf/engine/README.md)) |
+| How does the app hold up without a graphics card, or on an old laptop? | `run machines` |
+| What does a feature (pictures, effects, movieclips, a camera, text, shapes, a long timeline) cost? | `run features` |
+| What is slow while I use the app, right now? | the Developer panel's Performance tab and its Record button ([DEVTOOLS.md](DEVTOOLS.md#panels)) |
+| What should be improved first? | `report`: every grade on one page, what most needs work, each scenario with where its time went |
 
 ## The loop for a change
 
@@ -38,7 +49,28 @@ about fifteen seconds. A run prints its summary and writes `artifacts/perf/runs/
 scenario failed or a launch did not complete; `compare --fail-on-worse` exits 1 when something got worse.
 
 For an engine change the faster loop is `npm run perf -- engine` and `engine-compare`: no window, the same documents,
-single-thread costs of each engine layer.
+single-thread costs of each engine layer ([The engine tier](#the-engine-tier)).
+
+### Suites
+
+A suite (`perf/suites.mjs`) is sized by how long its answer is worth waiting for, so it is made of parts: every
+scenario on one scene, the core scenarios on the others. The core scenarios are what a person does most, one or two
+from each area (`CORE` in that file): open, play, step, scrub, pan, zoom, drag a joint, move a figure, undo, select,
+move many, drag an inspector value, a brush stroke, save.
+
+| Suite | Covers | Takes about |
+| --- | --- | --- |
+| `quick` (the default) | the core scenarios on the small and the large scene, on the graphics card | 4 minutes |
+| `standard` | every scenario on the busy scene, the core scenarios on the small and the stress scene | 15 minutes |
+| `machines` | the core scenarios on a small scene as each desktop environment, and on the busy scene with no graphics card | 10 minutes |
+| `features` | the busy scene plain and with each heavier feature, and a long animation | 10 minutes |
+| `drawing` | painting on a drawing layer, with and without a graphics card | 4 minutes |
+| `full` | all of the above and the core scenarios in Chrome | 50 minutes |
+
+`--env`, `--workload` and `--scenario` replace the suite's parts with one of their own; what they do not name comes
+from the suite's first part. A scenario word is an id or the start of one (`pose`, `timeline.scrub`); an exact id
+names only that scenario. A suite that grows past its minutes loses scenarios to a longer one: the short ones are
+what keeps measuring a habit.
 
 **Engine function names.** A profile can only name engine functions when the WebAssembly build kept its names:
 `node scripts/engine-build.mjs --names` (the code is the same; the file is about 2 MB larger). Without it the timed
@@ -144,8 +176,10 @@ A new module that belongs to an existing layer needs a row there only when its n
 ### Metrics and grades
 
 A metric has a unit and a direction (`perf/lib/metrics.mjs`). A scenario is graded good, fair, poor or bad on one or
-more of its metrics; its grade is the worst. The limits are fixed and come from how people perceive delay, never from
-what the app does today:
+more of its metrics; its grade is the worst. The limits and the rule live once, in `src/devtools/grades.mjs`: the
+runner and the Developer panel's Record summary both grade there, so a gesture recorded by hand and the same gesture in
+a run get the same word. The limits are fixed and come from how people perceive delay, never from what the app does
+today:
 
 | Judged | Good | Fair | Poor | Why |
 | --- | --- | --- | --- | --- |
@@ -191,7 +225,32 @@ measure the same document. Every figure moves on every frame, the worst honest c
 | `large` | 500 figures, 30,000 segments | 111 |
 | `stress` | 2,000 figures, 200,000 segments: the scene the app must stay usable on | 101 |
 
-`npm run perf -- list` shows the others (workloads for pictures, effects, movieclips, cameras, long timelines).
+Feature workloads (`perf/workload-features.mjs`) are the busy scene with one feature added, so the difference from
+`medium` is that feature's cost: `sprites` (pictures on the limbs), `effects` (glow, shadow, outline, tint and blur),
+`movieclips` (the figures inside clips two deep), `camera` (a camera that pans, zooms and turns on every frame), `text`
+(a label on every figure), `shapes` (half-transparent filled polygons), and `long` (the small scene over 4,001 frames:
+what a long timeline costs). `npm run perf -- list` describes each.
+
+## Scenarios
+
+A scenario is one thing a person does, with real input, verified to have had its effect
+([perf/scenarios/README.md](../perf/scenarios/README.md) is the contract; `npm run perf -- list` names all of them).
+One file per area under `perf/scenarios/`:
+
+| Area | Scenarios |
+| --- | --- |
+| Files and projects | open, import a Pivot file, save as, save again, the recovery copy, new, close, a second project, switching |
+| Playback | play; play with the effects preview off; play without the camera |
+| Timeline | step, jump, scrub, zoom, scroll, add, duplicate and remove a frame, play with a figure selected |
+| Canvas | pan, zoom, move the pointer over the scene |
+| Posing and history | drag a joint, move a figure, undo and redo |
+| Selection | click, a selection rectangle, move many figures, select all |
+| Interface | drag an inspector value, switch workspace, fold and close a panel, focus mode, a panel tab, a divider, the window's size, onion skins, the main menu, the command palette |
+| Drawing | a brush stroke, a large soft brush, the eraser, a stroke on a painted cel, fill, undo, lasso and move |
+| Export | PNG, GIF, WebM, MP4, Pivot |
+
+A scenario is a `gesture` (continuous input on a clock, judged on its frames and its input delay) or an `action`
+(one thing that ends, judged on how long the person waits).
 
 ## Results
 
@@ -213,19 +272,48 @@ never less than five percent or the smallest step the unit resolves. A run compa
 everywhere. Raising a threshold to make a comparison pass hides which of the code and the expectation is wrong: when
 a result is noisy, take more passes (`--passes`) on a quieter machine.
 
+### The report
+
+`npm run perf -- report [run …] [--engine <engine run>] [--notes <file.md>] [--out <file.html>]` writes one page that
+needs nothing else to open (`perf/report/`): every scenario's grade on every pair of environment and workload, what
+most needs work, startup by phase, memory, and each scenario in full (its metrics with their spread, its frames, where
+the time went by thread, layer and function, the calls into the engine, the interface writes). Several runs go on one
+page: the first is the baseline the others are compared with. `--engine` adds an engine run (capacity, cost per
+thousand segments, how each cost grows); `--notes` puts a Markdown file of findings at the top, for the person who
+decides what to improve. The same data as text, for an agent or a terminal, is `show`.
+
+`perf/report/model.mjs` shapes the data once (it is tested without a browser); the page's modules
+(`perf/report/page/`) only draw it, and `perf/report/build.mjs` puts them and the data into the one file.
+
+## The engine tier
+
+`npm run perf -- engine` runs the engine's own bytes in Node, on the same generated documents, one layer at a time and
+on one thread: opening, starting a session, building a frame, preparing playback, the interface's reads after a seek,
+a pose and a move with undo and redo, saving, the Pivot export, the CPU rasterizer. It takes about a minute, needs no
+window and no graphics card, and its numbers are steadier than the app's. `engine --scale` runs sizes from 1,000 to
+200,000 segments and reports how each cost grows and how large a scene one thread carries within a frame.
+`engine-compare` compares two runs after bringing both to one machine speed.
+[perf/engine/README.md](../perf/engine/README.md) is its contract. Results go to `artifacts/perf/engine/<label>/`.
+
 ## Adding to it
 
 - **A scenario**: [perf/scenarios/README.md](../perf/scenarios/README.md) is the contract. A file per area; real
-  input; a gesture on a clock; the effect verified; the app left as it was.
-- **A workload**: a row in `perf/workloads.mjs`, generated and deterministic.
+  input; a gesture on a clock; the effect verified; the app left as it was. Add it to a suite only when the suite
+  still fits its minutes.
+- **An engine benchmark**: an object in `perf/engine/benchmarks.mjs` ([perf/engine/README.md](../perf/engine/README.md)).
+- **A workload**: a row in `perf/workloads.mjs` (a feature workload in `perf/workload-features.mjs`), generated and
+  deterministic.
 - **An environment**: a row in `perf/environments.mjs`, with what it cannot imitate said in its description.
 - **A span**: at the layer that owns the work, through `src/trace.mjs` ([DEVTOOLS.md](DEVTOOLS.md)); span arguments
   are built only when tracing, so the shipping build pays a null check.
 - **A layer**: a row in `perf/lib/layers.mjs`.
 
-`tests/perf.test.mjs` holds the pure parts (layers, attribution, grades, comparison, latency, workloads);
-`tests/devtools.test.mjs` the recorders' reads and that the shipping build carries none of the tools. The runner
-itself needs a window and is verified by running it.
+`tests/perf.test.mjs` holds the pure parts (layers, attribution, grades, comparison, latency, suites);
+`tests/perf-workloads.test.mjs` that every workload is the document it says; `tests/perf-scenarios-interface.test.mjs`
+and `tests/perf-scenarios-files.test.mjs` the scenarios' own helpers; `tests/perf-report.test.mjs` the report's model;
+`tests/perf-engine.test.mjs` the engine tier's definitions, scaling and comparison; `tests/devtools.test.mjs` the
+recorders' reads and that the shipping build carries none of the tools. The runner itself needs a window and is
+verified by running it.
 
 ## What it cannot tell
 
