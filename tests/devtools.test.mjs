@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {meterBoundary} from '../src/devtools/boundary.mjs';
-import {analyze, Capture, perfettoTrace, preparationSince, recentEvents, ringEvents, summarize} from '../src/devtools/capture.mjs';
+import {analyze, Capture, perfettoTrace, pictureTimes, preparationSince, recentEvents, ringEvents, shownFrames, summarize} from '../src/devtools/capture.mjs';
 import {filterLogs} from '../src/devtools/control.mjs';
 import {frameBounds, frameCountAt, frameSeries, frameWindow, inputWindow, summarizeFrames} from '../src/devtools/frames.mjs';
 import {grade, GRADES, judgeCapture, LIMITS} from '../src/devtools/grades.mjs';
@@ -228,6 +228,23 @@ test('one grading for the panel and the runner: four grades from fixed limits, a
   const judged = judgeCapture({frames: {felt: 12}, inputs: {count: 5, p95: 80}});
   assert.deepEqual([judged.grade, judged.decided, judged.value, judged.criteria.map(row => row.grade)], ['poor', 'input.p95', 80, ['good', 'poor']]);
   assert.deepEqual([judgeCapture({frames: {felt: 25}, inputs: {count: 0, p95: null}}).grade, judgeCapture({frames: null, inputs: null}).grade], ['fair', null]);
+});
+
+test('pictures shown after the frame that asked for them are judged by when they were shown, and pictures drawn in their frame add nothing', () => {
+  // Three inputs 10 ms apart; the stage asked for a picture in the frame after each and showed it 30 ms later (drawn on the engine's workers).
+  const events = [0, 10, 20].map(ms => ({name: 'stage draw', start: 105 + ms, duration: 30, args: {tick: 1, drawn: true, processor: true}}));
+  const taken = {startedAt: 100, stoppedAt: 300, events, inputs: {at: [101, 111, 121]}};
+  const shown = shownFrames(taken);
+  assert.deepEqual([shown.at, shown.asked, shown.later], [[35, 45, 55], [5, 15, 25], [1, 1, 1]]);
+  // Each input waited for the picture asked for after it: 34 ms; the pictures came 10 ms apart.
+  assert.deepEqual(pictureTimes(shown, 200), {pictures: 3, felt: 10, input: {p50: 34, p95: 34}});
+  // An input no picture answered waits to the end of the capture.
+  assert.equal(pictureTimes({...shown, inputs: [...shown.inputs, 60]}, 200).input.p95 > 100, true);
+  // The same pictures drawn in their frame: the frame and the input delay already say it.
+  assert.equal(pictureTimes(shownFrames({...taken, events: events.map(event => ({...event, args: {tick: 1, drawn: true}}))}), 200), null);
+  const judged = judgeCapture({frames: {felt: 7}, inputs: {count: 3, p95: 12}, pictures: {felt: 20, input: {p95: 80}}});
+  assert.deepEqual([judged.grade, judged.decided], ['poor', 'picture.input.p95']);
+  assert.equal(analyze({...taken, dropped: 0, frames: null, inputs: {at: [101, 111, 121], latency: [5, 5, 5], dropped: 0}}).pictures.input.p95, 34);
 });
 
 test('a live list keeps its order while values move, until a row clearly passes the one above it', () => {

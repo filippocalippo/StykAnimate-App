@@ -8,6 +8,7 @@ use styk_render::{Renderer, ViewParams, wgpu};
 use wasm_bindgen::prelude::*;
 
 mod pictures;
+mod processor;
 pub(crate) use pictures::ViewPictures;
 
 use crate::engine::EngineHandle;
@@ -126,6 +127,12 @@ pub struct Stage {
     surface_missed: bool,
     /// The camera monitor and frame thumbnails, drawn on this device (`views.rs`).
     pub(crate) views: crate::views::Views,
+    /// Frames drawn by the processor renderer on the engine's workers instead of this device (`processor.rs`).
+    processor: Option<processor::Processor>,
+    /// Edit frames are drawn on the destination pixel grid ([`Stage::set_canvas_drawing`]).
+    canvas_drawing: bool,
+    /// The pictures the processor renderer samples.
+    cpu_images: Arc<styk_raster::Images>,
 }
 
 #[wasm_bindgen]
@@ -242,7 +249,51 @@ impl Stage {
             errors,
             surface_missed: false,
             views: Default::default(),
+            processor: None,
+            canvas_drawing: false,
+            cpu_images: Arc::new(styk_raster::Images::with_budget(0)),
         })
+    }
+
+    /// Draws frames with the processor renderer on the engine's workers (`true`) instead of this device: the page shows
+    /// them from [`Stage::processor_frame`].
+    pub fn set_processor(&mut self, on: bool) {
+        if on != self.processor.is_some() {
+            self.processor = on.then(Default::default);
+        }
+    }
+
+    /// Whether frames are drawn on the engine's workers.
+    pub fn processor(&self) -> bool {
+        self.processor.is_some()
+    }
+
+    /// The newest frame the workers finished and the page has not shown: `[address, width, height, serial]` of its
+    /// straight RGBA rows in the engine's memory, valid until the next call into the stage; empty when there is none.
+    pub fn processor_frame(&mut self) -> Vec<f64> {
+        let Some(processor) = self.processor.as_mut() else { return Vec::new() };
+        processor.poll(&self.engine);
+        match processor.ready() {
+            Some(shot) => vec![processor::Processor::pixels(shot).as_ptr() as usize as f64, shot.width as f64, shot.height as f64, shot.serial as f64],
+            None => Vec::new(),
+        }
+    }
+
+    /// The number of the last frame asked of the workers (each draw that returned true asks for one).
+    pub fn processor_serial(&self) -> f64 {
+        self.processor.as_ref().map_or(0.0, |processor| processor.serial() as f64)
+    }
+
+    /// Whether a frame is still being drawn on the workers.
+    pub fn processor_pending(&mut self) -> bool {
+        self.processor.as_mut().is_some_and(|processor| processor.poll(&self.engine))
+    }
+
+    /// The page copied frame `serial` ([`Stage::processor_frame`]).
+    pub fn processor_shown(&mut self, serial: f64) {
+        if let Some(processor) = self.processor.as_mut() {
+            processor.shown(serial as u64);
+        }
     }
 
     /// Why the graphics device was lost (the browser reset it, the driver stopped), or an empty
@@ -307,6 +358,7 @@ impl Stage {
     /// The selected browser presenter uses direct Canvas drawing semantics.
     /// Prepared playback explicitly restores the portable world-grid policy.
     pub fn set_canvas_drawing(&mut self, direct: bool) {
+        self.canvas_drawing = direct;
         self.renderer.set_drawing_grid(if direct { styk_render::DrawingGrid::Destination } else { styk_render::DrawingGrid::World });
     }
 
@@ -819,6 +871,13 @@ impl Stage {
             camera_view: camera.is_some(),
             camera_limit: styk_render::CAMERA_PREVIEW_LIMIT,
         };
+        if let Some(processor) = self.processor.as_mut() {
+            let grid = if self.canvas_drawing { styk_render::DrawingGrid::Destination } else { styk_render::DrawingGrid::World };
+            processor.request(&self.engine, processor::Request { serial: 0, list: list.clone(), images: self.cpu_images.clone(), view, size: [self.config.width, self.config.height], grid });
+            self.pictures = self.pictures_after(list);
+            self.pictures_shown(pages);
+            return Ok(true);
+        }
         let target = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
             _ => {

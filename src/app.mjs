@@ -1634,7 +1634,8 @@ function loop(now) {
     } else if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
       preparedPresented = state.renderer.renderPrepared(packet.key, {view: state.view, cameraEnabled: !state.scrubbing}) === true;
       if (preparedPresented) {
-        if (playbackAwaitsDraw) playbackMetrics.present(performance.now());
+        // A frame drawn on the engine's workers counts when its picture is shown (onPicture below).
+        if (playbackAwaitsDraw && !state.renderer.presentsLater) playbackMetrics.present(performance.now());
         playbackAwaitsDraw = false;
         ctx.clearRect(0, 0, overlay.width, overlay.height);
       } else if (state.playing) state.dirtyRender = true; // The picture on show stays and the frame is drawn on the next animation frame.
@@ -6231,7 +6232,7 @@ function recoverCanvas(refreshGpuBudget) {
 }
 function rendererOptions() {
   return {
-    onInvalidate: requestRender,
+    onInvalidate: requestRender, onPicture: (prepared, at) => { if (prepared && state.playing) playbackMetrics.present(at); },
     onMonitorPicture: requestMonitorRender,
     // A frame the engine refused: the previous picture stays and the document's next revision is tried again.
     onError: error => { stats.problem(error); status(error, true); },
