@@ -18,15 +18,24 @@ export function exportContext(canvas) {
 
 /**
  * Hands a finished export frame from its worker's canvas to the interface: an
- * ImageBitmap for canvas consumers, or a lossless PNG for native video, APNG and
- * PNG sequences. Used by the engine's export worker
- * (engine/engine-export-worker.mjs).
+ * ImageBitmap for canvas consumers, its RGBA pixels for an encoder that reads them
+ * (`pixels`: GIF), or a lossless PNG for native video, APNG and PNG sequences. Used
+ * by the engine's export worker (engine/engine-export-worker.mjs).
+ *
+ * The pixels are read from the canvas the frame was put on, so they have been through
+ * the canvas's premultiplied store exactly as the pixels an encoder reads after drawing
+ * the frame's bitmap on a canvas of its own: the same values, two copies fewer.
  *
  * `native` frames are composited over black in place unless `preserveAlpha`: no
  * second full-size canvas or renderer-thread bitmap round trip is needed for opaque
  * native video.
  */
-export async function deliverExportFrame(canvas, {native = false, preserveAlpha = false} = {}, stats = {}) {
+export async function deliverExportFrame(canvas, {native = false, preserveAlpha = false, pixels = false} = {}, stats = {}) {
+  if (pixels) {
+    const context = exportContext(canvas), image = context.getImageData(0, 0, canvas.width, canvas.height);
+    checkExportContext(context);
+    return {pixels: {data: image.data, width: image.width, height: image.height}, stats};
+  }
   if (!native) return {bitmap: canvas.transferToImageBitmap(), stats};
   const started = performance.now(), context = exportContext(canvas);
   if (!preserveAlpha) {

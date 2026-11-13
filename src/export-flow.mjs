@@ -344,6 +344,7 @@ export function createExportFlow(ctx) {
             onProgress,
             sink,
             renderFrame: (index) => renderer.renderTick(index + options.start),
+            renderPixels: (index) => renderer.renderPixelsTick(index + options.start),
             renderPNGFrame: (index) => renderer.renderNativeTick(index + options.start, {preserveAlpha: true}),
             renderSVGFrame: (index) =>
               renderer.renderSVGTick(index + options.start),

@@ -5,7 +5,7 @@
  * event loop: the export's GPU device lives here (WebGPU, else WebGL2 on an
  * OffscreenCanvas), frames are drawn tile by tile, read back and put on one output
  * canvas, then handed over as the JavaScript export worker hands them over (an
- * ImageBitmap, or a PNG for native video, APNG and PNG sequences). Where the worker gets
+ * ImageBitmap, the RGBA pixels for GIF, or a PNG for native video, APNG and PNG sequences). Where the worker gets
  * no GPU device, the CPU rasterizer draws the same tiles here (`ExportRenderer.create_cpu`,
  * each tile drawn when asked for, nothing drawn ahead). The document comes from the engine
  * (the revision the export started from); the pose the editor shows comes as document
@@ -226,7 +226,7 @@ async function render(message) {
   // Where a frame's time goes: pictures and evaluation, waiting for its pixels, then reading them.
   const stats = {...JSON.parse(renderer.stats()), workerMs: performance.now() - started, evaluateMs: evaluated - started, readMs, resolveMs, ahead: ahead.size,
     smoothing: options.smoothing, renderWidth: options.width, renderHeight: options.height, renderer: 'engine'};
-  return deliverExportFrame(canvas, {native: message.native, preserveAlpha: true}, stats);
+  return deliverExportFrame(canvas, {native: message.native, preserveAlpha: true, pixels: message.pixels}, stats);
 }
 
 async function operate(message) {
@@ -270,7 +270,7 @@ self.addEventListener('message', ({data: message}) => {
   running = run.catch(() => {});
   run.then(result => {
     if (message.id === undefined) { self.postMessage({warmed: true}); return; }
-    self.postMessage({id: message.id, ok: true, ...result}, result.bitmap ? [result.bitmap] : []);
+    self.postMessage({id: message.id, ok: true, ...result}, result.bitmap ? [result.bitmap] : result.pixels ? [result.pixels.data.buffer] : []);
   }, error => {
     if (message.id === undefined) { self.postMessage({warmed: false, error: String(error?.message ?? error)}); return; }
     const text = error?.message ?? String(error);

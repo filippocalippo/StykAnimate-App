@@ -12,14 +12,14 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | Rust owner | Modules | Source at start | js | partial | ported | verified | removed | Covered by Rust | Partly covered | Deleted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
-| `styk-drawing` | 36 | 164 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
-| `styk-edit` | 93 | 600 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
+| `styk-drawing` | 36 | 165 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
+| `styk-edit` | 93 | 601 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
-| `styk-eval` | 80 | 312 KiB | 10 | 32 | 2 | 2 | 34 | 31 % | 56 % | 18 % |
-| `styk-export` | 14 | 58 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
+| `styk-eval` | 80 | 313 KiB | 10 | 32 | 2 | 2 | 34 | 31 % | 56 % | 18 % |
+| `styk-export` | 16 | 79 KiB | 10 | 2 | 0 | 0 | 4 | 0 % | 7 % | 0 % |
 | `styk-formats` | 55 | 711 KiB | 20 | 7 | 1 | 22 | 5 | 68 % | 8 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1973 KiB | 80 | 61 | 12 | 28 | 174 | 54 % | 18 % | 27 % |
+| **Total** | 357 | 1996 KiB | 82 | 61 | 12 | 28 | 174 | 54 % | 18 % | 27 % |
 
 ## Engine modules
 
@@ -269,6 +269,8 @@ Engine logic: ported to Rust.
 | `src/export-frame-worker.mjs` | `styk-export` | removed | removed; the engine's export worker (src/engine/engine-export-worker.mjs) draws every export, and writes SVG with styk-export svg |
 | `src/export-memory.mjs` | `styk-export` | partial | Rust: engine exports bounded by 2,048-px tiles and read-back slots (styk-export); the interface keeps the allowance and tile plan it validates a request with |
 | `src/export-sampling.mjs` | `styk-export` | partial | Rust: the sampling limits mirrored in styk_export::settings; the JavaScript worker still reads these |
+| `src/gif-encode-worker.mjs` | `styk-export` | js |  |
+| `src/gif-frames.mjs` | `styk-export` | js |  |
 | `src/gif-options.mjs` | `styk-export` | js |  |
 | `src/gif-quantize.mjs` | `styk-export` | js |  |
 | `src/image-codecs.mjs` | `styk-export` | js |  |

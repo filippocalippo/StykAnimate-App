@@ -31,7 +31,8 @@ import {exportAnimation} from './src/image-export.mjs';
 const blob = await exportAnimation({
   format: 'gif', width, height, fps, totalFrames,
   dither: defaultGIFDither(report),
-  renderFrame: index => renderer.renderTick(index),
+  // The engine's export frames as RGBA (src/engine/engine-export.mjs), or canvases through renderFrame.
+  renderPixels: index => renderer.renderPixelsTick(index),
   signal,
   onProgress: ({phase, completed, total}) => {
     progress.max = total;
@@ -40,25 +41,65 @@ const blob = await exportAnimation({
 });
 ```
 
-`dither` must be Boolean. Animated GIF invokes `renderFrame` in order twice, so
-the callback must render the same committed scene in both passes. Progress
-reports `phase: 'palette' | 'encode'` and a total of `2 * totalFrames`; other
-image formats retain one pass. Root export pins the document revision and
+`dither` must be Boolean. An animated GIF needs every frame twice: a first pass
+builds the palette, a second maps and compresses. Progress reports
+`phase: 'palette' | 'encode'` and a total of `2 * totalFrames`; other image
+formats retain one pass. Root export pins the document revision and
 working-pose revision and cancels when either changes. Cancel terminates the
-worker during either pass, including palette construction or compression.
+worker (and its helpers) during either pass, including palette construction or
+compression.
+
+**Frames.** The app's exports give the encoder the engine's frames as RGBA pixels
+(`renderPixels`): the export renderer's worker reads them from the canvas it put the
+frame on and transfers them, through the interface thread, to the encoder's worker. A
+canvas consumer (`renderFrame`) still works, its canvas snapshotted into a bitmap that
+the worker draws and reads back. The pixels are the same either way: a canvas keeps
+premultiplied colour, and the pixels have been through that store once in both. While
+the worker encodes a frame, the next one is drawn.
+
+**Two passes, one rendering.** When an animation's frames fit in
+`gifRetainedBytes()` (256 MiB, or 1/32 of the device's memory where that is less),
+the worker keeps the first pass's frames and encodes them in the second, releasing
+each as it is written: every frame is rendered once. A longer or larger animation is
+rendered twice, and the renderer must then give the same committed image in both
+passes.
+
+**Encoding on several threads.** The second pass is spread over helper workers
+(`src/gif-frames.mjs`, `src/gif-encode-worker.mjs`): half the processor's threads
+less one, at most four, for an animation of three frames or more and 256 × 256 pixels
+or more; with fewer than two, the worker encodes alone. They start with the export, so
+they have loaded by the second pass. Without dithering a pixel's index depends on the
+pixel alone, so the index a pixel outside a frame's changed rectangle keeps from the
+frame before is the one it would get anew: each helper maps and compresses whole
+frames. With dithering a helper dithers the changed rectangle alone (the error never
+leaves it), and the worker puts the frames together in order and compresses them. The
+frames are written in order, so the file is the one the worker would write alone, byte
+for byte. At most two frames a helper are in flight. These are JavaScript workers of the
+encoder, not engine threads: the encoder is JavaScript, and the engine's threads run
+engine jobs.
 
 The palette collector keeps exact RGB counts until 65,536 distinct colors, then
 folds them into a fixed 32,768-bin RGB555 histogram with weighted channel sums.
-It weights all contributing frames without retaining their bitmaps. Median cut
-selects boxes by weighted RGB variance, splits the widest channel and uses
-integer weighted means. Nearest-color lookup uses an exact RGB search tree and
-a cache capped at 65,536 entries. Sierra Lite needs only two RGB rows. Temporal
-mapping retains one previous RGBA frame and one index buffer; one transferred
-bitmap is in flight. Encoded output remains bounded at 512 MiB in memory, or
-16 GiB when a streamed file destination is available. Existing limits
-of 67 million pixels per frame (16.7 million in Safari), 16,384 pixels per side and 1–50 fps for animated
-GIF apply. Two render passes trade additional worker work for bounded memory;
-these tests do not establish large-animation export throughput.
+It weights all contributing frames. Median cut selects boxes by weighted RGB
+variance, splits the widest channel and uses integer weighted means.
+Nearest-color lookup uses an exact RGB search tree (the least distance, the lowest
+index among equals) and a cache capped at 65,536 entries. Sierra Lite needs only two
+RGB rows. Temporal mapping retains one previous RGBA frame and one index buffer.
+Encoded output remains bounded at 512 MiB in memory, or 16 GiB when a streamed file
+destination is available. Existing limits of 67 million pixels per frame (16.7 million
+in Safari), 16,384 pixels per side and 1–50 fps for animated GIF apply.
+
+**How it stays exact.** The encoder reads pixels as 32-bit words: a run of equal
+pixels (most of a stick-figure frame) is one histogram update or one palette lookup,
+and two frames compare a word at a time. The histogram is an insertion-ordered hash
+(the order of first appearance decides palette order and median-cut ties); median cut
+sorts each box stably by counting sort (an exact histogram's channels are whole
+numbers; an RGB555 histogram's mean channels are ranked first) and sums each box in
+the same order, so every mean is the same number. LZW keeps its dictionary in a small
+hash table. `tests/fixtures/gif-reference.mjs` keeps the per-pixel encoder these
+replaced, and `tests/gif-quantize.test.mjs` checks that today's writes the same bytes
+for gradients, transparency, partial alpha, unchanged frames, more than 65,536 colours,
+dithering on and off, still frames, and frames finished on helpers out of order.
 
 ## Native compatibility boundary
 

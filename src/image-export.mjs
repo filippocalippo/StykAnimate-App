@@ -2,17 +2,26 @@ import {restoreMessageError, messageError} from './localized-error.mjs';
 
 import { normalizeGIFDither } from "./gif-options.mjs";
 import { EXPORT_MAX_PIXELS } from "./export-sampling.mjs";
+import { deviceMemoryHint } from "./playback-budget.mjs";
 /** Offline animated image and numbered image-sequence exports.
  * Canvas frames are snapshotted into a transferable ImageBitmap; palette creation,
  * LZW, PNG/JPEG compression, checksums, APNG and ZIP writing stay in a worker.
- * Animated GIF renders each index twice: first to collect one animation palette,
- * then to encode. renderFrame must return the same committed image in both passes.
+ * GIF frames can come as RGBA pixels instead (`renderPixels`), transferred to the
+ * worker without a canvas; the next frame is then drawn while one is encoded.
+ * Animated GIF needs every frame twice: first to collect one animation palette,
+ * then to encode. The worker keeps the frames of the first pass for the second
+ * when they fit in gifRetainedBytes(); otherwise each index is rendered twice, and
+ * renderFrame must return the same committed image in both passes.
  */
 const MAX_BYTES = 512 * 1024 * 1024;
 // Streamed exports are bounded by the destination disk, not renderer memory.
 // ZIP32 stores 32-bit offsets, so sequences must stay under 4 GiB.
 const STREAM_MAX_BYTES = 16 * 1024 * 1024 * 1024;
 const ZIP_STREAM_MAX_BYTES = 0xfff00000;
+const MiB = 1024 * 1024;
+/** The frames an animated GIF's worker may keep between its two passes: 256 MiB, less on a machine of under 8 GiB. */
+export const gifRetainedBytes = (deviceMemory = deviceMemoryHint()) =>
+  Math.min(256 * MiB, Math.floor(((Number.isFinite(deviceMemory) && deviceMemory > 0 ? deviceMemory : 4) * 1024 * MiB) / 32));
 const formats = new Set([
   "gif",
   "apng",
@@ -29,6 +38,8 @@ const abortError = () =>
  * fps:number,totalFrames:number,renderFrame?:(index:number)=>Promise<HTMLCanvasElement|OffscreenCanvas>|HTMLCanvasElement|OffscreenCanvas,
  * renderSVGFrame?:(index:number)=>Promise<Blob|string>|Blob|string,
  * renderPNGFrame?:(index:number)=>Promise<{blob:Blob,width:number,height:number}>|{blob:Blob,width:number,height:number},
+ * renderPixels?:(index:number)=>Promise<{data:Uint8ClampedArray,width:number,height:number}>, GIF and GIF sequences: the frame's
+ *   RGBA pixels, which the export then owns (transferred to its worker),
  * onProgress?:(value:{phase:"palette"|"encode",completed:number,total:number,progress:number})=>void,
  * signal?:AbortSignal,loop?:boolean,quality?:number,dither?:boolean,maxBytes?:number,
  * sink?:{streamed:boolean,write(part:Blob)=>Promise<void>,finish()=>Promise<object>,abort()=>Promise<void>}}} options
@@ -44,6 +55,7 @@ export async function exportAnimation({
   renderFrame,
   renderSVGFrame,
   renderPNGFrame,
+  renderPixels,
   onProgress,
   signal,
   loop = true,
@@ -52,6 +64,7 @@ export async function exportAnimation({
   maxBytes,
   timeoutMs = 120000,
   sink,
+  retainedBytes = gifRetainedBytes(),
 }) {
   format =
     {
@@ -65,6 +78,8 @@ export async function exportAnimation({
   const vector = format === "svg-sequence";
   const encodedPNG = (format === "apng" || format === "png-sequence") &&
     typeof renderPNGFrame === "function";
+  const pixelFrames = (format === "gif" || format === "gif-sequence") &&
+    typeof renderPixels === "function";
   if (
     !Number.isInteger(width) ||
     !Number.isInteger(height) ||
@@ -94,7 +109,7 @@ export async function exportAnimation({
         : "Choose an image frame rate between 1 and 1,000 fps.",
     );
   }
-  if (typeof (vector ? renderSVGFrame : encodedPNG ? renderPNGFrame : renderFrame) !== "function")
+  if (typeof (vector ? renderSVGFrame : encodedPNG ? renderPNGFrame : pixelFrames ? renderPixels : renderFrame) !== "function")
     throw new TypeError(
       vector
         ? "SVG sequence export needs a vector frame renderer."
@@ -119,7 +134,7 @@ export async function exportAnimation({
   if (signal?.aborted) throw abortError();
   if (
     typeof Worker === "undefined" ||
-    (!vector && !encodedPNG &&
+    (!vector && !encodedPNG && !pixelFrames &&
       (typeof createImageBitmap === "undefined" ||
         typeof OffscreenCanvas === "undefined"))
   ) {
@@ -177,6 +192,18 @@ export async function exportAnimation({
   const abort = () => fail(abortError());
   signal?.addEventListener("abort", abort, { once: true });
   let completed = false;
+  // An animated GIF of pixel frames that fit keeps the first pass's frames in its worker for the second.
+  const retain = format === "gif" && pixelFrames && totalFrames * width * height * 4 <= retainedBytes;
+  // Helper workers for the GIF's second pass: half the processor's threads but one, at most four, none below two.
+  const threads = Math.min(4, Math.floor((globalThis.navigator?.hardwareConcurrency ?? 4) / 2) - 1);
+  const helpers = format === "gif" && totalFrames >= 3 && width * height >= 65536 && threads >= 2 ? threads : 0;
+  // The next pixel frame, drawn while the worker encodes this one.
+  let ahead = null;
+  const renderAhead = (index) => {
+    const frame = (async () => renderPixels(index))();
+    frame.catch(() => {});
+    return frame;
+  };
   const forward = async (response) => {
     if (sink && response?.output instanceof Blob) await sink.write(response.output);
   };
@@ -195,6 +222,9 @@ export async function exportAnimation({
           maxBytes,
           stream: Boolean(sink),
           encodedPNG,
+          pixels: pixelFrames,
+          retain,
+          helpers,
         },
       }),
     );
@@ -219,7 +249,18 @@ export async function exportAnimation({
           });
           continue;
         }
-        if (encodedPNG) {
+        if (pixelFrames && pass === 1 && retain) {
+          await forward(await request("frame", { retained: true }));
+        } else if (pixelFrames) {
+          const frame = await (ahead ?? renderAhead(index));
+          ahead = null;
+          check();
+          if (!(frame?.data instanceof Uint8ClampedArray) || frame.width !== width || frame.height !== height ||
+              frame.data.length !== width * height * 4)
+            throw messageError(new Error(''), "errors.imageExport.renderedImageFrameHasTheWrongDimensions", {value: index + 1});
+          if (index + 1 < totalFrames) ahead = renderAhead(index + 1);
+          await forward(await request("frame", { pixels: frame.data }, [frame.data.buffer]));
+        } else if (encodedPNG) {
           const frame = await renderPNGFrame(index);
           check();
           if (!(frame?.blob instanceof Blob) || frame.blob.type !== "image/png" ||

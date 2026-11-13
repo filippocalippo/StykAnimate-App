@@ -137,3 +137,73 @@ test("the existing alpha128 cutoff and white matte remain independent of ditheri
     );
   }
 });
+
+test("the encoder writes the bytes of the per-pixel reference for every kind of frame", async () => {
+  const { GIFEncoder } = await import("../src/image-codecs.mjs");
+  const { referenceAnimatedGIF, referenceStillGIF } = await import("./fixtures/gif-reference.mjs");
+  // Frames that move (a changed rectangle), stand still, lose pixels to transparency and carry partial alpha.
+  const animation = (kind, width, height) => {
+    const frames = [gifFixture(kind, width, height), gifFixture(kind, width, height, 1), gifFixture(kind, width, height, 1)];
+    const last = gifFixture(kind, width, height, 1);
+    last.fill(0, (5 * width + 3) * 4, (9 * width + 40) * 4);
+    for (let i = 3; i < last.length; i += 4 * 7) last[i] = 140 + (i % 97);
+    frames.push(last);
+    return frames;
+  };
+  // More than 65,536 colours: the histogram folds into RGB555 bins part of the way through.
+  const rich = [0, 1].map((frame) => {
+    const data = new Uint8ClampedArray(320 * 240 * 4);
+    for (let i = 0; i < 320 * 240; i++) data.set([(i * 7 + frame) & 255, (i >>> 3) & 255, (i * 13) >>> 8 & 255, 255], i * 4);
+    return data;
+  });
+  const cases = [
+    ["gradient", animation("gradient", 128, 56), 128, 56],
+    ["sprite", animation("sprite", 160, 64), 160, 64],
+    ["grayscale", animation("grayscale", 256, 52), 256, 52],
+    ["rich", rich, 320, 240],
+  ];
+  for (const [name, frames, width, height] of cases)
+    for (const dither of [false, true]) {
+      const builder = new GIFPaletteBuilder();
+      for (const frame of frames) builder.add(frame, width);
+      const gif = new GIFEncoder({ width, height, fps: 24, totalFrames: frames.length, loop: true, dither, maxBytes: 64 << 20, palette: builder.finish() });
+      for (const frame of frames) gif.add(frame);
+      const bytes = new Uint8Array(await gif.finish().arrayBuffer());
+      assert.deepEqual(bytes, referenceAnimatedGIF(frames, { width, height, fps: 24, dither }), `${name}, dither ${dither}`);
+      const still = new GIFEncoder({ width, height, fps: 24, totalFrames: 1, loop: false, dither, maxBytes: 64 << 20 });
+      still.add(frames[3] ?? frames[1]);
+      assert.deepEqual(new Uint8Array(await still.finish().arrayBuffer()), referenceStillGIF(frames[3] ?? frames[1], { width, height, fps: 24, dither }), `${name} still, dither ${dither}`);
+    }
+});
+
+test("frames encoded on helpers, answering out of order, give the bytes of the encoder going frame by frame", async () => {
+  const { GIFEncoder } = await import("../src/image-codecs.mjs");
+  const { GIFFrames, helperFrame } = await import("../src/gif-frames.mjs");
+  // A helper that answers after a delay of its own, so later frames often come back first.
+  class Helper {
+    constructor(delay) { this.delay = delay; }
+    postMessage(message) {
+      if (message.operation === "plan") { this.plan = structuredClone(message.plan); this.dither = message.dither; return; }
+      const answer = helperFrame(this.plan, this.dither, structuredClone(message));
+      setTimeout(() => this.onmessage({ data: { id: message.id, ok: true, ...answer } }), this.delay);
+    }
+    terminate() { this.ended = true; }
+  }
+  const width = 160, height = 64, still = gifFixture("sprite", width, height, 1);
+  const frames = [gifFixture("sprite", width, height), still, still.slice(), gifFixture("sprite", width, height), still.slice()];
+  frames[4].fill(0, (10 * width + 3) * 4, (12 * width + 90) * 4);
+  for (const dither of [false, true]) {
+    const builder = new GIFPaletteBuilder();
+    for (const frame of frames) builder.add(frame, width);
+    const plan = builder.finish(), options = { width, height, fps: 24, totalFrames: frames.length, loop: true, dither, maxBytes: 64 << 20 };
+    const serial = new GIFEncoder({ ...options, palette: plan });
+    for (const frame of frames) serial.add(frame);
+    const parallel = new GIFEncoder({ ...options, palette: plan }), helpers = [new Helper(12), new Helper(1)];
+    const queue = new GIFFrames(parallel, plan, { width, height, dither, helpers });
+    for (const frame of frames) await queue.push(frame.slice());
+    await queue.flush();
+    queue.close();
+    assert.ok(helpers.every((helper) => helper.ended));
+    assert.deepEqual(new Uint8Array(await parallel.finish().arrayBuffer()), new Uint8Array(await serial.finish().arrayBuffer()), `dither ${dither}`);
+  }
+});

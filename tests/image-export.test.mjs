@@ -103,3 +103,35 @@ test('encoded PNG validation rejects truncated streams, corrupt CRCs and absent 
   assert.throws(() => validatePNGFrame(corrupt, 2, 2), /PNG frame/);
   assert.throws(() => validatePNGFrame(png(new Uint8Array()), 2, 2), /no pixels/);
 });
+
+for (const [kept, retainedBytes] of [['keeps its first pass', undefined], ['renders twice when the frames do not fit', 32]]) {
+  test(`a GIF of pixel frames ${kept}, drawing the next frame while one is encoded`, async t => {
+    const log = [];
+    const {workers, requests} = environment(t, message => {
+      log.push(`${message.operation}${message.pixels ? ' pixels' : message.retained ? ' retained' : ''}`);
+      return {id: message.id, ok: true};
+    });
+    const rendered = [];
+    const result = await exportAnimation({...options, format: 'gif', retainedBytes,
+      renderFrame() {throw new Error('Unexpected canvas round trip');},
+      async renderPixels(index) {rendered.push(index); log.push(`render ${index}`); return {data: new Uint8ClampedArray(16), width: 2, height: 2};}});
+    assert.equal(result, undefined);
+    const config = requests[0].message.config;
+    assert.equal(config.pixels, true);
+    assert.equal(config.retain, retainedBytes === undefined);
+    assert.deepEqual(rendered, retainedBytes === undefined ? [0, 1, 2] : [0, 1, 2, 0, 1, 2]);
+    // Frame 1 is asked for before frame 0 goes to the worker, and so on.
+    assert.deepEqual(log.slice(1, 5), ['render 0', 'render 1', 'frame pixels', 'render 2']);
+    const second = log.slice(log.indexOf('encode') + 1, -1).filter(entry => entry.startsWith('frame'));
+    assert.deepEqual(second, Array(3).fill(retainedBytes === undefined ? 'frame retained' : 'frame pixels'));
+    // Pixels are transferred, never copied.
+    for (const {message, transfer} of requests.filter(r => r.message.pixels)) assert.deepEqual(transfer, [message.pixels.buffer]);
+    assert.ok(workers.every(worker => worker.terminated));
+  });
+}
+
+test('a pixel frame of the wrong size stops a GIF export before it reaches the worker', async t => {
+  const {requests} = environment(t);
+  await assert.rejects(exportAnimation({...options, format: 'gif', renderPixels: async () => ({data: new Uint8ClampedArray(12), width: 2, height: 2})}), /wrong dimensions/);
+  assert.equal(requests.filter(r => r.message.operation === 'frame').length, 0);
+});

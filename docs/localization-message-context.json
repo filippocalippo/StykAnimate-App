@@ -7483,7 +7483,7 @@
   },
   "counts.framesToExport": {
     "locations": [
-      "src/export-progress.mjs:65"
+      "src/export-progress.mjs:67"
     ],
     "context": "localizedText(field('frame-detail'), preparing ? 'counts.framesToExport' : s.phase === 'saving' ? 'exportProgress.chooseWhereToSave' : s.phase === 'encoding' ? "
   },
@@ -13896,7 +13896,7 @@
     "locations": [
       "src/export-flow.mjs:205",
       "src/export-flow.mjs:324",
-      "src/export-flow.mjs:385"
+      "src/export-flow.mjs:386"
     ],
     "context": "if ([...exportJobs].some(job => job.raster)) throw messageError(new Error(''), \"errors.exportFlow.anExportIsAlreadyRunningWaitForIt\", {});"
   },
@@ -13951,7 +13951,8 @@
   },
   "errors.exportFrameRenderer.theExportRendererReturnedAnIncompleteFrame": {
     "locations": [
-      "src/engine/engine-export.mjs:279"
+      "src/engine/engine-export.mjs:279",
+      "src/engine/engine-export.mjs:349"
     ],
     "context": "throw messageError(new Error(''), 'errors.exportFrameRenderer.theExportRendererReturnedAnIncompleteFrame', {});"
   },
@@ -13981,7 +13982,7 @@
   },
   "errors.exportFrameWorker.losslessVideoFrameEncodingIsUnavailable": {
     "locations": [
-      "src/export-canvas.mjs:42",
+      "src/export-canvas.mjs:51",
       "src/native-video-frame-worker.mjs:27"
     ],
     "context": "if (blob.type !== 'image/png' || !blob.size) throw messageError(new Error(''), \"errors.exportFrameWorker.losslessVideoFrameEncodingIsUnavailable\", {});"
@@ -14204,19 +14205,19 @@
   },
   "errors.gifQuantize.gifQuantizationRequiresABoundedRectangularRgbaFrame": {
     "locations": [
-      "src/gif-quantize.mjs:24"
+      "src/gif-quantize.mjs:32"
     ],
     "context": "throw messageError(new RangeError(''), \"errors.gifQuantize.gifQuantizationRequiresABoundedRectangularRgbaFrame\", {});"
   },
   "errors.gifQuantize.previousGifFrameDimensionsChanged": {
     "locations": [
-      "src/gif-quantize.mjs:242"
+      "src/gif-quantize.mjs:395"
     ],
     "context": "throw messageError(new Error(''), \"errors.gifQuantize.previousGifFrameDimensionsChanged\", {});"
   },
   "errors.gifQuantize.renderedGifColorsChangedBetweenPaletteAndEncoding": {
     "locations": [
-      "src/gif-quantize.mjs:273"
+      "src/gif-quantize.mjs:406"
     ],
     "context": "throw messageError(new Error(''), \"errors.gifQuantize.renderedGifColorsChangedBetweenPaletteAndEncoding\", {});"
   },
@@ -14270,19 +14271,19 @@
   },
   "errors.imageCodecs.chooseASupportedNumberedImageSequence": {
     "locations": [
-      "src/image-codecs.mjs:311"
+      "src/image-codecs.mjs:334"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageCodecs.chooseASupportedNumberedImageSequence\", {});"
   },
   "errors.imageCodecs.gifCompressionExceededItsBoundedOutputBuffer": {
     "locations": [
-      "src/image-codecs.mjs:220"
+      "src/image-codecs.mjs:234"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageCodecs.gifCompressionExceededItsBoundedOutputBuffer\", {});"
   },
   "errors.imageCodecs.gifFrameDimensionsAreInvalid": {
     "locations": [
-      "src/image-codecs.mjs:256"
+      "src/image-codecs.mjs:274"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageCodecs.gifFrameDimensionsAreInvalid\", {});"
   },
@@ -14308,7 +14309,7 @@
     "locations": [
       "src/image-codecs.mjs:85",
       "src/image-codecs.mjs:98",
-      "src/image-export-worker.mjs:57"
+      "src/image-export-worker.mjs:81"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageCodecs.theBrowserDidNotProduceAPngFrame\", {});"
   },
@@ -14321,7 +14322,7 @@
   },
   "errors.imageCodecs.theGifExportIsMissingFrames": {
     "locations": [
-      "src/image-codecs.mjs:291"
+      "src/image-codecs.mjs:314"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageCodecs.theGifExportIsMissingFrames\", {});"
   },
@@ -14333,7 +14334,7 @@
   },
   "errors.imageCodecs.theImageSequenceIsMissingFrames": {
     "locations": [
-      "src/image-codecs.mjs:353"
+      "src/image-codecs.mjs:376"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageCodecs.theImageSequenceIsMissingFrames\", {});"
   },
@@ -14351,123 +14352,126 @@
   },
   "errors.imageExport.anImageFrameCouldNotBeTransferred": {
     "locations": [
-      "src/image-export.mjs:147"
+      "src/image-export.mjs:162"
     ],
     "context": "fail(messageError(new Error(''), \"errors.imageExport.anImageFrameCouldNotBeTransferred\", {})),"
   },
   "errors.imageExport.chooseBetween1AndExportFrames": {
     "locations": [
-      "src/image-export.mjs:85"
+      "src/image-export.mjs:100"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.chooseBetween1AndExportFrames\", {value: maxFrames.toLocaleString()});"
   },
   "errors.imageExport.chooseGifApngOrAPngJpegGif": {
     "locations": [
-      "src/image-export.mjs:64"
+      "src/image-export.mjs:77"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.chooseGifApngOrAPngJpegGif\", {});"
   },
   "errors.imageExport.imageEncodingFailed": {
     "locations": [
-      "src/image-export.mjs:156"
+      "src/image-export.mjs:171"
     ],
     "context": ": request.reject(restoreMessageError((event.data.error ? new Error(event.data.error) : messageError(new Error(''), \"errors.imageExport.imageEncodingFailed\")), e"
   },
   "errors.imageExport.imageEncodingTimedOutExportStoppedTryAgain": {
     "locations": [
-      "src/image-export.mjs:166"
+      "src/image-export.mjs:181"
     ],
     "context": "const timer = setTimeout(() => fail(messageError(new Error(''), \"errors.imageExport.imageEncodingTimedOutExportStoppedTryAgain\", {})), timeoutMs);"
   },
   "errors.imageExport.imageExportCancelled": {
     "locations": [
-      "src/image-export.mjs:25"
+      "src/image-export.mjs:34"
     ],
     "context": "messageError(new DOMException('', \"AbortError\"), \"errors.imageExport.imageExportCancelled\", {});"
   },
   "errors.imageExport.imageExportsSupportDimensionsUpTo16384": {
     "locations": [
-      "src/image-export.mjs:77"
+      "src/image-export.mjs:92"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.imageExportsSupportDimensionsUpTo16384\", {value: Math.round(EXPORT_MAX_PIXELS / 1e6)});"
   },
   "errors.imageExport.jpegQualityMustBeBetweenZeroAndOne": {
     "locations": [
-      "src/image-export.mjs:104"
+      "src/image-export.mjs:119"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.jpegQualityMustBeBetweenZeroAndOne\", {});"
   },
   "errors.imageExport.renderedImageFrameHasTheWrongDimensions": {
     "locations": [
-      "src/image-export.mjs:227",
-      "src/image-export.mjs:235"
+      "src/image-export.mjs:260",
+      "src/image-export.mjs:268",
+      "src/image-export.mjs:276"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.renderedImageFrameHasTheWrongDimensions\", {value: index + 1});"
   },
   "errors.imageExport.renderedSvgFrameMustContainSvgTextOr": {
     "locations": [
-      "src/image-export.mjs:211"
+      "src/image-export.mjs:241"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.renderedSvgFrameMustContainSvgTextOr\", {value: index + 1});"
   },
   "errors.imageExport.theImageExportWorkerStopped": {
     "locations": [
-      "src/image-export.mjs:144"
+      "src/image-export.mjs:159"
     ],
     "context": "fail((event.message ? new Error(event.message) : messageError(new Error(''), \"errors.imageExport.theImageExportWorkerStopped\")));"
   },
   "errors.imageExport.thisBrowserCannotExportImagesInAWorker": {
     "locations": [
-      "src/image-export.mjs:126"
+      "src/image-export.mjs:141"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.thisBrowserCannotExportImagesInAWorker\", {});"
   },
   "errors.imageExportWorker.aCanvasImageEncoderIsUnavailable": {
     "locations": [
-      "src/image-export-worker.mjs:34"
+      "src/image-export-worker.mjs:53"
     ],
     "context": "if (!context) throw messageError(new Error(''), \"errors.imageExportWorker.aCanvasImageEncoderIsUnavailable\", {});"
   },
   "errors.imageExportWorker.theBrowserDoesNotSupportImageEncoding": {
     "locations": [
-      "src/image-export-worker.mjs:119"
+      "src/image-export-worker.mjs:166"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExportWorker.theBrowserDoesNotSupportImageEncoding\", {type: type});"
   },
   "errors.imageExportWorker.theGifPaletteAnalysisIsIncomplete": {
     "locations": [
-      "src/image-export-worker.mjs:47"
+      "src/image-export-worker.mjs:66"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExportWorker.theGifPaletteAnalysisIsIncomplete\", {});"
   },
   "errors.imageExportWorker.theImageExportWasNotInitialized": {
     "locations": [
-      "src/image-export-worker.mjs:53",
-      "src/image-export-worker.mjs:124"
+      "src/image-export-worker.mjs:77",
+      "src/image-export-worker.mjs:93",
+      "src/image-export-worker.mjs:171"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExportWorker.theImageExportWasNotInitialized\", {});"
   },
   "errors.imageExportWorker.theRenderedImageFrameHasTheWrongDimensions": {
     "locations": [
-      "src/image-export-worker.mjs:82"
+      "src/image-export-worker.mjs:98",
+      "src/image-export-worker.mjs:129"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExportWorker.theRenderedImageFrameHasTheWrongDimensions\", {});"
   },
   "errors.imageExportWorker.theSvgFrameIsEmptyOrExceedsThe": {
     "locations": [
-      "src/image-export-worker.mjs:70"
+      "src/image-export-worker.mjs:117"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExportWorker.theSvgFrameIsEmptyOrExceedsThe\", {});"
   },
   "errors.imageExportWorker.theVectorFrameDoesNotContainAnSvg": {
     "locations": [
-      "src/image-export-worker.mjs:73"
+      "src/image-export-worker.mjs:120"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExportWorker.theVectorFrameDoesNotContainAnSvg\", {});"
   },
   "errors.imageExportWorker.unknownImageExportOperation": {
     "locations": [
-      "src/image-export-worker.mjs:136"
+      "src/image-export-worker.mjs:187"
     ],
     "context": "} else throw messageError(new Error(''), \"errors.imageExportWorker.unknownImageExportOperation\", {});"
   },
@@ -15780,7 +15784,7 @@
   "errors.nativeVideoExport.renderedVideoFrameHasTheWrongDimensions": {
     "locations": [
       "src/native-video-export.mjs:70",
-      "src/video-export.mjs:275"
+      "src/video-export.mjs:283"
     ],
     "context": "if (!canvas || canvas.width !== width || canvas.height !== height) throw messageError(new Error(''), \"errors.nativeVideoExport.renderedVideoFrameHasTheWrongDime"
   },
@@ -18226,13 +18230,13 @@
   },
   "errors.videoExport.theVideoEncoderDidNotFinishItsPending": {
     "locations": [
-      "src/video-export.mjs:301"
+      "src/video-export.mjs:310"
     ],
     "context": "flushTimer = setTimeout(() => reject(messageError(new Error(''), \"errors.videoExport.theVideoEncoderDidNotFinishItsPending\", {})), 30000);"
   },
   "errors.videoExport.theVideoEncoderStoppedAcceptingFrames": {
     "locations": [
-      "src/video-export.mjs:265"
+      "src/video-export.mjs:272"
     ],
     "context": "const timer = setTimeout(() => done(messageError(new Error(''), \"errors.videoExport.theVideoEncoderStoppedAcceptingFrames\", {})), 30000);"
   },
@@ -18899,122 +18903,122 @@
   },
   "exportProgress.allFramesRendered": {
     "locations": [
-      "src/export-progress.mjs:65"
+      "src/export-progress.mjs:67"
     ],
     "context": "localizedText(field('frame-detail'), preparing ? 'counts.framesToExport' : s.phase === 'saving' ? 'exportProgress.chooseWhereToSave' : s.phase === 'encoding' ? "
   },
   "exportProgress.buildingGifColors": {
     "locations": [
-      "src/export-progress.mjs:61"
+      "src/export-progress.mjs:63"
     ],
     "context": "const stageKey = s.phase === 'saving' ? 'exportProgress.savingYourFile' : s.phase === 'encoding' ? 'exportProgress.finishingYourFile' : preparing ? 'exportProgr"
   },
   "exportProgress.cancelExport": {
     "locations": [
-      "src/export-progress.mjs:52"
+      "src/export-progress.mjs:54"
     ],
     "context": "<div class=\"export-progress-actions\"><button type=\"button\" class=\"ui-button\" data-variant=\"outline\" id=\"cancel-export\" data-i18n=\"exportProgress.cancelExport\">C"
   },
   "exportProgress.cancelling": {
     "locations": [
-      "src/export-progress.mjs:74"
+      "src/export-progress.mjs:76"
     ],
     "context": "button.onclick = () => { button.disabled = true; localizedText(button, \"exportProgress.cancelling\", {}); cancel(); };"
   },
   "exportProgress.chooseWhereToSave": {
     "locations": [
-      "src/export-progress.mjs:65"
+      "src/export-progress.mjs:67"
     ],
     "context": "localizedText(field('frame-detail'), preparing ? 'counts.framesToExport' : s.phase === 'saving' ? 'exportProgress.chooseWhereToSave' : s.phase === 'encoding' ? "
   },
   "exportProgress.elapsed": {
     "locations": [
-      "src/export-progress.mjs:50"
+      "src/export-progress.mjs:52"
     ],
     "context": "<dl class=\"export-progress-stats\"><div><dt>${messageHTML(\"exportProgress.rendered\", {})}</dt><dd id=\"export-rendered\">0</dd></div><div><dt>${messageHTML(\"export"
   },
   "exportProgress.encodingFrames": {
     "locations": [
-      "src/export-progress.mjs:61"
+      "src/export-progress.mjs:63"
     ],
     "context": "const stageKey = s.phase === 'saving' ? 'exportProgress.savingYourFile' : s.phase === 'encoding' ? 'exportProgress.finishingYourFile' : preparing ? 'exportProgr"
   },
   "exportProgress.estRemaining": {
     "locations": [
-      "src/export-progress.mjs:50"
+      "src/export-progress.mjs:52"
     ],
     "context": "<dl class=\"export-progress-stats\"><div><dt>${messageHTML(\"exportProgress.rendered\", {})}</dt><dd id=\"export-rendered\">0</dd></div><div><dt>${messageHTML(\"export"
   },
   "exportProgress.exportProgress": {
     "locations": [
-      "src/export-progress.mjs:48"
+      "src/export-progress.mjs:50"
     ],
     "context": "<progress id=\"export-progress\" max=\"100\" aria-label=\"Export progress\" aria-describedby=\"export-frame-detail\" data-i18n-aria-label=\"exportProgress.exportProgress"
   },
   "exportProgress.finishingYourFile": {
     "locations": [
-      "src/export-progress.mjs:61"
+      "src/export-progress.mjs:63"
     ],
     "context": "const stageKey = s.phase === 'saving' ? 'exportProgress.savingYourFile' : s.phase === 'encoding' ? 'exportProgress.finishingYourFile' : preparing ? 'exportProgr"
   },
   "exportProgress.frameProgress": {
     "locations": [
-      "src/export-progress.mjs:65"
+      "src/export-progress.mjs:67"
     ],
     "context": "localizedText(field('frame-detail'), preparing ? 'counts.framesToExport' : s.phase === 'saving' ? 'exportProgress.chooseWhereToSave' : s.phase === 'encoding' ? "
   },
   "exportProgress.leftToRender": {
     "locations": [
-      "src/export-progress.mjs:50"
+      "src/export-progress.mjs:52"
     ],
     "context": "<dl class=\"export-progress-stats\"><div><dt>${messageHTML(\"exportProgress.rendered\", {})}</dt><dd id=\"export-rendered\">0</dd></div><div><dt>${messageHTML(\"export"
   },
   "exportProgress.message0s": {
     "locations": [
-      "src/export-progress.mjs:50"
+      "src/export-progress.mjs:52"
     ],
     "context": "<dl class=\"export-progress-stats\"><div><dt>${messageHTML(\"exportProgress.rendered\", {})}</dt><dd id=\"export-rendered\">0</dd></div><div><dt>${messageHTML(\"export"
   },
   "exportProgress.passProgress": {
     "locations": [
-      "src/export-progress.mjs:71"
+      "src/export-progress.mjs:73"
     ],
     "context": "if (s.passes === 2) localizedText(field('pass-note'), 'exportProgress.passProgress', {pass:s.pass,total:2});"
   },
   "exportProgress.preparingAnimation": {
     "locations": [
-      "src/export-progress.mjs:47",
-      "src/export-progress.mjs:61"
+      "src/export-progress.mjs:49",
+      "src/export-progress.mjs:63"
     ],
     "context": "<div class=\"export-progress-head\"><strong id=\"export-stage\" role=\"status\" aria-live=\"polite\" data-i18n=\"exportProgress.preparingAnimation\">Preparing animation…<"
   },
   "exportProgress.processing": {
     "locations": [
-      "src/export-progress.mjs:65"
+      "src/export-progress.mjs:67"
     ],
     "context": "localizedText(field('frame-detail'), preparing ? 'counts.framesToExport' : s.phase === 'saving' ? 'exportProgress.chooseWhereToSave' : s.phase === 'encoding' ? "
   },
   "exportProgress.rendered": {
     "locations": [
-      "src/export-progress.mjs:50"
+      "src/export-progress.mjs:52"
     ],
     "context": "<dl class=\"export-progress-stats\"><div><dt>${messageHTML(\"exportProgress.rendered\", {})}</dt><dd id=\"export-rendered\">0</dd></div><div><dt>${messageHTML(\"export"
   },
   "exportProgress.rendering": {
     "locations": [
-      "src/export-progress.mjs:65"
+      "src/export-progress.mjs:67"
     ],
     "context": "localizedText(field('frame-detail'), preparing ? 'counts.framesToExport' : s.phase === 'saving' ? 'exportProgress.chooseWhereToSave' : s.phase === 'encoding' ? "
   },
   "exportProgress.renderingFrames": {
     "locations": [
-      "src/export-progress.mjs:61"
+      "src/export-progress.mjs:63"
     ],
     "context": "const stageKey = s.phase === 'saving' ? 'exportProgress.savingYourFile' : s.phase === 'encoding' ? 'exportProgress.finishingYourFile' : preparing ? 'exportProgr"
   },
   "exportProgress.savingYourFile": {
     "locations": [
-      "src/export-progress.mjs:61"
+      "src/export-progress.mjs:63"
     ],
     "context": "const stageKey = s.phase === 'saving' ? 'exportProgress.savingYourFile' : s.phase === 'encoding' ? 'exportProgress.finishingYourFile' : preparing ? 'exportProgr"
   },

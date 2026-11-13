@@ -954,8 +954,9 @@ fixture 1,035 ms).
 For a document the engine draws, export frames (PNG, PNG and JPEG sequences, GIF, APNG and
 video frames) come from the engine: the frame the stage would show at that tick, through the
 scene camera, at the export's size and sampling, without onion skins. The encoders (the PNG,
-GIF, APNG and ZIP writers, WebCodecs, FFmpeg, the audio mix) are unchanged and receive the
-same canvases and PNG frames as before. SVG is the engine's too (below): the frame's draw list written as
+GIF, APNG and ZIP writers, WebCodecs, FFmpeg, the audio mix) receive canvases and PNG frames,
+and the GIF writers the frame's RGBA pixels, read from the worker's canvas and transferred
+(`renderPixelsTick`: the values a canvas consumer reads back, [GIF export](../gif-export.md)). SVG is the engine's too (below): the frame's draw list written as
 vector artwork. A page without the engine's worker threads cannot export.
 
 Composited No smoothing frames preserve the editor's existing `exportSVG` fallback
