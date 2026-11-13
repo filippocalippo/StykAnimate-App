@@ -37,7 +37,8 @@ function pairLine(pair) {
 export function overview(result) {
   const lines = [`StykAnimate performance run "${result.label}"`,
     `${result.build.commit ?? 'no commit'}${result.build.dirty ? ' + uncommitted changes' : ''} (${result.build.branch ?? '?'}), engine build ${result.build.engine?.sha256 ?? '?'} · ${result.machine.cpu}, ${result.machine.threads} threads, ${result.machine.memoryGB} GB`,
-    `${result.pairs.length} launch${result.pairs.length === 1 ? '' : 'es'}, ${result.passes} timed pass${result.passes === 1 ? '' : 'es'}${result.profile ? ' and a profiled pass' : ''} per scenario, ${Math.round(result.seconds)} s in all`, ''];
+    `${result.pairs.length} launch${result.pairs.length === 1 ? '' : 'es'}, ${result.passes} timed pass${result.passes === 1 ? '' : 'es'}${result.profile ? ' and a profiled pass' : ''} per scenario, ${Math.round(result.seconds)} s in all`,
+    ...(result.unfinished ? [`NOT FINISHED: ${result.unfinished} more launch${result.unfinished === 1 ? ' was' : 'es were'} planned when this was written (the run was still going, or was stopped)`] : []), ''];
   for (const pair of result.pairs) {
     lines.push(`== ${pairLine(pair)}`);
     if (pair.error) lines.push(`   NOT COMPLETED: ${pair.error}`);

@@ -161,7 +161,7 @@ method: how often, how long in all, the worst. It answers "what did the interfac
 - processor time by process.
 
 **Memory**: after every scenario, the memory of the page, the graphics process and the browser process, the engine's
-memory in use, its peak and what it has reserved, the JavaScript heap and the GPU memory the stage counts.
+memory in use, its peak and what it has reserved, the JavaScript heap and the GPU memory the stage holds (its buffers, render targets and picture pages).
 
 ### Layers
 

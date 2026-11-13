@@ -59,7 +59,7 @@ function parse(argv, flags = []) {
   return {words, options};
 }
 const list = text => String(text).split(',').map(part => part.trim()).filter(Boolean);
-const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : /(ch|sh|s|x)$/.test(word) ? 'es' : 's'}`;
 
 async function run(argv) {
   const {words, options} = parse(argv, ['no-profile', 'no-startup', 'raw']);
@@ -78,7 +78,8 @@ async function run(argv) {
   // Startup is the launch itself: measured apart, on the bundle a packaged app starts from, unless the run names its scenarios.
   const measuresStartup = !options['no-startup'] && !options.scenario;
   const bundle = measuresStartup ? await buildBundle().catch(error => { log(`The bundle did not build (${String(error.message).split(/\r?\n/)[0]}): startup is measured from the sources.`); return null; }) : null;
-  const pairs = [], startups = new Set();
+  const pairs = [], startups = new Set(), at = new Date().toISOString(), described = {build: build(), machine: machine()};
+  const resultOf = () => ({schema: SCHEMA, label, at, suite: name, passes, profile, seconds: (performance.now() - started) / 1000, ...described, pairs});
   for (const {environment: chosen, workload: spec, scenarios} of planned) {
     // An environment's startup is measured once and shown with its first workload.
     const startup = measuresStartup && chosen.host === 'desktop' && !startups.has(chosen.id) ? await measureStartup(chosen, {launches: Math.max(3, passes), bundle, log}) : null;
@@ -86,9 +87,10 @@ async function run(argv) {
     const pair = await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), log});
     if (startup) pair.scenarios.unshift(startup);
     pairs.push(pair);
+    // A long run keeps what it has measured: stopped now, its folder holds every launch finished so far, and says so.
+    if (pairs.length < planned.length) { const partial = {...resultOf(), unfinished: planned.length - pairs.length}; write(partial, overview(partial)); }
   }
-  const result = {schema: SCHEMA, label, at: new Date().toISOString(), suite: name, passes, profile, seconds: (performance.now() - started) / 1000, build: build(), machine: machine(), pairs};
-  const text = overview(result), folder = write(result, text);
+  const result = resultOf(), text = overview(result), folder = write(result, text);
   process.stdout.write(text);
   console.log(`Written to ${folder}`);
   return pairs.some(pair => pair.error || pair.scenarios.some(scenario => scenario.error)) ? 1 : 0;

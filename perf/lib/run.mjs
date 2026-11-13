@@ -130,7 +130,7 @@ async function memoryNow(app) {
   }
   const total = Object.values(byType).reduce((sum, bytes) => sum + bytes, 0);
   return {jsHeap: megabytes(memory.jsHeap?.usedBytes), engine: megabytes(memory.engine?.liveBytes), enginePeak: megabytes(memory.engine?.peakBytes), engineReserved: megabytes(memory.engineMemoryBytes),
-    frameCache: megabytes(memory.engine?.frameCacheBytes), gpu: megabytes(memory.gpuBytes), page: megabytes(byType.page), graphics: megabytes(byType.graphics), browser: megabytes(byType.browser), total: total ? megabytes(total) : null};
+    frameCache: megabytes(memory.engine?.frameCacheBytes), gpu: megabytes(memory.gpuTotalBytes ?? memory.gpuBytes), page: megabytes(byType.page), graphics: megabytes(byType.graphics), browser: megabytes(byType.browser), total: total ? megabytes(total) : null};
 }
 
 /** The engine's threads as one row: their layers, modules and functions added up, with each thread's busy time. */
