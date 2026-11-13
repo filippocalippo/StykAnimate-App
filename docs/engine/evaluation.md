@@ -36,7 +36,11 @@ the JavaScript keeps only what a document stores (the validation of its records,
    composes layers in order. Imported keys sample the native timeline with the
    sheet's `legacyAnimation` channels; when every layer, the scene and the camera
    share one native sample (or a layer has nothing), that sample is the frame,
-   slots and all, as the editor returns its one object.
+   slots and all, as the editor returns its one object. One evaluation of the sheet
+   samples the native timeline once for each time its tracks ask for
+   (`Prepared::source_at`, as the editor's `sampleLayerSheet` keeps `sourceAt(time)`):
+   the scene, the camera and every imported layer read that frame (a document opened
+   from a Pivot file tweened every figure three times a frame before).
 3. Movieclip instances choose their local time, layers order the draw order (`applyLayerOrder`).
 4. The scene camera ([below](#the-scene-camera)): where it travels moves parallax
    layers, then camera-motion impulses shake the shot.
