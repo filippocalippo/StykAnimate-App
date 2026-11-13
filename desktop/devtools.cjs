@@ -6,7 +6,6 @@
 // It gives the page's preload script the early script (src/devtools/early.js, run before any page script) and the name
 // of the bridge the page answers through, turns on the inspector, and serves the control channel: a named pipe (a
 // socket file outside Windows) that only this user reaches, one JSON request per line, answered in order.
-const { app, dialog, ipcMain } = require('electron');
 const { readFileSync, unlinkSync } = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
@@ -15,6 +14,9 @@ const path = require('node:path');
 const MAX_REQUEST = 64 * 1024, MAX_ANSWER = 1024 * 1024, WAIT_MS = 120000;
 const BRIDGE = '__stykDevtoolsBridge';
 const pipePath = pid => process.platform === 'win32' ? `\\\\.\\pipe\\stykanimate-dev-${pid}` : path.join(os.tmpdir(), `stykanimate-dev-${pid}.sock`);
+// Electron is asked for only by the functions that run in its main process. The others are plain functions the unit
+// tests call in Node, where a checkout installed without Electron's binary (as the Tests workflow installs) cannot load it.
+const electron = () => require('electron');
 
 /** Whether this launch is a developer launch: a source checkout asked for it. A packaged app never is. */
 function developerLaunch(app) {
@@ -117,7 +119,7 @@ function answerDialogs(dialog, answers) {
 
 /** The app's processes as the operating system counts them: type, CPU seconds so far, and memory in bytes. */
 function processMetrics() {
-  return app.getAppMetrics().map(metric => ({
+  return electron().app.getAppMetrics().map(metric => ({
     pid: metric.pid, type: metric.type, name: metric.serviceName || metric.name || '',
     cpuSeconds: metric.cpu?.cumulativeCPUUsage ?? null, cpuPercent: metric.cpu?.percentCPUUsage ?? null,
     workingSetBytes: (metric.memory?.workingSetSize ?? 0) * 1024, peakWorkingSetBytes: (metric.memory?.peakWorkingSetSize ?? 0) * 1024,
@@ -131,6 +133,7 @@ function processMetrics() {
  * Returns the argument the preload script looks for and a `close` that ends the pipe.
  */
 function startDevtools({ appRoot, page, openFile }) {
+  const { dialog, ipcMain } = electron();
   const environment = profilingEnvironment(process.env.STYK_DEVTOOLS_ENVIRONMENT);
   // The environment is defined in the page before the early script reads it.
   const asked = environment ? `globalThis.__stykDevtoolsEnvironment = ${JSON.stringify(environment)};\n` : '';
