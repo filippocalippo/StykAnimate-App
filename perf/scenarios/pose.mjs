@@ -2,6 +2,7 @@
  * Posing: the edits an animator makes all day, a joint dragged and a figure moved.
  */
 import {LIMITS} from '../lib/metrics.mjs';
+import {respond} from '../lib/response.mjs';
 
 /** Finds a handle of the figure with the most joints, selects that figure and returns where to press (window pixels). */
 async function handle(context, kind) {
@@ -36,9 +37,12 @@ export const moveFigure = {
   reset: context => context.request('undo'),
 };
 
+/** Whether the stage shows a document other than the one at revision `before` (runs in the page). */
+const revised = before => { const {editor, state} = globalThis.styk; return editor.revision !== before && state.lastEditingPresentation?.revision === editor.revision; };
+
 export const undo = {
   id: 'history.undo', area: 'posing', title: 'Undo and redo an edit', kind: 'operation',
-  description: 'Undoes a joint drag and redoes it: each is one command of the engine\'s history, then a redraw.',
+  description: 'Undoes a joint drag with Ctrl+Z and redoes it with Ctrl+Shift+Z: each key press to the frame that shows the document as it was. One command of the engine\'s history, then the stage and the interface repaint.',
   judge: {metric: 'duration', limits: LIMITS.response},
   metrics: {'history.redo': {title: 'Redo', unit: 'ms', better: 'lower', digits: 0}},
   async setup(context) {
@@ -47,11 +51,10 @@ export const undo = {
     return target;
   },
   async run(context) {
-    const started = Date.now();
-    await context.request('undo');
-    const undone = Date.now();
-    await context.request('redo');
-    return {metrics: {duration: undone - started, 'history.redo': Date.now() - undone}};
+    const revision = async () => (await context.state()).document.revision;
+    const undone = await respond(context, () => context.input.key('Z', {ctrl: true}), revised, {argument: await revision(), what: 'the undo'});
+    const redone = await respond(context, () => context.input.key('Z', {ctrl: true, shift: true}), revised, {argument: await revision(), what: 'the redo'});
+    return {metrics: {duration: undone, 'history.redo': redone}};
   },
   teardown: context => context.request('undo'),
 };
