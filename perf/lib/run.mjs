@@ -227,6 +227,9 @@ async function runScenario(app, scenario, context, {passes, profile, raw}) {
   } catch (error) {
     result.error = String(error?.message ?? error).split('\n')[0].slice(0, 500);
     await app.request('trace.stop').catch(() => {});
+    // What the app said meanwhile (its warnings and errors), so a failure can be read after the run.
+    const said = await app.request('logs', {level: 'warn', limit: 12}).catch(() => null);
+    if (said?.rows?.length) result.logs = said.rows.map(row => `${row.level} [${row.module}] ${String(row.message).slice(0, 300)}`);
   } finally {
     if (state !== undefined) await Promise.resolve(scenario.teardown?.(context, state)).catch(error => result.notes.push(`teardown: ${error.message}`));
   }
