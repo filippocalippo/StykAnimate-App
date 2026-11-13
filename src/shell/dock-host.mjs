@@ -1309,29 +1309,40 @@ export function createDockHost({document: doc = globalThis.document, window: win
   });
   if (band) resizeObserver.observe(band);
   const rail = workspace.querySelector('.shell-rail');
+  /**
+   * The rail's tools take two columns where one column of them is taller than the rail's place (the solution's rail
+   * rectangle), and always in Build. Its content's height (`railNatural`: the tools, their gaps, the rail's padding and its
+   * other parts) does not depend on that place, so it is measured only when the rail or one of its parts changes size
+   * (the observer below, after layout); a solve decides the columns from it without reading layout. Measuring right
+   * after a commit's writes forced a style and layout pass inside every commit of a divider drag or a window resize.
+   */
+  let railNatural = null;
+  const railColumnsFit = () => {
+    let columns = railColumns;
+    if (solution?.rail?.orientation === 'horizontal') columns = 1;
+    else if (railNatural && solution?.rail?.rect) columns = mode() === 'rig' || railNatural.items > 1 && railNatural.height > solution.rail.rect.height + 0.5 ? 2 : 1;
+    if (columns === railColumns) return;
+    railColumns = columns;
+    rail.toggleAttribute('data-columns', columns === 2);
+    schedule();
+  };
   const railFit = () => {
     const dock = rail.querySelector(':scope > .tool-dock');
-    if (solution?.rail?.orientation === 'horizontal') {
-      if (railColumns !== 1) { railColumns = 1; rail.toggleAttribute('data-columns', false); schedule(); }
-    } else if (dock && solution?.rail?.rect) {
+    const horizontal = solution?.rail?.orientation === 'horizontal';
+    if (!horizontal && dock) {
       const items = [...dock.children].filter(node => node.offsetParent !== null);
       const box = win.getComputedStyle(rail), gap = parseFloat(win.getComputedStyle(dock).rowGap) || 0;
       const add = dock.querySelector(':scope > .rail-add');
       const apart = add && add.offsetParent !== null ? parseFloat(win.getComputedStyle(add).marginBlockEnd) || 0 : 0;
-      const natural = items.reduce((sum, node) => sum + node.offsetHeight, 0) + gap * Math.max(0, items.length - 1)
+      const height = items.reduce((sum, node) => sum + node.offsetHeight, 0) + gap * Math.max(0, items.length - 1)
         + (parseFloat(box.paddingTop) || 0) + (parseFloat(box.paddingBottom) || 0) + apart
         + [...rail.children].filter(node => node !== dock && node.offsetParent !== null).reduce((sum, node) => {
           const style = win.getComputedStyle(node);
           return sum + node.offsetHeight + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
         }, 0);
-      const columns = mode() === 'rig' || items.length > 1 && natural > solution.rail.rect.height + 0.5 ? 2 : 1;
-      if (columns !== railColumns) {
-        railColumns = columns;
-        rail.toggleAttribute('data-columns', columns === 2);
-        schedule();
-      }
+      railNatural = {items: items.length, height};
     }
-    const horizontal = solution?.rail?.orientation === 'horizontal';
+    railColumnsFit();
     const more = !horizontal && rail.scrollHeight - rail.scrollTop - rail.clientHeight > 1;
     if (rail.hasAttribute('data-more-below') !== more) rail.toggleAttribute('data-more-below', more);
     const after = horizontal && rail.scrollWidth - rail.scrollLeft - rail.clientWidth > 1;
@@ -1341,7 +1352,8 @@ export function createDockHost({document: doc = globalThis.document, window: win
   if (rail) {
     for (const element of [rail, ...rail.children]) railObserver.observe(element);
     rail.addEventListener('scroll', railFit, {passive: true, signal});
-    listeners.solve.add(() => railFit());
+    // Whether the rail scrolls changes only with its size, which the observer sees; before its first measure a solve fits it in full.
+    listeners.solve.add(() => (railNatural ? railColumnsFit() : railFit()));
   }
   const bandWatch = band ? watchBand(band, {window: win, document: doc, storage: browserStorage(win), start: ready, onChange: () => schedule()}) : null;
   const modeObserver = new win.MutationObserver(modeChanged);
