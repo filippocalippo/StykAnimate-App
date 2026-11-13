@@ -33,7 +33,7 @@ use crate::frame::objects_of;
 use crate::ik::{angle_table, assign, bake_object, controllers, displayed_angle, has_pinned, joined_table, reference_value, same_bend, set_controller, solve_frame, translate_targets};
 use crate::record::{join_target, num, uid};
 use crate::select::{resolve_join_selection, SelectionState};
-use crate::sheet::{constant, continuations, fixed, items, key_at, signature, Plan, Write};
+use crate::sheet::{changed_pose, constant, continuations, fixed, items, key_at, Plan, Write};
 use crate::timeline::{rows, total_ticks, Row};
 use crate::{Drag, EditError, Editor};
 
@@ -598,7 +598,7 @@ impl Editor {
         let objects = current.iter().map(|object| {
             let Some(id) = uid(object).filter(|id| component.contains(id)) else { return object.clone() };
             let before = old.iter().find(|object| uid(object) == Some(id));
-            if before.is_some_and(|before| signature(before, &old) == signature(object, &current)) { return before.unwrap().clone(); }
+            if before.is_some_and(|before| !changed_pose(before, &old, object, &current)) { return before.unwrap().clone(); }
             changed.push(id); snapshot_object(object)
         }).collect::<Vec<_>>();
         let mut settled = candidate.clone(); settled.make_obj().unwrap().set("objects", Value::array(objects));
@@ -644,7 +644,7 @@ impl Editor {
             let candidate = stored_candidate(&stored, &posed.working, &session.component, session.target.camera);
             let previous = objects_of(&stored); let current = objects_of(&candidate);
             let after = current.iter().filter(|object| uid(object).is_some_and(|id| session.component.contains(&id)) &&
-                previous.iter().find(|before| uid(before) == uid(object)).is_none_or(|before| signature(before,&previous) != signature(object,&current))).map(snapshot_object).collect::<Vec<_>>();
+                previous.iter().find(|before| uid(before) == uid(object)).is_none_or(|before| changed_pose(before, &previous, object, &current))).map(snapshot_object).collect::<Vec<_>>();
             self.drag = None;
             if after.is_empty() { self.emit("edit", vec![("motionPath", Value::Bool(true))]); return Ok(false); }
             self.check_native_motion_records(&candidate, &after.iter().filter_map(uid).collect::<Vec<_>>())?;
@@ -2022,7 +2022,7 @@ fn changed_uids(posed: &Posed, component: Option<&[u32]>) -> Vec<u32> {
             continue;
         }
         let previous = before.iter().find(|o| uid(o) == Some(id));
-        if previous.is_none_or(|p| signature(p, &before) != signature(object, &after)) {
+        if previous.is_none_or(|p| changed_pose(p, &before, object, &after)) {
             changed.push(id);
         }
     }

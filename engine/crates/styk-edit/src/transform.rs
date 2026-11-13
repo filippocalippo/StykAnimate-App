@@ -255,8 +255,11 @@ impl Editor {
                 }
                 editor.drag.as_mut().unwrap().detached.extend(detached.iter().map(|(k, v)| (*k, *v)));
             }
+            // The figures as the detaching above left them, read once: the loop changes each slot only after reading it (a read of the
+            // whole list for each figure moved was quadratic in a selection of thousands).
+            let objects = if external.is_empty() { objects } else { editor.frame_objects() };
             for &slot in &affected {
-                let object = editor.frame_objects().swap_remove(slot);
+                let object = objects[slot].clone();
                 let id = uid(&object).unwrap();
                 // Pinned targets go with the figure only when asked (`movePins`); `fromStart`
                 // puts them back where the gesture found them first.

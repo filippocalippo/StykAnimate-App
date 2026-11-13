@@ -3,6 +3,7 @@
 //! `_followSheetSelection`, `keepSelectionOnSeek`, `setActiveLayer`).
 
 use styk_doc::Value;
+use styk_doc::fast::FastSet;
 
 use crate::record::{join_target, uid};
 use crate::timeline::{rows, total_ticks};
@@ -263,15 +264,13 @@ impl Editor {
     pub(crate) fn select_many(&mut self, uids: &[u32]) -> Result<Value, EditError> {
         self.selection_metadata.branch = None;
         let frame = self.selection_frame()?;
-        let mut selected = Vec::new();
-        for &u in uids {
-            if frame.iter().any(|o| uid(o) == Some(u)) && !selected.contains(&u) {
-                selected.push(u);
-            }
-        }
+        // The figures on show and those taken, as sets: a selection of thousands is looked up once a figure, not by a scan.
+        let shown: FastSet<u32> = frame.iter().filter_map(uid).collect();
+        let mut taken: FastSet<u32> = FastSet::default();
+        let selected: Vec<u32> = uids.iter().copied().filter(|u| shown.contains(u) && taken.insert(*u)).collect();
         self.select_ids(selected);
         self.emit("selection", vec![]);
-        Ok(Value::array(frame.into_iter().filter(|o| uid(o).is_some_and(|u| self.selection.uids.contains(&u))).collect()))
+        Ok(Value::array(frame.into_iter().filter(|o| uid(o).is_some_and(|u| taken.contains(&u))).collect()))
     }
 
     pub(crate) fn seek(&mut self, tick: f64) -> Result<Value, EditError> { self.seek_checked(tick,&mut || Ok(())) }
@@ -395,11 +394,11 @@ impl Editor {
         self.frame_index = state.frame_index.min(frames.saturating_sub(1));
         let total = total_ticks(&rows(&self.report));
         self.tick = state.tick.clamp(0.0, (total - 1.0).max(0.0));
-        let existing: Vec<u32> = self.selection_frame()?.iter().filter_map(uid).collect();
+        let existing: FastSet<u32> = self.selection_frame()?.iter().filter_map(uid).collect();
         let selected = state.selection.uid.filter(|u| existing.contains(u));
-        let mut uids = Vec::new();
-        for &uid in &state.selection.uids { if existing.contains(&uid) && !uids.contains(&uid) { uids.push(uid); } }
-        let selected = if selected.is_some_and(|u| uids.contains(&u)) { selected } else { uids.last().copied() };
+        let mut taken: FastSet<u32> = FastSet::default();
+        let uids: Vec<u32> = state.selection.uids.iter().copied().filter(|u| existing.contains(u) && taken.insert(*u)).collect();
+        let selected = if selected.is_some_and(|u| taken.contains(&u)) { selected } else { uids.last().copied() };
         self.selection = Selection { uid: selected, uids, joint: if selected.is_none() { -1 } else { state.selection.joint } };
         let mut metadata = styk_doc::Obj::new();state.write_metadata(&mut metadata);
         self.set_selection_metadata(&Value::object(metadata))?;
