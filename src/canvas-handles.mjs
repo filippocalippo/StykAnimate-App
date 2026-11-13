@@ -33,9 +33,10 @@ export function createCanvasHandles(app) {
    * figure changes: a gesture shows a new frame each step, with the same figures. */
   let handleFigures = {key: null, bound: null, types: null, flags: new Map(), figures: new Map()};
   let handleSettleTimer = 0, handlesResting = false;
-  /** The view's scale at the last draw and when it last changed: a zoom is in progress, and the joints are painted at quantised
-   * sizes, until the scale has not changed for `ZOOM_REST_MS` (a frame between two notches of a wheel is still the zoom). */
-  let drawnScale = null, scaleChanged = -Infinity;
+  /** The view's scale at the last draw and when it last changed. A scale that changes again within `ZOOM_REST_MS` of its last
+   * change is a zoom in progress: the joints are painted at quantised sizes until the scale has not changed for that long (a
+   * frame between two notches of a wheel is still the zoom). A single change (fitting the view, one step) is painted exact. */
+  let drawnScale = null, scaleChanged = -Infinity, zoomGesture = false;
 
   function frameHandles(frame) {
     const key = `${editor.layerViewKey}|${[...state.hidden].join(',')}|${[...state.locked].join(',')}`, bound = app.builderMode()?.boundUids ?? null;
@@ -114,7 +115,8 @@ export function createCanvasHandles(app) {
     }
     const {hidden, locked} = shown;
     // A selection whose own joints exceed the budget shows them for the figures selected last only (docs/SCENE-EDITING.md).
-    const originsOnlyUids = shown.dense ? selectedOriginsOnly(app.selection(), editor.selectedUid, shown.jointsOf) : null;
+    // One figure selected always keeps its joints: the counts are not needed.
+    const selected = app.selection(), originsOnlyUids = shown.dense && selected.size > 1 ? selectedOriginsOnly(selected, editor.selectedUid, shown.jointsOf) : null;
     const built = getPivotHandles(geometry, {
       showDetailed: rigDetailsShown(editor),
       spatialMode: builderMode?.active || !['select','pose'].includes(state.tool) ? 'pose' : spatialControlMode(editor),
@@ -150,9 +152,10 @@ export function createCanvasHandles(app) {
     const shown = handles(geometry),
       translations = state.drag?.translations;
     const d = window.devicePixelRatio || 1, now = performance.now();
-    if (drawnScale !== null && drawnScale !== state.view.scale) scaleChanged = now;
+    if (drawnScale !== null && drawnScale !== state.view.scale) { zoomGesture = now - scaleChanged < ZOOM_REST_MS; scaleChanged = now; }
+    else if (now - scaleChanged >= ZOOM_REST_MS) zoomGesture = false;
     drawnScale = state.view.scale;
-    const zooming = now - scaleChanged < ZOOM_REST_MS;
+    const zooming = zoomGesture;
     // The view and the camera are affine: the matrix carries the projection, and its translation alone changing is a pan.
     const drawn = overlay.draw(app.ctx, shown, {matrix: affineProjection(app.project), projectionKey: handleCache.key,
       width: app.overlay.width / d, height: app.overlay.height / d, dpr: d, translations,

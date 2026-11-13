@@ -227,8 +227,9 @@ that, as before. A selection dragged by an origin (every figure moved by the sam
 the same way by the delta: its joints are stamped once at the press and then only where the drag brings new ones into
 view, and painted afresh once the drag rests a moment and when it ends; figures moved by different deltas are stamped over
 the picture every frame. A zoom resizes the joints' descriptors instead of building them again, and when the zoom makes every joint the smallest (or largest)
-size the segments' lengths are not read at all. While a zoom is in progress (the view's scale changed less than 150 ms
-ago, `ZOOM_REST_MS` in `src/canvas-handles.mjs`), each joint is stamped at its size rounded down to half a backing pixel,
+size the segments' lengths are not read at all. While a zoom is in progress (the view's scale changes again less than
+150 ms after its last change, `ZOOM_REST_MS` in `src/canvas-handles.mjs`; a single change such as fitting the view is
+painted exact at once), each joint is stamped at its size rounded down to half a backing pixel,
 so a zoom paints a few pictures instead of a hundred new ones each frame, and a joint is never drawn larger than where a
 click finds it; once the scale has been still that long, the joints are painted at their exact sizes.
 
