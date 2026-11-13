@@ -170,6 +170,44 @@ test('the environment a profiling run asks for reaches the page only as the thre
   for (const text of [undefined, '', 'not json', '[]', '{}', '{"deviceMemoryGiB": -1}']) assert.equal(profilingEnvironment(text), null);
 });
 
+test('a dialog answer given over the control channel answers one dialog of its kind, and an unanswered dialog is cancelled only when asked', async () => {
+  const {createDialogAnswers, answerDialogs} = createRequire(import.meta.url)('../desktop/devtools.cjs');
+  const shown = [];
+  const dialog = {showSaveDialog: async (_window, options) => { shown.push(['save', options.title]); return {canceled: true, filePath: ''}; },
+    showOpenDialog: async options => { shown.push(['open', options.title]); return {canceled: true, filePaths: []}; },
+    showErrorBox: title => { shown.push(['error', title]); }};
+  const answers = createDialogAnswers({now: () => 7});
+  const restore = answerDialogs(dialog, answers);
+  const file = path.resolve(os.tmpdir(), 'styk-answer.styk');
+  assert.deepEqual(answers.answer({kind: 'save', path: file}).pending, {save: 1, open: 0});
+  answers.answer({kind: 'open', path: file});
+  answers.answer({kind: 'save', cancel: true});
+  // Answers are used in the order given, each once, by the dialog of their own kind; the window and its options pass as Electron gives them.
+  assert.deepEqual(await dialog.showSaveDialog({}, {title: 'Save', defaultPath: 'a.styk'}), {canceled: false, filePath: file});
+  assert.deepEqual(await dialog.showOpenDialog({title: 'Open'}), {canceled: false, filePaths: [file]});
+  assert.deepEqual(await dialog.showSaveDialog({}, {title: 'Save'}), {canceled: true, filePath: ''});
+  assert.deepEqual(shown, []);
+  // With nothing queued the real dialog shows, until the driver asks for unanswered dialogs to be cancelled.
+  await dialog.showSaveDialog({}, {title: 'Shown'});
+  assert.deepEqual(shown, [['save', 'Shown']]);
+  answers.answer({unanswered: 'cancel'});
+  assert.deepEqual(await dialog.showOpenDialog({}, {title: 'Refused'}), {canceled: true, filePaths: []});
+  // An error box holds the main process: it is recorded with its message instead of shown.
+  dialog.showErrorBox('Unable to open file', 'The file is damaged.');
+  assert.equal(shown.length, 1);
+  const status = answers.status();
+  assert.deepEqual(status.asked.map(row => row.answer), [file, file, 'cancelled', 'shown', 'cancelled (unanswered)', 'not shown']);
+  assert.equal(status.asked.at(-1).message, 'The file is damaged.');
+  assert.deepEqual([status.asked[0].title, status.asked[0].defaultPath, status.asked[0].at], ['Save', 'a.styk', 7]);
+  // Wrong arguments are refused with a sentence; clear drops what waits.
+  for (const args of [{kind: 'print', path: file}, {kind: 'save', path: 'relative.styk'}, {kind: 'save'}, {unanswered: 'maybe'}]) assert.throws(() => answers.answer(args), /kind|absolute path|unanswered/);
+  answers.answer({kind: 'save', path: file});
+  assert.deepEqual(answers.answer({clear: true}).pending, {save: 0, open: 0});
+  restore();
+  await dialog.showSaveDialog({}, {title: 'Restored'});
+  assert.deepEqual(shown.at(-1), ['save', 'Restored']);
+});
+
 test('the Perfetto export is Chrome trace JSON with named threads', () => {
   const r = ring(8);
   push(r, 'paint', 10, 2.5, {args: {playing: false}});

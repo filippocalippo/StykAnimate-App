@@ -7,7 +7,8 @@
  * touches their settings, library or recovery files. Three connections come back:
  *   - the inspector protocol (inspector.mjs): input, profiles of every thread, tracing, the processes' CPU time;
  *   - the developer tools' control channel in the page (`request`): the app's own operations and captures;
- *   - on the desktop, the control channel's pipe (`pipe`): opening a file as the shell does, the processes' memory.
+ *   - on the desktop, the control channel's pipe (`pipe`): opening a file as the shell does, the processes' memory,
+ *     answering the save and open dialogs.
  */
 import {execFile, spawn} from 'node:child_process';
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
@@ -148,7 +149,11 @@ export class App {
 
   /** After the app is ready: the pipe, the environment's processor slowdown, and a stage nothing covers. */
   async prepare() {
-    if (this.kind === 'desktop') this.pipe = await connectPipe(this.pid);
+    if (this.kind === 'desktop') {
+      this.pipe = await connectPipe(this.pid);
+      // A run cannot answer a native dialog: one it did not answer ahead (answerDialog) is cancelled, never shown.
+      await this.shell('dialog.answer', {unanswered: 'cancel'});
+    }
     await this.inspector.send('Page.enable', {}, this.page).catch(() => {});
     const rate = this.environment.cpuSlowdown ?? 1;
     if (rate > 1) {
@@ -178,13 +183,23 @@ export class App {
     return answer.result;
   }
 
-  /** One operation only the desktop's main process answers (`open {path}`, `process.metrics`). */
+  /** One operation only the desktop's main process answers (`open {path}`, `process.metrics`, `dialog.answer`). */
   async shell(op, args = {}) {
     if (!this.pipe) throw new Error(`${op} needs the desktop app: this run is in a browser.`);
     const answer = await this.pipe.request(op, args);
     if (!answer.ok) throw new Error(`${op}: ${answer.error.what}${answer.error.cause ? ` (${answer.error.cause})` : ''}`);
     return answer.result;
   }
+
+  /**
+   * Answers the desktop's next save or open dialog (`kind`: 'save' or 'open') with `file`, an absolute path; `null`
+   * answers it as cancelled. Returns the dialogs' status: answers still waiting and the last dialogs asked, with what
+   * answered each (`dialog.answer`, docs/DEVTOOLS.md). The browser has no such dialogs: its saves are downloads.
+   */
+  answerDialog(kind, file) { return this.shell('dialog.answer', file === null ? {kind, cancel: true} : {kind, path: file}); }
+
+  /** The desktop's dialogs now: answers waiting, and the last dialogs asked with what answered each. `clear: true` drops the waiting answers. */
+  dialogs({clear = false} = {}) { return this.shell('dialog.answer', clear ? {clear: true} : {}); }
 
   /**
    * Opens the document at `file` as a person does. On the desktop the shell opens it, as it opens a file from
