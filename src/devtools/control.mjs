@@ -107,11 +107,14 @@ export function createControl(runtime) {
       // The app's own steps (src/trace.mjs `tracePhase`), and before the first of them the page and its scripts loading.
       const steps = events.filter(event => event.thread === 'phases').map(event => ({name: event.name.replace(/^start: /, ''), startMs: round(event.start, 1), ms: round(event.duration, 1)}));
       const longTasks = events.filter(event => event.name === 'long task');
+      // The spans before ready that say what a step waited for (the engine's load, the graphics calls, the long tasks): not the phases, frames or counters.
+      const spans = events.filter(event => event.duration >= 0 && event.thread !== 'phases' && event.thread !== 'display' && event.name !== 'animation frame')
+        .slice(0, 120).map(event => ({name: event.name, thread: event.thread, startMs: round(event.start, 1), ms: round(event.duration, 1), ...(event.args?.syncMs >= 1 ? {syncMs: round(event.args.syncMs, 1)} : {})}));
       return {timeOrigin: performance.timeOrigin, responseEndMs: round(navigation?.responseEnd, 1), domContentLoadedMs: round(navigation?.domContentLoadedEventEnd, 1),
         firstPaintMs: round(paints['first-paint'], 1), firstContentfulPaintMs: round(paints['first-contentful-paint'], 1),
         engineLoadedMs: engineLoad ? round(engineLoad.start + engineLoad.duration, 1) : null, engineLoadMs: engineLoad ? round(engineLoad.duration, 1) : null,
         readyMs: round(runtime.readyAt, 1), phases: steps.length ? [{name: 'page and scripts', startMs: 0, ms: steps[0].startMs}, ...steps] : [],
-        longTasks: {count: longTasks.length, ms: round(longTasks.reduce((total, event) => total + event.duration, 0), 1)}};
+        longTasks: {count: longTasks.length, ms: round(longTasks.reduce((total, event) => total + event.duration, 0), 1)}, spans};
     },
     /** Measures the display's period over `frames` frames (call it while the app is idle): the budget every frame is judged against. */
     'display.period': async ({frames: count = 45} = {}) => {

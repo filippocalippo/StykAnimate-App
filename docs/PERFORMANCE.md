@@ -124,7 +124,10 @@ truth, and compare only runs taken under similar conditions.
   machine, and a slow app shows as fewer, later frames.
 - **Startup** is the launch itself: measured apart, three fresh launches per environment, on a bundle built from this
   checkout as a packaged app starts (`perf/lib/startup.mjs`; [APP-START.md](APP-START.md)), with the app's own steps as
-  phases. Every other scenario runs from the sources, where a profile can name the module a function is in.
+  phases. Every other scenario runs from the sources, where a profile can name the module a function is in. A run that
+  names its scenarios measures no startup unless it names `app.start` (or `startup`): `--scenario app.start` alone
+  measures only the launches (`--passes` of them, at least three) and opens no workload. `show <run> app.start` prints
+  the first launch's steps and the spans until ready (the engine's start, the graphics calls, the long tasks).
 
 ### How a run reaches the app
 

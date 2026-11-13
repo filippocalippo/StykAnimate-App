@@ -63,6 +63,8 @@ function parse(argv, flags = []) {
   return {words, options};
 }
 const list = text => String(text).split(',').map(part => part.trim()).filter(Boolean);
+/** The scenario words that name the launch (perf/lib/startup.mjs), which no scenario module defines. */
+const STARTUP_WORDS = new Set(['app.start', 'startup']);
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : /(ch|sh|s|x)$/.test(word) ? 'es' : 's'}`;
 
 async function run(argv) {
@@ -70,8 +72,14 @@ async function run(argv) {
   if (words.length > 1) throw new Usage('`run` takes one suite name; scenarios go in --scenario.');
   const name = words[0] ?? 'quick', plan = suiteNamed(name), first = plan.parts[0];
   // Options replace the suite's parts with one: what an option does not name comes from the suite's first part.
+  // `--scenario app.start` (or `startup`) names the launch itself, which is measured apart (below): with no other scenario named,
+  // the run measures only the launches and opens no workload.
+  const named = options.scenario ? list(options.scenario) : null;
+  const startupNamed = Boolean(named?.some(word => STARTUP_WORDS.has(word)));
+  const others = named?.filter(word => !STARTUP_WORDS.has(word));
+  const startupOnly = startupNamed && !others.length;
   const parts = options.env || options.workload || options.scenario
-    ? [{environments: options.env ? list(options.env) : first.environments, workloads: options.workload ? list(options.workload) : first.workloads, scenarios: options.scenario ? list(options.scenario) : first.scenarios}]
+    ? [{environments: options.env ? list(options.env) : first.environments, workloads: options.workload ? list(options.workload) : first.workloads, scenarios: others?.length ? others : first.scenarios}]
     : plan.parts;
   let parameters = null, experiment = null;
   try { parameters = options.param ? parseParameters(options.param) : null; } catch (error) { throw new Usage(error.message); }
@@ -81,9 +89,11 @@ async function run(argv) {
   if (!Number.isInteger(passes) || passes < 1 || passes > 20) throw new Usage('--passes is 1 to 20.');
   const label = options.label ?? timeLabel(), profile = !options['no-profile'], started = performance.now();
   const log = text => console.error(`[perf] ${text}`);
-  log(`${plural(planned.length, 'launch')}, ${plural(planned.reduce((total, pair) => total + pair.scenarios.length, 0), 'scenario run')}, ${passes} timed pass${passes === 1 ? '' : 'es'}${profile ? ' + 1 profiled' : ''} each`);
-  // Startup is the launch itself: measured apart, on the bundle a packaged app starts from, unless the run names its scenarios.
-  const measuresStartup = !options['no-startup'] && !options.scenario && !experiment;
+  if (startupOnly) log(`the start only: ${plural(new Set(planned.map(pair => pair.environment.id)).size, 'environment')}, ${plural(Math.max(3, passes), 'fresh launch')} each`);
+  else log(`${plural(planned.length, 'launch')}, ${plural(planned.reduce((total, pair) => total + pair.scenarios.length, 0), 'scenario run')}, ${passes} timed pass${passes === 1 ? '' : 'es'}${profile ? ' + 1 profiled' : ''} each`);
+  // Startup is the launch itself: measured apart, on the bundle a packaged app starts from, unless the run names its scenarios without it.
+  const measuresStartup = !options['no-startup'] && (!options.scenario || startupNamed) && !experiment;
+  if (startupNamed && !measuresStartup) throw new Usage(`app.start cannot be measured ${experiment ? 'in an experiment' : 'with --no-startup'}.`);
   const bundle = measuresStartup ? await buildBundle().catch(error => { log(`The bundle did not build (${String(error.message).split(/\r?\n/)[0]}): startup is measured from the sources.`); return null; }) : null;
   const pairs = [], startups = new Set(), at = new Date().toISOString(), described = {build: build(), machine: machine()};
   const resultOf = () => ({schema: SCHEMA, label, at, suite: name, passes, profile, seconds: (performance.now() - started) / 1000, ...described, pairs});
@@ -91,7 +101,9 @@ async function run(argv) {
     // An environment's startup is measured once and shown with its first workload.
     const startup = measuresStartup && chosen.host === 'desktop' && !startups.has(chosen.id) ? await measureStartup(chosen, {launches: Math.max(3, passes), bundle, log}) : null;
     startups.add(chosen.id);
-    const pair = await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), experiment, parameters, log});
+    if (startupOnly && !startup) continue;
+    const pair = startupOnly ? {environment: {id: chosen.id, title: chosen.title, description: chosen.description}, workload: {id: spec.id, title: spec.title, description: spec.description},
+      facts: null, startup: null, scenarios: [], memory: [], error: null} : await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), experiment, parameters, log});
     if (startup) pair.scenarios.unshift(startup);
     pairs.push(pair);
     // A long run keeps what it has measured: stopped now, its folder holds every launch finished so far, and says so.
