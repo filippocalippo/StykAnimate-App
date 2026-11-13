@@ -12,7 +12,9 @@ steps on the way (the desktop shell, the page and its scripts, the interface, th
    Chromium's renderer main thread pays a fixed cost per request, so the number of requests matters more than their size.
 3. **The scripts and styles**: the packaged app serves the application as a bundle (below): about a dozen files at launch. From source the page loads about 370 modules
    and 92 stylesheets, which is slower to start and exists so that tests and development see the sources.
-4. **`init()`** (`src/app.mjs`): settings, locale, the shell, then the stage (`createRenderer`), which waits for the graphics process.
+4. **The engine and the stage** (`src/engine/engine-start.mjs`, the page's first script): the engine's WebAssembly compiles; once the page has painted its
+   first frame, the scene's WebGPU adapter is asked for and the stage starts over the scene canvas (as soon as the module is instantiated too) (below, "Asking for the device sooner").
+5. **`init()`** (`src/app.mjs`): settings, locale, the shell, then the stage (`createRenderer`), which takes the stage started in step 4 and waits for it.
 
 ## The bundle
 
@@ -40,11 +42,37 @@ The scripts are not minified: five interleaved runs each gave the same ready tim
 
 **Crash reports.** `sanitizeError` (`src/telemetry-schema.mjs`) names only allowlisted module basenames and lines. Bundled, a frame would be `chunk-HASH.mjs:LINE`, which is not on the list, or `app.mjs` at a line of the bundle. The build therefore reads each script's source map once (`frameTable` in `scripts/build-app.mjs`), writes the lines that came from allowlisted modules as `[module, last line, bundle line, source line, ...]` runs, and deletes the maps. The page loads the tables as a classic script (`src/frame-map.js`) before any module; a worker has its own at the start of its first line. A frame is then reported as the module and its source line, as it would be unbundled.
 
+## Asking for the device sooner
+
+What the stage waits for is a chain of round trips to the browser's graphics process, each of which waits for that process's one main thread and for the
+page's interface thread to take the answer. Before November 2026 the chain was: the engine's WebAssembly ready, its first two threads joined, then wgpu's
+WebGPU detection (an adapter asked for and dropped), the adapter, the device, and on a machine whose driver Chromium refuses for WebGPU, a fourth request
+for the adapter's name. A worker asked for its own adapter and device meanwhile, which warmed nothing the page uses: each page and worker has its own
+connection to the graphics process. Now (spans of the `graphics calls` and `engine start` lanes, `npm run perf -- show <run> app.start`):
+
+- **The adapter is asked for once the page has painted** (`src/engine/engine-adapter.mjs`), beside the engine's compile, and its answer is handed to the engine's
+  own request with the same options (wgpu asks through `navigator.gpu`, so the hand-off is there; a second stage, after a lost device, asks afresh). Its
+  description names the adapter in the status line, which the warm-up worker did before; the worker is gone. The page's first WebGPU call holds the
+  interface thread while its connection is set up (`syncMs` on the span: 2 to 300 ms, more when the graphics process is busy); it did so before too, inside the stage.
+- **One adapter request per device** (`engine/crates/styk-wasm/src/gpu.rs`, used by the stage, the preview worker and the export worker): WebGPU where the
+  browser gives an adapter, else WebGL2, without wgpu's detection. On a busy machine (other builds at 100% of the processor) the detection took 1.1 s and the
+  adapter after it 0.66 s; a machine whose driver is refused waits for one "no adapter" instead of two.
+- **The stage starts before the engine's threads join** (`loadEngine({stage})`): it needs the engine's handle, not its threads.
+- **Both wait for the page's first paint** (at most 0.3 s, `afterFirstPaint` in `engine-start.mjs`): started before it, their synchronous parts (the
+  connection's setup, WebGL2's shader link) held the first pixels back by 0.2 to 0.5 s on every environment.
+- **A WebGL2 stage is named by the engine** (`adapterName` in `src/engine/engine-stage.mjs`): asking WebGPU for the name of a WebGL2 stage waited for one more
+  "no adapter", up to 1.5 s, and would have named another device.
+
+On a refused driver (`--env webgl`) the largest single wait is the engine's primitive shader program: its link status (`gl: getProgramParameter`) holds the
+interface thread for about 1.6 s on a cold profile, the shader translated and compiled behind it (ANGLE on Direct3D 11). wgpu's GL backend asks for the status
+at once, so the compile cannot overlap anything on that thread; the stage now starts it before the interface is built, so the interface waits for it instead of after it.
+A program cache in the profile makes later launches cheaper; the measured start is always a fresh profile.
+
 ## The stage's wait for the graphics process
 
 Marks across a launch (bundled app, fresh profile, a quiet machine; page milliseconds) put the stage's creation at about 0.55 s and its end at about 1.9 s. Its
 three calls to the browser (`requestAdapter` for the detection wgpu does, `requestAdapter` and `requestDevice`) took 0.7 s, 0.4 s and 0.08 s, but the same calls in a bare window
-take 0.15 s, 0 s and 0.05 s, and leaving out the detection request changed nothing. The graphics process's one main thread was busy: a trace showed it
+take 0.15 s, 0 s and 0.05 s, and leaving out the detection request (emulated in the page) changed nothing then; see "Asking for the device sooner" for what it costs where the chain waits for a busy interface thread. The graphics process's one main thread was busy: a trace showed it
 rasterizing the interface (`RasterDecoderImpl::DoEndRaster`, 0.36 s and then 0.41 s, compiling shaders on a cold cache) while the stage's WebGPU commands
 waited behind it.
 
@@ -64,7 +92,8 @@ real work either way: on the renderer's raster threads with the switch, on the g
   takes about 0.33 s to compile in a cold profile and 3 to 5 ms with the on-disk cache (`DawnWebGPUCache` in the profile, kept between launches), and the
   first picture is drawn 10 to 20 ms after `styk.ready`: the compile overlaps the rest of the stage. Compiling with DXC instead of FXC
   (`--enable-dawn-features=use_dxc`) changed it by about 20 ms.
-- **Detection request.** Leaving out wgpu's WebGPU detection request (emulated in the page) changed the stage's time by nothing.
+- **Detection request.** Leaving out wgpu's WebGPU detection request (emulated in the page) changed the stage's time by nothing in an earlier quiet measurement; it is
+  left out now ("Asking for the device sooner"), because each request of the chain waits for the interface thread and the graphics process.
 - **Yields in `init()`.** A macrotask yield after the shell and before the timeline mounts moved the stage's median 65 ms (noise-sized) and left ready where it was; events could then
   run on a half-built interface, so it is not in.
 - **The engine before the application.** `src/app.mjs` awaits `loadEngine()` at the top of its body (`useEngine(await loadEngine())`), because the
@@ -107,7 +136,7 @@ Nothing moves it: less to paint does not shorten the wait. A trace of the graphi
 `RasterDecoderImpl::DoEndRaster` tasks (1.39 s in the baseline), two of them about 0.33 s each and the first before any script runs. So those are not the visible page's content: they are
 the raster path's own first-use work (its context and shaders, cold) and the canvases' drawing. The stage's WebGPU commands (0.7 to 0.9 s of tasks) queue between them, and after
 `Stage.create` the same thread compiles the engine's primitive shader (0.48 to 0.60 s in `HandleDawnCommands`), which is what the first picture waits for: `styk.ready` is set before it,
-and the first-frame counter (`engineStats.frames`) counts frames submitted, not shown. Compiling it earlier would mean creating the same pipeline from the page's warm-up worker, a second copy of the renderer's
+and the first-frame counter (`engineStats.frames`) counts frames submitted, not shown. Compiling it earlier would mean creating the same pipeline from a worker of the page, a second copy of the renderer's
 pipeline description in JavaScript that Dawn's cache would only share if every detail matched; `createRenderPipelineAsync` is not offered by wgpu. Neither was done.
 
 Shader caches persist: after a launch the profile holds `GPUCache` (1.6 MB), `DawnGraphiteCache` (0.5 MB) and `DawnWebGPUCache` (5.6 MB), and the next launch of the same profile read them (the bare-window

@@ -23,6 +23,7 @@ pub mod document_export;
 pub mod edit;
 pub mod engine;
 pub mod export;
+mod gpu;
 pub mod math;
 pub mod open;
 pub mod preview;

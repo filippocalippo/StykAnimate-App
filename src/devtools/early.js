@@ -241,6 +241,43 @@
     }, {capture: true, passive: true});
   }
 
+  // --- graphics calls ----------------------------------------------------------------------------------------------
+  /**
+   * The page's requests to the browser's graphics process, timed where the browser answers them: the adapter, the device,
+   * a canvas's WebGPU or WebGL context, and the render pipelines (`createRenderPipeline` returns at once, the compile
+   * follows in the graphics process). The start of the app waits for these (docs/APP-START.md); the engine asks for
+   * them from WebAssembly, so the spans name what no span of the app can. Thread `graphics calls`.
+   */
+  const timeAsync = (target, method, name) => {
+    const native = target?.[method];
+    if (typeof native !== 'function') return;
+    target[method] = function (...args) {
+      const started = now(), answer = native.apply(this, args), sync = now() - started;
+      const done = (value) => { trace.complete(name, started, now() - started, {answered: value != null, syncMs: sync}, 'graphics calls'); return value; };
+      return answer && typeof answer.then === 'function' ? answer.then(done, (error) => { trace.complete(name, started, now() - started, {failed: String(error?.message ?? error)}, 'graphics calls'); throw error; }) : done(answer);
+    };
+  };
+  timeAsync(globalThis.GPU?.prototype, 'requestAdapter', 'gpu: requestAdapter');
+  timeAsync(globalThis.GPUAdapter?.prototype, 'requestDevice', 'gpu: requestDevice');
+  timeAsync(globalThis.GPUDevice?.prototype, 'createRenderPipeline', 'gpu: createRenderPipeline');
+  // WebGL2's calls that wait for the graphics process (a shader's or program's status, a parameter): a span when one waits 2 ms or more.
+  for (const method of ['getProgramParameter', 'getShaderParameter', 'getParameter', 'getExtension', 'getSupportedExtensions', 'getError', 'readPixels', 'clientWaitSync']) {
+    const native = globalThis.WebGL2RenderingContext?.prototype?.[method];
+    if (typeof native !== 'function') continue;
+    WebGL2RenderingContext.prototype[method] = function (...args) {
+      const started = now(), answer = native.apply(this, args), took = now() - started;
+      if (took >= 2) trace.complete(`gl: ${method}`, started, took, null, 'graphics calls');
+      return answer;
+    };
+  }
+  const nativeContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+    if (type !== 'webgpu' && type !== 'webgl2' && type !== 'webgl') return nativeContext.call(this, type, ...rest);
+    const started = now(), context = nativeContext.call(this, type, ...rest);
+    trace.complete(`canvas: getContext ${type}`, started, now() - started, {answered: context != null}, 'graphics calls');
+    return context;
+  };
+
   // --- logs --------------------------------------------------------------------------------------------------------
   const LOGS = 4096;
   const logs = {rows: [], dropped: 0, sequence: 0};

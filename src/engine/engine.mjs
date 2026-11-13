@@ -10,7 +10,7 @@
  */
 import init, {EditSession, EngineHandle, Stage, api_version} from './pkg/styk_engine.js';
 import {declaredMemoryPages} from './engine-memory.mjs';
-import {traceBegin, traceEnd, tuned} from '../trace.mjs';
+import {traceBegin, traceComplete, traceEnd, tuned} from '../trace.mjs';
 
 /** The command/query API this loader was written for. */
 const API_VERSION = 1;
@@ -29,18 +29,20 @@ let loading = null;
 
 let adapterInfo = null;
 /**
- * Records the promise of the graphics adapter's description (vendor, architecture, device) that the page's warm-up worker
- * is fetching (engine-start.mjs): the stage names its adapter from it instead of asking the browser a third time, which
+ * Records the promise of the description (vendor, architecture, device) of the adapter the page asked for as it started
+ * (engine-start.mjs, engine-adapter.mjs): the stage names its adapter from it instead of asking the browser again, which
  * took over half a second on a first launch.
  */
 export function expectAdapterInfo(promise) { adapterInfo = promise; }
 
-/** That promise (it resolves to the description, or null where there is none), or null when no warm-up was started. */
+/** That promise (it resolves to the description, or null where there is none), or null when the page did not ask. */
 export const expectedAdapterInfo = () => adapterInfo;
 
 /**
  * Loads the engine once per page.
- * @param {{workers?: number, deviceMemory?: number}} [options]
+ * @param {{workers?: number, deviceMemory?: number, stage?: Promise<HTMLCanvasElement|null>}} [options] `stage`: the scene canvas (when it settles),
+ *   whose stage starts as soon as both it and the module are ready (before the engine's threads have joined), for `createStage` to take
+ *   (engine-start.mjs). A canvas whose stage was taken already is left alone.
  * @returns {Promise<{handle: EngineHandle, workers: number, threaded: boolean, createStage(canvas: HTMLCanvasElement): Promise<Stage>,
  *   open(bytes: Uint8Array, extension: string, name: string): Promise<object>, whenProgress(seen?: number, timeoutMs?: number): Promise<void>, progressSeen(): number, destroy(): void}>}
  */
@@ -94,7 +96,7 @@ const ATLAS_PAGES_SPEC = Object.freeze({min: 0, max: 64, description: 'Sprite la
 const MEMORY_MAXIMUM_SPEC = Object.freeze({min: 0, max: 2048, description: 'The most the engine memory may reserve, in MiB: 512, 1024 or 2048, as a device with little address space gets (applies when the app reloads; 0: the largest the device accepts)'});
 
 async function load({workers = tuned('engine.workers', defaultWorkerCount(), WORKERS_SPEC),
-  deviceMemory = globalThis.navigator?.deviceMemory} = {}) {
+  deviceMemory = globalThis.navigator?.deviceMemory, stage = null} = {}) {
   const span = traceBegin('engine load');
   const source = new URL('./pkg/styk_engine_bg.wasm', import.meta.url);
   const {module, pages} = await compile(source);
@@ -123,11 +125,25 @@ async function load({workers = tuned('engine.workers', defaultWorkerCount(), WOR
   // The sprite pages a document's pictures keep resident; 0 leaves the engine's own default.
   const atlasPages = tuned('engine.atlasPages', 0, ATLAS_PAGES_SPEC);
   if (atlasPages > 0) handle.set_atlas_pages(atlasPages);
-  if (threaded) await Promise.all(Array.from({length: Math.min(workers, LAUNCH_WORKERS)}, spawn));
+  const stages = stageHandoff(canvas => {
+    const started = performance.now(), created = Stage.create(canvas, handle);
+    created.then(() => traceComplete('stage create', started, performance.now() - started, null, 'engine start'), () => {});
+    return created;
+  });
+  // The stage needs the engine's handle, not its threads: its graphics device is asked for while they start.
+  const preparing = stage ? Promise.resolve(stage).then(canvas => { if (canvas) stages.prepare(canvas); return canvas; }, () => null) : null;
+  try {
+    const joining = performance.now();
+    if (threaded) await Promise.all(Array.from({length: Math.min(workers, LAUNCH_WORKERS)}, spawn));
+    traceComplete('engine threads join', joining, performance.now() - joining, null, 'engine start');
+  } catch (error) {
+    // This engine is given up (the application's call loads another): the stage it started is nobody's.
+    preparing?.then(canvas => canvas && stages.release(canvas));
+    throw error;
+  }
   if (span !== 0) traceEnd(span, {workers, threaded});
   let growing = null, stopped = false;
   const progress = new Int32Array(memory.buffer, handle.progress_address(), 1);
-  const stages = stageHandoff(canvas => Stage.create(canvas, handle));
   let pumping = false;
   /** Without workers, background work runs here in slices that leave the frame its time. */
   const pump = () => {
@@ -176,11 +192,7 @@ async function load({workers = tuned('engine.workers', defaultWorkerCount(), WOR
     memoryMaximumBytes: reserved.maximumBytes,
     /** Where the memory is: linear memory, bytes the allocator handed out, and what the engine holds of it. */
     memory: () => JSON.parse(handle.memory()),
-    /**
-     * Starts the stage over `canvas` ahead of its owner (src/engine/engine-start.mjs, while the application's modules are
-     * still arriving): the `createStage` for the same canvas takes it instead of starting another.
-     */
-    prepareStage: canvas => stages.prepare(canvas),
+    /** The stage over `canvas`: the one the load started ahead of its owner (the `stage` option), else a new one. */
     createStage: canvas => stages.take(canvas),
     /** An edit session on the document `json` exactly as the editor holds it (D19). */
     editSession: (json, state, revision) => EditSession.from_document(json, state, revision),
@@ -198,10 +210,11 @@ async function load({workers = tuned('engine.workers', defaultWorkerCount(), WOR
  * over once (starting one when none was prepared), so a canvas never gets two.
  */
 export function stageHandoff(start) {
-  const prepared = new WeakMap();
+  const prepared = new WeakMap(), taken = new WeakSet();
   return {
     prepare(canvas) {
-      if (prepared.has(canvas)) return;
+      // A canvas keeps one context: once its owner has a stage over it, nothing else starts one.
+      if (prepared.has(canvas) || taken.has(canvas)) return;
       const stage = start(canvas);
       // The owner that takes the stage reports its failure; until then it is not an unhandled rejection.
       stage.catch(() => {});
@@ -210,7 +223,14 @@ export function stageHandoff(start) {
     take(canvas) {
       const stage = prepared.get(canvas);
       prepared.delete(canvas);
+      taken.add(canvas);
       return stage ?? start(canvas);
+    },
+    /** Frees the stage prepared over `canvas` that nobody took (its engine was given up). */
+    release(canvas) {
+      const stage = prepared.get(canvas);
+      prepared.delete(canvas);
+      stage?.then(started => started.free?.(), () => {});
     },
   };
 }

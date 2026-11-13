@@ -15,7 +15,7 @@ function standInStage(behaviour = {}) {
   const record = name => (...args) => { calls.push([name, ...args]); return behaviour[name]?.(...args); };
   const stage = {
     calls,
-    backend: () => 'BrowserWebGpu · Test GPU',
+    backend: () => behaviour.backend ?? 'BrowserWebGpu · Test GPU',
     stats: () => JSON.stringify({prims: 12, groups: 3, passes: 2, effectBytes: 1, layerBytes: 2, depthBytes: 3, materialBytes: 4,
       glyphBytes: 5, uploadBytes: 6, pictures: 7, multisampled: true}),
     take_device_errors: () => behaviour.errors?.() ?? '',
@@ -328,6 +328,17 @@ test('a stage prepared ahead of its owner is taken once, and a failed start reac
   assert.equal(started.length, 2, 'a stage is handed over once; the next take starts its own');
   await handoff.take(other);
   assert.equal(started.length, 3);
+  // A canvas keeps one context: a start that comes after its owner took the canvas starts nothing.
+  handoff.prepare(other);
+  assert.equal(started.length, 3, 'a taken canvas is not prepared again');
+  // A stage nobody takes (its engine was given up) is freed.
+  let freed = 0;
+  const releasing = stageHandoff(() => Promise.resolve({free: () => { freed++; }}));
+  const loose = {};
+  releasing.prepare(loose);
+  releasing.release(loose);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(freed, 1);
   const failing = stageHandoff(() => Promise.reject(new Error('no device')));
   failing.prepare(canvas);
   await assert.rejects(failing.take(canvas), /no device/);
@@ -415,7 +426,7 @@ test('a stage starts although the browser never describes its adapter: it takes 
   const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   const {expectAdapterInfo} = await import('../src/engine/engine.mjs');
   try {
-    // The warm-up worker never answers.
+    // The page's early request never answers.
     expectAdapterInfo(new Promise(() => {}));
     assert.equal((await open({}, {adapterNameMs: 20})).renderer.stats.adapter, 'Test GPU');
     // No worker, and the browser's own answer never comes.
@@ -428,7 +439,27 @@ test('a stage starts although the browser never describes its adapter: it takes 
   }
 });
 
-test('the stage names its adapter from the warm-up worker\'s description, and asks the browser only when it has none', async () => {
+test('a WebGL2 stage is named by the engine and never asks WebGPU, whose answer the start would wait for', async () => {
+  let asked = 0;
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  // Where WebGPU was refused, the browser's "no adapter" takes as long as an adapter would.
+  Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {gpu: {requestAdapter: () => { asked++; return new Promise(() => {}); }}}});
+  const {expectAdapterInfo} = await import('../src/engine/engine.mjs');
+  try {
+    for (const warm of [Promise.resolve(null), new Promise(() => {}), Promise.resolve({vendor: 'webgpu', architecture: 'other', device: 'card'})]) {
+      expectAdapterInfo(warm);
+      const started = performance.now();
+      assert.equal((await open({backend: 'Gl · ANGLE (NVIDIA)'}, {adapterNameMs: 5000})).renderer.stats.adapter, 'ANGLE (NVIDIA)');
+      assert.ok(performance.now() - started < 1000, 'the start did not wait for the adapter name');
+    }
+    assert.equal(asked, 0);
+  } finally {
+    expectAdapterInfo(null);
+    if (original) Object.defineProperty(globalThis, 'navigator', original); else delete globalThis.navigator;
+  }
+});
+
+test('the stage names its adapter from the early request\'s description, and asks the browser only when it has none', async () => {
   let asked = 0;
   const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {gpu: {requestAdapter: async () => { asked++; return {info: {vendor: 'asked', architecture: '', device: ''}}; }}}});

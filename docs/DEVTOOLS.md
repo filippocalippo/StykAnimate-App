@@ -44,14 +44,19 @@ Instrumented once, at the owning layer:
 - the app's start as phases (`init()` in src/app.mjs): document activation, language, interface, stage and graphics
   device, first layout;
 - `open`, `save`, `export` and `recovery write` as spans of the `tasks` lane (src/app.mjs);
-- `engine load` (src/engine/engine.mjs).
+- `engine load` (src/engine/engine.mjs), and on the `engine start` lane `engine threads join` (the launch's first threads) and `stage create`
+  (the stage's adapter, device and renderer); `stage: adapter name` (src/engine/engine-stage.mjs).
 
 Recorded by the tools themselves, with no line in the app (`src/devtools/early.js`, `boundary.mjs`):
 - every input handler, where the browser calls it: `on pointermove (canvas)`, `on keydown (document)`,
   `on change (editor)` (the editor's own change event, which every edit sends to its listeners);
 - every animation-frame callback (`animation frame`): the app's paint and its pass of interface updates;
 - every call the interface thread makes into the engine, counted by method, and a span
-  (`engine Stage.render_edit`) when one takes a quarter of a millisecond or more.
+  (`engine Stage.render_edit`) when one takes a quarter of a millisecond or more;
+- the page's requests to the browser's graphics process (the `graphics calls` lane), which the engine makes from WebAssembly:
+  `gpu: requestAdapter`, `gpu: requestDevice`, `gpu: createRenderPipeline` (with how long the call itself held the thread, `syncMs`,
+  where that was a millisecond or more), `canvas: getContext webgpu` or `webgl2`, and every WebGL2 call that waited 2 ms or more
+  for the graphics process (`gl: getProgramParameter`: a shader program's link).
 
 The browser itself reports long tasks and input-to-paint latency per event (the `long tasks` and `input` lanes).
 
@@ -207,7 +212,7 @@ A request is `{id, op, args?, detail?: "short" | "full"}`. The answer is `{id, o
 | `metrics`, `threads`, `memory` | the frames, inputs, paint, queues and memory now; the page's workers; the page's, the engine's and the GPU's memory |
 | `boundary` | `{limit, reset}`: the calls the interface made into the engine since the last capture began, heaviest first |
 | `environment` | what a profiling run asked the page to pretend, and what the page, the engine and the stage report |
-| `startup` | the launch's milestones and the app's start as phases, in ms from the page's start |
+| `startup` | the launch's milestones, the app's start as phases, and the spans until ready (the engine's start, the graphics calls, the long tasks), in ms from the page's start |
 | `display.period` | measures the display's period over `frames` frames (call it while the app rests) |
 | `process.metrics` | over the pipe only: the app's processes with their processor seconds and memory |
 | `logs` | `{level, module, text, since, limit}` |

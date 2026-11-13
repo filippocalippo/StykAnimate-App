@@ -85,6 +85,10 @@ export function explain(pair, scenario) {
       `  interface thread per frame: mean ${frames.work.mean} ms, p95 ${frames.work.p95} ms (${Math.round((frames.work.budgetShare ?? 0) * 100)}% of the period), worst ${frames.work.worst} ms`,
       ...Object.entries(frames.phases).map(([phase, value]) => `    ${pad(phase, 9)} mean ${value.mean} ms, p95 ${value.p95} ms, ${Math.round((value.share ?? 0) * 100)}% of the work`));
   }
+  if (detail?.phases?.length) {
+    lines.push('', 'The start, step by step (first launch; ms from the launch):', ...detail.phases.map(step => `  ${pad(step.name, 44)} at ${pad(step.startMs, 7)} ${step.ms} ms`));
+    if (detail.marks?.length) lines.push('', 'Spans until ready (first launch; ms from the launch):', ...detail.marks.map(mark => `  ${pad(`${mark.name} (${mark.thread})`.slice(0, 60), 60)} at ${pad(mark.startMs, 7)} ${mark.ms} ms`));
+  }
   if (detail?.spans?.length) {
     lines.push('', 'Spans of the interface (first pass), heaviest first:', `  ${pad('span', 44)} ${pad('count', 6)} ${pad('total ms', 9)} ${pad('p50', 8)} ${pad('p95', 8)} worst`,
       ...detail.spans.filter(row => row.thread === 'interface' || row.thread === 'tasks').slice(0, 14).map(row => `  ${pad(row.name.slice(0, 44), 44)} ${pad(row.count, 6)} ${pad(row.totalMs, 9)} ${pad(row.p50, 8)} ${pad(row.p95, 8)} ${row.worst}`));

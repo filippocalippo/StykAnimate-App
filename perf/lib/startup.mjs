@@ -12,6 +12,7 @@ import path from 'node:path';
 import {promisify} from 'node:util';
 import {launch, ROOT} from './app.mjs';
 import {aggregate, judge} from './metrics.mjs';
+import {backgroundLoad, BUSY_PERCENT} from './result.mjs';
 
 /** Builds the bundle this checkout's packaged app would start from; resolves with its folder. */
 export async function buildBundle() {
@@ -44,9 +45,11 @@ export async function measureStartup(environment, {launches = 3, bundle = null, 
     // The inspector slows a page only once it can attach to it, which is after the launch.
     ...(environment.cpuSlowdown > 1 ? [`The launch ran at this machine's full speed: the processor slowdown of this environment (${environment.cpuSlowdown}×) starts once the page is running.`] : [])], error: null};
   delete result.judge;
-  const values = [];
+  const values = [], loads = [];
   try {
     for (let index = 0; index < launches; index++) {
+      // What else the machine is doing takes time from the launch: each one records it, and a busy machine is said so.
+      loads.push(await backgroundLoad());
       const app = await launch(environment, {bundle});
       try {
         const page = await app.request('startup');
@@ -56,11 +59,17 @@ export async function measureStartup(environment, {launches = 3, bundle = null, 
         values.push({duration: shell + page.readyMs, 'start.shell': shell, 'start.firstPaint': shell + (page.firstContentfulPaintMs ?? page.firstPaintMs ?? NaN), 'start.engine': page.engineLoadMs ?? NaN,
           'start.page': page.readyMs, 'start.scripts': phase('page and scripts'), 'start.interface': phase('interface'), 'start.stage': phase('stage and graphics device'), 'start.blocked': page.longTasks.ms});
         // The first launch's steps, in order, for the report: the desktop shell first, then the page's own.
-        if (!index) result.detail = {phases: [{name: 'desktop shell', startMs: 0, ms: Math.round(shell)}, ...page.phases.map(step => ({...step, startMs: Math.round(shell + step.startMs)}))]};
+        if (!index) result.detail = {phases: [{name: 'desktop shell', startMs: 0, ms: Math.round(shell)}, ...page.phases.map(step => ({...step, startMs: Math.round(shell + step.startMs)}))],
+          marks: (page.spans ?? []).map(mark => ({...mark, startMs: Math.round(shell + mark.startMs)})).sort((a, b) => a.startMs - b.startMs)};
       } finally { await app.close(); }
       result.passes++;
     }
   } catch (error) { result.error = String(error?.message ?? error).split('\n')[0].slice(0, 500); }
+  const busiest = Math.max(...loads.filter(Number.isFinite));
+  if (Number.isFinite(busiest)) {
+    result.backgroundLoadPercent = busiest;
+    if (busiest > BUSY_PERCENT) result.notes.push(`The machine was busy with other work before a launch (up to ${busiest}% of its processor): these numbers are slower and noisier than they would be.`);
+  }
   result.metrics = aggregate(values);
   result.judged = judge([START.judge], result.metrics, START.metrics);
   result.grade = result.judged.grade;

@@ -43,10 +43,12 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   two workers at launch (`engine-worker.mjs`); `grow()` starts the rest, up to `navigator.hardwareConcurrency - 1` and at most 8, when a file or a
   large document opens, when playback prepares frames for someone waiting (not the idle warm-up) and when an export starts, so an empty editor holds
   two threads (about 40 MiB less than eight). Work queued meanwhile runs on the threads there are. Without cross-origin isolation the same module
-  runs without workers through `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine, has a worker (`engine-graphics-worker.mjs`) ask the browser's
-  graphics process for an adapter and a device (let go of at once: the first request is slow whoever makes it, so the stage's own meets a process
-  that is up, and the interface thread does not wait for the process to set its connection up, as it did when it asked); the worker also reports the adapter's description, which the stage shows as the adapter's name (a third request from the interface thread took about 0.6 s on a first launch) and requests the scene canvas's graphics device while the application's modules are still arriving; the application's `loadEngine()` and `createStage()` take
-  what it started (`prepareStage`, `stageHandoff`). `join` hands another thread what it needs to join the engine (the
+  runs without workers through `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine and, once the page has painted its first frame, asks the browser for the scene's WebGPU adapter
+  (`engine-adapter.mjs`: the answer takes most of a second on a first launch, so it comes back while the engine loads; it is handed to the
+  engine's own request with the same options, and its description is the adapter's name in the status line), and starts the
+  stage over the scene canvas as soon as the module is instantiated too, before its threads have joined (`loadEngine({stage})`); the application's
+  `loadEngine()` and `createStage()` take what it started (`stageHandoff`). The engine asks for each device's adapter once
+  (`styk-wasm` `gpu.rs`): WebGPU where the browser gives an adapter, else WebGL2, with no separate detection request. `join` hands another thread what it needs to join the engine (the
   compiled module, the memory, a stack size, the progress counter's address).
 - The export worker (`src/engine/engine-export-worker.mjs`, one per export, see
   [rendering.md](rendering.md#exports)): joins the shared memory like a preparation
