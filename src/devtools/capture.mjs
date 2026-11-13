@@ -101,41 +101,52 @@ export function analyze(taken, {periodMs = null, slowest, series = false} = {}) 
   };
 }
 
+/** The spans of a picture shown: drawn in the frame that drew it (`stage draw`), or shown later (`stage picture`). */
+const PICTURE_SPANS = new Set(['stage draw', 'stage draw prepared', 'stage picture', 'stage picture prepared']);
+
 /**
  * The pictures the stage showed during a capture and the inputs it received, as times in milliseconds from the
  * capture's start: `at` and `tick` of every frame the stage drew (`prepared`: a frame the engine's threads made, as
  * playback and a dense scrub show), and `inputs`, when each input happened. With both, a scenario can say how long a
  * key press or a pointer move took to show its frame, which the frame after its handler does not tell when the
- * picture is made off the interface thread. At most the last 2,000 of each.
+ * picture is made off the interface thread. A picture drawn on the engine's workers and shown later (`later`) also
+ * says when it was asked for (`asked`); `requests` are every draw that asked the workers for a picture, and
+ * `answered` when the frame after each input ended. At most the last 2,000 of each.
  */
-/** The spans of a picture shown: drawn in the frame that drew it (`stage draw`), or shown later (`stage picture`). */
-const PICTURE_SPANS = new Set(['stage draw', 'stage draw prepared', 'stage picture', 'stage picture prepared']);
-
 export function shownFrames(taken) {
-  const at = [], tick = [], prepared = [], asked = [], later = [];
+  const at = [], tick = [], prepared = [], asked = [], later = [], requests = [];
+  const time = value => round(value - taken.startedAt, 1);
   for (const event of taken.events) {
-    if (!PICTURE_SPANS.has(event.name) || event.args?.drawn !== true || !Number.isFinite(event.args.tick)) continue;
-    at.push(round(event.start + event.duration - taken.startedAt, 1)); tick.push(event.args.tick); prepared.push(event.name.endsWith('prepared') ? 1 : 0);
+    if (!PICTURE_SPANS.has(event.name) || !Number.isFinite(event.args?.tick)) continue;
+    if (event.args.drawn === 'asked') { requests.push(time(event.start)); continue; }
+    if (event.args.drawn !== true) continue;
+    at.push(time(event.start + event.duration)); tick.push(event.args.tick); prepared.push(event.name.endsWith('prepared') ? 1 : 0);
     // A picture drawn on the engine's workers spans from the frame that asked for it to its showing (engine-stage-processor.mjs).
-    asked.push(round(event.start - taken.startedAt, 1)); later.push(event.name.startsWith('stage picture') ? 1 : 0);
+    asked.push(time(event.start)); later.push(event.name.startsWith('stage picture') ? 1 : 0);
   }
-  const keep = list => list.slice(-2000);
-  return {at: keep(at), tick: keep(tick), prepared: keep(prepared), asked: keep(asked), later: keep(later), inputs: keep((taken.inputs?.at ?? []).map(time => round(time - taken.startedAt, 1)))};
+  const keep = list => list.slice(-2000), inputs = taken.inputs?.at ?? [];
+  return {at: keep(at), tick: keep(tick), prepared: keep(prepared), asked: keep(asked), later: keep(later), requests: keep(requests),
+    inputs: keep(inputs.map(time)), answered: keep(inputs.map((input, index) => time(input + (taken.inputs.latency?.[index] ?? 0))))};
 }
 
 /**
  * How the stage's pictures followed the hand when they were shown after the frame that asked for them (drawn on the
  * engine's workers): there the display frames run on while the picture is still being drawn, so the frame time and the
- * input delay say how free the interface thread was, not what the person saw. `felt` weighs how long each picture
- * stood still while the hand had moved (as `frames.felt` weighs frames): from the later of the picture before it and
- * the first input that picture did not show, to the picture; a picture after a pause in the input (between two notches
- * of a wheel) counts from the input, not from the picture before. `input` runs from each input to the first picture
- * asked for after it ({p50, p95}; an input no picture answered waits to the capture's end). Null for a capture whose
- * pictures were all shown in the frame that drew them, or without inputs.
+ * input delay say how free the interface thread was, not what the person saw. Only the inputs whose frame asked for a
+ * picture count (a pointer moving over a still stage asks for none). `felt` weighs how long each picture stood still
+ * while the hand had moved (as `frames.felt` weighs frames): from the later of the picture before it and the first input
+ * that picture did not show, to the picture; a picture after a pause in the input (between two notches of a wheel)
+ * counts from the input, not from the picture before. `input` runs from each input to the first picture asked for after
+ * it ({p50, p95}; an input no picture answered waits to the capture's end). Null for a capture whose pictures were all
+ * shown in the frame that drew them, or without such inputs.
  */
 export function pictureTimes(shown, endMs = Infinity) {
   if (!shown?.later?.includes(1) || !shown.inputs?.length) return null;
-  const inputs = shown.inputs, waits = inputs.map(input => {
+  const requests = shown.requests ?? [];
+  // An input whose frame (from the input to the end of the frame after its handler) asked the workers for a picture.
+  const inputs = shown.inputs.filter((input, index) => requests.some(request => request >= input && request <= (shown.answered?.[index] ?? input + 100)));
+  if (!inputs.length) return null;
+  const waits = inputs.map(input => {
     const answer = shown.at.find((at, index) => shown.asked[index] >= input && at >= input);
     return (answer ?? Math.max(endMs, input)) - input;
   });

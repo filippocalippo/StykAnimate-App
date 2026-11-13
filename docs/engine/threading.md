@@ -97,6 +97,15 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   at a time and is released after five idle minutes, as the export worker is (device
   destroyed, pending answers let through, then the thread destroyed); it is never
   terminated to cancel a preview (a cancelled request's answer is dropped), and never while inside the engine ("Ending a worker").
+- The stage on the processor (`styk_engine::stage_raster`, [rendering.md](rendering.md#the-stage-on-the-processor)): where the
+  stage's device is a software rasterizer, a stage frame is drawn by the CPU rasterizer on the preparation workers. The
+  interface's draw queues one task (`Engine::spawn`, ahead of frames) and returns; that task, on a worker, readies the
+  frame's pictures (handed over by the stage, or decoded from the document there) and glyph masks under a mutex only these
+  tasks take, then queues one task per band of 64 rows, which any worker takes; each band writes its own rows of the
+  frame's buffer. The interface learns of the end from the progress counter (each task bumps it) and copies the newest
+  finished frame onto a canvas; it never waits for one. One frame is drawn at a time and a newer request replaces the one
+  waiting; a frame let go of is cancelled between its primitives, and what the stage held is dropped on a worker. A page
+  without workers does not use it (its tasks would run on the interface thread through `pump`).
 - Frame thumbnails and the camera monitor are drawn by the stage on the interface
   thread (`styk-wasm/src/views.rs`), the only work done there being the draw itself:
   a thumbnail's frame is prepared on the preparation workers (`ExportFrames::prefetch`)

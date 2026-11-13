@@ -275,6 +275,64 @@ was measured on the way: on the busy scene the segments' draw was 40 of 71 ms, o
 saved 10 and sending every vertex off screen showed the vertex shader at about a third of the frame; turning
 multisampling off changed nothing measurable.
 
+### The stage on the processor
+
+Even with the narrower shaders a busy scene stayed at 36 to 52 ms a frame on SwiftShader, and the interface thread spent
+most of that inside the browser's own rendering step, waiting: with software compositing a WebGL canvas is read back
+into a bitmap for the compositor every frame, and the page's thread is held until SwiftShader has rasterized it. So on a
+stage whose device is a software rasterizer (the same detection, `Renderer::shading_runs`) and whose engine has worker
+threads, the stage's frames are drawn by the CPU rasterizer on the engine's workers instead, and shown from a bitmap
+([D21](decisions/0021-processor-stage.md)):
+
+- **Every draw goes through the stage as before.** `Stage::draw` takes the same list, view, pictures, live cels and
+  orientation for an edit frame, a prepared playback or scrub frame, onion skins, the camera view, effects, pictures and
+  drawing cels; only its last step changes: with `Stage::set_processor` on it asks `styk_engine::stage_raster` for the
+  frame instead of drawing it on the device, and returns true (asked). A frame the stage cannot draw yet is a condition of
+  the frame as before ([Every document](#every-document)), never an empty picture.
+- **The frame is drawn in bands on the workers** (`styk_engine::stage_raster`): a job readies what the frame needs (the
+  decoded pictures the stage took from the engine for its atlas, shared, not copied; any picture the frame samples that is
+  not held, decoded there from the document; the live cels' slots; the lone glyphs' masks, `Raster::bands`), then queues a
+  task per band of 64 rows. Each band is the same view moved up by its first row (`styk_raster::Bands::render`, as an
+  export's tiles are drawn), each layer cropped to the band, and writes its rows, straight RGBA, into the frame's buffer.
+- **The page shows the newest finished frame** (`src/engine/engine-stage-processor.mjs`): it copies the frame out of the
+  engine's memory into an `ImageData` and puts it on a 2D canvas laid over the scene canvas (`putImageData`; the
+  software compositor shows it in the next frame, sooner than `transferFromImageBitmap` after `createImageBitmap`, which
+  adds a task). It looks when the engine's progress counter moves (`whenProgress`, D7); the picture on show stays
+  meanwhile. One frame is drawn at a time; a newer request replaces the one waiting for it (a gesture never piles up
+  frames), and a frame let go of (the stage freed, the processor switched off) ends between its primitives.
+- **What a picture shown later means for the measurements.** The draw's span (`stage draw`, `stage draw prepared`) is the
+  interface's part and says `drawn: 'asked'`; the picture has a span of its own from the draw that asked for it to its
+  showing (`stage picture`, `stage picture prepared`). The capture's `shown` series, playback's delivered frames and the
+  developer tools' `settle` count pictures shown; gestures are judged on the pictures too (`picture.felt`,
+  `picture.input.p95`, [PERFORMANCE.md](../PERFORMANCE.md#metrics-and-grades)).
+- **What does not change.** The device and its renderer stay: the stage keeps uploading pictures and live cels to it, so
+  `pictures_pending`, residency and the soft copies work as before and the device draws again at once when the processor is
+  switched off. The camera monitor and thumbnails on a WebGL2 stage were drawn on the CPU in their workers already.
+  Picking was always the CPU rasterizer's. The quality ladder's edge sampling (`set_multisampled`) does not apply: the
+  processor always draws four samples a pixel.
+- **The fallback is the device.** Without engine threads (a page that is not cross-origin isolated) the processor is not
+  used, because its tasks would run on the interface thread; when a frame's job cannot hold a picture it samples (the
+  memory is full) the stage switches to the device for good (`Stage::processor_failed`) and says so in the console. The
+  live parameter `stage.processor` (developer tools: 1 on, 0 off, -1 the device's choice) switches between the two so they
+  can be compared in the app; the stage's stats report the processor's frame (`engine.processor`: its time from request to
+  last band, its work, its bands and buffers).
+
+Bounded: at most three frame buffers of the canvas's size (the one being drawn, one finished and not yet shown, one kept
+for the next frame), the page's one `ImageData` and the canvas's own backing; the pictures the job holds stay within
+`styk_raster::Images`' budget (a sixteenth of the memory), least recently used first out; all of it is let go of with the
+stage, on a worker ([memory.md](memory.md#what-is-bounded-now)).
+
+The pictures are the CPU rasterizer's ([CPU](#cpu-styk-raster)), held to the GPU renderer's by D13 for exports already.
+The stage adds paint contexts of its own; each is covered: the canvas background drawn directly and the view's fill
+(`K_FILL_VIEW` on the root), the artboard's edge and clip, device-pixel ratio, pan and zoom (the view matrix), the
+destination drawing grid of edit frames (`set_drawing_grid`), the scene camera, and the turned or mirrored Draw view,
+which the CPU rasterizer follows as the GPU does (`Raster::set_orientation`: the artboard's quad, its fills and the
+root's per-pixel clip; `styk-raster/tests/bands.rs` against the GPU renderer: 0 solid pixels, mean at most 0.004).
+`styk-raster/tests/bands.rs` draws seven repository documents in bands of several heights against the whole frame (at
+most one level on a few edge pixels, where a band's moved view rounds a vertex differently in single precision);
+`styk-engine/tests/stage_raster.rs` draws them on real worker threads against the whole frame, and checks the queue, the
+buffers and the live cels' slots.
+
 ## Text
 
 The JavaScript editor's WebGPU renderer (since deleted) never drew text as vectors

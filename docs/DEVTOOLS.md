@@ -75,7 +75,10 @@ Live parameters are registered where they are used:
   (applies on reload);
 - `engine.atlasPages`, the sprite pages kept resident;
 - `stage.shadingRuns`, whether the stage draws runs of primitives with the simpler fragment shaders (1) or all with the
-  general one (0) over the device's choice (-1: on for a software rasterizer, [rendering.md](engine/rendering.md#without-a-graphics-card)).
+  general one (0) over the device's choice (-1: on for a software rasterizer, [rendering.md](engine/rendering.md#without-a-graphics-card));
+- `stage.processor`, whether the stage's frames are drawn on the engine's workers by the CPU rasterizer and shown from a bitmap (1) or by
+  the graphics device (0), over the device's choice (-1: on for a software rasterizer with engine threads,
+  [rendering.md](engine/rendering.md#the-stage-on-the-processor)).
 
 A frame is late when it took over one and a half of the display's periods; the tools measure the period (the shortest
 run of frames seen), so there is no threshold to set.
