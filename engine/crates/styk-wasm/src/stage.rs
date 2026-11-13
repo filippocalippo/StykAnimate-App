@@ -79,6 +79,12 @@ pub struct Stage {
     /// The atlas places uploaded so far, and whether the last frame drawn lacked a
     /// picture ([`Stage::pictures_pending`]).
     uploaded: Uploaded,
+    /// The live slots written since the frame on show was drawn: where the next edit frame differs from it ([`Stage::draw`]).
+    live_writes: styk_engine::LiveWrites,
+    /// Where the drawing tiles of the list drawn last lie.
+    drawing_runs: styk_engine::DrawingRuns,
+    /// Edit frames drawn in a part of the frame before them (`styk_render::Renderer::redraw_within`).
+    part_frames: u64,
     /// The pages of the sprite layout in the sprite texture, for a document with more of them than it keeps
     /// ([`styk_engine::Residency`]); none for a document whose texture is the layout's size.
     residency: Option<styk_engine::Residency>,
@@ -188,7 +194,9 @@ impl Stage {
                 kept.push(error.to_string());
             }
         }));
-        let renderer = Renderer::new(&device, &queue, format);
+        let mut renderer = Renderer::new(&device, &queue, format);
+        // A stroke changes a part of the frame: the stage keeps each frame, so the next is drawn again in that part alone.
+        renderer.set_keep_frames(true);
         // A stage over a document that is already open (the canvas was replaced after a lost device):
         // the pictures decoded so far went to the stage before it.
         engine.engine.redecode_images();
@@ -209,6 +217,9 @@ impl Stage {
             live_pages: 0,
             live_shown: 0,
             uploaded: Uploaded::default(),
+            live_writes: Default::default(),
+            drawing_runs: Default::default(),
+            part_frames: 0,
             residency: None,
             loading: Default::default(),
             shown_pages: Vec::new(),
@@ -347,7 +358,7 @@ impl Stage {
     fn present_prepared(&mut self, snapshot: &styk_engine::FrameSnapshot, zoom: f64, pan: [f64; 2], camera: bool, clip_to_artboard: bool) -> Result<bool, JsError> {
         let generation = &snapshot.generation;
         let frame = &snapshot.frame;
-        let drawn = self.draw(generation, &frame.list, if camera { frame.camera } else { None }, zoom, pan, clip_to_artboard)?;
+        let drawn = self.draw(generation, &frame.list, if camera { frame.camera } else { None }, zoom, pan, clip_to_artboard, None)?;
         if drawn {
             self.shown = Shown::Prepared { generation: generation.id, tick: frame.tick, epoch: snapshot.epoch };
             self.pictures_ahead(frame.tick);
@@ -575,12 +586,19 @@ impl Stage {
             // publish a camera path for the wrong document.
             return Ok(false);
         };
-        // A list encoded over the one before it: the renderer, holding that one, writes the primitives that changed.
-        if let Some(changes) = self.edit.take_changes() {
+        // A list encoded over the one before it: the renderer, holding that one, writes the primitives that changed, and the frame differs
+        // from the one drawn last in those primitives (and the live slots written since): it is drawn again in that part where it can be.
+        let changes = self.edit.take_changes();
+        let before = match &changes {
+            Some(changes) if self.renderer.holds_list(&changes.since) => Some((changes.since.clone(), changes.prims.clone())),
+            None if self.renderer.holds_list(&list) => Some((list.clone(), Vec::new())),
+            _ => None,
+        };
+        if let Some(changes) = changes {
             self.renderer.note_changes(&list, &changes.since, changes.prims);
         }
         let scene_camera = if camera { self.edit.camera() } else { None };
-        let drawn = self.draw(&generation, &list, scene_camera, zoom, [pan_x, pan_y], clip_to_artboard)?;
+        let drawn = self.draw(&generation, &list, scene_camera, zoom, [pan_x, pan_y], clip_to_artboard, before)?;
         if drawn {
             self.release_picks();
             self.shown = Shown::Edit { generation: generation.id, edits: self.edits, effects: self.effects, scene: std::sync::Arc::new(self.edit.snapshot()), hidden: hidden.to_vec(), translations };
@@ -701,11 +719,12 @@ impl Stage {
     /// Tells the live cels which of their levels `list` shows at the view `matrix`, and writes
     /// the slots of those that changed while another level was on show, before the frame draws.
     /// A list that shows no live tile leaves the choice as it was.
-    fn show_live_levels(&mut self, generation: &Generation, list: &styk_eval::drawlist::DrawList, matrix: [f64; 6]) {
+    fn show_live_levels(&mut self, generation: &Generation, list: &Arc<styk_eval::drawlist::DrawList>, since: Option<(&Arc<styk_eval::drawlist::DrawList>, &[(u32, u32)])>, matrix: [f64; 6]) {
         if self.live.is_empty() {
             return;
         }
-        let levels = styk_eval::live::shown_levels(list, generation.assets.pages, (matrix[0] * matrix[3] - matrix[1] * matrix[2]).abs().sqrt());
+        let tiles = self.drawing_runs.of(list, since);
+        let levels = styk_eval::live::shown_levels_in(list, tiles, generation.assets.pages, (matrix[0] * matrix[3] - matrix[1] * matrix[2]).abs().sqrt());
         if levels != 0 {
             self.live_shown = levels;
             self.live.set_resident(levels);
@@ -733,7 +752,9 @@ impl Stage {
         self.renderer.upload_live(base, &runs);
         for run in &runs {
             for cell in 0..run.cells {
-                self.uploaded.mark(base + run.page, run.x + styk_eval::drawing::BORDER + cell * styk_eval::live::CELL, run.y + styk_eval::drawing::BORDER);
+                let (x, y) = (run.x + styk_eval::drawing::BORDER + cell * styk_eval::live::CELL, run.y + styk_eval::drawing::BORDER);
+                self.uploaded.mark(base + run.page, x, y);
+                self.live_writes.mark(base + run.page, x, y);
             }
         }
     }
@@ -753,7 +774,10 @@ impl Stage {
         }
     }
 
-    fn draw(&mut self, generation: &Arc<Generation>, list: &Arc<styk_eval::drawlist::DrawList>, camera: Option<styk_eval::doc::Camera>, zoom: f64, pan: [f64; 2], clip_to_artboard: bool) -> Result<bool, JsError> {
+    /// Draws `list`. `before` is the list of the frame on show and the ranges of primitives `list` differs from it in (an edit frame encoded
+    /// over it), or `None`: then the frame is drawn whole.
+    #[allow(clippy::too_many_arguments)]
+    fn draw(&mut self, generation: &Arc<Generation>, list: &Arc<styk_eval::drawlist::DrawList>, camera: Option<styk_eval::doc::Camera>, zoom: f64, pan: [f64; 2], clip_to_artboard: bool, before: Option<(Arc<styk_eval::drawlist::DrawList>, Vec<(u32, u32)>)>) -> Result<bool, JsError> {
         // A lost device draws nothing more (the interface makes a new stage); drawing on it would only raise errors.
         if self.lost.get().is_some() {
             return Ok(false);
@@ -779,7 +803,8 @@ impl Stage {
         let orientation = styk_eval::view::orientation(self.rotation, self.flip, [pan[0] + doc.canvas[0] as f64 * zoom / 2.0, pan[1] + doc.canvas[1] as f64 * zoom / 2.0]);
         let upright = styk_eval::view::camera_matrix(doc, camera.as_ref(), zoom, pan);
         let m = orientation.map_or(upright, |o| styk_eval::view::compose(o, upright));
-        self.show_live_levels(generation, list, m);
+        // A list encoded over the one drawn last is laid out as it: its drawing tiles lie where that one's did, but in the ranges it changed.
+        self.show_live_levels(generation, list, before.as_ref().map(|(held, ranges)| (held, ranges.as_slice())), m);
         self.renderer.set_orientation(orientation);
         // The artboard is the scene rectangle under the workspace view alone: the camera moves the scene inside it.
         let (p0, p1) = (pan, [pan[0] + doc.canvas[0] as f64 * zoom, pan[1] + doc.canvas[1] as f64 * zoom]);
@@ -804,6 +829,15 @@ impl Stage {
             }
         };
         self.surface_missed = false;
+        // What changed since the frame on show: the primitives the list differs in and the live slots written since. The renderer draws
+        // that part alone over the frame it kept, when it can (the same view, no pictures but the live slots changed, a plain list).
+        if let Some((held, ranges)) = &before {
+            let changed = (!Arc::ptr_eq(held, list)).then_some((held.as_ref(), ranges.as_slice()));
+            let tiles = self.drawing_runs.of(list, Some((held, ranges.as_slice())));
+            if let Some(part) = self.live_writes.part(list, changed, tiles, m) {
+                self.renderer.redraw_within(part);
+            }
+        }
         self.renderer.set_list(list);
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("styk frame") });
         self.renderer.render(&mut encoder, &view, [self.config.width, self.config.height]);
@@ -826,6 +860,8 @@ impl Stage {
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(target);
+        self.live_writes.clear();
+        self.part_frames += u64::from(self.renderer.drew_part());
         self.pictures = self.pictures_after(list);
         self.soft_frames += u64::from(self.loading.placeholders() > 0);
         self.pictures_shown(pages);
@@ -917,10 +953,10 @@ impl Stage {
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
         let (resident, loads, evictions) = self.residency_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"shadingRuns\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"shadingRuns\":{},\"partFrames\":{}}}",
             s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
             sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
-            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms, self.renderer.shading_runs()
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms, self.renderer.shading_runs(), self.part_frames
         )
     }
 }

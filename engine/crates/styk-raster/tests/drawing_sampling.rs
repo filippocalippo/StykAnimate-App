@@ -204,3 +204,88 @@ fn a_live_cels_room_draws_nothing() {
         }
     }
 }
+
+/// The bounds in output pixels of a drawing tile's quad under `view`, with a margin of two pixels.
+fn quad_bounds(p: &Prim, view: &ViewParams) -> [f64; 4] {
+    let m = view.matrix;
+    let (o, u, v) = ([p.a[0] as f64, p.a[1] as f64], [p.a[2] as f64, p.a[3] as f64], [p.b[0] as f64, p.b[1] as f64]);
+    let corners = [o, [o[0] + u[0], o[1] + u[1]], [o[0] + v[0], o[1] + v[1]], [o[0] + u[0] + v[0], o[1] + u[1] + v[1]]].map(|c| [m[0] * c[0] + m[2] * c[1] + m[4], m[1] * c[0] + m[3] * c[1] + m[5]]);
+    let (xs, ys) = (corners.map(|c| c[0]), corners.map(|c| c[1]));
+    [xs.iter().copied().fold(f64::INFINITY, f64::min) - 2.0, ys.iter().copied().fold(f64::INFINITY, f64::min) - 2.0, xs.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 2.0, ys.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 2.0]
+}
+
+/// A frame that differs from the one before it in a part (a stroke's tiles) is drawn in that part alone over the kept frame, and is the
+/// frame drawn whole, byte for byte, with four samples a pixel and with one; a frame of another view, or over pictures uploaded since,
+/// is drawn whole.
+#[test]
+fn a_frame_drawn_in_a_part_is_the_frame_drawn_whole() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+        eprintln!("skipped: no adapter");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+    let (assets, decoded, _) = images();
+    for (edges, multisampled) in [(Edges::Smooth, true), (Edges::Smooth, false), (Edges::Crisp, false)] {
+        let fresh = || {
+            let mut renderer = Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, edges);
+            renderer.set_multisampled(multisampled);
+            renderer.prepare_sprites(&assets);
+            renderer.upload_images(&assets, &decoded);
+            renderer
+        };
+        let draw = |renderer: &mut Renderer, list: &Arc<DrawList>, view: &ViewParams, within: Option<[f64; 4]>| {
+            if let Some(rect) = within {
+                renderer.redraw_within(rect);
+            }
+            renderer.set_list(list);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            renderer.render(&mut encoder, view, SIZE);
+            queue.submit([encoder.finish()]);
+            (read_frame(&device, &queue, renderer.frame_texture().expect("a frame")).2, renderer.drew_part())
+        };
+        for (scale, rotated) in [(1.0, false), (1.3, true), (0.71, false)] {
+            let what = format!("{edges:?}, multisampled {multisampled}, scale {scale}, rotated {rotated}");
+            let view = view(scale, rotated);
+            let before = Arc::new(list(&assets, false, false));
+            // A tile moves by a few units and another goes (its quad becomes the room of a live cel's block): what a stroke frame changes.
+            let mut changed = list(&assets, false, false);
+            changed.prims[1].a[0] += 3.25;
+            changed.prims[1].a[1] -= 1.5;
+            changed.prims[2] = styk_eval::drawlist::room_quad(&changed.prims[2]);
+            let after = Arc::new(changed);
+            let part = [1usize, 2].iter().flat_map(|&i| [quad_bounds(&before.prims[i], &view), quad_bounds(&after.prims[i], &view)]).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
+            let whole = draw(&mut fresh(), &after, &view, None).0;
+
+            let mut kept = fresh();
+            kept.set_keep_frames(true);
+            draw(&mut kept, &before, &view, None);
+            let (drawn, in_part) = draw(&mut kept, &after, &view, Some(part));
+            assert!(in_part, "{what}: the frame is drawn in the part");
+            assert!(drawn == whole, "{what}: the frame drawn in a part is the frame drawn whole");
+            let (again, in_part) = draw(&mut kept, &after, &view, Some(part));
+            assert!(in_part && again == whole, "{what}: drawn in the part again, the same frame");
+
+            // Another view: the kept frame is not what it would be drawn over.
+            let mut other = fresh();
+            other.set_keep_frames(true);
+            draw(&mut other, &before, &self::view(scale * 1.01, rotated), None);
+            let (drawn, in_part) = draw(&mut other, &after, &view, Some(part));
+            assert!(!in_part && drawn == whole, "{what}: after another view the frame is drawn whole");
+
+            // Pictures uploaded since the kept frame: drawn whole.
+            let mut uploaded = fresh();
+            uploaded.set_keep_frames(true);
+            draw(&mut uploaded, &before, &view, None);
+            uploaded.upload_images(&assets, &decoded);
+            let (drawn, in_part) = draw(&mut uploaded, &after, &view, Some(part));
+            assert!(!in_part && drawn == whole, "{what}: over pictures uploaded since, the frame is drawn whole");
+
+            // Not kept: drawn whole.
+            let mut plain = fresh();
+            draw(&mut plain, &before, &view, None);
+            let (drawn, in_part) = draw(&mut plain, &after, &view, Some(part));
+            assert!(!in_part && drawn == whole, "{what}: a renderer that keeps no frame draws it whole");
+        }
+    }
+}

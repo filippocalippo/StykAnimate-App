@@ -50,6 +50,123 @@ pub struct Uploaded {
     primed: bool,
 }
 
+/// The live drawing slots written since the frame on show was drawn (`styk-wasm` `Stage::flush_live`), by place: where a stroke changed
+/// the picture without the draw list changing, so that the next frame can be drawn again in that part alone ([`LiveWrites::part`],
+/// `styk_render::Renderer::redraw_within`).
+#[derive(Default)]
+pub struct LiveWrites {
+    places: HashSet<u64>,
+}
+
+/// Where a list's drawing tiles lie, as runs of its primitives, kept while the lists drawn keep their layout (an edit frame encoded over the
+/// one before it: a stroke's cel is a block among a dense frame's segments), so that what reads them each frame
+/// ([`styk_eval::live::shown_levels_in`], [`LiveWrites::part`]) does not read every primitive.
+#[derive(Default)]
+pub struct DrawingRuns {
+    runs: Vec<(u32, u32)>,
+    /// The list the runs were found in (held weakly: its address is never another list's while this is held).
+    of: Option<std::sync::Weak<DrawList>>,
+}
+
+impl DrawingRuns {
+    /// The runs of `list`'s drawing tiles. `since`: a list `list` is laid out as and the ranges it differs from it in (an edit frame encoded
+    /// over the frame drawn last), or `None`. The runs of that list are kept when they were found in it and hold the ranges it changed;
+    /// otherwise every primitive is read.
+    pub fn of(&mut self, list: &Arc<DrawList>, since: Option<(&Arc<DrawList>, &[(u32, u32)])>) -> &[(u32, u32)] {
+        let runs = &self.runs;
+        let within = |&(start, end): &(u32, u32)| start == end || runs.iter().any(|&(a, b)| a <= start && end <= b);
+        let found_in = |held: &Arc<DrawList>| self.of.as_ref().is_some_and(|of| std::ptr::eq(of.as_ptr(), Arc::as_ptr(held)));
+        let kept = found_in(list) || since.is_some_and(|(held, ranges)| held.prims.len() == list.prims.len() && found_in(held) && ranges.iter().all(within));
+        if !kept {
+            self.runs.clear();
+            for (at, p) in list.prims.iter().enumerate() {
+                if p.kind & 255 != K_IMAGE || p.kind & styk_draw::F_DRAWING == 0 {
+                    continue;
+                }
+                let at = at as u32;
+                match self.runs.last_mut() {
+                    Some(run) if run.1 == at => run.1 = at + 1,
+                    _ => self.runs.push((at, at + 1)),
+                }
+            }
+        }
+        self.of = Some(Arc::downgrade(list));
+        &self.runs
+    }
+}
+
+/// The margin in output pixels around the quads a part is made of: the rounding of their corners between the encoder and the GPU.
+const PART_MARGIN: f64 = 2.0;
+/// The margin of the test of the levels a view shows: the shader's own test runs in single precision.
+const LEVEL_MARGIN: f64 = 1.0 / 64.0;
+
+impl LiveWrites {
+    /// The slot whose tile starts at `(x, y)` of atlas layer `layer` was written.
+    pub fn mark(&mut self, layer: u32, x: u32, y: u32) {
+        self.places.insert(place(layer, x, y));
+    }
+
+    /// A frame was drawn: what was written before it is on show.
+    pub fn clear(&mut self) {
+        self.places.clear();
+    }
+
+    /// Where `list`, drawn over the frame drawn last, differs from it, in output pixels through `matrix` (the scene to output pixels), its
+    /// drawing tiles lying in the runs `tiles` ([`DrawingRuns`]):
+    /// the quads of the drawing tiles whose slot or parent's slot was written since, and the primitives `changed` names (the list drawn
+    /// last and the ranges in which `list` differs from it, [`styk_eval::drawlist::ListChanges`]) as they were and as they are. `None`
+    /// when one of those is not a drawing tile of the frame's root (it may reach anywhere): the frame is drawn whole. An empty rectangle
+    /// when nothing changed.
+    pub fn part(&self, list: &DrawList, changed: Option<(&DrawList, &[(u32, u32)])>, tiles: &[(u32, u32)], matrix: [f64; 6]) -> Option<[f64; 4]> {
+        let mut part = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        let scale = (matrix[0] * matrix[3] - matrix[1] * matrix[2]).abs().sqrt();
+        let mut add = |p: &styk_draw::Prim| -> bool {
+            if styk_eval::drawlist::is_room_quad(p) {
+                return true;
+            }
+            if p.kind & 255 != K_IMAGE || p.kind & styk_draw::F_DRAWING == 0 || p.group != 0 {
+                return false;
+            }
+            // A tile of a level the view does not show draws nothing (a floating selection's quads of the upper levels, many times its
+            // size, move with it): the shader's test (`prim.wgsl` `image_vertex`), with the margin of `shown_levels` on both sides.
+            let (level, pixels) = (p.b[3] as u32, f64::from(p.a[2]).hypot(f64::from(p.a[3])) * scale / f64::from(styk_eval::drawing::TILE));
+            if !((level == 0 || pixels <= 1.0 + LEVEL_MARGIN) && (level == styk_eval::drawing::MAX_LEVEL || pixels > 0.5 - LEVEL_MARGIN)) {
+                return true;
+            }
+            let (o, u, v) = ([p.a[0] as f64, p.a[1] as f64], [p.a[2] as f64, p.a[3] as f64], [p.b[0] as f64, p.b[1] as f64]);
+            for c in [o, [o[0] + u[0], o[1] + u[1]], [o[0] + v[0], o[1] + v[1]], [o[0] + u[0] + v[0], o[1] + u[1] + v[1]]] {
+                let (x, y) = (matrix[0] * c[0] + matrix[2] * c[1] + matrix[4], matrix[1] * c[0] + matrix[3] * c[1] + matrix[5]);
+                part = [part[0].min(x - PART_MARGIN), part[1].min(y - PART_MARGIN), part[2].max(x + PART_MARGIN), part[3].max(y + PART_MARGIN)];
+            }
+            true
+        };
+        if let Some((before, ranges)) = changed {
+            if before.prims.len() != list.prims.len() {
+                return None;
+            }
+            for &(start, end) in ranges {
+                for at in start as usize..end as usize {
+                    if !add(&before.prims[at]) || !add(&list.prims[at]) {
+                        return None;
+                    }
+                }
+            }
+        }
+        if !self.places.is_empty() {
+            for p in tiles.iter().flat_map(|&(start, end)| &list.prims[start as usize..end as usize]) {
+                if p.kind & 255 != K_IMAGE || p.kind & styk_draw::F_DRAWING == 0 || styk_eval::drawlist::is_room_quad(p) {
+                    continue;
+                }
+                let parent = (p.paint != styk_draw::NO_PAINT).then(|| list.paints.get(p.paint as usize)).flatten().map(|row| place(row[0] as u32, row[1] as u32, row[2] as u32));
+                if (self.places.contains(&record_place(p.b[2], p.c[0], p.c[1])) || parent.is_some_and(|parent| self.places.contains(&parent))) && !add(p) {
+                    return None;
+                }
+            }
+        }
+        Some(if part[0] < part[2] { part } else { [0.0; 4] })
+    }
+}
+
 /// An atlas place by its page and corner (the gutter excluded), as records name it.
 fn place(layer: u32, x: u32, y: u32) -> u64 {
     (layer as u64) << 32 | (y as u64) << 16 | x as u64

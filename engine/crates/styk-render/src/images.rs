@@ -94,12 +94,16 @@ impl Renderer {
 
     /// Allocates the sprite atlas for a document (pages from its asset layout).
     pub fn prepare_sprites(&mut self, assets: &Assets) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         self.prepare_sprites_live(assets, 0);
     }
 
     /// Allocates the sprite atlas for a document, with `live` more pages after its own for the
     /// drawing cels held live ([`styk_eval::live`]).
     pub fn prepare_sprites_live(&mut self, assets: &Assets, live: u32) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         self.install_sprites(assets, live).destroy();
     }
 
@@ -128,6 +132,8 @@ impl Renderer {
     /// its pixels are uploaded; a picture that is not in draws its soft copy ([`Renderer::upload_rows`]), which draws
     /// nothing until it is uploaded. Nothing is in yet.
     pub fn prepare_sprites_resident(&mut self, assets: &Assets, live: u32, layers: u32) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         self.lay_out_resident(assets, live, layers, assets.pages);
     }
 
@@ -136,12 +142,16 @@ impl Renderer {
     /// the pictures that are not in draw nothing, and the soft atlas is not made. `layers` layers to begin with; the texture
     /// grows by [`Renderer::resize_sprite_layers`] when the export needs more pages at once.
     pub fn prepare_sprites_export(&mut self, assets: &Assets, layers: u32) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         self.lay_out_resident(assets, 0, layers, 0);
     }
 
     /// Stage admission also bounds the picture lookup table. On refusal the
     /// current atlas and its lookup table remain installed.
     pub fn prepare_sprites_export_bounded(&mut self, assets: &Assets, layers: u32, table_bytes: u64) -> Result<(), u64> {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         let device_limit = u64::from(self.device.limits().max_texture_dimension_2d) * u64::from(crate::resources::TABLE_WIDTH) * 16;
         let held = PictureState::new_bounded(&self.device, &self.queue, assets, 0, false, |_| None, table_bytes.min(device_limit))?;
         self.install_resident(assets, 0, layers, held);
@@ -194,6 +204,7 @@ impl Renderer {
         }
         old.destroy();
         self.rebind_sprites();
+        self.forget_kept();
         true
     }
 
@@ -208,13 +219,18 @@ impl Renderer {
             |entry| values.get(&(entry.layer, entry.y << 12 | entry.x)).and_then(|v| v.checked_sub(1)), table_bytes.min(device_limit))?;
         std::mem::replace(&mut self.pictures, held).destroy();
         self.rebind_sprites();
+        self.forget_kept();
         Ok(true)
     }
 
     /// The picture at `entry` is in layer `layer` of the sprite texture (`None`: it is not, its soft copy draws). Takes
     /// effect with [`Renderer::flush_pictures`]. Returns whether a write is needed.
     pub fn set_picture(&mut self, entry: &styk_eval::assets::AtlasEntry, layer: Option<u32>) -> bool {
-        self.pictures.set(entry, layer)
+        let changed = self.pictures.set(entry, layer);
+        if changed {
+            self.forget_kept();
+        }
+        changed
     }
 
     /// Writes the pictures put in or taken out since the last call to the table shaders read.
@@ -242,6 +258,8 @@ impl Renderer {
     /// draws nothing). The layout may have grown since the texture was prepared. Takes effect with
     /// [`Renderer::flush_sprite_map`].
     pub fn map_sprite_page(&mut self, page: u32, layer: Option<u32>) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         if page >= MAX_PAGES {
             return;
         }
@@ -261,6 +279,8 @@ impl Renderer {
     /// texture exists until the copy has run, so this is for a working set the texture was too small for, not a
     /// routine step.
     pub fn resize_sprite_layers(&mut self, layers: u32) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         let have = self.sprites.depth_or_array_layers();
         if layers <= have {
             return;
@@ -284,6 +304,8 @@ impl Renderer {
     /// Makes room for `live` pages after the document's own, keeping every texel written
     /// (the pages are copied on the GPU): the document's pictures are not decoded again.
     pub fn grow_sprites(&mut self, assets: &Assets, live: u32) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         let wanted = (assets.pages + live).max(2);
         let have = self.sprites.depth_or_array_layers();
         if wanted <= have && self.sprites.width() == PAGE {
@@ -317,6 +339,8 @@ impl Renderer {
     /// The live pages follow the document's in the layout, so the page map is what moves them. The texture is copied into a
     /// larger one only when it has no free layer left.
     pub fn extend_sprites(&mut self, old_pages: u32, old_live: u32, pages: u32, live: u32) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         let layer_of = |page: u32| self.sprite_map.layers.get(page as usize).copied().unwrap_or(UNMAPPED);
         let kept_documents: Vec<u32> = (0..old_pages).map(layer_of).collect();
         let kept_live: Vec<u32> = (0..old_live).map(|k| layer_of(old_pages + k)).collect();
@@ -393,6 +417,8 @@ impl Renderer {
     /// the same device draws another view of the same document with the pictures `other`
     /// uploads (the stage's camera monitor). Call it again after `other` prepares a new atlas.
     pub fn share_sprites(&mut self, other: &Renderer) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         self.sprites = other.sprites.clone();
         self.sprite_view = other.sprite_view.clone();
         self.sprite_map.texture = other.sprite_map.texture.clone();
@@ -406,6 +432,8 @@ impl Renderer {
 
     /// Uploads decoded images into the atlas prepared by [`prepare_sprites`].
     pub fn upload_images<'a>(&mut self, assets: &Assets, images: impl IntoIterator<Item = &'a DecodedImage>) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         for img in images {
             self.upload_rows(assets, img, 0, img.height);
         }
@@ -414,6 +442,8 @@ impl Renderer {
     /// Uploads rows `first..first + rows` of a decoded image: a large picture goes in over several calls, so no
     /// frame is made to wait for all of it.
     pub fn upload_rows(&mut self, assets: &Assets, img: &DecodedImage, first: u32, rows: u32) {
+        // The frame kept for a redraw in a part sampled what this replaces ([`Renderer::redraw_within`]).
+        self.forget_kept();
         if assets.pages == 0 || first >= img.height {
             return;
         }

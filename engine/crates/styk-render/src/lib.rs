@@ -111,6 +111,8 @@ pub struct Stats {
     pub glyph_masks: u32,
     pub glyph_masks_filled: u32,
     pub glyph_bytes: u64,
+    /// The frame was drawn in a part of it ([`Renderer::redraw_within`]).
+    pub part: bool,
 }
 
 /// How a renderer covers shape edges.
@@ -205,6 +207,15 @@ pub struct Renderer {
     pub(crate) orientation: Option<effects::plan::Affine>,
     /// Set only by completed effect execution plus actual parent consumption.
     pub(crate) root_gpu_source: bool,
+    /// The frame's multisampled picture is kept after it is resolved, so that the next frame can be drawn again in a part of it
+    /// ([`Renderer::set_keep_frames`]).
+    pub(crate) keep_frames: bool,
+    /// What the frame in the output was drawn of, while it can be drawn again in a part; `None` once something it was drawn from changed.
+    pub(crate) kept: Option<frame::KeptFrame>,
+    /// The part of the frame the next frame differs in ([`Renderer::redraw_within`]), output pixels `[x0, y0, x1, y1]`.
+    pub(crate) within: Option<[f64; 4]>,
+    /// The pipeline that clears a part of the frame to transparency, by sample count.
+    pub(crate) clear_part: Option<(u32, wgpu::RenderPipeline)>,
     pub stats: Stats,
 }
 
@@ -250,6 +261,11 @@ impl Renderer {
     /// points, groups) is written as for any list. Forgotten at the next `set_list`, whatever it sets.
     pub fn note_changes(&mut self, list: &Arc<DrawList>, since: &Arc<DrawList>, prims: Vec<(u32, u32)>) {
         self.changes = Some((list.clone(), since.clone(), prims));
+    }
+
+    /// Whether `list` is the list this renderer drew last (or holds to draw next).
+    pub fn holds_list(&self, list: &Arc<DrawList>) -> bool {
+        self.list.as_ref().is_some_and(|held| Arc::ptr_eq(held, list))
     }
 
     /// Uploads a draw list unless it is already resident.

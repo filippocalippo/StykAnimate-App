@@ -25,12 +25,14 @@ impl Renderer {
     /// Move, never copy, the last output to a presenter. Submit its encoder
     /// before publishing it to another thread on the same device/queue.
     pub fn take_frame(&mut self) -> Option<RenderedFrame> {
+        self.kept = None;
         self.output.take().map(|output| RenderedFrame { output, pipeline: self.composite.clone() })
     }
 
     /// Worker-only recycling after the presenter's submission. Queue ordering
     /// keeps the previous present ahead of a subsequent write to this texture.
     pub fn recycle_frame(&mut self, frame: RenderedFrame) {
+        self.kept = None;
         if let Some(old) = self.output.replace(frame.output) { old.0.destroy(); }
     }
     /// Draws the rendered frame into the host's render pass (viewport already set).
