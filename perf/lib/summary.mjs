@@ -59,6 +59,7 @@ export function overview(result) {
     }
     const memory = pair.memory.at(-1);
     if (memory?.total) lines.push(`   memory at the end: ${memory.total} MB in all (page ${memory.page ?? '–'}, graphics ${memory.graphics ?? '–'}); engine ${memory.engine ?? '–'} MB in use, JavaScript ${memory.jsHeap ?? '–'} MB`);
+    if (memory?.owners) lines.push(`   the page by owner: ${OWNER_PARTS.filter(([key]) => Number.isFinite(memory.owners[key])).map(([key, name]) => `${name} ${Math.round(memory.owners[key])}`).join(', ')} MB (npm run perf -- memory ${result.label})`);
     lines.push('');
   }
   lines.push('Grades: GOOD, FAIR, POOR, BAD against fixed limits (docs/PERFORMANCE.md). One scenario in full: npm run perf -- show <run> <scenario>.');
