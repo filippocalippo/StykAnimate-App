@@ -1,6 +1,6 @@
 /**
  * The performance overlay (developer build only; docs/DEVTOOLS.md "Panels"), Ctrl+Shift+O: a small pill over the
- * stage's top-left corner that lets every input through, readable at a glance while dragging. It shows the frame time a
+ * stage's bottom-right corner (the tool rail floats at its left) that lets every input through, readable at a glance while dragging. It shows the frame time a
  * person sees and the input delay (each with its grade), the interface thread's work against the display's period,
  * late frames, what the engine's threads prepare, memory, and the frame chart of the last two seconds in miniature.
  *
@@ -28,7 +28,7 @@ export function createOverlay(runtime) {
   const glyph = {font: '', width: 0};
   const place = () => {
     const stage = document.getElementById('viewport')?.getBoundingClientRect();
-    if (stage) { root.style.left = `${Math.round(stage.left + 8)}px`; root.style.top = `${Math.round(stage.top + 8)}px`; }
+    if (stage) { root.style.left = `${Math.round(stage.right - WIDTH - 8)}px`; root.style.top = `${Math.round(stage.bottom - HEIGHT - 8)}px`; }
   };
   const observer = new ResizeObserver(place);
 
@@ -72,7 +72,7 @@ export function createOverlay(runtime) {
       [[`input p95 ${inputs.count ? `${format(inputs.p95, 1)} ms` : '–'}`, colours.fg], word(inputs.count ? grade(inputs.p95, LIMITS.input) : null), [inputs.count ? `  p50 ${format(inputs.p50, 1)}` : '', colours.dim]],
       [[`work p95 ${format(f.work.p95, 1)} ms`, colours.fg], [` = ${f.work.budgetShare === null ? '–' : Math.round(f.work.budgetShare * 100)}% of ${format(f.periodMs, 1)} ms`, (f.work.budgetShare ?? 0) > 1 ? colours.bad : colours.dim]],
       [[`engine ${rate ? `${format(rate.perSecond, 0)}/s` : '–'}`, colours.fg], [rate?.msPerFrame ? ` ${format(rate.msPerFrame, 1)} ms` : '', colours.dim],
-        [`  js ${mb(memory?.jsHeap?.usedBytes)} eng ${mb(memory?.engine?.liveBytes)} gpu ${mb(memory?.gpuBytes)} MB`, colours.dim]],
+        [`  js ${mb(memory?.jsHeap?.usedBytes)} eng ${mb(memory?.engine?.liveBytes)} gpu ${mb(memory?.gpuTotalBytes)} MB`, colours.dim]],
     ];
     // A monospaced font: one measure gives every piece's width, and a drawing measures no text.
     context.font = `10.5px ${colours.mono}`;

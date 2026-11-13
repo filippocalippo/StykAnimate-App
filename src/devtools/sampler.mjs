@@ -15,7 +15,7 @@ import {distribution, round} from './stats.mjs';
 
 /** The numbers `sample` keeps, with the counter each is written to in the span ring (null: kept, not graphed). Bytes are counted in megabytes. */
 export const SAMPLED = Object.freeze({
-  jsHeapBytes: 'memory jsHeap MB', engineLiveBytes: 'memory engine live MB', engineHeapBytes: 'memory engine heap MB', gpuBytes: 'memory gpu MB',
+  jsHeapBytes: 'memory jsHeap MB', engineLiveBytes: 'memory engine live MB', engineHeapBytes: 'memory engine heap MB', gpuBytes: 'memory gpu MB', gpuTotalBytes: 'memory gpu total MB',
   prepared: 'engine prepared', preparedTotalMs: null, preparedInline: null, imagesPending: 'engine imagesPending', cachedFrames: 'engine cachedFrames', cachedBytes: null,
   playbackReady: 'playback readyFrames', threadsLive: 'threads live',
 });
@@ -68,14 +68,17 @@ export class Sampler {
   /** Runs the tools' own reads of the engine outside the boundary meter, which counts only the app's calls. */
   quietly(read) { return this.boundary ? this.boundary.unmetered(read) : read(); }
 
-  /** The page's memory, the engine's and the GPU's as the stage counts it. */
+  /**
+   * The page's memory, the engine's and the GPU's as the stage counts it: `gpuBytes` is the stage's own figure (the one
+   * the app reports), which leaves out its render targets and sprite pages; `gpuTotalBytes` adds them, all the stage holds.
+   */
   memory() { return this.quietly(() => this.#readMemory()); }
   #readMemory() {
     const heap = performance.memory ? {usedBytes: performance.memory.usedJSHeapSize, totalBytes: performance.memory.totalJSHeapSize, limitBytes: performance.memory.jsHeapSizeLimit} : null;
     const engine = this.engine ? parsed(() => this.engine.memory()) : null;
     const renderer = this.app.state?.renderer?.stats ?? null;
     return {jsHeap: heap, engine, engineMemoryBytes: this.engine?.memoryBytes ?? null, engineMaximumBytes: this.engine?.memoryMaximumBytes ?? null,
-      gpuBytes: renderer?.gpuBytes ?? null, gpu: renderer?.engine ? {spriteBytes: renderer.engine.spriteBytes, targetBytes: renderer.engine.targetBytes, effectBytes: renderer.engine.effectBytes,
+      gpuBytes: renderer?.gpuBytes ?? null, gpuTotalBytes: renderer?.engine ? renderer.gpuBytes + renderer.engine.targetBytes + renderer.engine.spriteBytes : null, gpu: renderer?.engine ? {spriteBytes: renderer.engine.spriteBytes, targetBytes: renderer.engine.targetBytes, effectBytes: renderer.engine.effectBytes,
         layerBytes: renderer.engine.layerBytes, glyphBytes: renderer.engine.glyphBytes, softBytes: renderer.engine.softBytes} : null};
   }
 
@@ -138,7 +141,7 @@ export class Sampler {
    */
   sample(trace) {
     const jobs = this.jobs(), memory = this.memory(), engine = jobs.engine ?? {}, number = value => (Number.isFinite(value) ? value : NaN);
-    const values = {jsHeapBytes: memory.jsHeap?.usedBytes, engineLiveBytes: memory.engine?.liveBytes, engineHeapBytes: memory.engine?.heapBytes ?? memory.engineMemoryBytes, gpuBytes: memory.gpuBytes,
+    const values = {jsHeapBytes: memory.jsHeap?.usedBytes, engineLiveBytes: memory.engine?.liveBytes, engineHeapBytes: memory.engine?.heapBytes ?? memory.engineMemoryBytes, gpuBytes: memory.gpuBytes, gpuTotalBytes: memory.gpuTotalBytes,
       prepared: engine.busy ? NaN : engine.prepared, preparedTotalMs: engine.busy ? NaN : engine.preparedTotalMs, preparedInline: engine.busy ? NaN : engine.inline,
       imagesPending: engine.imagesPending, cachedFrames: engine.cachedFrames, cachedBytes: engine.cachedBytes, playbackReady: jobs.playback?.readyFrames, threadsLive: jobs.threads.live};
     const history = this.history, slot = history.total % HISTORY, at = performance.now();

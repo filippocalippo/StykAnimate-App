@@ -233,13 +233,14 @@ test('the sampler writes its counters and keeps the same numbers as a short hist
   const engine = {threaded: true, workers: 3, memoryBytes: 64 * 1048576, memory: () => ({liveBytes: 10 * 1048576, heapBytes: 64 * 1048576, peakBytes: 0, frameCacheBytes: 0}),
     handle: {stats: () => { reads++; return JSON.stringify(stats); }, workers_lost: () => 0, generation: () => 1}};
   const early = {frames: recorder(), workers: {rows: [], sequence: 0}, browser: {longTasks: 0, longTaskMs: 0, slowInputs: 0, worstInputMs: 0}};
-  const sampler = new Sampler({app: {state: {renderer: {stats: {gpuBytes: 5 * 1048576}}}}, early, engine});
+  // The stage's own GPU figure leaves its render targets and sprite pages out; the total adds them.
+  const sampler = new Sampler({app: {state: {renderer: {stats: {gpuBytes: 5 * 1048576, engine: {targetBytes: 3 * 1048576, spriteBytes: 1048576}}}}}, early, engine});
   const counters = [];
   sampler.sample({counter: (name, value) => counters.push([name, value])});
   stats = {...stats, prepared: 30, totalMs: 90, inline: 2};
   sampler.sample(null);
   assert.equal(reads, 2, 'one read of the engine\'s statistics per sample');
-  assert.deepEqual(Object.fromEntries(counters.filter(([name]) => name.startsWith('memory'))), {'memory jsHeap MB': NaN, 'memory engine live MB': 10, 'memory engine heap MB': 64, 'memory gpu MB': 5});
+  assert.deepEqual(Object.fromEntries(counters.filter(([name]) => name.startsWith('memory'))), {'memory jsHeap MB': NaN, 'memory engine live MB': 10, 'memory engine heap MB': 64, 'memory gpu MB': 5, 'memory gpu total MB': 9});
   const series = sampler.series(60000, ['engineLiveBytes', 'prepared']);
   assert.deepEqual([series.at.length, series.engineLiveBytes[0], series.prepared], [2, 10 * 1048576, [10, 30]]);
   const rate = sampler.preparationRate(60000);

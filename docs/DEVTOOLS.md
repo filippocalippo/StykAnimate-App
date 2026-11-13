@@ -90,7 +90,8 @@ Six tabs; the first opens by default:
   - *Engine*: frames its threads prepared per second and the time of one, frames prepared on the interface thread for
     want of a ready one, pictures pending, playback's ready frames, the frame cache, the threads.
   - *Memory*: the JavaScript heap, the engine's memory in use and reserved (its linear memory, which never shrinks),
-    the stage's GPU memory, each with its last minute as a line.
+    the stage's GPU memory, each with its last minute as a line. The GPU figure is all the stage reports; the stage's
+    own `gpuBytes` (the app's count, shown beside it) leaves out its render targets and sprite pages.
 
   **Record** starts a capture (the control channel's and the runner's kind) and **Stop** ends it; the tab then shows
   exactly that stretch, frozen, with its grade against the limits (the frame time seen against 16.7 / 33.3 / 100 ms
@@ -112,7 +113,7 @@ Six tabs; the first opens by default:
   last draw's geometry and submit times, a refusal), the browser's long tasks and slow inputs since the page started,
   and every worker the page started.
 
-The **performance overlay** is a small pill over the stage's top-left corner that lets input through. It shows the
+The **performance overlay** is a small pill over the stage's bottom-right corner that lets input through. It shows the
 frame time seen and the input delay p95 (each with its grade), frames per second, late frames, the interface's work
 p95 against the period, the frames the engine's threads prepare, memory, and the last two seconds' frame chart in
 miniature. It is one canvas, drawn four times a second from reads the tools already keep, with no layout, in the

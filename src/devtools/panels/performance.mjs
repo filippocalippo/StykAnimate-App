@@ -34,7 +34,7 @@ const MEMORY = [
   {key: 'jsHeapBytes', counter: 'memory jsHeap MB', label: 'JavaScript heap', title: 'The page\'s JavaScript objects (the interface, the read view)'},
   {key: 'engineLiveBytes', counter: 'memory engine live MB', label: 'Engine in use', title: 'What the engine\'s allocator has handed out now'},
   {key: 'engineHeapBytes', counter: 'memory engine heap MB', label: 'Engine reserved', title: 'The engine\'s linear memory: it grows to what was needed at once and never shrinks'},
-  {key: 'gpuBytes', counter: 'memory gpu MB', label: 'GPU (stage)', title: 'What the stage holds on the graphics card: targets, layers, effects, glyphs'},
+  {key: 'gpuTotalBytes', counter: 'memory gpu total MB', label: 'GPU (stage)', title: 'All the stage holds on the graphics card: its render targets, sprite pages, layers, effects and glyphs'},
 ];
 
 export function createPerformanceTab({runtime, recording, panel, idle}) {
@@ -184,10 +184,12 @@ export function createPerformanceTab({runtime, recording, panel, idle}) {
       }
       return;
     }
-    const history = sampler.series(60000, MEMORY.map(item => item.key));
+    const history = sampler.series(60000, MEMORY.map(item => item.key)), gpu = sampler.last?.memory;
     for (const item of memory) {
       const values = history[item.key].map(bytes => bytes / 1048576), last = history[item.key].at(-1), most = Math.max(...values.filter(Number.isFinite));
-      item.update(values, megabytes(last), Number.isFinite(most) ? `the most ${format(most, 1)} MB in the last minute` : 'not known');
+      // The stage's own figure leaves its render targets out: both are shown, so a difference is not a surprise.
+      const sub = item.key === 'gpuTotalBytes' && gpu?.gpu ? `targets ${megabytes(gpu.gpu.targetBytes)} · app's count ${megabytes(gpu.gpuBytes)}` : Number.isFinite(most) ? `the most ${format(most, 1)} MB in the last minute` : 'not known';
+      item.update(values, megabytes(last), sub);
     }
   }
 
