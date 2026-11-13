@@ -656,6 +656,8 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     // until the session lets it go.
     const drafted = answer.retained ? (editor._authoredPoseEdit?.frame ?? baseFrame()) : null;
     const kept = answer.retainedKept ? editor._evaluated : null;
+    // A gesture that ended changing nothing (a press that moved nothing): the frame on show is again the one it was composed on.
+    const composed = answer.shownKept ? editor._authoredPoseEdit?.source ?? null : null;
     adoptState(answer);
     if (answer.clipboard) clipboards.adopt(answer.clipboard, live);
     if (answer.figureClipboardPastes) clipboards.pasted(answer.figureClipboardPastes);
@@ -663,6 +665,7 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     if (answer.status === 'ok' && (name === 'beginVfxClipEdit' || name === 'beginAnimationEdit')) mirrorEdit(name, answer);
     if (drafted && !editor._authoredPoseEdit) { editor._evaluated = retainedShown = retainedFrame(answer, drafted); editor._geometry = null; }
     else if (kept && !editor._authoredPoseEdit && !editor._evaluated) { editor._evaluated = kept; }
+    else if (composed && !editor._authoredPoseEdit && !editor._sheetPropertyPreview && !editor._evaluated) { editor._evaluated = composed; }
     if (!answer.retained && !answer.retainedKept) retainedShown = null;
     if (drawing && answer.status === 'ok') drawing.adopted(answer);
     emit(answer);

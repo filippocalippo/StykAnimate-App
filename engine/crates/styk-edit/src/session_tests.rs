@@ -1966,3 +1966,43 @@ fn rig_and_camera_answers_tell_the_owner_which_gesture_is_open() {
     }
     assert!(rig >= 20 && camera >= 10 && previews >= 8 && closed >= 20, "rig {rig}, camera {camera}, previews {previews}, closed {closed}");
 }
+
+#[test]
+fn a_gesture_that_ends_changing_nothing_says_the_frame_on_show_is_the_one_it_was_composed_on() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/edit");
+    let reference = parse(&std::fs::read_to_string(root.join("selection-metadata-plain-sheet.reference.json")).unwrap());
+    let first = reference.get("steps").unwrap().item(0).unwrap();
+    let mut session = session_from_recorded_state(&reference, first.get("state").unwrap());
+    assert!(session.editor.sheet() && !session.editor.selection.uids.is_empty(), "a layer sheet with a figure selected");
+    let call = |session: &mut Session, method: &str, args: &str| {
+        let mut view = session.editor.state_value().as_obj().unwrap().clone();
+        view.set("changesOnly", Value::Bool(true));
+        view.set("patch", Value::Bool(true));
+        let answer = session.call_values(method, &parse(args), &Value::object(view));
+        assert_eq!(answer.get("status").and_then(Value::as_str), Some("ok"), "{method}: {answer:?}");
+        answer
+    };
+    let kept = |answer: &Value| answer.get("shownKept") == Some(&Value::Bool(true));
+    // A press and a release that moved nothing: the frame on show is the one the press composed its draft on.
+    let report = session.report().clone();
+    assert!(!kept(&call(&mut session, "beginTranslationDrag", r#"["Move connected figures"]"#)), "a gesture that goes on shows its draft");
+    let released = call(&mut session, "commitDrag", "[]");
+    assert_eq!(released.get("result"), Some(&Value::Bool(false)));
+    assert!(kept(&released), "{released:?}");
+    assert!(session.report().same_node(&report));
+    // So does a gesture cancelled.
+    call(&mut session, "beginTranslationDrag", r#"["Move connected figures"]"#);
+    assert!(kept(&call(&mut session, "cancelDrag", "[]")));
+    // A move changes the frame on show: the view reads it again.
+    call(&mut session, "beginTranslationDrag", r#"["Move connected figures"]"#);
+    call(&mut session, "moveSelection", r#"[7, 3, {"fromStart": true}]"#);
+    let moved = call(&mut session, "commitDrag", "[]");
+    assert_eq!(moved.get("result"), Some(&Value::Bool(true)));
+    assert!(!kept(&moved));
+    // A press on the frame the move kept on show, released without moving: the release lets that frame go for the document's evaluation,
+    // which the view does not hold, so it reads the frame again.
+    assert!(session.editor.retained_frame().is_some(), "the move keeps its draft on show");
+    call(&mut session, "beginTranslationDrag", r#"["Move connected figures"]"#);
+    let after = call(&mut session, "commitDrag", "[]");
+    assert!(!kept(&after), "{after:?}");
+}

@@ -13815,7 +13815,7 @@
   },
   "errors.editorMovieclips.theSceneChangedWhileBakingTryAgain": {
     "locations": [
-      "src/engine/engine-owner.mjs:692"
+      "src/engine/engine-owner.mjs:695"
     ],
     "context": "if (editor.report !== report || editor.revision !== revision) throw messageError(new Error(''), 'errors.editorMovieclips.theSceneChangedWhileBakingTryAgain', {}"
   },
@@ -13860,14 +13860,14 @@
   },
   "errors.engineOwner.invalidValue": {
     "locations": [
-      "src/engine/engine-owner.mjs:950"
+      "src/engine/engine-owner.mjs:953"
     ],
     "context": "if (needed.some(name => !Object.hasOwn(values, name))) return Object.assign(messageError(new Error(''), 'errors.engineOwner.invalidValue', {}), {unnamed: error}"
   },
   "errors.engineOwner.notSupported": {
     "locations": [
       "src/engine/engine-owner.mjs:8",
-      "src/engine/engine-owner.mjs:966",
+      "src/engine/engine-owner.mjs:969",
       "src/native-property-edit.mjs:261"
     ],
     "context": "* or has no command for, raises the refusal (`errors.engineOwner.notSupported`, counted in `report.refused`) and changes nothing,"
@@ -35689,7 +35689,7 @@
   },
   "vfxChannels.enabled": {
     "locations": [
-      "src/engine/engine-owner.mjs:937",
+      "src/engine/engine-owner.mjs:940",
       "src/vfx-clip-inspector.mjs:65",
       "src/vfx-localization.mjs:9",
       "src/vfx.mjs:24"
