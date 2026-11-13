@@ -55,9 +55,10 @@ duration when the capture's length is not it (`{metrics: {duration: opened.ms}}`
   (`docs/DEVTOOLS.md` lists the operations), `evaluate(fn, argument)` runs a function in the page, `open(file)` opens a
   document, `quiet()` closes what covers the stage, `shell(op, args)` is the desktop's own half.
 - `context.request`, `context.evaluate`: the same two, shorter.
-- `context.input`: `stroke(path, {durationMs, hz, button})`, `wheel(x, y, {notches, deltaY, durationMs, ctrl})`,
+- `context.input`: `stroke(path, {durationMs, hz, button, pressure})`, `wheel(x, y, {notches, deltaY, durationMs, ctrl})`,
   `click(x, y)`, `key(name, {ctrl, shift, alt})`, `keys(name, {count, durationMs})`, `move`, `down`, `up`, `hold`,
-  `release` (`perf/lib/input.mjs`). `context.paths` has `line`, `circle` and `sweep`.
+  `release` (`perf/lib/input.mjs`). A stroke with `pressure(t)` is a pen: the page sees pen pointer events with that
+  pressure. `context.paths` has `line`, `circle`, `wave` and `sweep`.
 - `context.stage()`: the stage's rectangle and centre in window pixels. `context.rect(selector)`: the same for the
   first visible element matching a selector (it throws when nothing does). `context.press(selector)`: a real click on
   its middle. `context.until(test, {what, timeoutMs})`: waits until a function is truthy in the page.
