@@ -162,11 +162,12 @@ function promiseLine(p, findings) {
 function attentionLines(findings, notShown) {
   if (!findings.length) return ['  nothing'];
   const lines = findings.map(f => {
-    const status = lowerFirst((f.summary || '').split(' · ')[0]);
+    // The views say a finding's status; one from an older site is the first part of its summary.
+    const status = lowerFirst(f.status !== undefined ? f.status ?? '' : (f.summary || '').split(' · ')[0]);
     const mark = f.severity === 'critical' ? 'critical, ' : '';
     return `  ${f.id.padEnd(7)} ${truncate(f.title, 62).padEnd(62)}  ${mark}${status}`.trimEnd();
   });
-  if (notShown) lines.push(`  and ${count(notShown)} more not shown (the views give the three that reach most sessions)`);
+  if (notShown) lines.push(`  and ${count(notShown)} more that reach fewer sessions (npm run stats -- findings --all)`);
   return lines;
 }
 
@@ -203,7 +204,7 @@ export function formatFindings(view, { next = '' } = {}) {
     lines.push(`${f.id}  ${f.severity}  ${f.kind}  ${plural(f.sessions, 'session')}`, `  ${f.title}`, `  ${f.summary}`, '');
   }
   if (!findings.length) lines.push('Nothing needs attention.', '');
-  if (view.notShown) lines.push(`And ${count(view.notShown)} more not shown: the views give the three that reach most sessions.`, '');
+  if (view.notShown) lines.push(`And ${count(view.notShown)} more that reach fewer sessions: add --all to list them.`, '');
   lines.push(...footer(view));
   if (findings.length) lines.push(`Next: npm run stats -- show ${findings[0].id}${next}`);
   return lines.join('\n');
@@ -473,7 +474,7 @@ STYK_STATS_URL (default ${DEFAULT_SITE}; http: only for localhost and 127.0.0.1)
 
 Commands
   release [version]        the four promises and what needs attention (the default)
-  findings                 what needs attention, at most three, with their evidence lines
+  findings                 what needs attention with its evidence lines: the three that reach most sessions, or all with --all
   show <id>                one finding whole: evidence and the brief for an agent (R-ff75, E-a786)
   responsiveness [doing]   smooth share by scene size and machine (drag, play, scrub, view, draw)
   safety                   saves, recovery, file opens and exports, and why they failed
@@ -489,6 +490,7 @@ Options
   --days 7|30|90           the period, in days up to today (default 7)
   --platform <name>        win32, linux, darwin, web or all (default all)
   --channel <name>         stable, beta, internal or development (default stable)
+  --all                    with findings: every finding, not the first three
   --fresh                  compute the view now instead of taking one up to five minutes old
   --json                   print the view's JSON unchanged
 
@@ -509,10 +511,11 @@ export function parseArgs(argv) {
     if (!token.startsWith('--')) { positional.push(token); continue; }
     const eq = token.indexOf('=');
     const name = token.slice(2, eq < 0 ? undefined : eq);
-    if (name === 'json' || name === 'fresh' || name === 'help') {
+    if (name === 'json' || name === 'fresh' || name === 'all' || name === 'help') {
       if (eq >= 0) throw new UsageError(`--${name} takes no value.`);
       if (name === 'json') json = true;
       else if (name === 'fresh') params.fresh = '1';
+      else if (name === 'all') params.all = '1';
       else positional.unshift('help');
       continue;
     }
@@ -662,7 +665,8 @@ export async function run(argv, { env = process.env, out = text => process.stdou
     const context = { origin, key, fetchImpl };
 
     if (command === 'show') {
-      const { body } = await read(context, 'findings', params);
+      // Every finding, so one beyond the three the overview shows can be shown too.
+      const { body } = await read(context, 'findings', { ...params, all: '1' });
       const finding = (body.findings || []).find(f => f.id.toLowerCase() === arg.toLowerCase());
       if (!finding && /^E-[0-9a-f]+$/i.test(arg)) {
         // A problem's finding id starts its group's signature, and the problem view holds the same brief,

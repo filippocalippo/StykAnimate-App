@@ -86,7 +86,7 @@ describe('the text of each command', () => {
       '  E-a786  The engine stops: index out of bounds: the len is # but the i…  critical, new in 9.1.0',
       '  R-ff75  Dragging stutters in scenes of 50,000 to 200,000 segments on…   worse than 9.0.0',
       '  F-5a1c  Stick Nodes 4.3 files fail to open                              since 9.1.0',
-      '  and 3 more not shown (the views give the three that reach most sessions)',
+      '  and 3 more that reach fewer sessions (npm run stats -- findings --all)',
       '',
       ...FOOTER,
       'Next: npm run stats -- show E-a786        (add --json for the numbers alone)',
@@ -145,7 +145,7 @@ describe('the text of each command', () => {
       '  Stick Nodes 4.3 files fail to open',
       '  Since 9.1.0 · 8 of 42 opens failed · a version the reader does not know',
       '',
-      'And 3 more not shown: the views give the three that reach most sessions.',
+      'And 3 more that reach fewer sessions: add --all to list them.',
       '',
       ...FOOTER,
       'Next: npm run stats -- show E-a786',
@@ -421,6 +421,7 @@ describe('refusals', () => {
       assert.equal(requests.length, before, argv.join(' '));
     }
     assert.throws(() => parseArgs(['--json=1']), UsageError);
+    assert.deepEqual(parseArgs(['findings', '--all']), { command: 'findings', arg: undefined, params: { all: '1' }, json: false });
     assert.deepEqual(parseArgs(['responsiveness', 'view', '--json']), { command: 'responsiveness', arg: 'view', params: { doing: 'view' }, json: true });
   });
 
