@@ -23,6 +23,18 @@ pub(crate) struct Target {
     free: Vec<u32>,
     /// Only the root target has the host's explicit per-paint Canvas clip.
     canvas_clip: Option<styk_render::paint::CanvasClip>,
+    /// The quad a primitive of a turned view's root is kept inside, pixel by pixel ([`inside`]); set per primitive.
+    pub quad_clip: Option<[[f32; 2]; 4]>,
+}
+
+/// Whether the centre of pixel `i` of a `width`-wide target is inside `quad` (corners in order, either way round), as
+/// `inside_orient_artboard` in prim.wgsl decides it, in single precision.
+#[inline]
+fn inside(quad: &[[f32; 2]; 4], i: usize, width: usize) -> bool {
+    let p = [(i % width) as f32 + 0.5, (i / width) as f32 + 0.5];
+    let edge = |a: [f32; 2], b: [f32; 2]| (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    let e = [edge(quad[0], quad[1]), edge(quad[1], quad[2]), edge(quad[2], quad[3]), edge(quad[3], quad[0])];
+    e.iter().all(|&v| v >= 0.0) || e.iter().all(|&v| v <= 0.0)
 }
 
 /// A colour component `v` (0–1) as the target stores it: to the nearest level, halves to
@@ -54,7 +66,7 @@ fn canvas_blend(dst: Px, src: [f32; 4], add: bool) -> Px {
 
 impl Target {
     pub fn new(width: usize, height: usize, samples: usize, clear: Px) -> Target {
-        Target { width, height, samples, pixels: vec![clear; width * height], index: vec![0; width * height], split: Vec::new(), free: Vec::new(), canvas_clip: None }
+        Target { width, height, samples, pixels: vec![clear; width * height], index: vec![0; width * height], split: Vec::new(), free: Vec::new(), canvas_clip: None, quad_clip: None }
     }
 
     pub fn set_canvas_clip(&mut self, clip: styk_render::paint::CanvasClip) { self.canvas_clip = Some(clip); }
@@ -79,6 +91,9 @@ impl Target {
 
     #[inline]
     fn blend_inner(&mut self, i: usize, mask: u8, mut src: [f32; 4], add: bool, paint: Option<u8>) {
+        if let Some(quad) = &self.quad_clip && !inside(quad, i, self.width) {
+            return;
+        }
         let blend = if let Some(clip) = self.canvas_clip {
             let alpha = clip.alpha([i % self.width, i / self.width]);
             let alpha = paint.map_or(alpha, |paint| ((paint as u32 * alpha as u32 + 127) / 255) as u8);
@@ -144,7 +159,7 @@ impl Target {
     /// over the whole pixel, which `blend` would give too.
     #[inline]
     pub fn set_opaque(&mut self, i: usize, px: Px) {
-        if self.canvas_clip.is_some() {
+        if self.canvas_clip.is_some() || self.quad_clip.is_some() {
             self.blend(i, self.full(), px.map(|v|v as f32 / 255.0), false);
             return;
         }
