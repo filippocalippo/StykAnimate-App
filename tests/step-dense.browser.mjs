@@ -1,5 +1,5 @@
-// A held frame step in a scene whose editing frame is dear: the first step is exact, the run after it shows prepared frames and reads
-// no frame, and the key up draws the exact editing frame of the tick the run reached; an ordinary scene steps exactly at every step
+// A held frame step in a scene whose editing frame is dear: from the press on the steps show prepared frames and read no frame, and
+// the key up draws the exact editing frame of the tick the run reached; an ordinary scene steps exactly at every step
 // (docs/TIMELINE.md, "Stepping through a dense scene"). Real key events through the page. Needs the development server (npm run serve).
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
@@ -15,11 +15,14 @@ const dense = (tick, dear = true) => page.evaluate(({tick, dear}) => {
 }, {tick, dear});
 const settled = tick => page.waitForFunction(tick => styk.state.lastEditingPresentation?.tick === tick && !styk.state.dirtyRender, tick, {timeout: 15000})
   .catch(async error => { throw new Error(`the exact frame of tick ${tick} was not drawn: ${JSON.stringify(await page.evaluate(() => ({tick: styk.editor.tick, shown: styk.state.lastEditingPresentation, dirty: styk.state.dirtyRender, focus: document.activeElement?.id, draws: stepLog.draws.slice(-5)})))}`, {cause: error}); });
+/** The playhead at `tick`, moved there by a step of a run (the stage shows prepared frames until the run ends). */
+const landed = tick => page.waitForFunction(tick => styk.editor.tick === tick && styk.scrub.preview.active, tick, {timeout: 15000});
 /**
- * `key` pressed, then (after the first step is drawn) auto-repeated `repeats` times about 30 a second, and released. Returns the draws of
- * the first step, of the repeats and after the key up, and the reads of the frame on show while the run steered the playhead.
+ * `key` pressed, then (after the first step landed: drawn exactly in an ordinary scene, `exact`) auto-repeated `repeats` times about 30 a
+ * second, and released. Returns the draws of the first step, of the repeats and after the key up, and the reads of the frame on show while
+ * the run steered the playhead.
  */
-async function hold(key, repeats, {focus = '#viewport', first} = {}) {
+async function hold(key, repeats, {focus = '#viewport', first, exact = false} = {}) {
   await page.evaluate(selector => document.querySelector(selector).focus({preventScroll: true}), focus);
   // A step within a quarter of a second of the last one would join its run: the press is a first step.
   await sleep(400);
@@ -27,7 +30,7 @@ async function hold(key, repeats, {focus = '#viewport', first} = {}) {
   const keys = key.split('+'), main = keys.at(-1);
   for (const modifier of keys.slice(0, -1)) await page.keyboard.down(modifier);
   await page.keyboard.down(main);
-  if (first !== undefined) await settled(first);
+  if (first !== undefined) await (exact ? settled(first) : landed(first));
   const firstDraws = await page.evaluate(() => stepLog.draws.splice(0));
   // Playwright sends a key pressed again before its release as the keyboard's auto-repeat.
   for (let i = 0; i < repeats; i++) { await page.keyboard.down(main); await sleep(33); }
@@ -61,28 +64,28 @@ try {
   const total = await page.evaluate(() => styk.editor.totalTicks);
   assert.ok(total > 40, `the demo has room for a run (${total} ticks)`);
   assert.equal(await page.evaluate(() => styk.scrub.costs.dear(styk.editor.report)), false, 'the demo paints a new tick in a few milliseconds');
-  // The rule is asked at a run's second step, after the first step's own paint, which in the demo is cheap: the test answers for it.
+  // The rule is asked at a step outside a run, and the demo's paints are cheap: the test answers for it.
   await page.evaluate(() => { styk.scrub.costs.dear = report => report === styk.editor.report && window.stepDear; });
 
   // An ordinary scene: every step of a held key draws the exact editing frame, onion skins included; nothing is prepared for it.
   await dense(0, false);
-  let run = await hold('Period', 12, {first: 1});
+  let run = await hold('Period', 12, {first: 1, exact: true});
   assert.equal(run.during.steering, false);
   assert.equal(run.after.tick, 13, 'every step lands');
   const ordinary = [...run.first, ...run.during.draws, ...run.after.draws].filter(draw => draw.drawn);
   assert.ok(ordinary.every(draw => draw.kind === 'edit' && draw.onions), 'an ordinary scene steps as editing');
   assert.ok(new Set(ordinary.map(draw => draw.tick)).size > 6, 'the editing frame follows the steps');
 
-  // A dense scene: the first step is exact, the repeats show prepared frames and read nothing, the key up draws the exact frame.
+  // A dense scene: the press and its repeats show prepared frames and read nothing, the key up draws the exact frame.
   await dense(0);
   await settled(0);
   await page.evaluate(() => { stepLog.draws.length = 0; });
   run = await hold('Period', 24, {first: 1});
-  assert.ok(run.first.some(draw => draw.kind === 'edit' && draw.drawn && draw.tick === 1 && draw.onions), 'one press is an exact step');
-  assert.equal(run.during.steering, true, 'the repeats steer the playhead');
+  assert.deepEqual(run.first.filter(draw => draw.kind === 'edit'), [], 'the press draws no editing frame: its picture is a prepared frame');
+  assert.equal(run.during.steering, true, 'the press and the repeats steer the playhead');
   assert.deepEqual(run.during.draws.filter(draw => draw.kind === 'edit'), [], 'no editing frame is drawn until the run ends');
   assert.equal(run.during.reads, 0, 'nothing reads the frame on show during the run');
-  const shown = run.during.draws.filter(draw => draw.drawn).map(draw => draw.tick);
+  const shown = [...run.first, ...run.during.draws].filter(draw => draw.drawn).map(draw => draw.tick);
   assert.ok(shown.length >= 1, 'prepared frames are shown during the run');
   assert.deepEqual(shown, [...shown].sort((a, b) => a - b), `a forward run never shows an older tick after a newer one (${shown})`);
   assert.equal(run.after.steering, false);
@@ -119,12 +122,16 @@ try {
   assert.equal(run.after.tick, keyTicks[7], 'seven keyframe steps');
   assert.ok(run.during.draws.every(draw => draw.kind === 'prepared' && keyTicks.includes(draw.tick)), 'only keyframes are passed');
 
-  // Taps closer than a quarter of a second are a run too; another command's key ends it first, so the command acts on the exact frame.
+  // A tap is a run that ends a quarter of a second after it, with the exact frame of its tick; taps closer than that are one run; another
+  // command's key ends it first, so the command acts on the exact frame.
   await dense(0);
   await settled(0);
   await page.evaluate(() => document.querySelector('#viewport').focus({preventScroll: true}));
   await sleep(400);
+  await page.evaluate(() => { stepLog.draws.length = 0; });
   await page.keyboard.press('Period'); await settled(1);
+  const tapped = (await page.evaluate(() => stepLog.draws)).filter(draw => draw.kind === 'edit' && draw.drawn).map(draw => draw.tick);
+  assert.ok(tapped.length > 0 && tapped.every(tick => tick === 1), `a lone tap draws the exact frame of its tick when its run ends (${tapped})`);
   await page.keyboard.press('Period'); await page.keyboard.press('Period');
   assert.equal(await page.evaluate(() => styk.scrub.preview.active), true, 'quick taps steer the playhead');
   await page.evaluate(() => { stepLog.draws.length = 0; });

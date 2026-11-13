@@ -31,15 +31,61 @@ test('a scene scrubs from prepared frames when its paints at a new tick cost ove
 /** A playback adapter whose frames are ready when the test says, and an engine whose progress the test advances. */
 function preparedSide({total = 101} = {}) {
   const ready = new Set(), requests = [], reads = [];
-  let progress = 0, wake = null;
+  // A clock the test moves (`wait`): while it stands still the pointer has no speed, and nothing is asked for ahead of where it is.
+  let progress = 0, wake = null, time = 0;
   const playback = {get(tick) { reads.push(tick); return ready.has(tick) ? {tick, key: `engine:1:1:${tick}`, frame: {camera: {x: tick}}} : null; }};
   const engine = {
     progressSeen: () => progress,
     whenProgress: (seen, ms) => new Promise(resolve => { wake = {seen, ms, resolve}; }),
   };
-  const preview = createScrubPreview({playback, total: () => total, engine: () => engine, prepare: (ticks, playhead) => requests.push({ticks: [...ticks], playhead})});
-  return {preview, ready, requests, reads, engine, advance() { progress++; const waiting = wake; wake = null; waiting?.resolve(); return waiting; }, get wake() { return wake; }};
+  const preview = createScrubPreview({playback, total: () => total, engine: () => engine, now: () => time, prepare: (ticks, playhead) => requests.push({ticks: [...ticks], playhead})});
+  return {preview, ready, requests, reads, engine, wait(ms) { time += ms; }, advance() { progress++; const waiting = wake; wake = null; waiting?.resolve(); return waiting; }, get wake() { return wake; }};
 }
+
+/**
+ * A drag (or a run of steps, `steps`) from tick 10 moving a tick every 10 ms, whose first frames are seen ready 50 ms after they were
+ * asked for: the first tick of the request made then.
+ */
+function paced(steps) {
+  const side = preparedSide({total: 400}), {preview, requests, ready} = side;
+  preview.begin(10, {steps});
+  for (let tick = 11; tick <= 16; tick++) { side.wait(10); preview.point(tick); }
+  for (const tick of requests.flatMap(request => request.ticks)) ready.add(tick);
+  preview.next();
+  return requests.at(-1).ticks[0];
+}
+
+test('a moving pointer\'s frames are asked for where it will be once they are made', () => {
+  const side = preparedSide({total: 400}), {preview, requests, ready} = side;
+  preview.begin(10);
+  // A tick every 10 ms: until a frame of the drag has been seen ready, the pointer's own tick is asked for.
+  for (let tick = 11; tick <= 16; tick++) { side.wait(10); preview.point(tick); }
+  assert.deepEqual(requests[0].ticks, [11, 12, 13], 'before a frame is seen ready, the pointer\'s own tick first');
+  assert.equal(requests.length, 1, 'three being made');
+  // The frames take 50 ms from being asked for to being seen ready: 0.1 ticks a millisecond leads by five ticks.
+  for (const tick of requests[0].ticks) ready.add(tick);
+  assert.equal(preview.next()?.tick, 13);
+  const asked = requests.at(-1).ticks;
+  assert.deepEqual(asked, [21, 22, 23], 'asked for where the pointer will be, and the next ones after it');
+  assert.equal(paced(true), 16, 'a run of steps asks for its playhead\'s own tick');
+  // A frame asked for ahead is shown only once the pointer has passed its tick.
+  ready.add(asked[0]);
+  assert.notEqual(preview.next()?.tick, asked[0], 'a tick the pointer has not reached is not shown');
+  for (let tick = 18; tick <= asked[0]; tick++) { side.wait(10); preview.point(tick); }
+  assert.equal(preview.next()?.tick, asked[0], 'shown once the pointer reaches it');
+  // A pointer that stops is asked for where it is, once the frames being made leave room.
+  for (let tick = asked[0] + 1; tick <= 40; tick++) { side.wait(10); preview.point(tick); }
+  side.wait(200);
+  for (const tick of requests.at(-1).ticks) ready.add(tick);
+  preview.next();
+  assert.equal(requests.at(-1).ticks[0], 40, `a still pointer's own tick (${requests.at(-1).ticks})`);
+  // At the document's end the lead stops there.
+  preview.end(); preview.begin(392);
+  for (let tick = 393; tick <= 396; tick++) { side.wait(10); preview.point(tick); }
+  for (const tick of requests.at(-1).ticks) ready.add(tick);
+  side.wait(10); preview.point(397); preview.next();
+  assert.ok(requests.at(-1).ticks.length > 0 && requests.at(-1).ticks.every(tick => tick <= 399), `never past the last tick (${requests.at(-1).ticks})`);
+});
 
 test('the pointer\'s tick is asked for first, then its neighbours in the drag\'s direction, three frames at a time', () => {
   const {preview, requests, ready} = preparedSide();
@@ -166,12 +212,12 @@ function stepSide({dear = true} = {}) {
   return side;
 }
 
-test('a held key: the first step is exact, the run starts at the first auto-repeat and ends with the key up', () => {
+test('a held key in a dense scene: the run starts at the first step and ends with the key up', () => {
   const side = stepSide(), {run, log} = side;
   assert.equal(STEP_RUN_MS, 250);
-  assert.equal(side.step(0), false, 'one press is an exact step');
-  assert.deepEqual(log, []);
-  // The keyboard's repeat delay (half a second) is longer than the gap: the repeat says it is a run.
+  assert.equal(side.step(0), true, 'the press is a step of a run: its prepared frame shows, the exact one waits for the end');
+  assert.deepEqual(log, ['begin']);
+  // The keyboard's repeat delay (half a second) is longer than the gap: the key is still down, and the run waits for it.
   assert.equal(side.step(500, {repeat: true}), true);
   assert.deepEqual(log, ['begin']);
   for (let i = 0; i < 60; i++) assert.equal(side.step(33, {repeat: true}), true);
@@ -185,38 +231,42 @@ test('a held key: the first step is exact, the run starts at the first auto-repe
   run.keyup({code: 'Period'});
   assert.deepEqual(log, ['begin', 'end'], 'the key up ends the run at once: the exact frame is drawn');
   assert.equal(run.active, false);
-  // The next press is a single exact step again.
-  assert.equal(side.step(400), false);
+  // The next press starts a run of its own.
+  assert.equal(side.step(400), true);
+  assert.deepEqual(log, ['begin', 'end', 'begin']);
 });
 
 test('taps closer than the gap are one run, which ends a gap after the last tap', () => {
   const side = stepSide(), {run, log} = side;
-  assert.equal(side.step(0), false);
-  run.keyup({code: 'Period'});
-  assert.equal(side.step(STEP_RUN_MS + 1), false, 'steps a quarter of a second apart are each exact');
-  run.keyup({code: 'Period'});
-  assert.equal(side.step(180), true, 'a tap within the gap starts a run');
+  assert.equal(side.step(0), true, 'a tap in a dense scene is a step of a run');
+  side.wait(80);
   run.keyup({code: 'Period'});
   assert.equal(run.active, true, "a tap's key up leaves the run for the next tap");
+  side.wait(STEP_RUN_MS - 81);
+  assert.equal(run.active, true);
+  side.wait(1);
+  assert.deepEqual(log, ['begin', 'end'], 'the run ends a gap after its last step, not after its key up: the exact frame is drawn');
+  assert.equal(side.step(STEP_RUN_MS + 1), true, 'a tap after the gap starts a run of its own');
+  run.keyup({code: 'Period'});
   side.wait(200);
-  assert.equal(side.step(0), true, 'the next tap joins it');
+  assert.equal(side.step(0), true, 'a tap within the gap joins it');
   run.keyup({code: 'Period'});
   side.wait(STEP_RUN_MS - 1);
   assert.equal(run.active, true);
   side.wait(1);
-  assert.deepEqual(log, ['begin', 'end'], 'no step for the gap ends the run');
+  assert.deepEqual(log, ['begin', 'end', 'begin', 'end'], 'no step for the gap ends the run');
   // A run of taps that becomes a held key ends with the key.
   side.step(0); side.step(100); side.step(500, {repeat: true});
   run.keyup({code: 'Period'});
-  assert.deepEqual(log, ['begin', 'end', 'begin', 'end']);
+  assert.deepEqual(log, ['begin', 'end', 'begin', 'end', 'begin', 'end']);
 });
 
 test('steps in an ordinary scene, during a drag or after losing focus are as before', () => {
   const side = stepSide({dear: false}), {run, log} = side;
-  side.step(0);
+  assert.equal(side.step(0), false, 'a scene whose frame keeps up steps exactly');
   for (let i = 0; i < 5; i++) assert.equal(side.step(33, {repeat: true}), false, 'a scene whose frame keeps up steps exactly, every step');
   assert.equal(run.active, false);
-  assert.deepEqual(log, ['begin', 'begin', 'begin', 'begin', 'begin'], 'asked at each step whether it scrubs from prepared frames');
+  assert.deepEqual(log, ['begin', 'begin', 'begin', 'begin', 'begin', 'begin'], 'asked at each step whether it scrubs from prepared frames');
   side.dear = true;
   assert.equal(side.step(33, {repeat: true}), true);
   // A playhead drag takes the run over: its release draws the exact frame, the run's end does not.
