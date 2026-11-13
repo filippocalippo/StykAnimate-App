@@ -3,6 +3,7 @@
  * how to write one). A file per area of the app; a scenario's id is `<area>.<what>`.
  */
 import canvas from './canvas.mjs';
+import drawing from './drawing.mjs';
 import files, {open} from './files.mjs';
 import interfaceScenarios from './interface.mjs';
 import playback from './playback.mjs';
@@ -16,6 +17,7 @@ export {open};
 export const SCENARIOS = Object.freeze([...files, ...playback, ...timeline, ...canvas, ...pose,
   ...selection,
   ...interfaceScenarios,
+  ...drawing,
 ]);
 
 /**

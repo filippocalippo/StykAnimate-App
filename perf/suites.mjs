@@ -20,6 +20,14 @@ export const SUITES = Object.freeze({
     description: 'The whole picture, about twenty minutes: every environment, the new project and all four scene sizes, 3 passes.',
     environments: ['gpu', 'webgl', 'software', 'low-end', 'browser'], workloads: ['starter', 'small', 'medium', 'large', 'stress'], scenarios: [], passes: 3,
   },
+  features: {
+    description: 'What each heavier feature costs, about twelve minutes: the graphics card on the busy scene and on it with pictures, effects, movieclips, a camera, text and filled shapes, and a long animation; every scenario but drawing, 2 passes.',
+    environments: ['gpu'], workloads: ['medium', 'sprites', 'effects', 'movieclips', 'camera', 'text', 'shapes', 'long'], scenarios: ['files', 'playback', 'timeline', 'canvas', 'posing'], passes: 2,
+  },
+  drawing: {
+    description: 'Painting on a drawing layer, about four minutes: the graphics card and no graphics card, on a small and a busy scene (the busy scene is the stroke among many figures), 2 passes.',
+    environments: ['gpu', 'software'], workloads: ['small', 'medium'], scenarios: ['drawing'], passes: 2,
+  },
 });
 
 /** The suite named `id`; throws with the list when there is none. */

@@ -38,8 +38,10 @@ async function until(time) {
 /** The input of one app (`app.inspector`, `app.page`). Positions are CSS pixels in the window. */
 export function createInput(app) {
   const send = (method, params) => app.inspector.send(method, params, app.page);
-  const state = {x: 0, y: 0, buttons: 0, modifiers: 0};
-  const mouse = (type, extra = {}) => send('Input.dispatchMouseEvent', {type, x: state.x, y: state.y, buttons: state.buttons, modifiers: state.modifiers, pointerType: 'mouse', ...extra});
+  // `pen` is set for the length of a pen stroke: its moves reach the page as pointer events of type pen with that pressure.
+  const state = {x: 0, y: 0, buttons: 0, modifiers: 0, pen: null};
+  const mouse = (type, extra = {}) => send('Input.dispatchMouseEvent', {type, x: state.x, y: state.y, buttons: state.buttons, modifiers: state.modifiers,
+    ...(state.pen ? {pointerType: 'pen', force: state.pen.force} : {pointerType: 'mouse'}), ...extra});
   const input = {
     async move(x, y) { state.x = x; state.y = y; await mouse('mouseMoved', {button: 'none'}); },
     async down(button = 'left', {clickCount = 1} = {}) { state.buttons |= BUTTONS[button]; await mouse('mousePressed', {button, clickCount}); },
@@ -54,21 +56,27 @@ export function createInput(app) {
     /**
      * Moves the pointer along `path(t)` (t from 0 to 1, returning {x, y}) for `durationMs`, one move every 1/`hz` s,
      * with `button` held (null: a hover). The moves leave on time whether or not the app has handled the one before.
+     * `pressure(t)` (0 to 1) makes it a pen stroke: the inspector's mouse events carry the pointer type and the force,
+     * and the page sees pen pointer events with that pressure, as from a tablet (the release lifts it to 0).
      * Resolves when the app has taken every event of the gesture, the release included.
      */
-    async stroke(path, {durationMs = 1500, hz = 120, button = 'left', release = true} = {}) {
+    async stroke(path, {durationMs = 1500, hz = 120, button = 'left', release = true, pressure = null} = {}) {
       const first = path(0), sent = [];
       await input.move(first.x, first.y);
+      if (pressure) state.pen = {force: pressure(0)};
       if (button) await input.down(button);
       const steps = Math.max(1, Math.round(durationMs / 1000 * hz)), started = performance.now();
       for (let step = 1; step <= steps; step++) {
         await until(started + step * 1000 / hz);
         const point = path(step / steps);
         state.x = point.x; state.y = point.y;
+        if (pressure) state.pen = {force: pressure(step / steps)};
         sent.push(mouse('mouseMoved', {button: button ?? 'none'}).catch(() => {}));
       }
       await Promise.all(sent);
-      if (button && release) await input.up(button);
+      if (pressure) state.pen = {force: 0};
+      try { if (button && release) await input.up(button); }
+      finally { if (pressure) state.pen = null; }
     },
     /**
      * Turns the wheel at (x, y): `notches` events of `deltaY` each over `durationMs`, on a clock like `stroke`.
@@ -120,6 +128,11 @@ export const paths = {
   line: (from, to) => t => ({x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t}),
   /** `turns` circles of `radius` starting and ending at `centre`'s right. */
   circle: (centre, radius, turns = 1) => t => ({x: centre.x + Math.cos(t * turns * 2 * Math.PI) * radius, y: centre.y + Math.sin(t * turns * 2 * Math.PI) * radius}),
+  /** From `from` to `to`, swinging `amplitude` pixels to either side `waves` times: a stroke a hand draws across the stage. */
+  wave: (from, to, amplitude, waves = 2) => t => {
+    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1, side = Math.sin(t * waves * 2 * Math.PI) * amplitude;
+    return {x: from.x + (to.x - from.x) * t - (to.y - from.y) / length * side, y: from.y + (to.y - from.y) * t + (to.x - from.x) / length * side};
+  },
   /** Out from `start` and round an ellipse, ending away from the start (a drag that ends displaced). */
   sweep: (start, width, height) => t => ({x: start.x + Math.sin(t * Math.PI * 1.5) * width, y: start.y - (1 - Math.cos(t * Math.PI * 1.5)) * height}),
 };

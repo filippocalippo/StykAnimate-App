@@ -33,4 +33,50 @@ export const play = {
   },
 };
 
-export default [play];
+/**
+ * The same playback with one feature turned off, the way a person turns it off: run on the same document after
+ * `playback.play`, the difference between the two is what the feature costs while playing.
+ */
+export const effectsOff = {
+  id: 'playback.effects-off', area: 'playback', title: 'Play with the effects preview off', kind: 'gesture',
+  description: `Turns Effects preview off with its button in the stage header, plays from the first frame for ${SECONDS} s as playback.play does, and turns it back on. Against playback.play on the same document: what drawing the effects costs.`,
+  judge: play.judge, metrics: play.metrics,
+  // Effects live in effect clips (_styk.vfxClips) or on a pose (_stykVfx on a keyframe or a figure on it).
+  when: async context => (await context.evaluate(() => {
+    const report = globalThis.styk.editor.report;
+    return Boolean(report._styk?.vfxClips?.clips?.length || report.keyframes.some(frame => frame._stykVfx || frame.objects.some(object => object._stykVfx)));
+  }) ? undefined : 'the document has no effects'),
+  async setup(context) {
+    if (!(await context.evaluate(() => globalThis.styk.state.vfxEnabled))) throw new Error('The effects preview is off before the scenario turns it off.');
+    await context.press('#vfx-preview');
+    await context.until(() => globalThis.styk.state.vfxEnabled === false, {what: 'the effects preview to turn off'});
+  },
+  run: (context, state) => play.run(context, state),
+  async teardown(context) {
+    if (await context.evaluate(() => globalThis.styk.state.vfxEnabled)) return;
+    await context.press('#vfx-preview');
+    await context.until(() => globalThis.styk.state.vfxEnabled === true, {what: 'the effects preview to turn back on'});
+  },
+};
+
+export const cameraOff = {
+  id: 'playback.camera-off', area: 'playback', title: 'Play without the camera', kind: 'gesture',
+  description: `Hides the camera layer, plays from the first frame for ${SECONDS} s as playback.play does (the whole stage instead of the camera's shot), and shows it again. Against playback.play on the same document: what playing through a moving camera costs.`,
+  judge: play.judge, metrics: play.metrics,
+  when: async context => (await context.evaluate(() => globalThis.styk.editor.report.keyframes.some(frame => frame.camera && frame.camera.is_default === false))
+    ? undefined : 'the document has no camera'),
+  // The camera's eye in the timeline has no stable handle to aim at: setup hides it with the command the eye runs
+  // (one undo step, undone in teardown); what is measured is the playback after it.
+  async setup(context) {
+    await context.evaluate(() => globalThis.styk.editor.setLayerVisible('camera', false));
+    await context.settle();
+  },
+  run: (context, state) => play.run(context, state),
+  async teardown(context) {
+    if (await context.evaluate(() => globalThis.styk.editor.report._styk?.layers?.fixed?.camera?.visible === false && globalThis.styk.editor.undoLabel === 'Set layer visibility')) await context.request('undo');
+  },
+};
+
+export default [play,
+  effectsOff, cameraOff,
+];

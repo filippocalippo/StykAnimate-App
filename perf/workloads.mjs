@@ -12,6 +12,7 @@ import {createHash} from 'node:crypto';
 import {existsSync, mkdirSync, statSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {ROOT} from './lib/app.mjs';
+import {FEATURES} from './workload-features.mjs';
 
 /**
  * figures × segments is what one frame draws; keyframes × hold is the animation's length in frames (between two
@@ -28,6 +29,21 @@ export const WORKLOADS = Object.freeze({
     figures: 500, segments: 60, chain: 10, keyframes: 12, hold: 10, canvas: [1920, 1080]},
   stress: {id: 'stress', title: 'Stress scene', description: '2,000 figures of 100 segments (200,000 segments a frame), 101 frames: the scene the app must stay usable on.',
     figures: 2000, segments: 100, chain: 10, keyframes: 11, hold: 10, canvas: [1920, 1080]},
+  // The busy scene with one of the heavier features (perf/workload-features.mjs), to compare with `medium`; `long` is the small scene made long.
+  sprites: {id: 'sprites', title: 'Busy scene of pictures', description: 'The busy scene with the last two segments of every limb drawn as a picture: 48 pictures of 512² pixels, 800 drawn a frame.',
+    figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'sprites', pictures: 48, pictureSize: 512},
+  effects: {id: 'effects', title: 'Busy scene with effects', description: 'The busy scene with an effect on every figure for the whole animation: glow, shadow, outline, tint and blur, each on 16 figures.',
+    figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'effects'},
+  movieclips: {id: 'movieclips', title: 'Busy scene in movieclips', description: 'The busy scene\'s 80 figures inside movieclips two deep: 8 instances of a clip that holds 5 figures and a clip of 5 more.',
+    figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'movieclips'},
+  camera: {id: 'camera', title: 'Busy scene through a camera', description: 'The busy scene spread over 3840 × 2160 behind a 1920 × 1080 canvas, with a camera that pans, zooms and turns on every frame.',
+    figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [3840, 2160], feature: 'camera', shot: [1920, 1080]},
+  text: {id: 'text', title: 'Busy scene with labels', description: 'The busy scene with a text label in place of every figure\'s head: 80 labels of 7 glyphs a frame.',
+    figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'text'},
+  shapes: {id: 'shapes', title: 'Busy scene of filled shapes', description: 'The busy scene with half-transparent filled polygons over every limb and through the limbs\' tips: 480 a frame.',
+    figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'shapes'},
+  long: {id: 'long', title: 'Long animation', description: '12 figures of 20 segments over 4,001 frames (2 min 47 s at 24 fps, 401 keyframes): what the timeline costs when it is long.',
+    figures: 12, segments: 20, chain: 5, keyframes: 401, hold: 10, canvas: [1280, 720]},
 });
 
 /** The workload named `id`; throws with the list when there is none. */
@@ -47,7 +63,8 @@ export function scaled(segments) {
 /** What a workload holds, for reports: figures and segments a frame, frames, and the generated file's size. */
 export function measure(spec) {
   if (spec.builtin) return {figures: 1, segmentsPerFrame: 10, frames: 10, bytes: 0};
-  return {figures: spec.figures, segmentsPerFrame: spec.figures * spec.segments, frames: (spec.keyframes - 1) * spec.hold + 1, keyframes: spec.keyframes};
+  return {figures: spec.figures, segmentsPerFrame: spec.figures * spec.segments, frames: (spec.keyframes - 1) * spec.hold + 1, keyframes: spec.keyframes,
+    ...(spec.feature ? {feature: spec.feature, ...FEATURES[spec.feature].measure(spec)} : {})};
 }
 
 /** A small seeded generator (mulberry32): the same numbers on every machine. */
@@ -104,8 +121,11 @@ export function document(spec) {
     return {duration_raw: frame === keyframes - 1 ? 1 : hold, background_id: 0, background_id_b: 0, background_mix: 0, camera: {is_default: true, x: 0, y: 0, scale: 1, angle_rad: 0},
       objects, object_draw_order: objects.map((_, slot) => slot), object_draw_order_unique_ids: objects.map(object => object.unique_id)};
   });
-  return {version: 5, canvas_width: width, canvas_height: height, fps: 24, auto_easing: false, auto_easing_disabled_raw: 1, auto_easing_source: 'file', backgrounds: [],
+  const result = {version: 5, canvas_width: width, canvas_height: height, fps: 24, auto_easing: false, auto_easing_disabled_raw: 1, auto_easing_source: 'file', backgrounds: [],
     figure_types: types, keyframes: frames, _styk: {format: 'StykAnimate', format_version: 1, name: spec.title}};
+  // A feature workload is the plain scene with its feature added; the feature draws its own numbers from the same generator.
+  if (spec.feature) FEATURES[spec.feature].apply(result, spec, next, document);
+  return result;
 }
 
 /**
@@ -114,7 +134,7 @@ export function document(spec) {
  */
 export function file(spec, directory = path.join(ROOT, 'artifacts', 'perf', 'workloads')) {
   const {title: _title, description: _description, ...shape} = spec;
-  const key = createHash('sha256').update(JSON.stringify(shape)).update('generator 1').digest('hex').slice(0, 12);
+  const key = createHash('sha256').update(JSON.stringify(shape)).update('generator 1').update(spec.feature ? ` ${spec.feature} ${FEATURES[spec.feature].version}` : '').digest('hex').slice(0, 12);
   const target = path.join(directory, `${spec.id}-${key}.json`);
   if (!existsSync(target)) {
     mkdirSync(directory, {recursive: true});
