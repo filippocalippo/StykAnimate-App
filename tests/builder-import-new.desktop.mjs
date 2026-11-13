@@ -6,7 +6,7 @@ import path from 'node:path';
 const root=process.cwd(), output=path.join(root,'artifacts/builder-import-new');
 await mkdir(output,{recursive:true});
 const profile=path.join(output,`profile-${Date.now()}`);await mkdir(profile,{recursive:true});
-await writeFile(path.join(profile,'telemetry-state.json'),JSON.stringify({decided:true,consent:{analytics:false,diagnostics:false,policyVersion:'2026-09-10',updatedAt:Date.now()}}));
+await writeFile(path.join(profile,'stats-state.json'),JSON.stringify({v:1,enabled:false,noticeSeen:true}));
 const executablePath=process.env.STYK_PACKAGED_EXECUTABLE;
 const application=await electron.launch({...(executablePath?{executablePath}:{}),args:executablePath?[]:[root],cwd:root,env:{...process.env,STYK_USER_DATA_DIR:profile}});
 const checks=[],errors=[];

@@ -250,7 +250,7 @@ test('errors the device reports are kept as warnings, not raised', async () => {
   renderer.destroy();
 });
 
-test('the counters the status label and telemetry read come from the engine', async () => {
+test('the counters the status label and statistics read come from the engine', async () => {
   const {renderer} = await open();
   renderer.render(request());
   const stats = renderer.stats;

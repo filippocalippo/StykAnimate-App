@@ -45,6 +45,15 @@
   .home-head-text { display: grid; gap: var(--space-1); min-inline-size: 0; }
   .home-title { margin: 0; font: var(--type-display); letter-spacing: var(--tracking-display); color: var(--text-1); text-wrap: balance; }
   .home-lede { margin: 0; font: var(--type-body); color: var(--text-2); text-wrap: pretty; }
+  /* The first-start line about statistics (privacy-settings.mjs): one quiet line in the page's flow, until it is answered. */
+  .home-notice {
+    display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-4);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-radius: var(--radius-lg);
+    background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-1);
+  }
+  .home-notice[hidden] { display: none; }
+  .home-notice-text { flex: 1 1 320px; min-inline-size: 0; margin: 0; font: var(--type-ui); color: var(--text-2); text-wrap: pretty; }
+  .home-notice-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
   .home-continue { max-inline-size: 100%; }
   .home-continue > .ui-label { overflow: hidden; text-overflow: ellipsis; }
 

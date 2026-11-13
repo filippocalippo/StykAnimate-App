@@ -6,11 +6,15 @@
  * base64 stay here: they are platform services.
  */
 import {errorMessageData, messageError} from '../localized-error.mjs';
+import {capturePanics, lastPanic} from './engine-panic.mjs';
 import {DRAWING_MAX_PIXELS} from '../drawing-model.mjs';
 import {TRANSFORM_BYTES} from '../drawing-transform.mjs';
 import {TILE_BLOB_PREFIX, tileBlobBytes} from '../drawing-tile-codec.mjs';
 import {drawingPNGBytes} from '../drawing-png.mjs';
 import {engineCall, tilesIn, maskIn, changesOut, tilesOut, rectOf, bytesOf, releaseDrawingEngineMemory, drawingEngineGeneration} from './engine-drawing.mjs';
+
+// A drawing engine panic here is kept and sent with the failure it causes (docs/STATISTICS.md, "Problems").
+capturePanics();
 
 const validRect = r => r && [r.x, r.y].every(Number.isSafeInteger) && Number.isInteger(r.width) && Number.isInteger(r.height) && r.width > 0 && r.height > 0 && r.width * r.height <= DRAWING_MAX_PIXELS;
 const rectArray = r => r ? Float64Array.of(r.x, r.y, r.width, r.height) : new Float64Array(0);
@@ -211,5 +215,5 @@ async function operation(data, post) {
       return;
     }
     throw messageError(new Error(''), 'errors.drawingWorkerOperations.unknownDrawingWorkerOperation', {});
-  } catch (error) { post({id, error: error.message, ...errorMessageData(error)}); }
+  } catch (error) { post({id, error: error.message, ...errorMessageData(error), panic: lastPanic() ?? undefined}); }
 }

@@ -1,4 +1,4 @@
-/** Display callback cadence from the existing playback rAF loop. The bounded
+/** Display callback cadence from the frame loop (statistics read the refresh interval from it). The bounded
  * rolling minimum does not mistake a main-thread stall for a slower display. */
 export class PlaybackCadence {
   constructor(){this.samples=new Float64Array(32);this.reset();}

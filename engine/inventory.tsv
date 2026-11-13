@@ -64,8 +64,8 @@ desktop/release-history.cjs	platform	-	stays	Electron shell and services
 desktop/release-links.cjs	platform	-	stays	Electron shell and services
 desktop/samples.cjs	platform	-	stays	the desktop sample list and sample bytes, under the Python codec service's samples/open rules
 desktop/shared-clipboard.cjs	platform	-	stays	Electron shell and services
+desktop/stats.cjs	platform	-	stays	Electron shell and services
 desktop/support.cjs	platform	-	stays	Electron shell and services
-desktop/telemetry.cjs	platform	-	stays	Electron shell and services
 desktop/updates.cjs	platform	-	stays	Electron shell and services
 desktop/vfw-export-service.cjs	platform	-	stays	Electron shell and services
 desktop/video-export-service.cjs	platform	-	stays	Electron shell and services
@@ -271,7 +271,7 @@ src/export-sampling.mjs	engine	styk-export	partial	Rust: the sampling limits mir
 src/export-sheet.mjs	ui	-	stays	export dialog and request
 src/export-sink.mjs	platform	styk-export	js	encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine
 src/export-video-quality.mjs	ui	-	stays	export dialog and request
-src/feedback-ui.mjs	app	-	stays	telemetry, support, updates
+src/feedback-ui.mjs	app	-	stays	support, updates
 src/figure-colors.mjs	engine	styk-edit	partial	Rust: recolouring and the palettes (styk-edit/src/recolor.rs); the inspector reads figurePalette, attachedFigurePalette, displayedColor and displayedSegmentPaint in JS
 src/figure-join-action.mjs	ui	-	stays	
 src/frame-clipboard-authored.mjs	engine	styk-edit	removed	deleted: only the editor's frame-draft planning used it (16602 bytes)
@@ -414,7 +414,7 @@ src/preview-image-worker.mjs	engine	styk-render::images	js	image decoding and va
 src/preview-image.mjs	engine	styk-render::images	js	image decoding and variants
 src/preview-images.mjs	engine	styk-render::images	js	image decoding and variants
 src/preview-quality.mjs	engine	styk-engine::playback	js	quality governor
-src/privacy-ui.mjs	app	-	stays	telemetry, support, updates
+src/privacy-settings.mjs	app	-	stays	statistics
 src/project-tabs-host.mjs	ui	-	stays	
 src/project-tabs.mjs	engine	styk-edit	js	
 src/property-controls.mjs	ui	-	stays	
@@ -422,7 +422,7 @@ src/property-toggle.mjs	ui	-	stays
 src/range-figure-operations.mjs	engine	styk-edit	removed	deleted: only the editor's range command bodies used it; the session plans figure operations (styk-edit range_plan.rs) (34665 bytes)
 src/raster-surfaces.mjs	engine	styk-render	removed	deleted: only the removed playback resources used it (1952 bytes)
 src/raster-view.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
-src/release-notes.mjs	app	-	stays	telemetry, support, updates
+src/release-notes.mjs	app	-	stays	support, updates
 src/render-artwork.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/renderer-camera-scene.mjs	engine	styk-render	removed	deleted: only the removed camera effects executor used it (2907 bytes)
 src/renderer-canvas-plan.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
@@ -482,6 +482,13 @@ src/spatial-projection.mjs	engine	styk-eval::spatial	partial	Rust: perspective p
 src/sprite-placement-dialog.mjs	ui	-	stays	
 src/startup-blue-data.mjs	engine	styk-edit	js	
 src/startup-document.mjs	engine	styk-edit	js	
+src/stats/collector.mjs	app	-	stays	statistics
+src/stats/files.mjs	app	-	stays	statistics
+src/stats/frames.mjs	app	-	stays	statistics
+src/stats/problems.mjs	app	-	stays	statistics
+src/stats/schema.mjs	app	-	stays	statistics
+src/stats/session.mjs	app	-	stays	statistics
+src/stats/stack.mjs	app	-	stays	statistics
 src/sticknodes/adapter.mjs	engine	styk-formats::sticknodes	js	
 src/sticknodes/decoder/archive.mjs	engine	styk-formats::sticknodes	js	
 src/sticknodes/decoder/binary.mjs	engine	styk-formats::sticknodes	js	
@@ -495,21 +502,15 @@ src/sticknodes/geometry.mjs	engine	styk-formats::sticknodes	partial	Rust: curved
 src/sticknodes/validation.mjs	engine	styk-formats::sticknodes	js	
 src/structural-equality.mjs	engine	styk-eval	removed	deleted: the retained-geometry and tween caches that compared poses with it are gone (the session sends the groups that changed)
 src/studio-shell.mjs	ui	-	stays	
-src/support-center.mjs	app	-	stays	telemetry, support, updates
-src/support-contract.mjs	app	-	stays	telemetry, support, updates
-src/support-desktop-ui.mjs	app	-	stays	telemetry, support, updates
-src/support-live-client.mjs	app	-	stays	telemetry, support, updates
-src/support-localization.mjs	app	-	stays	telemetry, support, updates
-src/support-media.mjs	app	-	stays	telemetry, support, updates
-src/support-ui.mjs	app	-	stays	telemetry, support, updates
+src/support-center.mjs	app	-	stays	support, updates
+src/support-contract.mjs	app	-	stays	support, updates
+src/support-desktop-ui.mjs	app	-	stays	support, updates
+src/support-live-client.mjs	app	-	stays	support, updates
+src/support-localization.mjs	app	-	stays	support, updates
+src/support-media.mjs	app	-	stays	support, updates
+src/support-ui.mjs	app	-	stays	support, updates
 src/surface-raster.mjs	engine	styk-render	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.
 src/svg-export.mjs	platform	-	removed	removed; styk_export::svg writes the frame's draw list as vector SVG (a picture of the frame where it has no vector form)
-src/telemetry-core.mjs	app	-	stays	telemetry, support, updates
-src/telemetry-measurements.mjs	app	-	stays	telemetry, support, updates
-src/telemetry-performance-schema.mjs	app	-	stays	telemetry, support, updates
-src/telemetry-performance.mjs	app	-	stays	telemetry, support, updates
-src/telemetry-schema.mjs	app	-	stays	telemetry, support, updates
-src/telemetry-workload.mjs	app	-	stays	telemetry, support, updates
 src/text-authoring-worker.mjs	engine	styk-edit	js	
 src/text-authoring.mjs	engine	styk-edit	js	
 src/text-dialog.mjs	ui	-	stays	
@@ -568,7 +569,7 @@ src/ui/ui-popover.mjs	ui	-	stays
 src/ui/ui-strings.mjs	ui	-	stays	
 src/ui/ui-toast.mjs	ui	-	stays	
 src/ui/ui-tooltip.mjs	ui	-	stays	
-src/update-ui.mjs	app	-	stays	telemetry, support, updates
+src/update-ui.mjs	app	-	stays	support, updates
 src/user-action-error.mjs	ui	-	stays	
 src/user-library.mjs	ui	-	stays	
 src/validation-labels.mjs	ui	-	stays	

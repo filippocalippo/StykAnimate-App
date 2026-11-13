@@ -6,7 +6,8 @@ import path from 'node:path';
 const root = process.cwd(), run = path.join(root, 'artifacts', `library-drag-${Date.now()}`);
 const profile = path.join(run, 'profile'), checks = [], errors = [];
 await mkdir(profile, {recursive: true});
-await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({decided: true, consent: {analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now()}}));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 const check = (name, value = true) => { assert.ok(value, name); checks.push(name); console.log('PASS', name); };
 let app, page;
 try {

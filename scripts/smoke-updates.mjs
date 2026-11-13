@@ -10,7 +10,8 @@ const output = path.join(root, 'artifacts', 'updates');
 await mkdir(output, { recursive: true });
 const profile = path.join(output, `profile-${Date.now()}`);
 await mkdir(profile, { recursive: true });
-await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 const launch = () => electron.launch({ executablePath, args: executablePath ? [] : [root], cwd: root, timeout: 45000, env: { ...process.env, STYK_USER_DATA_DIR: profile } });
 let application = await launch();
 const evidence = {};

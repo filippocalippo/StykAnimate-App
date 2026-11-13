@@ -223,7 +223,7 @@ the engine plans the skins ([onion-skin.md](onion-skin.md)) and keeps their eval
 while the document is the same, drawing the nearest forty-eight at most.
 
 Verification: `node tests/onion-timeline-range.browser.mjs`,
-`node tests/onion-controls.desktop.mjs`, and the `onion-controller`,
+`npm run test:onion:desktop` (`tests/onion-controls.desktop.mjs`), and the `onion-controller`,
 `onion-timeline-range`, and `onion-skins` unit tests. Desktop coverage includes native 75%, 100%, 150%, and 200% UI scaling.
 
 Audio tracks share the timeline's existing scroll area. Opening audio or adding

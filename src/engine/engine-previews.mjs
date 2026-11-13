@@ -19,6 +19,7 @@
  */
 import {loadEngine} from './engine.mjs';
 import {workerGuard, releaseWorker} from './engine-guard.mjs';
+import {enginePanicked} from './engine-panic.mjs';
 
 const WORKER_NAME = 'StykAnimate previews (engine)';
 /** How long an idle worker keeps its pictures and thread. */
@@ -89,7 +90,7 @@ export class EnginePreviewWorker {
     this.stats.lastMs = performance.now() - request.sent;
     if (request.signal?.aborted) { data.bitmap?.close(); request.reject(abortError()); }
     else if (data.ok) request.resolve(data);
-    else request.reject(Object.assign(new Error(data.error), {name: data.name || 'Error'}));
+    else { if (data.panic) enginePanicked(data.panic); request.reject(Object.assign(new Error(data.error), {name: data.name || 'Error'})); }
     this._next();
   }
 

@@ -2,7 +2,11 @@ import {errorMessageData, messageError, restoreMessageError} from './localized-e
 
 /** Worker side of the file protocol. No scene rendering or UI state lives here. */
 import { documentChunks } from './document-transport.mjs';
-import {diagnosticDetails} from './telemetry-schema.mjs';
+import {workerFailure} from './stats/files.mjs';
+import {capturePanics} from './engine/engine-panic.mjs';
+
+// A codec panic in this worker is kept, and sent with the failure it causes (docs/STATISTICS.md, "Problems").
+capturePanics();
 import {NATIVE_FRAME_CONTENT_TYPE, unpackNativeFrameResponse} from './import-wire.mjs';
 import {nativeFileCodec} from './native-file-codec.mjs';
 import {codecRequest} from './codec-request.mjs';
@@ -37,7 +41,7 @@ async function sendResult(id, result, signal) {
 
 function errorMessage(error, stage) {
   return {message: error?.message || String(error), ...errorMessageData(error), code: error?.code, status: error?.status,
-    ...diagnosticDetails(error,stage,stage === 'prepare' ? 'snapshot_failed' : 'decode_failed')};
+    ...workerFailure(error, stage, stage === 'prepare' ? 'transfer-failed' : undefined)};
 }
 
 /** The error a codec answer that is not a success stands for. */
@@ -45,7 +49,8 @@ function codecFailure(response, result) {
   const error = restoreMessageError(result?.error?.message || result?.error || result?.message ? new Error(result?.error?.message || result?.error || result?.message) : messageError(new Error(''), 'errors.importWorker.importFailed', {status:response.status}), result?.error && typeof result.error === 'object' ? result.error : result);
   error.code = result?.code;
   error.status = response.status;
-  error.telemetryCode = response.status >= 500 ? 'backend_unavailable' : 'backend_rejected'; error.telemetryStage = 'request';
+  if (response.status >= 500) error.fileReason = 'service-unavailable';
+  error.fileStage = 'request';
   return error;
 }
 
@@ -81,7 +86,7 @@ async function importRequest(message, signal) {
     body = message.bytes;
   } else throw messageError(new Error(''), "errors.importWorker.unknownImportOperation", {});
   const response = await codecRequest(message, path, {method: 'POST', headers, body, signal}).catch(error => {
-    error.telemetryCode = 'backend_unavailable'; error.telemetryStage = 'request'; throw error;
+    error.fileReason = 'service-unavailable'; error.fileStage = 'request'; throw error;
   });
   if(response.ok && response.headers.get('Content-Type')?.split(';')[0]===NATIVE_FRAME_CONTENT_TYPE) {
     const buffer=await response.arrayBuffer(), received=performance.now();
@@ -98,7 +103,8 @@ async function importRequest(message, signal) {
   catch {
     const error = messageError(new Error(''), response.ok ? 'errors.importWorker.unreadableProject' : 'errors.importWorker.serviceFailed', {status:response.status});
     error.status = response.status;
-    error.telemetryCode = response.ok ? 'decode_failed' : response.status >= 500 ? 'backend_unavailable' : 'backend_rejected'; error.telemetryStage = response.ok ? 'decode' : 'request';
+    if (!response.ok && response.status >= 500) error.fileReason = 'service-unavailable';
+    error.fileStage = response.ok ? 'decode' : 'request';
     throw error;
   }
   if (!response.ok || result?.ok === false) throw codecFailure(response, result);

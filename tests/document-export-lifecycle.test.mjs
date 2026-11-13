@@ -85,7 +85,7 @@ for (const reason of ['cancel', 'error', 'messageerror', 'timeout']) test(`a ${r
   const controller = new AbortController(), report = project();
   const result = exporter.export(report, {signal: controller.signal});
   const rejected = assert.rejects(result, error => reason === 'cancel' ? error.name === 'AbortError'
-    : reason === 'timeout' ? error.telemetryCode === 'timeout' : Boolean(error.telemetryCode));
+    : reason === 'timeout' ? error.fileReason === 'timeout' : Boolean(error.fileReason));
   await until(() => workers[0]?.messages.at(-1)?.operation === 'export', pollTurn);
   if (reason === 'cancel') controller.abort();
   else if (reason === 'timeout') {
@@ -256,7 +256,7 @@ test('every export on a page that is not cross-origin isolated is refused with a
   t.after(() => { if (descriptor) Object.defineProperty(globalThis, 'crossOriginIsolated', descriptor); else delete globalThis.crossOriginIsolated; });
   for (const format of ['styk', 'piv', 'stk', 'stkz', 'stykmov']) {
     await assert.rejects(exporter.export(project(), {format, revision: 1}), error =>
-      error.messageKey === 'errors.documentExport.theEngineCannotMakeThisFileHere' && error.telemetryCode === 'engine_failed' && /shared memory/.test(error.message), format);
+      error.messageKey === 'errors.documentExport.theEngineCannotMakeThisFileHere' && error.fileReason === 'engine' && /shared memory/.test(error.message), format);
   }
   assert.equal(workers.length, 0, 'no worker was started');
   assert.equal(exporter.jobs.size, 0); assert.equal(exporter.active, false);

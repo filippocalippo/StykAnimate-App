@@ -15,7 +15,7 @@ import {messageError} from './localized-error.mjs';
  * DOM-free at import. installInspectorBindings() is the thin DOM half: one
  * `change` listener on the inspector's root, installed once.
  *
- * ctx (from app.mjs): {editor, state, telemetry, guarded, pause,
+ * ctx (from app.mjs): {editor, state, stats, guarded, pause,
  * finishCurrentEdit, queueUI, requestRender, fit, changeFigureLayer,
  * timeline(), builderActive(), usesBuilderBranch(event),
  * updateBuilderStyle(patch, event), rangeFrames(), selectionBounds(),
@@ -65,7 +65,7 @@ export function inspectorBindings(ctx) {
       changeSurfaceSide(editor,index,side,{showDialog:ctx.showDialog,closeDialog:ctx.closeDialog});
     }],
     ['#node-is-ik', (target) => { editor.setNodeIK({enabled: target.checked}); }],
-    ['#node-ik-pinned', (target) => { ctx.telemetry.count('ik'); editor.setNodeIK({pinned: target.checked}); }],
+    ['#node-ik-pinned', (target) => { ctx.stats.feature('ik'); editor.setNodeIK({pinned: target.checked}); }],
     ['#node-ik-chain', (target) => { editor.setNodeIK({chainLength: target.valueAsNumber}); }],
     ['#node-ik-rotation', (target) => { editor.rotateIKTarget(target.valueAsNumber * Math.PI / 180); }],
     ['#node-ik-stretch', (target) => { editor.setNodeIK({allowStretch: target.checked}); }],

@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {mkdtemp, readFile, readdir, rm, stat} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import vm from 'node:vm';
-import {sanitizeError} from '../src/telemetry-schema.mjs';
-import {appEntries, bundledIndex, buildApp} from '../scripts/build-app.mjs';
+import {ourStack} from '../src/stats/stack.mjs';
+import {appEntries, bundledIndex, buildApp, sourceModule} from '../scripts/build-app.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** The application built once for the tests below, which only read it: where it is and what the build answered. */
@@ -59,7 +59,6 @@ test('the bundled page preloads the bundle where the page preloaded the modules'
     '    <link rel="icon" href="./mark.svg" />',
     '    <link rel="modulepreload" href="./src/app.mjs" />',
     '    <link rel="modulepreload" href="./src/chunks/a.mjs" />',
-    '    <script src="./src/frame-map.js"></script>',
     '    <script src="./src/theme-bootstrap.js"></script>',
     '    <link rel="preload" href="./x.wasm" as="fetch" />',
     '</head>',
@@ -111,18 +110,22 @@ test('the bundle is readable, keeps the vendored licence header, and leaves no s
   for (const directory of ['src', 'src/chunks', 'src/engine']) assert.ok(!(await readdir(path.join(output, directory))).some(name => name.endsWith('.map')), `no source map in ${directory}`);
 });
 
-test('a frame in a built script is reported as the module and source line it came from', async () => {
+test('a source of a script\'s map is its path in the repository, relative or as the file: URL an output on another drive gets', () => {
+  const folder = path.join(root, 'build', 'app', 'src', 'chunks');
+  assert.equal(sourceModule(root, folder, '../../../../src/stats/stack.mjs'), 'src/stats/stack.mjs');
+  assert.equal(sourceModule(root, path.join(os.tmpdir(), 'elsewhere'), pathToFileURL(path.join(root, 'src/my module.mjs')).href), 'src/my module.mjs');
+});
+
+test('a line of a built script is reported as the module of ours and source line it came from', async () => {
   const {output} = await bundle();
   const index = await readFile(path.join(output, 'index.html'), 'utf8');
-  assert.ok(index.indexOf('src/frame-map.js') > 0 && index.indexOf('src/frame-map.js') < index.indexOf('src/theme-bootstrap.js'), 'the tables load before anything else');
-  const context = vm.createContext({});
-  vm.runInContext(await readFile(path.join(output, 'src/frame-map.js'), 'utf8'), context);
+  assert.ok(!index.includes('frame-map'), 'nothing loads the tables at start: statistics fetch them for their first problem');
+  const tables = JSON.parse(await readFile(path.join(output, 'src/frame-map.json'), 'utf8'));
   const lines = await builtLines(output);
   const seen = [];
-  globalThis.__stykFrames = context.__stykFrames;
-  try {
-    // For some single-line statements of modules reports may name, the line the built file has them on must report the source line.
-    for (const [module, file] of ['src/app.mjs', 'src/editor.mjs', 'src/import-client.mjs', 'src/document-export.mjs', 'src/camera-monitor.mjs', 'src/renderer-geometry.mjs', 'src/engine/engine-owner.mjs', 'src/engine/engine-stage.mjs', 'src/engine/engine-open.mjs', 'src/engine/engine-playback.mjs', 'src/engine/engine-previews.mjs', 'src/engine/engine-failure.mjs', 'src/engine/engine-composite.mjs', 'src/engine/engine-thumbnails.mjs', 'src/engine/engine-document.mjs'].map(file => [path.basename(file), file])) {
+  {
+    // For some single-line statements of our modules (any of them, not a fixed list), the line the built file has them on must report the source line.
+    for (const [module, file] of ['src/app.mjs', 'src/editor.mjs', 'src/import-client.mjs', 'src/document-export.mjs', 'src/camera-monitor.mjs', 'src/renderer-geometry.mjs', 'src/layer-timeline.mjs', 'src/stats/collector.mjs', 'src/engine/engine-owner.mjs', 'src/engine/engine-stage.mjs', 'src/engine/engine-open.mjs', 'src/engine/engine-playback.mjs', 'src/engine/engine-previews.mjs', 'src/engine/engine-composite.mjs', 'src/engine/engine-thumbnails.mjs', 'src/engine/engine-document.mjs'].map(file => [file, file])) {
       const source = (await readFile(path.join(root, file), 'utf8')).split('\n');
       for (const [index, line] of source.entries()) {
         const text = line.trim();
@@ -133,19 +136,22 @@ test('a frame in a built script is reported as the module and source line it cam
         if (where.length !== 1) continue;
         const [name, number] = where[0];
         const stack = `Error: SECRET\n    at f (styk-app://app/${name}:${number}:11)`;
-        assert.deepEqual(sanitizeError(Object.assign(new Error('SECRET'), {stack}), 'app').frames, [{module, line: index + 1}], `${module}:${index + 1} at ${name}:${number}`);
+        assert.deepEqual(ourStack(stack, {tables}), [`f ${module}:${index + 1}`], `${module}:${index + 1} at ${name}:${number}`);
         seen.push(module);
         break;
       }
     }
     assert.ok(seen.length >= 3, `checked ${seen.join(', ')}`);
-    // A line of a module reports may not name reports nothing.
-    const timeline = lines.get('src/app.mjs').findIndex(line => line === '// src/layer-timeline.mjs');
-    if (timeline >= 0) assert.deepEqual(sanitizeError(Object.assign(new Error('SECRET'), {stack: `Error\n    at f (styk-app://app/src/app.mjs:${timeline + 3}:1)`}), 'app').frames, []);
-  } finally { delete globalThis.__stykFrames; }
-  // A worker carries its own table at the start of its first line, which moves no line.
+    // A line of a library in the bundle, and a line of a file without a table, report nothing.
+    const library = lines.get('src/app.mjs').findIndex(line => /^\/\/ (node_modules|vendor)\//.test(line));
+    if (library >= 0) assert.deepEqual(ourStack(`Error\n    at f (styk-app://app/src/app.mjs:${library + 3}:1)`, {tables}), []);
+    assert.deepEqual(ourStack('Error\n    at f (styk-app://app/src/chunks/none.mjs:3:1)', {tables}), []);
+  }
+  // The workers' lines are in the same file, and no worker file carries a table of its own.
+  assert.ok(tables['import-worker.mjs']?.modules.includes('src/import-worker.mjs'), 'the import worker has a table');
   const worker = (await readFile(path.join(output, 'src/import-worker.mjs'), 'utf8')).split('\n');
-  assert.ok(worker[0].startsWith('globalThis.__stykFrames=Object.assign(globalThis.__stykFrames??{},{"import-worker.mjs":'), worker[0].slice(0, 80));
+  assert.ok(!worker[0].includes('__stykFrames'), worker[0].slice(0, 80));
+  assert.ok(Object.values(tables).every(table => table.modules.every(module => module.startsWith('src/') && !/\/(pkg|locales)\//.test(module))), 'only modules of ours');
 });
 
 /** The modules a page script imports by URL, as `src/x.mjs`. */

@@ -204,8 +204,7 @@ still builds the `figureNames` and `tracks` indexes that the frozen load fixture
   buttons (Enter and Esc work); Combine refuses on a layer sheet when one figure came from Import
   figure; reopening an exported unconverted nested movieclip shows each odd tick with the pose of
   the even tick before it (the JavaScript export did the same).
-- Outside this repository: the telemetry collector should accept the backend value `webgl2` and drop
-  the deleted module names; CI and release workflows still install Python for the codec tests and
+- Outside this repository: CI and release workflows still install Python for the codec tests and
   the video encoder build.
 - Tests: some browser tests need local sample files or hard-code a port; tests that read
   `editor.frame` on layer-sheet documents may be stale (read `evaluatedFrame`).

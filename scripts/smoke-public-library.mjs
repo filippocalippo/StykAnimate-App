@@ -19,7 +19,8 @@ import {validateScene} from '../src/pivot/model.mjs';
 const root = process.cwd();
 const run = path.join(root, 'artifacts', `public-library-${Date.now()}`), profile = path.join(run, 'profile'), library = path.join(run, 'library');
 await mkdir(profile, {recursive: true});
-await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({decided: true, consent: {analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now()}}));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 
 // What people upload: real figures from the rig examples (the movieclip is made in the app below), with a WebP poster like the website's.
 const WEBP = Buffer.from('UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==', 'base64');

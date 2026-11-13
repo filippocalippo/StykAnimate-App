@@ -9,7 +9,8 @@ const library=path.join(run,'Documents','StykAnimate','library'), errors=[], che
 async function launch() {
   const profile=path.join(run,`profile-${Date.now()}`); await mkdir(profile,{recursive:true});
   // Isolated automated profiles keep optional collection off and skip onboarding.
-  await writeFile(path.join(profile,'telemetry-state.json'),JSON.stringify({decided:true,consent:{analytics:false,diagnostics:false,policyVersion:'2026-09-10',updatedAt:Date.now()}}));
+  // Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
   const app=await electron.launch({executablePath:packaged?process.env.STYK_PACKAGED_EXECUTABLE||path.join(root,'release','win-unpacked','StykAnimate.exe'):undefined,args:packaged?[]:[root],cwd:root,timeout:45000,env:{...process.env,STYK_LIBRARY_DIR:library,STYK_USER_DATA_DIR:profile,STYK_DEBUG:'1'}});
   const page=await app.firstWindow(); page.on('pageerror',e=>errors.push(e.message)); await page.waitForFunction(()=>window.styk?.ready,{timeout:30000});
   return {app,page};

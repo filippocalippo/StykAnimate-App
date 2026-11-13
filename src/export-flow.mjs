@@ -7,7 +7,7 @@ import {localizedMarkup} from './localization-bindings.mjs';
  * progress, and writing the result (saveBlob, finishExport).
  *
  * The export commands register themselves in the app's `actions` map, before
- * app.mjs wraps every action (drawing barrier, polygon guard, telemetry).
+ * app.mjs wraps every action (drawing barrier, polygon guard, statistics).
  * Every export runs from an explicit ExportRequest (export-request.mjs): the
  * request holds the choices, and exportJob() derives the options, file name
  * and encoder arguments from it and the editor's state. The export dialog
@@ -21,7 +21,7 @@ import {localizedMarkup} from './localization-bindings.mjs';
  * dialog of its own when the export was not started from it.
  *
  * DOM-free at import. ctx (from app.mjs): {editor, state, actions, desktop,
- * telemetry, audioEngine, exportJobs, playback, fail, status, toast, persistentFailure,
+ * stats, audioEngine, exportJobs, playback, fail, status, toast, persistentFailure,
  * finishCurrentEdit, pause, interruptRecovery, runDocumentExport,
  * writeNativeBlob, currentFrame, nameOf, simpleFrameCount}; optionally
  * overlays (the overlay stack), localization() and commitSettings(patch),
@@ -34,9 +34,7 @@ import { encodeVfwVideo } from "./vfw-video-export.mjs";
 import { VfwExportControls } from "./vfw-export-controls.mjs";
 import { getExportCapabilities, exportFormat } from "./export-capabilities.mjs";
 import { audioState, audibleClips } from "./audio-model.mjs";
-import { workload } from "./telemetry-workload.mjs";
-import { sizeBucket } from "./telemetry-schema.mjs";
-import { openExportSink as openExportSinkRaw } from "./export-sink.mjs";
+import { openExportSink } from "./export-sink.mjs";
 import { exportAnimation } from "./image-export.mjs";
 import { defaultGIFDither } from "./gif-options.mjs";
 import { createExportFrameRenderer, prewarmExportRenderer } from "./engine/engine-export.mjs";
@@ -50,11 +48,12 @@ import { icon } from "./icons.mjs";
 
 export function createExportFlow(ctx) {
   const {
-    editor, state, actions, desktop, telemetry, audioEngine, exportJobs, playback,
+    editor, state, actions, desktop, stats, audioEngine, exportJobs, playback,
     fail, status, toast, persistentFailure, finishCurrentEdit, pause, interruptRecovery,
     runDocumentExport, writeNativeBlob, currentFrame, nameOf, simpleFrameCount,
   } = ctx;
-  const exportTelemetry = new WeakMap();
+  /** The running raster export of a signal: its start, stage and size (statistics), its progress and renderer. */
+  const runningExports = new WeakMap();
   const t = (key, params) => ctx.localization?.()?.t(key, params);
   const glyph = name => icon(name);
   /** The open export dialog (export-sheet.mjs), or null. */
@@ -66,13 +65,6 @@ export function createExportFlow(ctx) {
     sessionPreferences = preferences;
     ctx.commitSettings?.({ exportPreferences: preferences });
   }
-  async function openExportSink(options){
-    const enabled=telemetry.consent.diagnostics,context=enabled?telemetry.performance.context():null,epoch=telemetry.epoch,started=enabled?performance.now():0;
-    const onTiming=(metric,ms)=>{if(epoch===telemetry.epoch)telemetry.performance.record(metric,ms,context);};
-    const sink=await openExportSinkRaw({...options,...(enabled?{onTiming}:{})});
-    if(enabled)onTiming('dialog',performance.now()-started);
-    return sink;
-  }
   /** Says an export finished and where: the file's name as saved (the save dialog may rename it). */
   function exported(saved, filename) {
     const path = typeof saved === "string" ? saved : typeof saved?.path === "string" ? saved.path : "";
@@ -81,15 +73,10 @@ export function createExportFlow(ctx) {
     toast(interfaceText("exportFlow.exported", {name: name}));
   }
   async function saveBlob(blob, filename, signal) {
-    const measurement = signal && exportTelemetry.get(signal), writeStarted = performance.now();
-    measurement?.onProgress?.({phase: 'saving'});
-    measurement?.releaseRenderer?.();
-    if (measurement) {
-      measurement.context.size = sizeBucket(blob.size);
-      telemetry.timing('export_ms', writeStarted - measurement.started);
-      telemetry.operation({ ...measurement.context, operation: 'export', stage: 'encode', outcome: 'succeeded' }, writeStarted - measurement.started);
-      measurement.stage = 'write';
-    }
+    const running = signal && runningExports.get(signal);
+    running?.onProgress?.({phase: 'saving'});
+    running?.releaseRenderer?.();
+    if (running) { running.bytes = blob.size; running.stage = 'write'; }
     let saved;
     if (desktop) {
       saved = await writeNativeBlob(desktop, blob, {
@@ -111,7 +98,6 @@ export function createExportFlow(ctx) {
     setTimeout(() => URL.revokeObjectURL(url), 10000);
       saved = true;
     }
-    if (measurement) telemetry.operation({ ...measurement.context, operation: 'export', stage: 'write', outcome: saved ? 'succeeded' : 'cancelled' }, performance.now() - writeStarted);
     return saved;
   }
   /** Route an encoder result to its saved state: a Blob goes through the
@@ -119,16 +105,8 @@ export function createExportFlow(ctx) {
   async function finishExport(output, filename, signal) {
     const blob = output instanceof Blob ? output : output?.blob;
     if (blob) return saveBlob(blob, filename, signal);
-    const measurement = signal && exportTelemetry.get(signal), finished = performance.now();
-    if (measurement) {
-      measurement.context.size = sizeBucket(output?.size ?? 0);
-      telemetry.timing('export_ms', finished - measurement.started);
-      telemetry.performance.record('encode',finished-measurement.started);
-      telemetry.operation({ ...measurement.context, operation: 'export', stage: 'encode', outcome: 'succeeded' }, finished - measurement.started);
-      measurement.stage = 'write';
-      measurement.releaseRenderer?.();
-      telemetry.operation({ ...measurement.context, operation: 'export', stage: 'write', outcome: output?.saved ? 'succeeded' : 'cancelled' }, 0);
-    }
+    const running = signal && runningExports.get(signal);
+    if (running) { running.bytes = output?.size; running.stage = 'write'; running.releaseRenderer?.(); }
     return Boolean(output?.saved);
   }
   /**
@@ -212,8 +190,8 @@ export function createExportFlow(ctx) {
       job = { controller, recovery: false, raster: true },
       source = editor.report;
     exportJobs.add(job);
-    const measurement = { started: performance.now(), stage: 'prepare', context: telemetry.consent.diagnostics ? workload({ format, report, fps }) : {} };
-    telemetry.count('export_started'); exportTelemetry.set(controller.signal, measurement);
+    const running = { started: performance.now(), stage: 'prepare', bytes: undefined };
+    runningExports.set(controller.signal, running);
     let frameRenderer;
     const host = progressHost(title),
       cancel = () => controller.abort();
@@ -221,8 +199,8 @@ export function createExportFlow(ctx) {
     // Closing the dialog while the export runs cancels it.
     host.onClose(cancel);
     const progressUI = mountExportProgress(host.content, {frames, passes, start}, cancel);
-    measurement.onProgress = value => progressUI.update(value);
-    measurement.releaseRenderer = () => frameRenderer?.dispose();
+    running.onProgress = value => progressUI.update(value);
+    running.releaseRenderer = () => frameRenderer?.dispose();
     try {
       // The engine draws the frames (src/engine/engine-export.mjs); an SVG is the engine's vector output.
       frameRenderer = createExportFrameRenderer({
@@ -237,7 +215,7 @@ export function createExportFlow(ctx) {
             : "replaced",
       }, {stage: state.renderer, revision: editor.revision, range: [start, start + frames - 1], vector: format === 'svg'});
       await frameRenderer.load(report);
-      measurement.stage = 'encode';
+      running.stage = 'encode';
       const saved = await render(
         frameRenderer,
         controller.signal,
@@ -248,14 +226,10 @@ export function createExportFlow(ctx) {
           if (value.completed === frames * passes) frameRenderer.dispose();
         },
       );
-      telemetry.count(saved ? 'export_succeeded' : 'export_cancelled');
-      telemetry.operation({ ...measurement.context, operation: 'export', stage: 'complete', outcome: saved ? 'succeeded' : 'cancelled' }, performance.now() - measurement.started);
-      if (saved) telemetry.milestone('first_export');
+      stats.file('export', format, saved ? {ms: performance.now() - running.started} : {cancelled: true});
       return saved;
     } catch (error) {
-      telemetry.count(error.name === 'AbortError' ? 'export_cancelled' : 'export_failed');
-      telemetry.operation({ ...measurement.context, operation: 'export', stage: 'complete', outcome: error.name === 'AbortError' ? 'cancelled' : 'failed' }, performance.now() - measurement.started);
-      if (error.name !== 'AbortError') telemetry.error(error, 'export', { ...measurement.context, stage: measurement.stage });
+      stats.file('export', format, {error, stage: running.stage, bytes: running.bytes, ms: performance.now() - running.started});
       if (error.name === "AbortError") {
         status(interfaceText("exportFlow.exportCancelled"));
         return false;
@@ -264,14 +238,13 @@ export function createExportFlow(ctx) {
     } finally {
       frameRenderer?.dispose();
       progressUI.dispose();
-      exportTelemetry.delete(controller.signal);
+      runningExports.delete(controller.signal);
       exportJobs.delete(job);
       host.onClose(null);
       host.close();
     }
   }
   async function exportPNG() {
-    telemetry.count('export_png');
     finishCurrentEdit();
     const request = currentRequest("png"),
       { options, filename } = exportJob(request, jobContext(request)),
@@ -296,7 +269,6 @@ export function createExportFlow(ctx) {
     );
   }
   async function exportSVGFrame() {
-    telemetry.count('export_svg');
     finishCurrentEdit();
     // SVG keeps vector paths: its options say "edges" whatever the request's smoothing.
     const request = currentRequest("svg"),
@@ -315,7 +287,6 @@ export function createExportFlow(ctx) {
     );
   }
   async function exportImages(format) {
-    telemetry.count(format.startsWith('svg') ? 'export_svg' : format.startsWith('gif') ? 'export_gif' : format.startsWith('jpeg') ? 'export_jpeg' : 'export_png');
     finishCurrentEdit();
     // The options, frame count, rate, name and GIF repeat (the Loop setting) come from the request.
     const request = currentRequest(format),
@@ -329,7 +300,7 @@ export function createExportFlow(ctx) {
       desktop,
     });
     if (!sink) {
-      telemetry.count('export_cancelled');
+      stats.file('export', format, {cancelled: true});
       return false;
     }
     try {
@@ -360,7 +331,6 @@ export function createExportFlow(ctx) {
     }
   }
   async function exportVideo(format = "webm") {
-    telemetry.count('export_video');
     finishCurrentEdit();
     // The request gives the encoder, codec, quality or bitrate, Windows codec
     // options, size, range and whether sound goes in; a request that cannot be
@@ -391,7 +361,7 @@ export function createExportFlow(ctx) {
           desktop,
         });
     if (!directSave && !sink) {
-      telemetry.count('export_cancelled');
+      stats.file('export', format, {cancelled: true});
       return false;
     }
     try {

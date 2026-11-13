@@ -24,7 +24,7 @@ function monitorState(canvas, options) {
 }
 function reportMonitorError(error, options) {
   if(!error||typeof error!=='object')error=messageError(new Error(''), "errors.cameraMonitor.theCameraPreviewFailed", {});
-  error.telemetryStage??='prepare';
+  error.fileStage??='prepare';
   if(options.onError)options.onError(error);
   else globalThis.reportError?.(error);
 }
@@ -60,7 +60,7 @@ export function drawCameraMonitor(canvas, options) {
     canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);
   }
   const ctx=canvas.getContext('2d',{willReadFrequently:true}), scale=Math.min(width/report.canvas_width,height/report.canvas_height);
-  if(!ctx || ctx.isContextLost?.())throw Object.assign(messageError(new Error(''), "errors.cameraMonitor.theCameraPreviewCanvasIsUnavailable", {}),{telemetryCode:'device_lost'});
+  if(!ctx || ctx.isContextLost?.())throw Object.assign(messageError(new Error(''), "errors.cameraMonitor.theCameraPreviewCanvasIsUnavailable", {}),{fileReason:'graphics-lost'});
   const view={scale,x:(width-report.canvas_width*scale)/2,y:(height-report.canvas_height*scale)/2};
   ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,width,height);
   if(!options.stage?.drawCameraMonitor?.(ctx,{width:canvas.width,height:canvas.height,zoom:scale*dpr,panX:view.x*dpr,panY:view.y*dpr,dpr},gpuSource=>{

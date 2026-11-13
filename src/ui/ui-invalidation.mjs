@@ -1,5 +1,5 @@
 import {messageError} from '../localized-error.mjs';
-import {traceBegin, traceEnd} from '../trace.mjs';
+import {traceBegin, traceEnd, tracing} from '../trace.mjs';
 /**
  * Surface-scoped chrome updates (architecture.md §3.2). The editor chrome is a
  * list of surfaces (the title, the transport, the inspector, …), each with the
@@ -71,7 +71,7 @@ export function createInvalidator({
     // One span per surface in the developer build's profiler: which part of the chrome a pass paid for.
     const span = traceBegin('interface update');
     try { surface.update(); } catch (error) { onError(error, surface.name); }
-    finally { if (span !== 0) traceEnd(span, {surface: surface.name}); }
+    finally { if (span !== 0) traceEnd(span, tracing ? {surface: surface.name} : undefined); }
   };
   function pass({force = false} = {}) {
     scheduled = false;

@@ -25,6 +25,7 @@ import {exportContext, checkExportContext} from '../export-canvas.mjs';
 import {EXPORT_MAX_PIXELS} from '../export-sampling.mjs';
 import {engineDocument} from './engine-document.mjs';
 import {workerGuard, releaseWorker} from './engine-guard.mjs';
+import {restoreFailure} from '../stats/files.mjs';
 
 /** Rendered pixels a side of an export tile at most (styk-export `TILE_SIDE`). */
 export const ENGINE_TILE_SIDE = 2048;
@@ -81,7 +82,7 @@ export function createExportFrameRenderer(options, {stage, revision, range, vect
 
 /** An export the engine cannot draw, and why. */
 function unavailable(reason) {
-  return Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.exportRenderingFailed', {}), {cause: reason, code: 'engine_unavailable', telemetryCode: 'engine_failed', telemetryStage: 'prepare'});
+  return Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.exportRenderingFailed', {}), {cause: reason, code: 'engine_unavailable', fileReason: 'engine', fileStage: 'prepare'});
 }
 
 export class EngineExportFrames {
@@ -141,8 +142,8 @@ export class EngineExportFrames {
       clearTimeout(pending.timer);
       if (data.ok) pending.resolve(data);
       else {
-        const error = Object.assign(restoreMessageError(data.error ? new Error(data.error) : messageError(new Error(''), 'errors.exportFrameRenderer.exportRenderingFailed'), data), {code: data.code,
-          name: data.name || 'Error', recoverable: Boolean(data.recoverable), telemetryCode: data.telemetryCode, telemetryStage: data.telemetryStage, telemetryFrames: data.telemetryFrames});
+        const error = restoreFailure(Object.assign(restoreMessageError(data.error ? new Error(data.error) : messageError(new Error(''), 'errors.exportFrameRenderer.exportRenderingFailed'), data), {code: data.code,
+          name: data.name || 'Error', recoverable: Boolean(data.recoverable)}), data);
         data.bitmap?.close();
         // Recoverable render errors keep the worker alive for a tile retry.
         if (!error.recoverable) this._fail(error);
@@ -151,10 +152,10 @@ export class EngineExportFrames {
     });
     worker.addEventListener('error', event => {
       event.preventDefault();
-      if (current()) this._fail(Object.assign(event.message ? new Error(event.message) : messageError(new Error(''), 'errors.exportFrameRenderer.theExportRendererStopped'), {telemetryCode: 'worker_failed', telemetryStage: 'encode'}));
+      if (current()) this._fail(Object.assign(event.message ? new Error(event.message) : messageError(new Error(''), 'errors.exportFrameRenderer.theExportRendererStopped'), {fileReason: 'worker-stopped', fileStage: 'encode'}));
     });
     worker.addEventListener('messageerror', () => {
-      if (current()) this._fail(Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.anExportFrameCouldNotBeTransferred', {}), {telemetryCode: 'snapshot_failed', telemetryStage: 'prepare'}));
+      if (current()) this._fail(Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.anExportFrameCouldNotBeTransferred', {}), {fileReason: 'transfer-failed', fileStage: 'prepare'}));
     });
   }
 
@@ -184,7 +185,7 @@ export class EngineExportFrames {
     return new Promise((resolve, reject) => {
       const id = ++this.sequence,
         timer = this.timeoutMs > 0
-          ? setTimeout(() => this._fail(Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.exportRenderingTimedOut', {}), {telemetryCode: 'timeout', telemetryStage: operation === 'render' ? 'encode' : 'prepare'})), this.timeoutMs)
+          ? setTimeout(() => this._fail(Object.assign(messageError(new Error(''), 'errors.exportFrameRenderer.exportRenderingTimedOut', {}), {fileReason: 'timeout', fileStage: operation === 'render' ? 'encode' : 'prepare'})), this.timeoutMs)
           : null;
       this.pending = {id, resolve, reject, timer};
       try {
@@ -255,7 +256,7 @@ export class EngineExportFrames {
     if (error?.name === 'AbortError') return false;
     return Boolean(error?.recoverable) ||
       ['vfx_surface_budget', 'export_memory_limit', 'export_canvas_lost'].includes(error?.code) ||
-      ['timeout', 'worker_failed', 'snapshot_failed'].includes(error?.telemetryCode);
+      ['timeout', 'worker-stopped', 'transfer-failed'].includes(error?.fileReason);
   }
 
   /** Replaces a failed engine worker (a new GPU device), drawing in tiles of at most `tileSize`. */

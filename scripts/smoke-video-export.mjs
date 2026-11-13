@@ -30,7 +30,8 @@ if (!existsSync(ffmpeg)) { console.error(`The bundled encoder is missing (${ffmp
 
 const EXPORTS = [['export-mp4', 'mp4'], ['export-video', 'webm'], ['export-avi', 'avi'], ['export-wmv', 'wmv'], ['export-gif', 'gif']];
 const work = await mkdtemp(path.join(os.tmpdir(), 'styk-video-'));
-await writeFile(path.join(work, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(work, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 const failures = [];
 let app;
 try {

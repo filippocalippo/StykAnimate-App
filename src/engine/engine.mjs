@@ -10,7 +10,8 @@
  */
 import init, {EditSession, EngineHandle, Stage, api_version} from './pkg/styk_engine.js';
 import {declaredMemoryPages} from './engine-memory.mjs';
-import {traceBegin, traceComplete, traceEnd, tuned} from '../trace.mjs';
+import {traceBegin, traceComplete, traceEnd, tracing, tuned} from '../trace.mjs';
+import {capturePanics, enginePanicked} from './engine-panic.mjs';
 
 /** The command/query API this loader was written for. */
 const API_VERSION = 1;
@@ -98,6 +99,8 @@ const MEMORY_MAXIMUM_SPEC = Object.freeze({min: 0, max: 2048, description: 'The 
 async function load({workers = tuned('engine.workers', defaultWorkerCount(), WORKERS_SPEC),
   deviceMemory = globalThis.navigator?.deviceMemory, stage = null} = {}) {
   const span = traceBegin('engine load');
+  // A panic on this thread, or one a worker forwards, reaches statistics as an engine problem (docs/STATISTICS.md).
+  capturePanics();
   const source = new URL('./pkg/styk_engine_bg.wasm', import.meta.url);
   const {module, pages} = await compile(source);
   // A profiling run can hold the memory to what a small device reserves; the shipping build always asks for the largest.
@@ -116,7 +119,8 @@ async function load({workers = tuned('engine.workers', defaultWorkerCount(), WOR
   const spawn = () => new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./engine-worker.mjs', import.meta.url), {type: 'module', name: 'styk-engine'});
     let ready = false;
-    worker.onmessage = () => { ready = true; resolve(); };
+    // A worker's first message says it joined; a later one is a panic it caught before it traps.
+    worker.onmessage = ({data}) => { if (data?.panic) { enginePanicked(data.panic); return; } ready = true; resolve(); };
     // A thread that traps cannot say so itself: the engine is told, and what waits for a job on it (a save) gives up.
     worker.onerror = event => { if (ready) handle.worker_lost(); else reject(new Error(`An engine worker failed to start: ${event.message}`)); };
     worker.postMessage({module, memory, address: handle.address(), stack: WORKER_STACK_BYTES});
@@ -141,7 +145,7 @@ async function load({workers = tuned('engine.workers', defaultWorkerCount(), WOR
     preparing?.then(canvas => canvas && stages.release(canvas));
     throw error;
   }
-  if (span !== 0) traceEnd(span, {workers, threaded});
+  if (span !== 0) traceEnd(span, tracing ? {workers, threaded} : undefined);
   let growing = null, stopped = false;
   const progress = new Int32Array(memory.buffer, handle.progress_address(), 1);
   let pumping = false;

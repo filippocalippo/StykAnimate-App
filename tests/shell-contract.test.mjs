@@ -64,7 +64,7 @@ export const SHELL_CONTRACT = Object.freeze({
   },
   // data-action values in index.html. Each is a key of the actions map in
   // app.mjs, and the same names are hotkey ids (hotkeys.mjs), native menu
-  // commands (desktop/main.cjs), telemetry buckets (telemetry-core.mjs),
+  // commands (desktop/main.cjs), statistics' command counts (src/stats/session.mjs),
   // localization menu keys and hotkey hints. Never rename one.
   actions: {
     // The band: New beside the tabs, its history, Save and Export, and a session's Cancel, Test rig and Done

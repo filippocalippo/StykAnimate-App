@@ -22,11 +22,10 @@ async function ready() {
   page.on('pageerror', (error) => { throw new Error(`Renderer error: ${error.message}`); });
   page.on('console', (message) => { if (message.type() === 'error') console.error('renderer:', message.text()); });
   await page.waitForFunction(() => window.styk?.ready, undefined, { timeout: 30000 });
-  // A fresh profile shows What's new and asks about diagnostics, one after the other, over Home.
+  // A fresh profile shows What's new over Home.
   for (let quiet = 0, round = 0; quiet < 3 && round < 40; round++) {
     await page.waitForTimeout(400);
-    if (await page.locator('.styk-privacy[open] [data-decline]').isVisible().catch(() => false)) { await page.click('.styk-privacy[open] [data-decline]'); quiet = 0; }
-    else if (await page.evaluate(() => Boolean(document.querySelector('dialog[open]')))) { await page.keyboard.press('Escape'); quiet = 0; }
+    if (await page.evaluate(() => Boolean(document.querySelector('dialog[open]')))) { await page.keyboard.press('Escape'); quiet = 0; }
     else quiet++;
   }
   await app.evaluate(({ dialog }) => {

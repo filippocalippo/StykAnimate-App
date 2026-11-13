@@ -46,7 +46,7 @@ try {
   const page = await app.firstWindow({timeout: 120000});
   await page.waitForFunction(() => window.styk?.editor && window.styk?.actions, null, {timeout: 120000, polling: 50});
   await page.waitForTimeout(2000);
-  await page.evaluate(() => { document.querySelector('.styk-privacy [data-decline]')?.click(); for (const d of document.querySelectorAll('dialog[open]')) d.close(); });
+  await page.evaluate(() => { for (const d of document.querySelectorAll('dialog[open]')) d.close(); });
   const point = (open, save) => app.evaluate(({dialog}, [openPath, savePath]) => {
     dialog.showOpenDialog = async () => ({canceled: false, filePaths: [openPath]});
     dialog.showSaveDialog = async () => ({canceled: false, filePath: savePath});
