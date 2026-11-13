@@ -96,9 +96,16 @@ button { cursor: pointer; }
 }
 
 main { max-width: 1480px; margin: 0 auto; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); }
-#overview-sections, #scenario, #overview { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+#overview-sections, #overview-lead, #scenario, #overview { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+#overview-lead:empty { display: none; }
 
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; scroll-margin-top: 12px; }
+/* Contents: the overview's sections, at the top of the window however far the page has scrolled. */
+.contents { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 10px; padding: 5px 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 4px 14px rgba(0, 0, 0, .08); }
+.contents[hidden] { display: none; }
+.contents button { border: 0; background: none; color: var(--text-2); font-size: 12.5px; padding: 4px 10px; border-radius: 6px; }
+.contents button:hover { background: var(--well); color: var(--text); }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; scroll-margin-top: 52px; }
 .panel-head { display: flex; flex-direction: column; gap: 3px; }
 .panel-head .sub { color: var(--text-2); max-width: 110ch; }
 .subhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 4px; }
@@ -120,6 +127,16 @@ main { max-width: 1480px; margin: 0 auto; padding: 16px max(16px, env(safe-area-
 .notes h3 { font-size: 14px; margin-top: 6px; }
 .notes h4, .notes h5, .notes h6 { font-size: 13px; margin-top: 4px; }
 .notes p, .notes li { max-width: 92ch; line-height: 1.55; }
+.notes p { margin: 0; }
+.notes .panel-head .more { align-self: flex-start; }
+.note-fold { border-top: 1px solid var(--line); }
+.note-fold > summary { display: flex; gap: 8px; align-items: baseline; padding: 9px 2px; cursor: pointer; list-style: none; border-radius: 6px; }
+.note-fold > summary::-webkit-details-marker { display: none; }
+.note-fold > summary::before { content: '▸'; color: var(--text-3); flex: none; }
+.note-fold[open] > summary::before { content: '▾'; }
+.note-fold > summary:hover { background: var(--well); }
+.note-fold > summary h4 { margin: 0; font-size: 13.5px; }
+.note-fold > .note-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 0 14px 18px; min-width: 0; }
 .notes ul, .notes ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 3px; }
 .notes code, .notes pre { font-family: var(--mono); font-size: 12px; background: var(--well); border-radius: 4px; }
 .notes code { padding: 1px 4px; }

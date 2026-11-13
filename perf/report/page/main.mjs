@@ -11,6 +11,7 @@ import {renderScenario} from './scenario.mjs';
 const model = JSON.parse(document.getElementById('report-data').textContent);
 const state = {env: '', workload: '', scenario: '', query: '', needsWork: false};
 const overviewRoot = document.getElementById('overview'), sectionsRoot = document.getElementById('overview-sections'), scenarioRoot = document.getElementById('scenario');
+const leadRoot = document.getElementById('overview-lead'), contentsRoot = document.getElementById('contents');
 // Where the overview was when a scenario opened from it: closing the scenario returns there, filters and scroll.
 let overviewScroll = 0, overviewFilters = {env: '', workload: ''};
 
@@ -87,7 +88,7 @@ function show() {
   syncControls();
   if (state.scenario) {
     const wasHidden = scenarioRoot.hidden;
-    overviewRoot.hidden = true; scenarioRoot.hidden = false;
+    overviewRoot.hidden = true; scenarioRoot.hidden = false; contentsRoot.hidden = true;
     release(scenarioRoot);
     const shown = renderScenario(scenarioRoot, model, {id: state.scenario, wanted: wantedColumn()}, currentView());
     document.title = `${state.scenario} · ${pageTitle}`;
@@ -103,9 +104,44 @@ function show() {
   const wasHidden = overviewRoot.hidden;
   release(scenarioRoot); scenarioRoot.replaceChildren(); scenarioRoot.hidden = true; overviewRoot.hidden = false;
   release(sectionsRoot);
-  renderOverview(sectionsRoot, model, currentView());
+  renderOverview(sectionsRoot, leadRoot, model, currentView());
+  drawContents();
   document.title = pageTitle;
   if (wasHidden) scrollTo(0, overviewScroll);
+}
+
+/** The overview's sections as a bar that stays at the top: a long page is one press from any of its parts. */
+function drawContents() {
+  const sections = [...overviewRoot.querySelectorAll('section.panel')];
+  contentsRoot.hidden = sections.length < 3;
+  contentsRoot.replaceChildren(...sections.map(section => h('button', {type: 'button', onclick: () => section.scrollIntoView({block: 'start', behavior: 'smooth'})}, section.querySelector('h2')?.textContent ?? section.id)));
+}
+
+/**
+ * The notes' findings fold: each second-level heading of the notes (an h4 on the page) and what follows it, up to the
+ * next heading, becomes a closed <details>. An analysis of many findings then reads as their titles first, and a link
+ * to a place inside a folded finding still works, because the page's links are addresses, not anchors.
+ */
+function foldNotes() {
+  const notes = document.getElementById('conclusions');
+  if (!notes) return;
+  const folds = [];
+  for (const heading of [...notes.querySelectorAll(':scope > h4')]) {
+    const body = h('div', {class: 'note-body'});
+    while (heading.nextElementSibling && !/^H[1-4]$/.test(heading.nextElementSibling.tagName)) body.append(heading.nextElementSibling);
+    const fold = h('details', {class: 'note-fold'});
+    heading.replaceWith(fold);
+    fold.append(h('summary', {}, heading), body);
+    folds.push(fold);
+  }
+  if (folds.length < 3) { for (const fold of folds) fold.open = true; return; }
+  const all = h('button', {type: 'button', class: 'more'}, 'Open all');
+  all.addEventListener('click', () => {
+    const open = folds.some(fold => !fold.open);
+    for (const fold of folds) fold.open = open;
+    all.textContent = open ? 'Close all' : 'Open all';
+  });
+  notes.querySelector('.panel-head')?.append(all);
 }
 
 const controls = {};
@@ -172,6 +208,7 @@ function keys(event) {
 
 const pageTitle = document.title;
 drawControls();
+foldNotes();
 readAddress();
 addEventListener('hashchange', () => { readAddress(); show(); });
 addEventListener('keydown', keys);

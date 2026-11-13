@@ -38,7 +38,7 @@ function tally(model, view) {
   for (const row of counted) for (const [status, count] of Object.entries(row.counts)) all[status] = (all[status] ?? 0) + count;
   const said = counts => order.filter(status => counts[status]).map(status => `${counts[status]} ${word(status).toLowerCase()}`).join(', ');
   const only = counted.length === 1 && model.columns.length > 1;
-  return panel('summary', 'In short', `${total} scenario${total === 1 ? '' : 's'} measured on ${counted.length} pair${counted.length === 1 ? '' : 's'} of environment and workload. A pair's row shows only that pair below.`,
+  return panel('summary', 'In short', `${total} scenario run${total === 1 ? '' : 's'} on ${counted.length} pair${counted.length === 1 ? '' : 's'} of environment and workload. A pair's row shows only that pair below.`,
     h('div', {class: 'tiles'}, order.filter(status => all[status]).map(status => h('div', {class: `tile st-${status}`},
       h('span', {class: 'tile-count'}, String(all[status])), h('span', {class: 'tile-word'}, glyph(status), word(status)), h('span', {class: 'tile-share'}, percent(all[status], total))))),
     h('div', {class: 'tally'}, counted.map(({column, counts}) => h('button', {type: 'button', class: 'tally-row', title: only ? 'Show every pair again' : 'Show only this pair', onclick: () => view.narrow(column)},
@@ -216,12 +216,15 @@ function engine(model) {
             benchmark.cells.slice(1).map(cell => `${cell.key} ${cell.text}`).join(' · '), Number.isFinite(benchmark.peakMB) ? mb(benchmark.peakMB) : '–']))))));
 }
 
-/** The overview's sections, in the order of the page. */
-export const SECTIONS = [tally, glance, needsWork, startup, memory, engine, trust];
+/** The sections before the notes of an analysis (the page in one look), then the ones after them, in the order of the page. */
+export const LEAD = [tally];
+export const SECTIONS = [glance, needsWork, startup, memory, engine, trust];
 
-/** Draws the overview into `root` for `view`. */
-export function renderOverview(root, model, view) {
-  root.replaceChildren(...SECTIONS.map(section => section(model, view)).filter(Boolean));
+/** Draws the overview for `view`: the leading sections into `lead` (above the notes), the others into `root`. */
+export function renderOverview(root, lead, model, view) {
+  const draw = sections => sections.map(section => section(model, view)).filter(Boolean);
+  lead.replaceChildren(...draw(LEAD));
+  root.replaceChildren(...draw(SECTIONS));
 }
 
 /** The facts line under the page's title: the runs the page is made from. */

@@ -298,12 +298,17 @@ a result is noisy, take more passes (`--passes`) on a quieter machine.
 ### The report
 
 `npm run perf -- report [run …] [--engine <engine run>] [--notes <file.md>] [--out <file.html>]` writes one page that
-needs nothing else to open (`perf/report/`): every scenario's grade on every pair of environment and workload, what
-most needs work, startup by phase, memory, and each scenario in full (its metrics with their spread, its frames, where
-the time went by thread, layer and function, the calls into the engine, the interface writes). Several runs go on one
-page: the first is the baseline the others are compared with. `--engine` adds an engine run (capacity, cost per
-thousand segments, how each cost grows); `--notes` puts a Markdown file of findings at the top, for the person who
-decides what to improve. The same data as text, for an agent or a terminal, is `show`.
+needs nothing else to open (`perf/report/`). It opens with the count of each grade and one bar per pair of
+environment and workload (a bar narrows the page to its pair), then every scenario's grade on every pair, what most
+needs work, startup by phase, memory, and each scenario in full (its metrics with their spread, its frames, where the
+time went by thread, layer and function, the calls into the engine, the interface writes). A bar of the page's
+sections stays at the top of the window. Several runs go on one page: the first is the baseline the others are
+compared with. `--engine` adds an engine run (capacity, cost per thousand segments, how each cost grows).
+
+`--notes` puts a Markdown file of findings under the summary, for the person who decides what to improve. Its `#`
+headings are sections; each `##` heading is a finding that folds, so many findings read as their titles first: say
+the finding in the title. A link of the form `#env=gpu&workload=stress&scenario=pose.drag-joint` opens that
+scenario. The same data as text, for an agent or a terminal, is `show`.
 
 `perf/report/model.mjs` shapes the data once (it is tested without a browser); the page's modules
 (`perf/report/page/`) only draw it, and `perf/report/build.mjs` puts them and the data into the one file.
