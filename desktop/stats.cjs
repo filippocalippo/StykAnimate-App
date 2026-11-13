@@ -42,8 +42,11 @@ function statsEndpoint(value, development = false) {
 }
 
 const VENDOR_IDS = { 0x8086: 'intel', 0x1002: 'amd', 0x1022: 'amd', 0x10de: 'nvidia', 0x106b: 'apple', 0x5143: 'qualcomm', 0x4d4f4351: 'qualcomm', 0x1414: 'software', 0x1ae0: 'software' };
-const stepOf = (steps, value) => { for (const s of steps) if (value <= s) return s; return steps.at(-1); };
-/** The machine in the schema's wide steps, from Electron's basic GPU information, the memory and the processor count. */
+/**
+ * The machine from Electron's basic GPU information: the kind of graphics and its vendor, as the schema's words. The memory
+ * (bytes) and the processor count are kept as they are; a batch rounds them to the schema's steps (memoryOf, coresOf), which
+ * are only ever defined there.
+ */
 function machineFacts({ gpuInfo, totalmem, cores } = {}) {
   const devices = Array.isArray(gpuInfo?.gpuDevice) ? gpuInfo.gpuDevice : [];
   const device = devices.find(item => item?.active) ?? devices[0];
@@ -52,10 +55,7 @@ function machineFacts({ gpuInfo, totalmem, cores } = {}) {
   const graphics = kind === 'software' ? 'software' : ['intel', 'apple', 'qualcomm'].includes(kind) ? 'integrated' : kind === 'nvidia' ? 'discrete'
     : kind === 'amd' ? (/\b(RX|R9|R7|Pro W|FirePro|Vega \d\d)\b/i.test(text) ? 'discrete' : /Radeon\(TM\) Graphics|Radeon Graphics|Vega \d\b/i.test(text) ? 'integrated' : 'unknown')
     : 'unknown';
-  const gigabytes = Number.isFinite(totalmem) && totalmem > 0 ? Math.round(totalmem / 1073741824) : 0;
-  return { graphics, vendor: kind === 'software' ? 'other' : kind,
-    memory: gigabytes > 0 ? String(stepOf([4, 8, 16, 32, 64], gigabytes)) : 'unknown',
-    cores: Number.isFinite(cores) && cores > 0 ? String(stepOf([2, 4, 8, 16, 32], cores)) : 'unknown' };
+  return { graphics, vendor: kind === 'software' ? 'other' : kind, totalmem, cores };
 }
 
 /** Anonymous session summaries, problems and file failures: checked, queued on disk and uploaded. */
@@ -268,7 +268,7 @@ class StatsService {
     const s = this.schema, word = (list, value) => list.includes(value) ? value : 'unknown';
     return { v: s.STATS_VERSION, app: { version: this.version, channel: this.channel, platform: word(s.PLATFORMS, this.platform), arch: word(s.ARCHS, this.arch) },
       machine: { graphics: word(s.GRAPHICS, this.machine.graphics), vendor: word(s.VENDORS, this.machine.vendor), backend: this.facts.backend,
-        memory: word(s.MEMORY_STEPS.map(String), this.machine.memory), cores: word(s.CORE_STEPS.map(String), this.machine.cores), refresh: this.facts.refresh } };
+        memory: s.memoryOf(this.machine.totalmem), cores: s.coresOf(this.machine.cores), refresh: this.facts.refresh } };
   }
   /** The oldest reports that fit one batch; a report the intake would refuse on its own is dropped. */
   nextBatch(base, today) {

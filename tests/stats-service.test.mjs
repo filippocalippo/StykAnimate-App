@@ -48,7 +48,7 @@ const memoryStore = (dir, options) => ({
 /** A service as at a start; `shown` (the default) is an installation whose Home already displayed the first-start line. */
 async function service(dir, { clock = { t: START }, fetch = intake().fetch, disk = false, shown = true, ...options } = {}) {
   const stats = new StatsService({ directory: dir, schemaPath, version: '1.2.6', channel: 'stable', siteUrl: 'https://stats.example', env: {},
-    machine: { graphics: 'integrated', vendor: 'intel', memory: '8', cores: '8' }, fetchImpl: fetch, now: () => clock.t,
+    machine: { graphics: 'integrated', vendor: 'intel', totalmem: 7.8 * 2 ** 30, cores: 6 }, fetchImpl: fetch, now: () => clock.t,
     randomHex: () => (++counter).toString(16).padStart(32, '0'), timers: false, ...(disk ? {} : { openStore: memoryStore }), localDay: utcDay,
     localWeekday: t => new Date(t).getUTCDay(), localHour: t => new Date(t).getUTCHours(), ...options });
   stats.clock = clock;
@@ -299,16 +299,18 @@ test('quitting waits for the upload at most the quit limit', async () => {
   await stats.close();
 });
 
-test('the machine is described in wide steps', () => {
+test('the machine is described in wide steps', async () => {
   const gpu = (...gpuDevice) => ({ gpuDevice });
-  assert.deepEqual(machineFacts({ gpuInfo: gpu({ vendorId: 0x8086, active: true }), totalmem: 15.8 * 2 ** 30, cores: 12 }),
-    { graphics: 'integrated', vendor: 'intel', memory: '16', cores: '16' });
-  assert.deepEqual(machineFacts({ gpuInfo: gpu({ vendorId: 0x8086 }, { vendorId: 0x10de, active: true }), totalmem: 64 * 2 ** 30, cores: 64 }),
-    { graphics: 'discrete', vendor: 'nvidia', memory: '64', cores: '32' });
+  // Memory and processor count are rounded to the schema's steps (memoryOf, coresOf) when a batch is made, nowhere else.
+  const batchOf = async machine => (await service(await folder(), { machine })).baseBatch().machine;
+  assert.deepEqual(await batchOf(machineFacts({ gpuInfo: gpu({ vendorId: 0x8086, active: true }), totalmem: 15.8 * 2 ** 30, cores: 12 })),
+    { graphics: 'integrated', vendor: 'intel', backend: 'unknown', memory: '16', cores: '16', refresh: 'unknown' });
+  assert.deepEqual(await batchOf(machineFacts({ gpuInfo: gpu({ vendorId: 0x8086 }, { vendorId: 0x10de, active: true }), totalmem: 64 * 2 ** 30, cores: 64 })),
+    { graphics: 'discrete', vendor: 'nvidia', backend: 'unknown', memory: '64', cores: '32', refresh: 'unknown' });
   assert.equal(machineFacts({ gpuInfo: gpu({ vendorId: 0x1002, deviceString: 'AMD Radeon RX 6600' }) }).graphics, 'discrete');
   assert.equal(machineFacts({ gpuInfo: gpu({ vendorId: 0x1002, deviceString: 'AMD Radeon(TM) Graphics' }) }).graphics, 'integrated');
   assert.deepEqual(machineFacts({ gpuInfo: gpu({ vendorId: 0x1414 }) }).graphics, 'software');
-  assert.deepEqual(machineFacts({}), { graphics: 'unknown', vendor: 'unknown', memory: 'unknown', cores: 'unknown' });
+  assert.deepEqual(await batchOf(machineFacts({})), { graphics: 'unknown', vendor: 'unknown', backend: 'unknown', memory: 'unknown', cores: 'unknown', refresh: 'unknown' });
 });
 
 test('the bridge is the table in docs/STATISTICS.md and nothing more, each call has its handler, and no telemetry channel is left', async () => {
