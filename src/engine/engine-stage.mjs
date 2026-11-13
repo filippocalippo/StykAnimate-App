@@ -23,6 +23,7 @@ import {LiveCels} from './engine-live-cels.mjs';
 import {EngineCameraMonitor} from './engine-previews.mjs';
 import {viewportBackingSize} from '../preview-quality.mjs';
 import {setCanvasSize} from '../ui/dom-write.mjs';
+import {createProcessorStage} from './engine-stage-processor.mjs';
 import {messageError} from '../localized-error.mjs';
 
 /**
@@ -30,7 +31,7 @@ import {messageError} from '../localized-error.mjs';
  * (the simpler fragment shaders on a software rasterizer, docs/engine/rendering.md), 0 the general shader, 1 the simpler ones.
  */
 const SHADING_SPEC = Object.freeze({min: -1, max: 1, description: 'Fragment shaders of the stage by run of primitives: 1 on, 0 off, -1 as the device chose (on without a graphics card)'});
-/** The live parameter that chooses who draws the stage's frames: 1 the processor renderer on the engine's workers, 0 the graphics device, -1 as the device chose (the workers without a graphics card). */
+/** The live parameter that chooses who draws the stage's frames: 1 the processor renderer on the engine's workers, 0 the graphics device, -1 as the device chose (the workers on a software rasterizer). */
 const PROCESSOR_SPEC = Object.freeze({min: -1, max: 1, description: 'Stage frames drawn on the engine\'s workers by the processor renderer: 1 on, 0 off (the graphics device), -1 as the device chose (on without a graphics card)'});
 
 /** The engine side of the stage, shared by every stage the app creates (it survives the loss of a canvas or device). */
@@ -239,51 +240,22 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       stage.set_shading_runs?.(asked < 0 ? shadingChosen : asked > 0);
     }
     const processorAsked = tuned('stage.processor', -1, PROCESSOR_SPEC);
-    if (processorAsked !== processor.asked) {
-      processor.asked = processorAsked;
-      const on = processorAsked < 0 ? shadingChosen : processorAsked > 0;
-      stage.set_processor(on);
-      if (on && !processor.canvas) {
-        processor.canvas = document.createElement('canvas');
-        processor.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none';
-        processor.context = processor.canvas.getContext('2d');
-        canvas.after(processor.canvas);
-      }
-      if (processor.canvas) processor.canvas.style.visibility = on ? '' : 'hidden';
-      canvas.style.visibility = on ? 'hidden' : '';
-      processor.on = on;
+    if (processorAsked !== processorWanted) {
+      processorWanted = processorAsked;
+      // As the device chose: on where it is a software rasterizer, with threads to draw on (without them the engine's
+      // work would run on this thread), and unless the workers could not draw a frame of this stage.
+      processor.set((processorAsked < 0 ? shadingChosen : processorAsked > 0) && side.engine.threaded && !processorFailed);
     }
   };
-  /** Frames drawn on the engine's workers: the canvas they are shown on, the request of each, and one wait for them at a time. */
-  const processor = {asked: null, on: false, canvas: null, context: null, image: null, waiting: false, asked_at: new Map()};
-  /** Shows the newest frame the workers finished, and waits for the next while one is being drawn. */
-  const presentProcessor = () => {
-    if (destroyed || !processor.on) return;
-    const seen = side.engine.progressSeen();
-    const frame = stage.processor_frame();
-    if (frame.length) {
-      const [address, width, height, serial] = frame, started = performance.now();
-      const target = processor.canvas;
-      if (target.width !== width || target.height !== height) { target.width = width; target.height = height; }
-      if (processor.image?.width !== width || processor.image?.height !== height) processor.image = new ImageData(width, height);
-      processor.image.data.set(new Uint8ClampedArray(side.engine.join.memory.buffer, address, width * height * 4));
-      stage.processor_shown(serial);
-      processor.context.putImageData(processor.image, 0, 0);
-      const asked = processor.asked_at.get(serial);
-      for (const key of processor.asked_at.keys()) if (key <= serial) processor.asked_at.delete(key);
-      if (asked) traceComplete(asked.prepared ? 'stage draw prepared' : 'stage draw', asked.at, performance.now() - asked.at, tracing ? {tick: asked.tick, drawn: true, processor: true, copyMs: performance.now() - started} : undefined);
-      if (asked) options.onPicture?.(asked.prepared, performance.now());
-    }
-    if (!processor.waiting && stage.processor_pending()) {
-      processor.waiting = true;
-      side.engine.whenProgress(seen, 16).then(() => { processor.waiting = false; presentProcessor(); });
-    }
-  };
-  /** A frame was asked of the workers: when and for which tick, for the picture's span when it is shown. */
-  const askedProcessor = (tick, prepared, at) => {
-    processor.asked_at.set(stage.processor_serial(), {tick, prepared, at});
-    presentProcessor();
-  };
+  /** Frames drawn on the engine's workers instead of the device (engine-stage-processor.mjs), and the live parameter's value last applied. */
+  let processorWanted = null, processorFailed = false;
+  const processor = createProcessorStage({stage, engine: side.engine, scene: canvas,
+    onPicture: (prepared, at, frame) => options.onPicture?.(prepared, at, frame),
+    onFailed: () => {
+      processorFailed = true; processorWanted = null;
+      console.warn('The stage could not draw a frame on the engine\'s threads (a picture did not fit in memory); it draws with the graphics device.');
+      invalidate();
+    }});
 
   const invalidate = () => options.onInvalidate?.();
   /** Another attempt at a frame the engine could not draw yet, on the next animation frame. */
@@ -458,8 +430,8 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
 
   const renderer = {
     /** The canvas the picture on show is on: the scene canvas, or the one frames drawn on the engine's workers are shown on. */
-    get canvas() { return processor.on ? processor.canvas : canvas; },
-    /** Frames are drawn on the engine's workers and shown when they are done: `options.onPicture(prepared, at)` says when, not the draw that asked. */
+    get canvas() { return processor.on && processor.canvas ? processor.canvas : canvas; },
+    /** Frames are drawn on the engine's workers and shown when they are done: `options.onPicture(prepared, at, {tick, revision})` says when, not the draw that asked. */
     get presentsLater() { return processor.on; },
     get dpr() { return deviceRatio; },
     /** Counters of the last frames, as the status label, the statistics' scene size and the performance report read them. */
@@ -481,11 +453,12 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       const revision = request.revision ?? 0;
       if (engineRefusal(side, request.report, revision)) return false;
       applyShading();
-      const asked = performance.now(), span = traceBegin(processor.on ? 'stage ask' : 'stage draw');
+      const asked = performance.now(), span = traceBegin('stage draw');
       try {
         const drawn = drawEdit(request);
-        if (span !== 0) traceEnd(span, tracing ? {tick: request.tick, drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs} : undefined);
-        if (drawn) { engineShown = true; preparePickSoon(); if (processor.on) askedProcessor(request.tick, false, asked); }
+        // A frame drawn on the engine's workers is only asked for here: its picture has a span of its own when it is shown.
+        if (span !== 0) traceEnd(span, tracing ? {tick: request.tick, drawn: drawn && processor.on ? 'asked' : drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs} : undefined);
+        if (drawn) { engineShown = true; preparePickSoon(); processor.asked(asked, {tick: request.tick, revision}); }
         return drawn;
       } catch (error) {
         if (span !== 0) traceEnd(span, tracing ? {error: true} : undefined);
@@ -524,14 +497,14 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       if (!ticket) return false;
       const view = frame.view ?? {}, seen = side.engine.progressSeen();
       applyShading();
-      const asked = performance.now(), span = traceBegin(processor.on ? 'stage ask' : 'stage draw prepared');
+      const asked = performance.now(), span = traceBegin('stage draw prepared');
       try {
         stage.set_canvas_drawing(false);
         orient(view);
         const drawn = stage.render_ticket(ticket.generation, ticket.epoch, ticket.tick, (view.scale ?? 1) * deviceRatio, (view.x ?? 0) * deviceRatio, (view.y ?? 0) * deviceRatio, frame.cameraEnabled !== false, true);
-        if (drawn) { engineShown = true; side.stats.frames++; awaitPictures(seen); if (processor.on) askedProcessor(ticket.tick, true, asked); }
+        if (drawn) { engineShown = true; side.stats.frames++; awaitPictures(seen); processor.asked(asked, {tick: ticket.tick, prepared: true}); }
         else if (stage.surface_pending()) redrawSoon();
-        if (span !== 0) traceEnd(span, tracing ? {tick: ticket.tick, drawn} : undefined);
+        if (span !== 0) traceEnd(span, tracing ? {tick: ticket.tick, drawn: drawn && processor.on ? 'asked' : drawn} : undefined);
         return drawn;
       } catch (error) {
         // The same refusal on every frame of a playback is reported once.
@@ -644,7 +617,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       clearInterval(poller); clearTimeout(pickTimer);
       side.pictureWait++;
       side.workerMonitor?.destroy(); side.workerMonitor = null;
-      processor.canvas?.remove(); processor.on = false;
+      processor.destroy();
       if (side.stage === stage) { side.stage = null; stage.free(); }
     },
   };

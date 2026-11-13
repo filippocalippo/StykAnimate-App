@@ -1673,8 +1673,7 @@ function loop(now) {
       // directions before yielding; cancellation may leave no further RAF.
       syncBackgroundInteraction(viewChanging);
       // What is presented is what was drawn: a frame the stage could not draw yet leaves the previous picture on show.
-      if (editingDrawn) state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
-        sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
+      if (editingDrawn && !state.renderer.presentsLater) presentedEditing(editor.tick, editor.revision, performance.now());
       overlayRender(() => drawingPreview?.geometry ?? heldGeometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       // What a paint at a new tick costs the interface decides how the next playhead drag of this document scrubs.
@@ -6230,9 +6229,12 @@ function recoverCanvas(refreshGpuBudget) {
   })().finally(() => {rendererRecovery = null;});
   return rendererRecovery;
 }
+/** The stage shows the edit frame of `tick` at `revision` (what the developer tools wait for). */
+function presentedEditing(tick, revision, at) { state.lastEditingPresentation = {tick, revision, at, sequence: (state.lastEditingPresentation?.sequence ?? 0) + 1}; }
 function rendererOptions() {
   return {
-    onInvalidate: requestRender, onPicture: (prepared, at) => { if (prepared && state.playing) playbackMetrics.present(at); },
+    // A frame drawn on the engine's workers is presented when its picture is shown, not when it was asked for.
+    onInvalidate: requestRender, onPicture: (prepared, at, frame) => { if (!prepared) presentedEditing(frame.tick, frame.revision, at); else if (state.playing) playbackMetrics.present(at); },
     onMonitorPicture: requestMonitorRender,
     // A frame the engine refused: the previous picture stays and the document's next revision is tried again.
     onError: error => { stats.problem(error); status(error, true); },

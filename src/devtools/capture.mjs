@@ -108,13 +108,16 @@ export function analyze(taken, {periodMs = null, slowest, series = false} = {}) 
  * key press or a pointer move took to show its frame, which the frame after its handler does not tell when the
  * picture is made off the interface thread. At most the last 2,000 of each.
  */
+/** The spans of a picture shown: drawn in the frame that drew it (`stage draw`), or shown later (`stage picture`). */
+const PICTURE_SPANS = new Set(['stage draw', 'stage draw prepared', 'stage picture', 'stage picture prepared']);
+
 export function shownFrames(taken) {
   const at = [], tick = [], prepared = [], asked = [], later = [];
   for (const event of taken.events) {
-    if ((event.name !== 'stage draw' && event.name !== 'stage draw prepared') || event.args?.drawn !== true || !Number.isFinite(event.args.tick)) continue;
-    at.push(round(event.start + event.duration - taken.startedAt, 1)); tick.push(event.args.tick); prepared.push(event.name === 'stage draw prepared' ? 1 : 0);
-    // A picture drawn on the engine's workers spans from the frame that asked for it to its showing (engine-stage.mjs).
-    asked.push(round(event.start - taken.startedAt, 1)); later.push(event.args.processor === true ? 1 : 0);
+    if (!PICTURE_SPANS.has(event.name) || event.args?.drawn !== true || !Number.isFinite(event.args.tick)) continue;
+    at.push(round(event.start + event.duration - taken.startedAt, 1)); tick.push(event.args.tick); prepared.push(event.name.endsWith('prepared') ? 1 : 0);
+    // A picture drawn on the engine's workers spans from the frame that asked for it to its showing (engine-stage-processor.mjs).
+    asked.push(round(event.start - taken.startedAt, 1)); later.push(event.name.startsWith('stage picture') ? 1 : 0);
   }
   const keep = list => list.slice(-2000);
   return {at: keep(at), tick: keep(tick), prepared: keep(prepared), asked: keep(asked), later: keep(later), inputs: keep((taken.inputs?.at ?? []).map(time => round(time - taken.startedAt, 1)))};
@@ -123,23 +126,30 @@ export function shownFrames(taken) {
 /**
  * How the stage's pictures followed the hand when they were shown after the frame that asked for them (drawn on the
  * engine's workers): there the display frames run on while the picture is still being drawn, so the frame time and the
- * input delay say how free the interface thread was, not what the person saw. `felt` weighs the time between the
- * pictures shown from the first input to the last (as `frames.felt` weighs frames), and `input` runs from each input to
- * the first picture asked for after it ({p50, p95}; an input no picture answered waits to the capture's end). Null
- * for a capture whose pictures were all shown in the frame that drew them, or without inputs.
+ * input delay say how free the interface thread was, not what the person saw. `felt` weighs how long each picture
+ * stood still while the hand had moved (as `frames.felt` weighs frames): from the later of the picture before it and
+ * the first input that picture did not show, to the picture; a picture after a pause in the input (between two notches
+ * of a wheel) counts from the input, not from the picture before. `input` runs from each input to the first picture
+ * asked for after it ({p50, p95}; an input no picture answered waits to the capture's end). Null for a capture whose
+ * pictures were all shown in the frame that drew them, or without inputs.
  */
 export function pictureTimes(shown, endMs = Infinity) {
   if (!shown?.later?.includes(1) || !shown.inputs?.length) return null;
-  const first = shown.inputs[0], last = shown.inputs.at(-1);
-  const waits = shown.inputs.map(input => {
+  const inputs = shown.inputs, waits = inputs.map(input => {
     const answer = shown.at.find((at, index) => shown.asked[index] >= input && at >= input);
     return (answer ?? Math.max(endMs, input)) - input;
   });
-  const during = shown.at.filter(at => at >= first && at <= last + 100);
-  let total = 0, squares = 0;
-  for (let index = 1; index < during.length; index++) { const ms = during[index] - during[index - 1]; total += ms; squares += ms * ms; }
+  let total = 0, squares = 0, pictures = 0;
+  for (let index = 1; index < shown.at.length; index++) {
+    // The first input the picture before did not show: the picture stood still for the hand from then (or from that picture).
+    const waiting = inputs.find(input => input >= shown.asked[index - 1]);
+    if (waiting === undefined || waiting > shown.at[index]) continue;
+    const ms = shown.at[index] - Math.max(shown.at[index - 1], waiting);
+    pictures++;
+    if (ms > 0) { total += ms; squares += ms * ms; }
+  }
   const input = sorted(waits);
-  return {pictures: during.length, felt: total > 0 ? round(squares / total, 1) : null, input: {p50: round(quantile(input, .5), 1), p95: round(quantile(input, .95), 1)}};
+  return {pictures, felt: total > 0 ? round(squares / total, 1) : null, input: {p50: round(quantile(input, .5), 1), p95: round(quantile(input, .95), 1)}};
 }
 
 /**

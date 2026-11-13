@@ -8,7 +8,6 @@ use styk_render::{Renderer, ViewParams, wgpu};
 use wasm_bindgen::prelude::*;
 
 mod pictures;
-mod processor;
 pub(crate) use pictures::ViewPictures;
 
 use crate::engine::EngineHandle;
@@ -127,12 +126,14 @@ pub struct Stage {
     surface_missed: bool,
     /// The camera monitor and frame thumbnails, drawn on this device (`views.rs`).
     pub(crate) views: crate::views::Views,
-    /// Frames drawn by the processor renderer on the engine's workers instead of this device (`processor.rs`).
-    processor: Option<processor::Processor>,
+    /// Frames drawn by the processor renderer on the engine's workers instead of this device ([`Stage::set_processor`]).
+    processor: Option<styk_engine::stage_raster::StageRaster>,
+    /// The atlas layer of the live cels' first page the processor frames hold their slots at.
+    processor_live_base: Option<u32>,
+    /// Primitives and isolation groups of the last list the processor was asked to draw (its stats).
+    processor_list: (usize, usize),
     /// Edit frames are drawn on the destination pixel grid ([`Stage::set_canvas_drawing`]).
     canvas_drawing: bool,
-    /// The pictures the processor renderer samples.
-    cpu_images: Arc<styk_raster::Images>,
 }
 
 #[wasm_bindgen]
@@ -250,16 +251,24 @@ impl Stage {
             surface_missed: false,
             views: Default::default(),
             processor: None,
+            processor_live_base: None,
+            processor_list: (0, 0),
             canvas_drawing: false,
-            cpu_images: Arc::new(styk_raster::Images::with_budget(0)),
         })
     }
 
     /// Draws frames with the processor renderer on the engine's workers (`true`) instead of this device: the page shows
     /// them from [`Stage::processor_frame`].
+    /// Every frame drawn goes through [`Stage::draw`] as before (its pictures, live cels and orientation included); only the
+    /// drawing itself moves (`styk_engine::stage_raster`). Switching it off lets go of its frames and pictures on a worker.
     pub fn set_processor(&mut self, on: bool) {
         if on != self.processor.is_some() {
-            self.processor = on.then(Default::default);
+            self.processor = on.then(|| styk_engine::stage_raster::StageRaster::new(&self.engine));
+            // The processor's pictures start empty: the live cels' slots are written to it again with the next frame.
+            self.processor_live_base = None;
+            // The device keeps no frame to draw a stroke's part over while it draws nothing (its next frame is drawn whole).
+            self.renderer.set_keep_frames(!on);
+            self.live_writes.clear();
         }
     }
 
@@ -272,9 +281,9 @@ impl Stage {
     /// straight RGBA rows in the engine's memory, valid until the next call into the stage; empty when there is none.
     pub fn processor_frame(&mut self) -> Vec<f64> {
         let Some(processor) = self.processor.as_mut() else { return Vec::new() };
-        processor.poll(&self.engine);
+        processor.poll();
         match processor.ready() {
-            Some(shot) => vec![processor::Processor::pixels(shot).as_ptr() as usize as f64, shot.width as f64, shot.height as f64, shot.serial as f64],
+            Some(shot) => vec![shot.pixels().as_ptr() as usize as f64, shot.width as f64, shot.height as f64, shot.serial as f64],
             None => Vec::new(),
         }
     }
@@ -286,7 +295,13 @@ impl Stage {
 
     /// Whether a frame is still being drawn on the workers.
     pub fn processor_pending(&mut self) -> bool {
-        self.processor.as_mut().is_some_and(|processor| processor.poll(&self.engine))
+        self.processor.as_mut().is_some_and(|processor| processor.poll())
+    }
+
+    /// Whether the processor could not draw a frame (a picture it samples could not be held in memory): the page draws
+    /// with the graphics device from then on.
+    pub fn processor_failed(&self) -> bool {
+        self.processor.as_ref().is_some_and(|processor| processor.failed())
     }
 
     /// The page copied frame `serial` ([`Stage::processor_frame`]).
@@ -684,6 +699,7 @@ impl Stage {
             }
             let rows = if waiting { image.height } else { (slice / (image.width as usize * 4)).max(1) as u32 };
             self.renderer.upload_rows(&generation.assets, &image, done, rows);
+            // The processor was given the picture whole when it was taken (below), or decodes it itself when it was switched on later.
             self.upload_bytes = rows.min(image.height - done) as usize * image.width as usize * 4;
             if done + rows < image.height {
                 self.partial = Some((image, done + rows));
@@ -698,6 +714,10 @@ impl Stage {
             // A picture whose page left while it was decoded is dropped: it is decoded again when it is wanted.
             if !self.has_place(&generation.assets, &image) {
                 continue;
+            }
+            // Frames drawn on the workers sample the same decoded pixels (shared, not copied).
+            if let Some(processor) = self.processor.as_mut() {
+                processor.add_image(&generation.assets, image.clone());
             }
             let rows = (slice / (image.width as usize * 4)).max(1) as u32;
             if waiting || image.height <= rows {
@@ -799,8 +819,24 @@ impl Stage {
     /// drawn last ([`styk_eval::live::LiveCels::take_runs`]): the calls of a frame rewrite the same
     /// neighbourhoods, so each slot is built once and neighbours are written together.
     fn flush_live(&mut self) {
+        // The processor's copies of the live slots are at the layer the live pages were at: when they move (or the processor
+        // started), they are let go of and every slot is written again.
+        if let (Some(processor), Some((_, base))) = (self.processor.as_mut(), self.atlas_of)
+            && self.processor_live_base != Some(base)
+        {
+            if let Some(before) = self.processor_live_base {
+                processor.drop_live_from(before.min(base));
+            }
+            self.processor_live_base = Some(base);
+            self.live.rewrite_all();
+        }
         let runs = self.live.take_runs();
         let Some((_, base)) = self.atlas_of else { return };
+        if let Some(processor) = self.processor.as_mut()
+            && !runs.is_empty()
+        {
+            processor.add_live(base, &runs);
+        }
         self.renderer.upload_live(base, &runs);
         for run in &runs {
             for cell in 0..run.cells {
@@ -871,11 +907,17 @@ impl Stage {
             camera_view: camera.is_some(),
             camera_limit: styk_render::CAMERA_PREVIEW_LIMIT,
         };
+        // Without a graphics card the frame is drawn on the engine's workers, from the same list and view: the page shows it
+        // when it is done (`processor_frame`), the picture on show staying meanwhile.
         if let Some(processor) = self.processor.as_mut() {
             let grid = if self.canvas_drawing { styk_render::DrawingGrid::Destination } else { styk_render::DrawingGrid::World };
-            processor.request(&self.engine, processor::Request { serial: 0, list: list.clone(), images: self.cpu_images.clone(), view, size: [self.config.width, self.config.height], grid });
+            self.processor_list = (list.prims.len(), list.groups.len());
+            processor.request(styk_engine::stage_raster::Request { generation: generation.clone(), list: list.clone(), view, orientation, size: [self.config.width, self.config.height], grid });
             self.pictures = self.pictures_after(list);
+            self.soft_frames += u64::from(self.loading.placeholders() > 0);
             self.pictures_shown(pages);
+            // The live slots written since the device's kept frame say where its next frame differs; it keeps none meanwhile.
+            self.live_writes.clear();
             return Ok(true);
         }
         let target = match self.surface.get_current_texture() {
@@ -1009,13 +1051,23 @@ impl Stage {
     /// uploaded, the pictures held and whether edges are multisampled, as JSON.
     pub fn stats(&self) -> String {
         let s = &self.renderer.stats;
+        let (mut prims, mut groups, mut passes) = (s.prims, s.groups, s.passes);
+        // Frames drawn on the engine's workers: what they draw, and what drawing them took.
+        let processor = match &self.processor {
+            Some(processor) => {
+                let p = processor.stats();
+                (prims, groups, passes) = (self.processor_list.0 as u32, self.processor_list.1 as u32, p.bands);
+                format!("{{\"frameMs\":{:.3},\"workMs\":{:.3},\"bands\":{},\"bufferBytes\":{},\"pictureBytes\":{},\"shown\":{},\"replaced\":{}}}", p.frame_ms, p.work_ms, p.bands, p.buffer_bytes, p.picture_bytes, p.shown, p.replaced)
+            }
+            None => "null".into(),
+        };
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
         let (resident, loads, evictions) = self.residency_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"shadingRuns\":{},\"partFrames\":{}}}",
-            s.prims, s.groups, s.passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"shadingRuns\":{},\"partFrames\":{},\"processor\":{}}}",
+            prims, groups, passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
             sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
-            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms, self.renderer.shading_runs(), self.part_frames
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms, self.renderer.shading_runs(), self.part_frames, processor
         )
     }
 }
