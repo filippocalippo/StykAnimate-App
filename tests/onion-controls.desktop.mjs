@@ -15,7 +15,8 @@ try{
   });
   const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   await page.evaluate(()=>{window.onionPointerTrace=[];for(const type of ['pointerdown','pointermove','pointerup'])document.addEventListener(type,event=>{window.onionPointerTrace.push({type,x:event.clientX,target:event.target.className});window.onionPointerTrace=window.onionPointerTrace.slice(-8);},{capture:true});});
-  const baseDpr=await page.evaluate(()=>devicePixelRatio),rail=page.getByRole('dialog',{name:'Onion skin settings',exact:true}),scrub=rail.getByRole('button',{name:'Drag frames before',exact:true});
+  // The display's own ratio: the page's, less the interface scale already applied (Automatic picks one for the screen).
+  const baseDpr=await page.evaluate(()=>devicePixelRatio)/await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor()),rail=page.getByRole('dialog',{name:'Onion skin settings',exact:true}),scrub=rail.getByRole('button',{name:'Drag frames before',exact:true});
   for(const scale of [75,100,150,200]){
     await page.evaluate(scale=>{styk.settingsUI.commit({uiScale:scale,onionRangeBefore:20});styk.timeline.setZoom(1);},scale);
     await page.waitForFunction(({scale,baseDpr})=>Math.abs(devicePixelRatio-baseDpr*scale/100)<.01,{scale,baseDpr});await settle();await page.evaluate(()=>document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close()));await settle();
