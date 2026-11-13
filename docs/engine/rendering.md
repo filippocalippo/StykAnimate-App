@@ -333,6 +333,39 @@ most one level on a few edge pixels, where a band's moved view rounds a vertex d
 `styk-engine/tests/stage_raster.rs` draws them on real worker threads against the whole frame, and checks the queue, the
 buffers and the live cels' slots.
 
+Measured 2026-11-13 in the desktop app (`npm run perf`, the busy scene of 3,200 segments a frame unless said; before: the
+WebGL2 stage of `perf/speed`, after: this; the machine's other load 6 to 15% for these pairs), the frame time seen and, after,
+the picture's own (`picture.felt`, input to picture at the 95th percentile):
+
+| Without a graphics card | Before | After |
+| --- | --- | --- |
+| Playing, delivered | 88.2% | 100% |
+| Step, key press to picture (p95) | 45 ms (poor) | 13.6 ms |
+| Scrub, the picture behind the pointer (p95) | 84.5 ms | 26.4 ms |
+| Pan, frame / picture | 41.2 ms | 7.1 / 8.9 ms |
+| Zoom, input to frame / picture | 96.5 ms | 27.1 / 24.8 ms (picture seen 17.8 ms: fair) |
+| Drag a joint, frame / input to picture | 36.0 / 63.6 ms | 7.2 / 12.8 ms |
+| Move many, inspector drag | 41 to 43 ms frames | 7 to 9 ms frames, pictures within 15 ms |
+| The small scene (240 segments) | fair to poor | every core scenario good |
+| Pictures on the limbs, playing / step | 40.8% / 93.5 ms | 100% / 13.9 ms |
+| Effects on every figure, playing / step | 4.1% / 1,184 ms | 100% / 59.9 ms |
+| A brush stroke, busy scene | 39.4 ms frames (poor) | 11.2 ms, picture within 24 ms |
+
+The browser's own rendering step on the interface thread fell from 33 to about 2 ms a frame (dragging a joint), the page's
+copy and `putImageData` of a frame take about 0.5 ms, and the engine's workers spend a few milliseconds a frame between them.
+On a graphics card (`gpu`, `webgl`) nothing changed: the processor is never used there and every scenario stayed within
+its noise. The start without a graphics card is no slower (1,057 ms, 1,020 to 1,124, against 1,487 before on a busier machine).
+
+The old-laptop environment (`low-end`: the page and its two engine threads four times slower) gains less and loses in places:
+playing 99.7% (99.4% with the device in the same build), moving a figure or many and stepping become fair (from poor), and
+the frame time of every gesture falls, but a zoom's pictures stand still 37 ms (poor, against a fair 26.6 ms frame with the
+device), a step's picture comes within 92 ms (the device's frame within 132 ms but its seek within 76) and the scrub trails by
+111 ms (98). Two things limit it: the interface thread's own work, about 50 ms a frame in an inspector drag whichever draws (31
+of them the browser's style, layout and paint of the interface), and the picture's way through two slowed threads (25 to 34
+ms from request to showing for the small scene, a few of them drawing). The environment cannot slow the graphics process, so
+there SwiftShader keeps the machine's full speed while the processor renderer runs slowed: on a real slow computer, where
+SwiftShader is slowed too, the processor stage gains more than this says.
+
 ## Text
 
 The JavaScript editor's WebGPU renderer (since deleted) never drew text as vectors

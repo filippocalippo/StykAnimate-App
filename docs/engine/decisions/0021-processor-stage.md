@@ -42,8 +42,10 @@ no longer waits.
 
 ## Evidence
 
-See [rendering.md](../rendering.md#the-stage-on-the-processor) for the measurements: the scenario numbers before and after on the
-software and old-laptop environments, the graphics card environments unchanged, and the pixels.
+[rendering.md](../rendering.md#the-stage-on-the-processor) has the measurements in full. On the busy scene without a graphics card
+every core scenario went from fair or poor to good (zoom fair: its pictures stand still 17.8 ms): a joint drag's picture within
+12.8 ms of the input (63.6 ms before), playing 100% of the frames (88.2%), the effects scene playing 100% (4.1%). On a graphics
+card nothing changed. The old-laptop environment gains less and loses in a zoom and a step's latency (see Consequences).
 
 - **Pixels in the app.** Seven scenes (small, busy, pictures, effects, camera, labels, shapes) in five views each (fitted, zoomed in and
   partly off screen, the canvas smaller than the view, through the camera, turned and mirrored with onion skins), device pixels of the
