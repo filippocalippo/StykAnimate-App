@@ -27,6 +27,11 @@ import {initSync, ExportDevice, ExportRenderer} from './pkg/styk_engine.js';
 import {applyDocumentChunk} from '../document-transport.mjs';
 import {exportContext, checkExportContext, deliverExportFrame} from '../export-canvas.mjs';
 import {inside, guarded} from './engine-guard.mjs';
+import {capturePanics} from './engine-panic.mjs';
+import {workerFailure} from '../stats/files.mjs';
+
+// An engine panic in this worker is kept, and sent with the failure it causes (docs/STATISTICS.md, "Problems").
+capturePanics();
 
 /** When this worker's modules were loaded, from its creation (ms). */
 const loadedAt = performance.now();
@@ -277,6 +282,6 @@ self.addEventListener('message', ({data: message}) => {
     // GPU memory exhaustion and a lost device may pass with smaller tiles or a new device.
     const recoverable = message.operation === 'render' && /^recoverable: /.test(text);
     self.postMessage({id: message.id, ok: false, error: text.replace(/^recoverable: /, ''), name: error?.name, code: error?.code ?? (recoverable ? 'export_gpu_memory' : undefined), recoverable,
-      telemetryCode: recoverable ? 'export_gpu' : 'engine_failed', telemetryStage: message.operation === 'render' ? 'encode' : 'prepare'});
+      ...workerFailure(error, message.operation === 'render' ? 'encode' : 'prepare', recoverable ? 'graphics-lost' : 'engine')});
   });
 });

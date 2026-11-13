@@ -26,7 +26,8 @@ const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.l
 
 async function measure(mode) {
   const profile = await mkdtemp(path.join(os.tmpdir(), 'styk-bench-'));
-  await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
+  // Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
   const env = { ...process.env, STYK_USER_DATA_DIR: profile };
   if (mode === 'canvas2d') env.STYK_GPU_UNSAFE = '0';
   const app = await electron.launch({ args: [root], cwd: root, timeout: 60000, env });

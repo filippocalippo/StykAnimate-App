@@ -22,18 +22,25 @@ exposes the bridge the control channel answers through. Without the argument non
 
 The interface code is the same in both. Three small hooks are shipping code, and each is inert without a developer
 launch:
-- **`src/trace.mjs`, the one instrumentation layer.** Call sites build span arguments only behind `if (tracing)` or an
-  open span, and live parameters' specs are module constants, so the shipping build pays a null check and allocates
-  nothing (`tests/devtools.test.mjs` scans for it). `traceBegin/traceEnd/traceComplete/traceInstant/traceCounter` and
+- **`src/trace.mjs`, the one instrumentation layer.** Call sites build span arguments only behind `if (tracing)` or
+  `tracing ? {…} : undefined`, and live parameters' specs are module constants, so the shipping build pays a null
+  check and allocates nothing (`tests/devtools.test.mjs` scans for it). `traceBegin/traceEnd/traceComplete/traceInstant/traceCounter` and
   `tuned(name, default, spec)`. Its sink is `globalThis.__stykTrace`, which only the early script defines: in the
   shipping build each call is a null check and `tuned` returns its default.
+
+  Statistics (docs/STATISTICS.md) may also listen, in every build, while they are on: `listenSpans(names, onSpan)` hears
+  the name and duration of each completed span named in `names`, nothing else. A span it listens to takes its token
+  from 64 preallocated slots (a negative number; the sink's tokens are positive), so it allocates nothing, and the
+  sink still receives every span with its arguments. A span nobody listens to costs what it did. `stopListening()`
+  puts the layer back as it was. The listener is the statistics collector's frame counter (src/stats/frames.mjs).
 - **`src/devtools-gate.mjs`.** It loads `src/devtools/devtools.mjs` by URL when the early script marked the page
   (`__STYK_DEVTOOLS__`). The URL is built at run time, so no bundler follows it: the tools are never in a bundle.
 - **`window.styk.requestRender`.** It draws the scene again on the next frame; the control channel waits on it.
 
 Instrumented once, at the owning layer:
 - the frame loop's `paint` (src/app.mjs);
-- `stage draw` and `stage draw prepared` (src/engine/engine-stage.mjs), with the geometry and submit times;
+- `stage draw` and `stage draw prepared` (src/engine/engine-stage.mjs), with the geometry and submit times; and an
+  edited frame's two parts as spans of their own, `stage geometry` and `stage submit`;
 - every edit session call, by method (src/engine/engine-owner.mjs `sessionCall`);
 - `engine load` (src/engine/engine.mjs).
 
@@ -146,8 +153,10 @@ Each run opens the document fresh, then runs the steps:
 - **pan-zoom:** 60 wheel notches with Ctrl held, then a middle-button pan.
 
 Each scenario is one capture. The command writes:
-- `summary.txt`, short enough to read in full. Per scenario: time, display frames (p50, p95, worst, late), paint p95,
-  edit calls, seek p95 and playback fps. Then the slowest spans, anything unusual (dropped events, logged errors),
+- `summary.txt`, short enough to read in full. Per scenario: time, display frames (p50, p95, worst, late), the
+  smooth share and frames counted by statistics' own frame counter (docs/STATISTICS.md, "The numbers"; the page's
+  `window.styk.stats`, which a developer page keeps without sending anything), paint p95, edit calls, seek p95 and
+  playback fps. Then the slowest spans, anything unusual (dropped events, logged errors),
   and the budgets;
 - `profile.json`, with every number, the medians over runs, each run, and the machine;
 - `trace-<scenario>.json` (Perfetto) and `stage.png`, from the first run.

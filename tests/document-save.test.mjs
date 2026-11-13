@@ -36,7 +36,7 @@ function app({browser = false, exportDocument = null} = {}) {
     exportFlow: {async openExportSink() {calls.pickers++; return hooks.picker();}},
     drawingController: {async barrier() {}}, drawingBarrier: async () => {},
     finishCurrentEdit() {}, interruptRecovery() {}, updateTitle() {}, scheduleRecovery() {}, scheduleProjectPicture() {},
-    telemetry: {}, status(value) {calls.statuses.push(value);}, fail(error) {calls.failed.push(error);},
+    stats: {}, status(value) {calls.statuses.push(value);}, fail(error) {calls.failed.push(error);},
     interfaceText: value => value, notify() {}, messageError: error => error,
     desktop, browserRecovery: {clear: slot => { calls.cleared.push(slot); return hooks.cleanup(); }},
     async writeNativeBlob(_desktop, _blob, {signal}) {calls.writes++; await hooks.write(_blob); if (signal.aborted) throw new DOMException('', 'AbortError'); calls.committed++; return true;},

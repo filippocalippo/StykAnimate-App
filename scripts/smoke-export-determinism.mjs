@@ -38,7 +38,8 @@ const option = (name, fallback) => { const at = process.argv.indexOf(`--${name}`
 const runs = Number(option('runs', 14)), pictures = Number(option('pictures', 64)), keep = option('keep', null);
 const file = option('file', null), first = Number(option('first', 0)), last = Number(option('last', 0));
 const work = await mkdtemp(path.join(os.tmpdir(), 'styk-determinism-'));
-await writeFile(path.join(work, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(work, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 const env = { ...process.env, STYK_USER_DATA_DIR: work, STYK_LIBRARY_DIR: path.join(work, 'library'), STYK_STARTUP_VIEW: 'editor', STYK_BACKGROUND_WINDOW: '1' };
 delete env.ELECTRON_RUN_AS_NODE;
 let app, failed = false;

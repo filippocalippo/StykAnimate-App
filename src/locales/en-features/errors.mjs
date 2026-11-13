@@ -1220,8 +1220,6 @@ export default Object.freeze({
   "errors.supportMedia.videoTooLong": "video_too_long",
   "errors.supportMedia.videoCompressionUnavailable": "video_compression_unavailable",
   "errors.supportMedia.cancelled": "Cancelled",
-  "errors.telemetryPerformanceSchema.invalidPerformanceDiagnostics": "Invalid performance diagnostics",
-  "errors.telemetrySchema.invalidTelemetrySnapshot": "Invalid telemetry snapshot",
   "errors.textAuthoringWorker.chooseATtfOrOtfFontSmallerThan": "Choose a TTF or OTF font smaller than 32 MB.",
   "errors.textAuthoringWorker.thisSessionHasEnoughFontsLoadedCloseAnd": "This session has enough fonts loaded. Close and reopen the text editor to choose more.",
   "errors.textAuthoringWorker.thereIsNoEmbeddedTextToEdit": "There is no embedded text to edit.",

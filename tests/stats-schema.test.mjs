@@ -10,7 +10,7 @@ const times = (...pairs) => { const out = emptyFrameTimes(); for (const [ms, n] 
 const session = (extra = {}) => ({ kind: 'session', sid, day: today, sample: 100, minutes: 42, open: 55, end: 'clean',
   first: { ever: false, day: true, week: false, back: false }, age: 'month', when: { weekday: 4, part: 'evening' }, language: 'it',
   mode: { simple: 30, advanced: 12 }, features: ['onion', 'library'], reached: ['edit', 'play', 'save'],
-  counts: { edits: 310, undos: 22, frames: 48, plays: 9, playSeconds: 140, saves: 3 }, ...extra });
+  counts: { edits: 310, undos: 22, keyframes: 48, plays: 9, playSeconds: 140, saves: 3 }, ...extra });
 const problem = (extra = {}) => ({ kind: 'problem', sid, day: today, sample: 25, type: 'engine', message: 'index out of bounds: the len is 0 but the index is 0',
   stack: ['styk_eval::drawlist::encode_strokes styk-eval/src/drawlist.rs:412', 'render engine-export-worker.mjs:280'], doing: 'exporting',
   trail: ['open', 'toggle-onion', 'play', 'export-video'], scene: '10k-50k', features: ['onion'], times: 1, ...extra });
@@ -20,7 +20,7 @@ const refusedAt = (value, field) => assert.throws(() => validateBatch(value, { t
 
 test('a report passes unchanged and nothing outside the description passes at all', () => {
   const sent = batch(session({ smooth: [{ doing: 'drag', scene: '50k-200k', frames: 100, late: 29, times: times([14, 71], [40, 20], [120, 9]), worst: 120.04, lateMs: 1880, stages: { edit: 300, geometry: 900.26 } }],
-    slow: [{ ms: 410, doing: 'drag', scene: '50k-200k', stages: { evaluate: 300 } }],
+    slow: [{ ms: 410, doing: 'drag', scene: '50k-200k', stages: { edit: 300 } }],
     files: [{ op: 'open', format: 'sticknodes', made: 'sticknodes/4.2', ok: 2, failed: 1, cancelled: 0, ms: 840 }],
     project: { scene: '50k-200k', figures: '21-100', frames: '200-1k', rate: '12-15' }, commands: { undo: 22, 'add-frame': 48 },
     recovery: { offered: true, restored: true, failed: false } }), problem(),
@@ -133,4 +133,17 @@ test('an upload is measured in bytes, not characters', () => {
   assert.ok(JSON.stringify(batch(...large)).length < MAX_BATCH_BYTES);
   refusedAt(batch(...large), 'batch');
   assert.equal(validateBatch(batch(...large.slice(0, 8)), { today }).reports.length, 8);
+});
+
+test('the words the app reports pass, and words the lists no longer hold are refused', () => {
+  const sent = batch(session({ features: ['text', 'onion'], counts: { keyframes: 3 },
+    smooth: [{ doing: 'view', scene: 'under-1k', frames: 2, late: 1, times: times([8, 1], [40, 1]), worst: 40, lateMs: 40, stages: { wait: 5, interface: 3, other: 12, draw: 20 } }],
+    files: ['styk-figure', 'styk-movieclip', 'sticknodes-movieclip', 'archive', 'apng'].map(format => ({ op: 'open', format, ok: 1, failed: 0, cancelled: 0, ms: 1 })) }),
+  problem({ doing: 'viewing' }),
+  { kind: 'file', sid, day: today, sample: 100, op: 'open', format: 'pivot-animation', size: 'under-1mb', stage: 'request', reason: 'service-unavailable', ms: 4 },
+  { kind: 'file', sid, day: today, sample: 100, op: 'export', format: 'video', size: 'unknown', stage: 'prepare', reason: 'transfer-failed', ms: 4 });
+  assert.equal(validateBatch(sent, { today }).reports.length, 4);
+  refusedAt(batch(session({ counts: { frames: 1 } })), 'batch.reports[0].counts.frames');
+  refusedAt(batch(session({ slow: [{ ms: 40, doing: 'drag', scene: 'under-1k', stages: { evaluate: 1 } }] })), 'batch.reports[0].slow[0].stages.evaluate');
+  refusedAt(batch(session({ slow: [{ ms: 40, doing: 'drag', scene: 'under-1k', stages: { overlay: 1 } }] })), 'batch.reports[0].slow[0].stages.overlay');
 });

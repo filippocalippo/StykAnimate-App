@@ -50,8 +50,8 @@ const roundTypes = t => Object.fromEntries(Object.entries(t).map(([k, v]) => [k,
  *  `probe(page)` resolves when the thing a step times from launch is usable (reported as `probeMs`). */
 async function launch({startupView = 'editor', seed = null, probe = null} = {}) {
   const profile = await mkdtemp(path.join(os.tmpdir(), 'styk-bench-'));
-  await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({decided: true,
-    consent: {analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now()}}));
+  // Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
   await seed?.(profile);
   const env = {...process.env, STYK_USER_DATA_DIR: profile, STYK_LIBRARY_DIR: path.join(profile, 'library'),
     STYK_STARTUP_VIEW: startupView, STYK_BACKGROUND_WINDOW: '1'};

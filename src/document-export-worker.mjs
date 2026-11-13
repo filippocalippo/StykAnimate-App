@@ -1,6 +1,10 @@
 import {errorMessageData, messageError} from './localized-error.mjs';
 
-import {diagnosticDetails} from './telemetry-schema.mjs';
+import {workerFailure} from './stats/files.mjs';
+import {capturePanics} from './engine/engine-panic.mjs';
+
+// An engine or codec panic in this worker is kept, and sent with the failure it causes (docs/STATISTICS.md, "Problems").
+capturePanics();
 import {makeExportDocument, makeProjectFile, releaseEngineThread} from './engine/engine-document-export.mjs';
 import {flattenDrawingFigures} from './drawing-flatten.mjs';
 import {codecRequest} from './codec-request.mjs';
@@ -68,7 +72,7 @@ self.addEventListener('message', async event => {
     self.close?.();
     return;
   }
-  if (running) { self.postMessage({id: message.id, ok: false, error: {message: 'The document export worker is busy.', messageKey:'errors.documentExportWorker.busy', telemetryCode: 'worker_busy', telemetryStage: 'prepare'}}); return; }
+  if (running) { self.postMessage({id: message.id, ok: false, error: {message: 'The document export worker is busy.', messageKey:'errors.documentExportWorker.busy', fileStage: 'prepare'}}); return; }
   running = true;
   let stage = 'prepare';
   try {
@@ -114,7 +118,7 @@ self.addEventListener('message', async event => {
           try { details = JSON.parse(text); } catch { /* Preserve status for non-JSON failures. */ }
           const error = new Error(details?.error?.message || details?.error || `Document export failed (${response.status}).`);
           error.status = response.status; error.code = details?.code;
-          error.telemetryCode = response.status >= 500 ? 'backend_unavailable' : 'backend_rejected';
+          if (response.status >= 500) error.fileReason = 'service-unavailable';
           throw error;
         }
         blob = await response.blob();
@@ -139,6 +143,6 @@ self.addEventListener('message', async event => {
     config = null;
     self.postMessage({id: message.id, ok: false, error: {message: error?.message || String(error), ...errorMessageData(error),
       code: error?.code, status: error?.status, name: error?.name, trapped: error?.trapped === true,
-      ...diagnosticDetails(error,stage,stage === 'validate' ? 'invalid_document' : stage === 'serialize' ? 'serialize_failed' : stage === 'request' ? 'backend_unavailable' : 'snapshot_failed')}});
+      ...workerFailure(error, stage === 'validate' ? 'prepare' : stage, stage === 'validate' ? 'damaged' : stage === 'request' ? 'service-unavailable' : stage === 'serialize' ? undefined : 'transfer-failed')}});
   } finally { running = false; }
 });

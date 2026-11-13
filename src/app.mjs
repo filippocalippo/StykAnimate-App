@@ -55,11 +55,8 @@ import {AudioEngine} from './audio-engine.mjs';
 import {audioState, audioFps, audibleClips} from './audio-model.mjs';
 import {PreviewImages} from './preview-images.mjs';
 import { PlaybackMetrics } from "./playback-metrics.mjs";
-import {PlaybackCadence} from './playback-cadence.mjs';
 import {previewQualityLevels, previewMsaaLevels, updatePreviewQuality, playbackQualityIndex} from './preview-quality.mjs';
-import { DesktopTelemetryClient } from './telemetry-core.mjs';
-import { workload, documentComplexity } from './telemetry-workload.mjs';
-import { sizeBucket,complexityBucket,fpsBucket } from './telemetry-schema.mjs';
+import {createStats} from './stats/collector.mjs';
 import { BrowserRecoverySession, readBrowserRecovery } from './browser-recovery.mjs';
 import {DocumentSave, RecoveryDeadline, documentCheckpoint, matchesDocumentCheckpoint} from './document-save.mjs';
 import {createProjectTabsHost} from './project-tabs-host.mjs';
@@ -68,7 +65,8 @@ import {createTutorials} from './tutorials/tutorials.mjs';
 import {installProjectTabs} from './shell/project-tabs-view.mjs';
 import {createProjectSwitcher} from './shell/project-switcher.mjs';
 import {movieclipScopes, sessionProjectName} from './editor-sessions.mjs';
-import { PrivacyUI } from './privacy-ui.mjs';
+import {openPrivacy} from './privacy-settings.mjs';
+import {COMMAND_BY_ID} from './ui/command-catalog.mjs';
 import { FeedbackUI } from './feedback-ui.mjs';
 import { UpdateUI } from './update-ui.mjs';
 import { ReleaseSplash } from './support-ui.mjs';
@@ -148,7 +146,7 @@ import { runTimelineHotkey } from "./timeline-hotkeys.mjs";
 
 import { layerIdForUid, layerVisible, layerLocked } from "./layers.mjs";
 import { DocumentExporter } from "./document-export.mjs";
-import { writeNativeBlob as writeNativeBlobRaw, readNativeRecovery } from "./native-files.mjs";
+import { writeNativeBlob, readNativeRecovery } from "./native-files.mjs";
 import {
   imageFileToFigure,
   imageFileToBackground,
@@ -250,15 +248,12 @@ async function runDocumentExportTraced(format, consume, { recovery = false, cont
   if (!recovery){finishCurrentEdit();await drawingController?.barrier();}
   const job = { controller, recovery };
   exportJobs.add(job);
-  const metric = recovery ? 'recovery' : format === 'styk' ? 'save' : 'export';
-  const started = performance.now();
-  const context = telemetry.consent.diagnostics ? workload({ format, report: editor.report }) : {};
-  let stage = 'serialize';
-  telemetry.count(metric + '_started');
+  const op = recovery ? 'autosave' : format === 'styk' ? 'save' : 'export', started = performance.now();
+  let stage = 'serialize', bytes;
   try {
     const drawingRevision=editor.revision;await drawingBarrier(editor.report,{signal:controller.signal});if(drawingRevision!==editor.revision)throw messageError(new DOMException('', 'AbortError'), "errors.app.theDrawingChangedDuringExport", {});
     // The engine makes Pivot and figure files from the document it holds: its session starts on the open document and takes what the editor changed.
-    if (format !== 'styk' && !editor._shown?.active) throw Object.assign(messageError(new Error(''), "errors.documentExport.theEngineCannotMakeThisFileHere", {}), {telemetryCode: 'engine_failed', telemetryStage: 'prepare'});
+    if (format !== 'styk' && !editor._shown?.active) throw Object.assign(messageError(new Error(''), "errors.documentExport.theEngineCannotMakeThisFileHere", {}), {fileReason: 'engine', fileStage: 'prepare'});
     const blob = await documentExporter.export(editor.report, {
       format,
       scopes: recovery ? movieclipScopes(editor) : undefined,
@@ -270,25 +265,13 @@ async function runDocumentExportTraced(format, consume, { recovery = false, cont
       signal: controller.signal,
       getRevision: () => `${editor.revision}:${saveMutationEpoch}`,
     });
-    context.size = sizeBucket(blob.size);
-    telemetry.performance.record('serialize',performance.now()-started);
-    telemetry.timing(metric + '_ms', performance.now() - started);
-    telemetry.operation({ ...context, operation: metric, stage: 'serialize', outcome: 'succeeded' }, performance.now() - started);
-    stage = 'write';
-    const writeStarted = performance.now();
+    bytes = blob.size; stage = 'write';
     const saved = await consume(blob, controller.signal);
-    telemetry.operation({ ...context, operation: metric, stage: 'write', outcome: saved ? 'succeeded' : 'cancelled' }, performance.now() - writeStarted);
-    telemetry.operation({ ...context, operation: metric, stage: 'complete', outcome: saved ? 'succeeded' : 'cancelled' }, performance.now() - started);
-    if (recovery) telemetry.count(saved ? 'recovery_saved' : 'recovery_cancelled');
-    else {
-      telemetry.count(metric + (saved ? '_succeeded' : '_cancelled'));
-      if (saved) { telemetry.milestone(metric === 'save' ? 'first_save' : 'first_export'); if (metric === 'export') telemetry.count(['piv', 'stk'].includes(format) ? 'export_pivot' : 'export_native'); }
-    }
+    stats.file(op, format, saved ? {ms: performance.now() - started} : {cancelled: true});
     return saved;
   } catch (error) {
-    telemetry.count(metric + (error.name === 'AbortError' ? '_cancelled' : '_failed'));
-    telemetry.operation({ ...context, operation: metric, stage: 'complete', outcome: error.name === 'AbortError' ? 'cancelled' : 'failed' }, performance.now() - started);
-    if (error.name !== 'AbortError') telemetry.error(error, metric, { ...context, stage });
+    // The file on disk is replaced only by a finished write (desktop/file-streams.cjs): before the write it is as it was.
+    stats.file(op, format, {error, stage, bytes, kept: stage === 'write' ? 'unknown' : 'untouched', ms: performance.now() - started});
     throw persistentFailure(error);
   } finally {
     exportJobs.delete(job);
@@ -379,7 +362,7 @@ const toasts = createToasts({
   area: () => (state.home ? $("home") : viewport).getBoundingClientRect(),
   topInset: () => bandBottom(document),
   t: (key, params) => appLocalization?.t(key, params),
-  feedback: desktop?.sendTelemetryFeedback
+  feedback: desktop?.supportRequest
     ? { label: interfaceText("app.sendFeedback"), labelKey: "app.sendFeedback", run: () => feedbackUI.open({ category: "bug" }) }
     : null,
 });
@@ -414,50 +397,29 @@ let warmTimer = null,
   playStarted = false,
   playStartupFrames = 2;
 const playbackMetrics = new PlaybackMetrics();
-const playbackCadence = new PlaybackCadence();
-let presentationDeadline = null;
 /** Playback moved to a frame the stage has not drawn yet. */
 let playbackAwaitsDraw = false;
-function writeNativeBlob(bridge,blob,options={}){
-  const context=telemetry.consent.diagnostics?telemetry.performance.context():null,epoch=telemetry.epoch;
-  return writeNativeBlobRaw(bridge,blob,{...options,...(context?{onTiming:(metric,ms)=>{if(epoch===telemetry.epoch)telemetry.performance.record(metric,ms,context);}}:{})});
-}
-/** The stage's graphics backend as telemetry names it: the engine draws with WebGPU, or with WebGL2 where there is none. */
-const telemetryBackend = () => ({WebGPU: 'webgpu', WebGL2: 'webgl2'})[state.renderer?.stats?.backend] ?? 'unavailable';
-const telemetry = new DesktopTelemetryClient(desktop, { getContext: () => ({
-  mode: state.settings.timelineMode, locale: state.settings.locale,
-  playing: state.playing,
-  pending:playback.stats.pendingFrames,cacheBytes:playback.stats.bytes,cache:playback.stats,
-  performance:{
-    backend:telemetryBackend(),
-    complexity:complexityBucket(state.renderer?.stats?.primitives),fps:fpsBucket(editor.report?.fps),
-    pixels:canvas.width*canvas.height<1e6?'under-1mp':canvas.width*canvas.height<4e6?'1-4mp':'4mp-plus',
-    phase:state.playing?'playing':'editing',quality:images.reduced||state.previewGovernor?.index?'reduced':'full',
-    features:(state.onion?1:0)|(state.inspectorContext==='camera'?2:0)|(state.vfxEnabled?4:0)|(state.motionPaths?8:0)|(state.renderer?.stats?.textureObjects?16:0),
-  },
-  backend: telemetryBackend(),
-  gauges: { gpu_memory_mb: state.renderer?.stats?.gpuBytes / 1048576, draw_calls: state.renderer?.stats?.drawCalls,
-    upload_kb: state.renderer?.stats?.uploadBytes / 1024, scene_figures: state.renderer?.stats?.objects,
-    scene_primitives: state.renderer?.stats?.primitives, scene_frames: editor.totalTicks },
-  gpuFamily: coarseGPUFamily(state.renderer?.stats?.adapter),
-}) });
-function recordPlaybackPresentation() {
-  const now = performance.now();
-  playbackMetrics.present(now);
-  telemetry.playbackPresent(now, playbackMetrics.targetFps,{deadline:presentationDeadline,refreshMs:playbackCadence.interval});
-}
-function coarseGPUFamily(value = '') {
-  return ['nvidia', 'amd', 'intel', 'apple', 'qualcomm', 'software'].find(name => String(value).toLowerCase().includes(name)) || 'unknown';
-}
+/** Statistics (docs/STATISTICS.md): what the collector reads of the editor. Off, it does nothing and the frame loop skips it. */
+const stats = createStats({bridge: desktop, app: {
+  language: () => state.settings.locale, mode: () => state.settings.timelineMode, playing: () => state.playing,
+  activity: () => !window.styk?.ready ? 'starting' : state.playing ? 'playing' : state.scrubbing ? 'scrubbing' : drawingController?.interacting ? 'drawing'
+    : state.drag || editingGestureActive() ? 'dragging' : viewGestureActive() ? 'viewing' : state.importing ? 'opening' : manualSave.active ? 'saving'
+    : exportJobs.size ? 'exporting' : 'idle',
+  featuresOn: () => [state.onion && 'onion', state.inspectorContext === 'camera' && 'camera', state.motionPaths && 'motion-paths',
+    state.renderer?.stats?.engine?.effectLayers > 0 && 'effects'].filter(Boolean),
+  segments: () => state.renderer?.stats?.primitives,
+  project: () => ({segments: state.renderer?.stats?.primitives, figures: state.renderer?.stats?.objects, frames: editor.totalTicks,
+    fps: editor.report?.frame_delay_ms ? 1000 / editor.report.frame_delay_ms : editor.report?.fps}),
+  backend: () => state.renderer?.stats?.backend,
+  commandIds: new Set(COMMAND_BY_ID.keys()),
+}});
+/** What a person does while the stage is drawn, for the frame counter (src/stats/frames.mjs); null for nothing it counts. */
+const statsDoing = viewChanging => state.playing ? 'play' : scrubPreview.active || state.scrubbing ? 'scrub' : drawingController?.interacting ? 'draw'
+  : state.drag?.kind === 'pan' || viewChanging || wheelZoom.active ? 'view' : state.drag || editingGestureActive() ? 'drag' : null;
 const feedbackUI = new FeedbackUI(desktop);
-importer.diagnostics=telemetry.performance;
-const privacyUI = new PrivacyUI(desktop, telemetry, feedbackUI);
 const releaseSplash = new ReleaseSplash(desktop);
 let updateNotice;
-const telemetryInit = telemetry.init().catch(() => null);
-globalThis.addEventListener('error', event => telemetry.error(event.error));
-globalThis.addEventListener('unhandledrejection', event => telemetry.error(event.reason));
-globalThis.addEventListener('pagehide', () => { telemetry.performance.finish();void telemetry.flush(); telemetry.dispose(); });
+void stats.init();
 let lastFpsUI = 0;
 function editingGestureActive(){return Boolean(state.drag||keyboardHandleGesture||editor._drag||editor._authoredPoseEdit||propertyControls?.active||vfxInspector?.active||vfxGizmos?.active||drawingController?.interacting);}
 // The editor chrome as surfaces (src/ui/ui-invalidation.mjs), in today's update order. queueUI()
@@ -1033,7 +995,7 @@ const FAILURE_MESSAGE_MS = 8000;
  * timed warning, an AbortError says nothing). A failed save, export or import
  * stays until dismissed; any other error goes after 8 seconds. */
 function fail(error) {
-  telemetry.error(error);
+  stats.problem(error);
   logActivity(error, true);
   toasts.fail(error, error instanceof UserActionError || persistentFailures.has(error) ? {} : { timeout: FAILURE_MESSAGE_MS, dismissible: true });
   console.error(error);
@@ -1589,6 +1551,7 @@ function syncBackgroundInteraction(viewChanging) {
   thumbnailRenderer?.setPaused(interacting||state.playing);
 }
 function loop(now) {
+  if (stats.on) stats.frames.tick(now);
   flushPoseMove();
   canvasGuides?.render();
   raf = 0;
@@ -1607,7 +1570,6 @@ function loop(now) {
         : editor.report.fps,
       range = playbackRange(),
       interval = 1000 / fps;
-    if(telemetry.consent.diagnostics&&telemetry.isForeground)playbackCadence.observe(now);else playbackCadence.reset();
     playbackMetrics.targetFps = fps;
     if (range.end <= range.start) {
       pause();
@@ -1636,7 +1598,6 @@ function loop(now) {
           editor.seek(next, { evaluate: false });
           state.playbackPacket = packet;
           playbackAwaitsDraw = true;
-          presentationDeadline = playStarted ? playDeadline : null;
           playDeadline =
             !playStarted || state.buffering
               ? now + interval
@@ -1663,20 +1624,17 @@ function loop(now) {
     state.dirtyRender = false;
     state.dirtyOverlay = false;
     const start = performance.now();
-    const sampled=telemetry.isForeground&&telemetry.performance.sampleFrame(),stages=sampled?{}:null;
-    state.renderer.measureFrame=sampled;state.renderer.telemetryStages=null;
-    let stageStarted=sampled?performance.now():0;
     // A dense scene's scrub shows the prepared frame of the newest tick the pointer passed, in the editing view; until one is ready the picture stays.
     const scrubFrame = scrubPreview.active && !state.playing ? scrubPreview.next() : null;
     const packet = state.playing ? state.playbackPacket : previewPacket();
-    let preparedPresented = false;
+    let preparedPresented = false, editingDrawn = false;
     if (scrubFrame) {
       preparedPresented = state.renderer.renderPrepared(scrubFrame.packet.key, {view: state.view, cameraEnabled: false}) === true;
       if (preparedPresented) { scrubPreview.presented(scrubFrame); ctx.clearRect(0, 0, overlay.width, overlay.height); }
     } else if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
       preparedPresented = state.renderer.renderPrepared(packet.key, {view: state.view, cameraEnabled: !state.scrubbing}) === true;
       if (preparedPresented) {
-        if (playbackAwaitsDraw) recordPlaybackPresentation();
+        if (playbackAwaitsDraw) playbackMetrics.present(performance.now());
         playbackAwaitsDraw = false;
         ctx.clearRect(0, 0, overlay.width, overlay.height);
       } else if (state.playing) state.dirtyRender = true; // The picture on show stays and the frame is drawn on the next animation frame.
@@ -1688,7 +1646,7 @@ function loop(now) {
       // The geometry the overlay reads. The engine draws from its session, so the picture does not wait for it: it is read after the picture.
       const heldGeometry = drawingPreview?.geometry || motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
       const source = drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null;
-      const editingDrawn = state.renderer.render({
+      editingDrawn = state.renderer.render({
         tick: editor.tick,
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
@@ -1735,22 +1693,16 @@ function loop(now) {
       request.finish(Boolean(pending));
       requestRender(); // The joints left out of the picture come back.
     }
-    if(sampled){stages.scene=performance.now()-stageStarted;stageStarted=performance.now();Object.assign(stages,state.renderer.telemetryStages);}
     // Final editor overlay pass: keep the actual camera above artwork and tool feedback (over a picture drawn in this paint).
     if (!scrubPreview.active || preparedPresented) drawFinalOverlay();
-    if(sampled){stages.overlay=performance.now()-stageStarted;stageStarted=performance.now();}
     state.dirtyMonitor = false;
     paintCameraMonitor();
     const elapsed = performance.now() - start;
     // Span arguments only in the developer build: the shipping frame allocates nothing for tracing.
     if (tracing) traceComplete('paint', start, elapsed, {playing: state.playing, prepared: preparedPresented});
-    if(sampled)stages.camera=performance.now()-stageStarted;
-    if(telemetry.isForeground)telemetry.performance.frame(elapsed,stages||{},sampled);
+    // The statistics' frame counter: a frame drawn for something a person does (no clock read of its own).
+    if (stats.on && (preparedPresented || editingDrawn)) { const doing = statsDoing(viewChanging); if (doing) stats.frames.drawn(doing, start, start + elapsed); }
     state.renderSamples.push(elapsed);
-    if (telemetry.consent.diagnostics && state.drawCalls % 30 === 0) {
-      telemetry.timing('frame_ms', elapsed);
-      if (elapsed > 33) telemetry.count('slow_frames');
-    }
     if (state.renderSamples.length > 300) state.renderSamples.shift();
     state.lastPresent = elapsed;
     state.drawCalls++;
@@ -1798,6 +1750,7 @@ function loop(now) {
   // A seek/edit event can request the next frame while this callback runs.
   // Keep that request instead of starting a second animation loop.
   if (!raf && (state.playing || state.dirtyRender || state.dirtyOverlay || state.dirtyMonitor)) raf = requestAnimationFrame(loop);
+  if (stats.on) stats.frames.end(raf !== 0);
 }
 /** The camera inspector's readouts and monitor, for the frame on show. */
 function paintCameraMonitor() {
@@ -1806,7 +1759,7 @@ function paintCameraMonitor() {
   const frame = currentFrame();
   syncCameraControls($('inspector'), frame, {activeKey:propertyControls?.activeKey,guides:state.cameraGuides});
   drawCameraMonitor($('inspector').querySelector('[data-camera-monitor]'), {
-    onError:error=>telemetry.error(error,'renderer'),onInvalidate:requestRender,onRecovery:(kind,outcome)=>telemetry.performance.recovery(kind,outcome),
+    onError:error=>stats.problem(error),onInvalidate:requestRender,
     stage:state.renderer,report:editor.report,frame,
   });
 }
@@ -1842,11 +1795,9 @@ async function play() {
       ? range.start
       : editor.tick;
   playStart = performance.now();
-  playbackCadence.reset();presentationDeadline=null;
-  telemetry.count('playback_started');
+  stats.count('plays'); stats.reach('play');
   playbackMetrics.reset(playStart, editor.report.frame_delay_ms
     ? 1000 / editor.report.frame_delay_ms : editor.report.fps);
-  telemetry.playbackStart(telemetry.consent.diagnostics ? workload({ report: editor.report, fps: playbackMetrics.targetFps }) : {});
   lastFpsUI = playStart;
   localizedText($("playback-fps"), "app.fps", {});
   setAttr($("playback-fps"), "data-health", "pending");
@@ -1878,18 +1829,12 @@ async function play() {
 }
 function pause() {
   state.motionPreviewRange=null;
-  if(state.playing)telemetry.performance.resources('stopped');
   audioPreparation?.abort(); audioScrubController?.abort(); audioEngine.stop(); state.audioReady = true;
   const wasPlaying = state.playing || state.previewing;
   if (state.playing) {
     playbackMetrics.stop(performance.now());
     const summary = playbackMetrics.snapshot(performance.now());
-    telemetry.count('playback_frames', summary.totalFrames);
-    telemetry.count('playback_seconds', Math.round(summary.elapsedMs / 1000));
-    telemetry.count('playback_buffering', summary.bufferingEvents);
-    telemetry.timing('playback_startup_ms', summary.startupMs);
-    telemetry.timing('playback_buffering_ms', summary.bufferingMs);
-    telemetry.playbackStop();
+    stats.count('playSeconds', summary.elapsedMs / 1000);
   }
   setHidden($("playback-fps"), true);
   setHidden($('preview-quality'), true);
@@ -2065,7 +2010,7 @@ function setTool(tool) {
 
   if (tool !== 'attach') state.figureJoin = null;
   if (state.tool !== tool) construction?.cancel();
-  if (tool !== state.tool && ['rig', 'line', 'chain', 'circle', 'polygon'].includes(tool)) telemetry.count('builder');
+  if (tool !== state.tool && ['rig', 'line', 'chain', 'circle', 'polygon'].includes(tool)) stats.feature('builder');
   if (!builderMode?.active && isMovieclip(editor.figure) && ['rig','line','chain','circle','polygon'].includes(tool)) {
     editor.enterMovieclip();
   }
@@ -2691,7 +2636,6 @@ const moveCanvasPointer = guarded((e) => {
       return;
     }
     if (!drag && state.tool === 'tweener' && !state.space) return;
-    if(drag&&telemetry.isForeground)telemetry.performance.action(drag.kind==='pan'?'pan':'edit');
     if (!drag && state.tool === 'polygon' && builderMode?.active) {
       state.bucketPreview = e.shiftKey ? bucketRegion(editor.geometry.objects.get(editor.selectedSlot),worldPoint(e)) : null;
       overlay.style.cursor = e.shiftKey ? (state.bucketPreview ? 'copy' : 'not-allowed') : '';
@@ -3128,7 +3072,6 @@ viewport.addEventListener(
       return;
     }
     const shouldZoom = state.settings.canvasZoomGesture === 'scroll' || e.ctrlKey || e.metaKey;
-    if(telemetry.isForeground)telemetry.performance.action(shouldZoom ? 'zoom' : 'pan');
     e.preventDefault();
     // Notify preparation before the first projection/RAF; a busy graphics
     // process can delay that RAF while an awaited background preload resumes.
@@ -3159,7 +3102,6 @@ canvasPinch = installCanvasPinch({
   setView: (view) => { state.view = view; placeArtboard(); requestRender(); },
   enabled: () => !drawingController?.active,
   onStart: () => {
-    if (telemetry.isForeground) telemetry.performance.action('zoom');
     interruptRecovery();
     pause();
     if (state.drag) cancelDrag();
@@ -3212,7 +3154,7 @@ async function acceptImport(
   }
   state.lastImportWarnings = [...(result.warnings || report._styk?.sticknodes?.warnings || []), ...(report.import_warnings || [])];
   if(state.lastImportWarnings.length)dialogs.showImportNotes(state.lastImportWarnings, {pivot: Boolean(report.import_warnings?.length),report});
-  state.lastImport = result.timings || null;
+  state.lastImport = result.timings || null; state.lastMade = [result.kind, result.version];
   const ms = result.timings?.total_ms ?? result.timings?.decode_ms;
   status(
     {messageKey: "app.opened", messageParams: {value: result.filename || name || editor.name, value2: ms !== undefined ? result.timings?.cache_hit ? {messageKey:'app.openedTimingCached',messageParams:{milliseconds:Math.round(ms)}} : ` · ${Math.round(ms)} ms` : ""}},
@@ -3547,20 +3489,10 @@ async function chooseSticknodesFile(file,isCurrent=()=>true) {
   return result;
 }
 async function importFiles(files) {
-  telemetry.performance.resources('before_open');
-  const started = performance.now(); telemetry.count('import_started');
-  try {
-    const result = await importFilesTracked(files);
-    if(result!==false){telemetry.performance.closedAt=null;telemetry.performance.resources('opened');}
-    telemetry.count(result === false ? 'import_cancelled' : 'import_succeeded');
-    if (result !== false) telemetry.timing('import_ms', performance.now() - started);
-    return result;
-  } catch (error) { telemetry.count(error.name === 'AbortError' ? 'import_cancelled' : 'import_failed'); telemetry.error(error, 'import'); throw persistentFailure(error); }
+  const started = performance.now();
+  try { return await importFilesTracked(files); }
+  catch (error) { throw persistentFailure(error); }
   finally { if (tracing) traceComplete('open', started, performance.now() - started, {files: files.length}, 'tasks'); }
-}
-function recordImportKind(filename = '') {
-  const extension = filename.split('.').at(-1)?.toLowerCase();
-  telemetry.count(['piv', 'stk'].includes(extension) ? 'import_pivot' : ['nodes', 'nodemc', 'stknds', 'zip'].includes(extension) ? 'import_sticknodes' : ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'].includes(extension) ? 'import_media' : 'import_native');
 }
 async function importFilesTracked(files) {
   finishCurrentEdit();
@@ -3570,30 +3502,25 @@ async function importFilesTracked(files) {
   status({messageKey: "app.importing", messageParams: {}}, false, true);
   try {
     for (const file of files) {
-      recordImportKind(file.name);
-      const started = performance.now(), context = telemetry.consent.diagnostics ? workload({ format: file.name, bytes: file.size }) : {};
-      let outcome = 'succeeded';
+      const started = performance.now();
       try {
       if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(file.name)) {
         if (
           !(await importMediaFile(file, {
             isCurrent: () => seq === importSequence,
           }))
-        ) { outcome = 'cancelled'; return false; }
+        ) { stats.file('open', file.name, {cancelled: true}); return false; }
+        stats.file('open', file.name, {ms: performance.now() - started});
         continue;
       }
       const result = await chooseSticknodesFile(file,()=>seq===importSequence);
-      if (!result || seq !== importSequence) { outcome = 'cancelled'; return false; }
-      if (telemetry.consent.diagnostics) context.complexity = documentComplexity(result.document);
-      telemetry.operation({ ...context, operation: 'import', stage: 'decode', outcome: 'succeeded' }, result.timings?.decode_ms);
-      telemetry.performance.record('decode',result.timings?.decode_ms);
-      if(await acceptImport(result, file.name)===false){outcome='cancelled';return false;}
-      telemetry.timing('import_decode_ms', result.timings?.decode_ms);
+      if (!result || seq !== importSequence) { stats.file('open', file.name, {cancelled: true}); return false; }
+      if(await acceptImport(result, file.name)===false){stats.file('open', file.name, {cancelled: true});return false;}
+      stats.file('open', file.name, {ms: performance.now() - started, kind: result.kind, version: result.version});
       } catch (error) {
-        outcome = error.name === 'AbortError' ? 'cancelled' : 'failed';
-        if (outcome === 'failed') telemetry.error(error, 'import', { ...context, stage: 'decode' });
+        stats.file('open', file.name, {error, stage: 'decode', bytes: file.size, ms: performance.now() - started});
         throw error;
-      } finally { telemetry.operation({ ...context, operation: 'import', stage: 'complete', outcome }, performance.now() - started); }
+      }
     }
   } catch(error) {
     if(error.name!=="AbortError")throw error;
@@ -3621,23 +3548,14 @@ async function openFile() {
   }
 }
 async function acceptNativeFile(result) {
-  const started = performance.now(); telemetry.count('import_started'); recordImportKind(result.filename);
-  const context = telemetry.consent.diagnostics ? workload({ format: result.filename, bytes: result.bytes?.byteLength }) : {};
+  const started = performance.now();
   try {
     const accepted = await acceptNativeFileTracked(result);
-    if (telemetry.consent.diagnostics && accepted !== false) context.complexity = documentComplexity(editor.report);
-    telemetry.operation({ ...context, operation: 'import', stage: 'complete', outcome: accepted === false ? 'cancelled' : 'succeeded' }, performance.now() - started);
-    telemetry.count(accepted === false ? 'import_cancelled' : 'import_succeeded');
-    if (accepted !== false) telemetry.timing('import_ms', performance.now() - started);
-    if (accepted !== false) {
-      telemetry.timing('import_decode_ms', state.lastImport?.decode_ms);
-      telemetry.operation({ ...context, operation: 'import', stage: 'decode', outcome: 'succeeded' }, state.lastImport?.decode_ms);
-    }
+    stats.file('open', result.filename, accepted === false ? {cancelled: true} : {ms: performance.now() - started, kind: state.lastMade?.[0], version: state.lastMade?.[1]});
     return accepted;
   } catch (error) {
-    telemetry.count(error.name === 'AbortError' ? 'import_cancelled' : 'import_failed');
-    telemetry.operation({ ...context, operation: 'import', stage: 'complete', outcome: error.name === 'AbortError' ? 'cancelled' : 'failed' }, performance.now() - started);
-    if (error.name !== 'AbortError') telemetry.error(error, 'import', { ...context, stage: 'decode' }); throw persistentFailure(error);
+    stats.file('open', result.filename, {error, stage: 'decode', bytes: result.bytes?.byteLength, ms: performance.now() - started});
+    throw persistentFailure(error);
   } finally { if (tracing) traceComplete('open', started, performance.now() - started, {native: true}, 'tasks'); }
 }
 async function acceptNativeFileTracked(result) {
@@ -4293,7 +4211,6 @@ const actions = {
   new: async () => {
     pause();
     if (!await openProject((session) => editor.newDocument(session), { blank: true })) return;
-    telemetry.performance.resources('closed');telemetry.performance.closedAt=performance.now();
     state.hidden.clear();
     state.locked.clear();
     images.clear();
@@ -4681,7 +4598,7 @@ const actions = {
     if (shell?.presentation("properties") === "sheet") shell.showPanel("properties", { focus: false });
   },
   settings: () => editorSettings?.open(),
-  privacy: () => privacyUI.open(),
+  privacy: () => openPrivacy(editorSettings),
   feedback: () => feedbackUI.open(),
   website: () => desktop?.openServicePage('home'),
   "builder-static-handles": () =>
@@ -4752,7 +4669,7 @@ const actions = {
 };
 // The export flow and the app's prompts add their commands (src/export-flow.mjs, src/app-dialogs.mjs).
 const exportFlow = createExportFlow({
-  editor, state, actions, desktop, telemetry, audioEngine, exportJobs, playback,
+  editor, state, actions, desktop, stats, audioEngine, exportJobs, playback,
   fail, status, toast, persistentFailure, finishCurrentEdit, pause, interruptRecovery,
   runDocumentExport, writeNativeBlob, currentFrame, nameOf, simpleFrameCount,
   // The export dialog joins the overlay stack, uses the app's words and remembers its choices in the editor settings.
@@ -4849,7 +4766,7 @@ for (const [name, action] of Object.entries(actions)) {
         return false;
       }
     }
-    telemetry.action(name);
+    stats.command(name);
     // A command that works on the animation sends Home away first; a tutorial hears which command ran.
     home.before(name);
     const result = action(...args);
@@ -4902,7 +4819,7 @@ document.addEventListener(
 );
 
 installInspectorBindings($("inspector"), {
-  editor, state, telemetry, guarded, pause, finishCurrentEdit, queueUI, requestRender, fit, changeFigureLayer,
+  editor, state, stats, guarded, pause, finishCurrentEdit, queueUI, requestRender, fit, changeFigureLayer,
   timeline: () => timelineUI, builderActive: () => Boolean(builderMode?.active), usesBuilderBranch, updateBuilderStyle,
   rangeFrames, selectionBounds, moveSelected, updateSelection, showDialog, closeDialog,
   // The header's quick actions read the command registry (built below) when the inspector renders.
@@ -5229,8 +5146,8 @@ const commandRequirements = {
   "desktop:newWindow": () => onDesktop(desktop?.newWindow),
   "desktop:recentFiles": () => onDesktop(desktop?.listRecentFiles),
   "desktop:updates": () => onDesktop(desktop?.getUpdateState),
-  "desktop:feedback": () => onDesktop(desktop?.sendTelemetryFeedback),
-  "desktop:telemetry": () => onDesktop(desktop?.getTelemetryState),
+  "desktop:feedback": () => onDesktop(desktop?.supportRequest),
+  "desktop:stats": () => onDesktop(desktop?.getStatsState),
   "update-ready": () => updateNotice?.state?.status === "ready" || (desktop?.getUpdateState ? requirementReason("updateReady") : requirementReason("desktop")),
   figure: () => Boolean(editor.object) || requirementReason("figure"),
   figures: () => selection().size > 1 || requirementReason("figures"),
@@ -5476,8 +5393,7 @@ editor.addEventListener("change", (e) => {
   }
   if (['edit','history','document'].includes(kind) && !e.detail?.live) { audioPreparation?.abort(); audioScrubController?.abort(); audioEngine.stop(); }
   if (kind === 'document') void audioEngine.clear().catch(fail);
-  if(kind==='seek'&&!state.playing&&telemetry.isForeground)telemetry.performance.action('seek');
-  if (kind === 'edit' && !e.detail?.live) { telemetry.count('edits'); telemetry.milestone('first_edit'); }
+  if (kind === 'edit' && !e.detail?.live) { stats.count('edits'); stats.reach('edit'); }
   const selectedTrack = ["seek", "history", "frame-draft"].includes(kind)
     ? timelineUI?.trackById?.get(state.selectedTrackId)
     : null;
@@ -5662,6 +5578,7 @@ function offerRecovery() {
     ? desktop.listRecoveries().then(records => records.map(record => ({...record, native: true, savedAt: Date.parse(record.savedAt)})))
     : desktop ? Promise.resolve([]) : browserRecovery.list();
   void copies.then(records => {
+    if (records.length) stats.recovery('offered');
     if (records.length === 1) showRecovery(records[0]);
     else if (records.length > 1) showRecovery(null, records);
   }).catch(error => status({messageKey: "app.recoveryCouldNotBeRead", messageParams: {message: error.message}}, true));
@@ -5694,6 +5611,7 @@ function showRecovery(record, records = [record]) {
     const reservation = browserRecovery ? await browserRecovery.reserve(chosen) : null;
     if (browserRecovery && !reservation) throw messageError(new Error(''), "errors.app.thisRecoveryCopyIsOpenInAnotherTab", {});
     let adopted = false;
+    const started = performance.now();
     try {
       let copy;
       if (chosen.native) {
@@ -5712,11 +5630,12 @@ function showRecovery(record, records = [record]) {
       adopted = true;
       fit();
       updateUI();
-      telemetry.count('recovery_restored');
+      stats.recovery('restored'); stats.file('recover', 'styk', {ms: performance.now() - started});
       offer.dismiss();
       records.splice(records.indexOf(chosen), 1);
       if (records.length) showRecovery(records.length === 1 ? records[0] : null, records);
-    } finally { if (!adopted) reservation?.release(); }
+    } catch (error) { stats.recovery('failed'); stats.file('recover', 'styk', {error, stage: 'read', ms: performance.now() - started}); throw error; }
+    finally { if (!adopted) reservation?.release(); }
   };
 }
 if (desktop) {
@@ -5926,8 +5845,8 @@ async function init() {
       ? (value) => desktop.setEditorSettings(value)
       : undefined,
     onResetWorkspace: () => workspaceLayout?.reset(),
-    onPrivacy: desktop?.getTelemetryState ? () => privacyUI.open() : undefined,
-    onFeedback: desktop?.sendTelemetryFeedback ? options => feedbackUI.open(options) : undefined,
+    onPrivacy: desktop?.getStatsState ? () => openPrivacy(editorSettings) : undefined,
+    onFeedback: desktop?.supportRequest ? options => feedbackUI.open(options) : undefined,
     onDonate: desktop?.openDonate ? () => desktop.openDonate() : undefined,
   });
   state.settings = editorSettings.value;
@@ -6134,13 +6053,12 @@ async function init() {
     moveItem: (asset, folder) => window.styk.library.moveItem(asset, folder),
     position: worldPoint, insert: libraryInsert, onError: fail,
   });
-  $('library-tab')?.addEventListener('click', () => telemetry.count('library'));
-  actions['add-to-library'] = () => { telemetry.count('library'); return window.styk.library.run(() => window.styk.library.save()); };
+  $('library-tab')?.addEventListener('click', () => stats.feature('library'));
+  actions['add-to-library'] = () => window.styk.library.run(() => window.styk.library.save());
   window.styk.movieclips = installMovieclipUI({editor,actions,pause,finishEdit:finishCurrentEdit,
     getTimeline:()=>timelineUI,setTool,onError:fail,queueUI,exportClip:()=>exportFlow.exportPivot('stykmov'),
     // The session breadcrumb sits above the stage until the inspector names the scope (M4).
     mountBreadcrumb:element=>document.querySelector('.context-strip').before(element)});
-  for (const [name, action] of Object.entries(actions)) if (name.startsWith('movieclip-')) actions[name] = (...args) => { telemetry.count('movieclip'); return action(...args); };
   editor.addEventListener('change',event=>{
     if(event.detail?.kind==='movieclip-scope' || event.detail?.movieclipScope) {
       timelineHost.mount(); state.inspectorContext=editor.object?'figure':'scene';state.inspectorTab='design';queueUI();
@@ -6203,15 +6121,13 @@ async function init() {
   status({messageKey: "app.ready", messageParams: {}});
   window.styk.ready = true;
   markEditorReady();
-  window.styk.telemetry = telemetry;
-  window.styk.privacyUI = privacyUI;
+  window.styk.stats = stats;
   // The developer build's tools (src/devtools/, never shipped): nothing happens in the shipping build.
   startDevtools(window.styk, {loadEngine, tableOf});
   // The listeners for what the main process pushes (the launch file, a stykanimate:// link's menu action) are all on: it sends what it kept (desktop/page-pushes.cjs).
   desktop?.pageListening?.();
   updateNotice = new UpdateUI(desktop, { onRestart: () => actions['restart-update']() });
   queueStartupPrompts();
-  void telemetryInit.then(() => telemetry.timing('startup_ms', performance.now()));
   // Prompts wait for the first rendered frame.
   requestAnimationFrame(() => overlays.markReady());
   warmPlayback();
@@ -6237,9 +6153,8 @@ async function init() {
 /**
  * Startup prompts open one at a time through the overlay manager's queue,
  * after the first rendered frame and never over a dialog or a menu: the notes
- * of a new version, then the privacy choice on first run (today's order; the
- * choice waits until the notes are known). The recovery offer and the update
- * notice are not prompts: they show at once without taking focus.
+ * of a new version. The recovery offer and the update notice are not prompts:
+ * they show at once without taking focus.
  */
 function queueStartupPrompts() {
   let release;   // undefined while the notes load, then the notes or null
@@ -6258,16 +6173,6 @@ function queueStartupPrompts() {
   releaseSplash.startupInfo()
     .then((info) => { release = info ?? null; }, (error) => { console.warn(error); release = null; })
     .finally(() => { if (!release) overlays.cancelPrompt("release-notes"); overlays.pumpPrompts(); });
-  void telemetryInit.then((info) => {
-    if (!info || info.decided) return;
-    overlays.enqueuePrompt({
-      id: "privacy-first-run", priority: 1, ready: () => release !== undefined,
-      open: async () => {
-        try { await privacyUI.open({ firstRun: true }); } catch { return; }
-        await whenClosed(privacyUI.dialog);
-      },
-    });
-  });
 }
 function scheduleGpuRecovery() {
   if (gpuRecoveryTimer !== undefined) return;
@@ -6296,7 +6201,7 @@ function recoverCanvas(refreshGpuBudget) {
     canvas.replaceWith(replacement); canvas = replacement;
     state.renderer = await createRenderer(canvas, rendererOptions());
     clearTimeout(gpuStableTimer);
-    telemetry.performance.recovery('gpu','recovered');
+    stats.recovered('graphics-lost');
     gpuStableTimer = setTimeout(() => { gpuRecoveryAttempts = 0; }, GPU_STABLE_MS);
     $("renderer-error").hidden = true;
     resize(); requestRender();
@@ -6308,14 +6213,13 @@ function rendererOptions() {
     onInvalidate: requestRender,
     onMonitorPicture: requestMonitorRender,
     // A frame the engine refused: the previous picture stays and the document's next revision is tried again.
-    onError: error => { telemetry.error(error, 'renderer'); status(error, true); },
+    onError: error => { stats.problem(error); status(error, true); },
     onStatus: (message) => {
       if (message.backend !== "WebGPU device lost") return;
       localizedText($("renderer-label"), "rendererStatus.deviceLost");
       status({messageKey: message.messageKey, messageParams: message.messageParams});
-      telemetry.performance.recovery('gpu','started');telemetry.performance.incident('gpu');
-      telemetry.count('gpu_errors');
-      telemetry.error(Object.assign(messageError(new Error(''), "errors.app.theGraphicsDeviceWasLost", {}), { name: 'GPUError', telemetryCode: 'device_lost' }), 'gpu');
+      stats.count('graphicsLost');
+      stats.problem(Object.assign(messageError(new Error(''), "errors.app.theGraphicsDeviceWasLost", {}), {name: 'GPUError'}), {type: 'graphics-lost', recovered: false});
       pause();
       propertyControls?.cancel();
       cancelDrag();

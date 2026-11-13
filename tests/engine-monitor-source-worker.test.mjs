@@ -12,7 +12,7 @@ async function harness({pixels=true,cancel=false,queued=false}={}) {
     monitor_background:()=>new Float64Array(values),monitor_pixels:()=>pixels,picture(data){data.fill(11);},monitor_end(){ended++;}};
   class Canvas {constructor(w,h){this.width=w;this.height=h;}getContext(){return{drawImage(){},getImageData(){return{data:[255,0,255,255]};},putImageData(){assert.fail('direct sources cannot use the old Canvas conversion');}};}transferToImageBitmap(){copies.push('gpu');return{close(){closed++;}};}}
   class Data {constructor(w,h){this.width=w;this.height=h;this.data=new Uint8ClampedArray(w*h*4);}}
-  const ctx=vm.createContext({initSync:()=>({}),Previews:{create:async()=>previews},inside:(_guard,run)=>run(),guarded:(_guard,object)=>object,OffscreenCanvas:Canvas,ImageData:Data,performance,Atomics,Int32Array,Float64Array,Uint8ClampedArray,DOMException,setTimeout,
+  const ctx=vm.createContext({initSync:()=>({}),Previews:{create:async()=>previews},inside:(_guard,run)=>run(),guarded:(_guard,object)=>object,capturePanics(){},lastPanic:()=>null,OffscreenCanvas:Canvas,ImageData:Data,performance,Atomics,Int32Array,Float64Array,Uint8ClampedArray,DOMException,setTimeout,
     createImageBitmap(image){copies.push(['ImageData',image.data[0]]);return new Promise(resolve=>finish=()=>resolve({close(){closed++;}}));},
     self:{addEventListener(_name,listener){receive=listener;},postMessage(message){answers.push(message);}}});
   vm.runInContext(source,ctx);

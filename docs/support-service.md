@@ -2,7 +2,7 @@
 
 The public `/feedback/` page and the app's Help, Settings and Privacy feedback actions
 use the same `SupportCenter` UI. The owner works in `/admin/` → Reports.
-Support is independent of optional telemetry. Sending a report never enables analytics
+Support is independent of statistics ([STATISTICS.md](STATISTICS.md)). Sending a report never changes them
 or uploads a project automatically.
 
 ## User experience
@@ -67,7 +67,7 @@ remains available in the other workspace sections.
   namespaced by inbox. The server stores only `SHA256('support:' + key)` on each report.
 - The Electron main process owns `desktop/support.cjs`, a narrow, fixed-origin support
   transport. It persists a **separate** support key through atomic `WorkspacePreferences`
-  in `support-access.json`. No telemetry credential, arbitrary URL, filesystem path or
+  in `support-access.json`. No other credential, arbitrary URL, filesystem path or
   IPC channel crosses the preload boundary. Report downloads use the native Save dialog
   and atomic replacement. Support keys are only copied on explicit user action.
 - Administrator authentication remains the existing signed HttpOnly, SameSite=Strict

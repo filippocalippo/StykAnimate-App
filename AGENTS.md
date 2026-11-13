@@ -32,6 +32,7 @@ Several agents and people work in this repository at the same time. Run `git sta
 | The browser build | `docs/WEB.md`; Linux: `docs/LINUX.md` |
 | Packaging, updates, releases | `docs/DESKTOP-RELEASE.md`, `docs/UPDATES.md`, `docs/RELEASING.md` |
 | Developer tools and profiling | `docs/DEVTOOLS.md` |
+| Statistics: what is sent, the numbers | `docs/STATISTICS.md` |
 
 ## Checking your work
 

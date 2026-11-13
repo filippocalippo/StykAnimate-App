@@ -54,7 +54,7 @@ function failure(error) {
   const params = Object.fromEntries(Object.entries(data?.messageParams ?? {}).map(([name, value]) => [name, parameter(value)]));
   const result = data?.messageKey ? messageError(new Error(String(data.message)), data.messageKey, params) : new Error(String(data?.message ?? error.message));
   if (data?.code) result.code = data.code;
-  if (UNSUPPORTED.has(data?.messageKey)) result.telemetryCode = 'unsupported_feature';
+  if (UNSUPPORTED.has(data?.messageKey)) result.fileReason = 'unsupported-feature';
   return result;
 }
 

@@ -30,7 +30,7 @@
  */
 import {applyDocumentPatch} from './engine-patch.mjs';
 import {openMovieclipNow, payloadText, registeredEngine} from './engine-open.mjs';
-import {traceBegin, traceEnd} from '../trace.mjs';
+import {traceBegin, traceEnd, tracing} from '../trace.mjs';
 
 import {fetchedRecords, holdAllRecords, holdingAll, recordsOf, tableOf} from '../lazy-table.mjs';
 import {messageError} from '../localized-error.mjs';
@@ -54,8 +54,8 @@ import {drawingFigures} from '../figure-types.mjs';
 function sessionCall(live, method, args, view, clip) {
   const span = traceBegin('edit session call');
   try { return clip ? live.call_with_document(method, args, view, clip) : live.call(method, args, view); }
-  // The span's arguments are built only when one is open: the shipping build pays a null check.
-  finally { if (span !== 0) traceEnd(span, {method}); }
+  // The span's arguments are built only for the developer tools; statistics hear its name and duration (src/trace.mjs).
+  finally { if (span !== 0) traceEnd(span, tracing ? {method} : undefined); }
 }
 
 /** How many values of each kind a call that draws many identities is handed. */

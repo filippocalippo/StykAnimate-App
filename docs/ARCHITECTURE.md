@@ -192,6 +192,18 @@ turns fingers into the desktop's pointer events; see [Touch interface](TOUCH.md)
 
 Windows and Linux source execution and packaged builds are verified; CI builds, packages and boots the Linux AppImage, and runs the unit suite on both ([Linux support](LINUX.md)). A distributable includes the current web assets (the engine and codec WebAssembly modules among them), the video encoder and licenses. Rebuild and verify the package after source changes; earlier smoke reports do not certify newer bytes. macOS has a build target that has not been executed. Platform-specific behaviour lives in the owning layer: Chromium's GPU switches in `desktop/gpu-switches.cjs`, interpreter discovery for the packaging scripts in `scripts/run-python.mjs`.
 
+## Statistics
+
+The desktop app sends anonymous statistics, on unless a person turns them off ([Statistics](STATISTICS.md)); the
+browser build sends nothing. `src/stats/` is the editor's side: `collector.mjs` starts and stops with the desktop
+process's state and is the one object app.mjs calls (`stats.command`, `stats.file`, `stats.problem`, and in the frame
+loop `stats.frames`, behind `if (stats.on)`); `frames.mjs` counts frames, `session.mjs` builds the session summary,
+`problems.mjs` and `stack.mjs` the problem reports, `files.mjs` names formats and failures, and `schema.mjs` says what
+a report may hold. The frame counter hears the trace layer's spans (`src/trace.mjs` `listenSpans`), so statistics and
+the developer tools measure with the same instrumentation. `src/engine/engine-panic.mjs` keeps the engine's panic
+text on every thread. `desktop/stats.cjs` checks, queues on disk and uploads, behind the seven calls of the preload
+bridge.
+
 ## Canvas guides and grid
 
 `src/canvas-guides.mjs` owns a fixed-size DOM overlay and a popover. It does not
