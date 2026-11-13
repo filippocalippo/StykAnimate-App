@@ -84,8 +84,8 @@ Statistics are on unless a person turns them off.
   (`telemetry-state.json`: identifier and queued summaries) is deleted at the first start of the new version.
 - **Development runs** (an unpackaged app) collect and show "the last report" but upload only when
   `STYK_SITE_URL` names a local site (`http://127.0.0.1` or `http://localhost`). Tests and smoke scripts never
-  reach the network: the smoke scripts start with statistics off (`stats-state.json` written into their scratch
-  data folder), except `scripts/smoke-boot.mjs`, which checks that a development run collects and sends nothing.
+  reach the network: the smoke scripts and the desktop tests start with statistics off (`stats-state.json` written
+  into their scratch data folder, or none at all in a fresh one, which uploads nothing in a development run), except `scripts/smoke-boot.mjs`, which checks that a development run collects and sends nothing.
 - **The developer tools' page** (`npm run dev`, or the profiling command in Chrome) collects in memory even
   without a desktop process, and sends nothing, so the profiling command can read the same numbers.
 
@@ -152,7 +152,21 @@ by the timeline mode. `commands` are the 24 most used ids of the command registr
 run through the app's command dispatch; another name is never counted. Features are touched by the commands
 that use them and by a few direct uses (the library tab, node IK, a building tool). `reached`: `edit` at the
 first edit, `play` at the first playback, `save` and `export` at the first that succeeded. `project` is the
-largest project on show during the session, by scene size and then by figures drawn.
+largest project on show during the session, by scene size and then by figures drawn; its `frames` is the animation's
+length in frames (ticks), not its keyframes.
+
+`counts` are whole numbers, each capped (`COUNTS` in schema.mjs), and absent when zero:
+
+| Count | What it counts |
+| --- | --- |
+| `edits` | finished edits of the document (a live drag counts once, when it ends) |
+| `undos`, `redos` | the `undo` and `redo` commands |
+| `keyframes` | keyframes made with a command: `add-frame` (Add frame), `extend-keyframe`, `insert-blank-key` and `insert-copied-key`. Keyframes made any other way are not counted |
+| `plays`, `playSeconds` | playbacks started, and the seconds they ran |
+| `opens`, `saves`, `exports` | file operations of that kind that succeeded (a save is one the person asked for, not an autosave) |
+| `commands` | commands of the registry run through the command dispatch |
+| `graphicsLost`, `graphicsBack` | the graphics device lost, and back |
+| `problems` | problems the collector heard, repeats included (each distinct one is a `problem` report once) |
 
 A session ends `clean` when the app quit in order, `crashed` when the window's process was lost, and `unknown`
 when the next start finds it was never closed (power loss, a forced end, a crash of the whole app). A session
@@ -175,7 +189,25 @@ successes took. A failure also becomes a `file` report with its stage and reason
 it posts (`fileStage`, `fileReason`), and an error otherwise gives its reason by its operating system code or
 message key. `made` is the program and format version that wrote an opened file, as the engine's reader
 reports it (`pivot/5`, `stykanimate/12`). `kept` is `untouched` for a save that failed before writing (the file
-on disk is replaced only by a finished write) and `unknown` for one that failed while writing.
+on disk is replaced only by a finished write) and `unknown` for one that failed while writing. A session keeps at most
+16 rows (one per operation, format and `made`); a further row is not counted.
+
+The words these use (`FORMATS`, `FILE_STAGES` and `FILE_REASONS` in schema.mjs), where the name does not say it:
+
+| Word | Means |
+| --- | --- |
+| `styk` | a StykAnimate project (`.styk`, or the older `.json`) |
+| `styk-figure`, `styk-movieclip` | a StykAnimate figure (`.stkz`) and movieclip (`.stykmov`) |
+| `pivot-animation`, `pivot-figure` | a Pivot animation (`.piv`) and figure (`.stk`) |
+| `sticknodes`, `sticknodes-figure`, `sticknodes-movieclip` | a Stick Nodes project (`.stknds`), figure (`.nodes`) and movieclip (`.nodemc`) |
+| `archive` | a `.zip` opened for the Stick Nodes files in it |
+| `picture` | one picture (`.png`, `.jpg`, `.webp`, `.bmp`): an opened picture, or a single frame exported |
+| `apng` | an animated PNG export |
+| `picture-sequence` | an export of every frame as its own picture (PNG, JPEG, GIF or SVG), delivered as one `.zip` |
+| `video`, `sound`, `gif`, `svg` | as named; `unknown` is anything else |
+| stage `request` | the call to the file service that converts Pivot and Stick Nodes files (`src/codec-request.mjs`), which runs in a worker of the page |
+| reason `transfer-failed` | the document, or a result, could not be handed between the page and a worker: the browser could not copy it across, or the export worker failed while taking the document in |
+| reason `service-unavailable` | that file service answered with an error of its own (status 500 or above), or an export's request to it got no answer |
 
 **Problems** (`src/stats/problems.mjs`). Uncaught errors and rejections, errors the app shows (`fail`), engine
 refusals of a frame (`renderer` errors), a lost graphics device and its return, failed saves, opens and
