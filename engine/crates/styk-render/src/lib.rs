@@ -272,7 +272,7 @@ impl Renderer {
             for &(start, end) in &ranges {
                 let (start, end) = (start as usize, end as usize);
                 same &= !list.prims[start..end].iter().any(structural) && !since.prims[start..end].iter().any(structural)
-                    && list.prims[start..end].iter().zip(&since.prims[start..end]).all(|(a, b)| a.group == b.group && shading::shading(a) == shading::shading(b));
+                    && list.prims[start..end].iter().zip(&since.prims[start..end]).all(|(a, b)| a.group == b.group && (!self.shading_on || shading::shading(a) == shading::shading(b)));
                 self.queue.write_buffer(&self.prims, (start * std::mem::size_of::<GpuPrim>()) as u64, prims_bytes(&list.prims[start..end]));
             }
             let mut rebind = self.bind0.is_none();
@@ -349,6 +349,15 @@ impl Renderer {
         if !self.add_ranges.is_empty() {
             self.additive_pipeline();
         }
+        self.derive_shading(list);
+    }
+
+    /// The runs of the list's prims and the shader each draws with ([`shading`]), where they are drawn so; none otherwise.
+    fn derive_shading(&mut self, list: &DrawList) {
+        if !self.shading_on {
+            self.shading_runs = Arc::from(Vec::new());
+            return;
+        }
         // The background (the root pass's leading fills) is drawn in a call of its own.
         let root = list.passes.iter().find(|p| p.depth == 0).map_or((0, 0), |p| (p.start, p.end));
         let background = root.0..root.0 + list.background_prims.min(root.1.saturating_sub(root.0));
@@ -361,7 +370,14 @@ impl Renderer {
     /// faster, and off on a graphics card. The pixels are the same either way on every adapter `tests/shading.rs` compares but
     /// Direct3D 12's compiler, which moved one pixel of the Canvas painter by a level.
     pub fn set_shading_runs(&mut self, on: bool) {
+        if self.shading_on == on {
+            return;
+        }
         self.shading_on = on;
+        // The runs are worked out only while they are drawn (a graphics card never needs them).
+        if let Some(list) = self.list.clone() {
+            self.derive_shading(&list);
+        }
     }
 
     /// Whether runs of prims draw with the simpler fragment shaders ([`Renderer::set_shading_runs`]).
