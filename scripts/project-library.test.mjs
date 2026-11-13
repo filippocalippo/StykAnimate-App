@@ -63,6 +63,38 @@ test('pins survive the limit; unpinned projects leave oldest first, and the list
   assert.equal(await library.preview(first.id), PNG);
 });
 
+test('Home recognizes an open project reached through a linked folder', async t => {
+  const { directory, files, library } = await fixture(['Walk.styk']);
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const linked = path.join(directory, 'linked');
+  await fs.symlink(directory, linked, process.platform === 'win32' ? 'junction' : 'dir');
+  const alias = path.join(linked, 'Walk.styk');
+  const project = await library.remember(alias);
+  const { projects } = await library.list({ open: [{ filename: alias, documentToken: 'open-walk' }] });
+  assert.equal(projects.length, 1);
+  assert.equal(projects[0].id, project.id);
+  assert.equal(projects[0].open, true, 'Home must return to the existing tab');
+  assert.equal(projects[0].documentToken, 'open-walk');
+  assert.equal(await library.resolve(project.id), await fs.realpath(files[0]));
+});
+
+test('Home stores previews and counts for a project reached through a linked folder', async t => {
+  const { directory, files, library, make } = await fixture(['Walk.styk']);
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const linked = path.join(directory, 'linked');
+  await fs.symlink(directory, linked, process.platform === 'win32' ? 'junction' : 'dir');
+  const alias = path.join(linked, 'Walk.styk');
+  const project = await library.remember(files[0]);
+  const stats = { frames: 48, fps: 24, width: 960, height: 540 };
+  assert.deepEqual(await library.setPreview(alias, { thumbnail: PNG, stats }), { stored: true, id: project.id });
+  const reloaded = make();
+  assert.equal(await reloaded.preview(project.id), PNG);
+  assert.deepEqual((await reloaded.list()).projects[0].stats, stats);
+  await fs.unlink(linked);
+  assert.deepEqual(await library.setPreview(alias, { thumbnail: PNG }), { stored: false });
+  assert.equal(await reloaded.preview(project.id), PNG, 'a vanished alias leaves the stored preview intact');
+});
+
 test('folders are labels: create, move into, rename and delete, and the files never move', async () => {
   const { files, library } = await fixture(['Walk.styk', 'Run.styk']);
   const walk = await library.remember(files[0]);
