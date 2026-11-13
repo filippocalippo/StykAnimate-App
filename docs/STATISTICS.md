@@ -233,10 +233,51 @@ The bridge the preload script exposes (`window.stykDesktop`), all of it:
 
 ## Reading the statistics
 
-The dashboard is the site's admin, behind its sign-in. Agents and scripts are to read the same numbers with
-`npm run stats` (`scripts/stats.mjs`), which needs a read-only key in the environment variable
-`STYK_STATS_KEY`; the key is never written into this repository, which is public. That script is not written
-yet: it comes with the site's reading API.
+The dashboard is the site's admin, behind its sign-in. Agents and scripts read the same numbers with
+`npm run stats` (`scripts/stats.mjs`), which asks the site's report views (`GET /api/v1/admin/stats/<view>`, described in
+the website's `worker/stats/README.md`) and prints them as short text, or unchanged with `--json`.
+
+- `STYK_STATS_KEY`: the read-only key. It is kept in the environment and never written into this repository,
+  which is public; the owner makes it and sets it on the website with `npx wrangler secret put STATS_READ_KEY`.
+  The reader never prints it and sends it only to the one origin below, following no redirect.
+- `STYK_STATS_URL`: the site, `https://stykanimate.com` when unset. `http:` is accepted only for `localhost` and `127.0.0.1`.
+
+| Command | What it prints |
+| --- | --- |
+| `release [version]` (the default) | the four promises with their change and reason, and what needs attention |
+| `findings`, `show <id>` | the findings (at most three); one finding whole, with its evidence and its brief for an agent |
+| `responsiveness [doing]` | smooth share by scene size and machine class for `drag`, `play`, `scrub`, `view` or `draw`, where the late frames' time went, and the profiling command that reproduces it |
+| `safety` | saves, recovery, file opens and exports, and why they failed |
+| `problems`, `problem <signature>` | what broke; one problem with its stack, trails, what the sessions share and its brief |
+| `usage`, `curiosities` | who uses the app and how; numbers worth a smile |
+
+Every command takes `--release`, `--compare <version|none>`, `--days 7|30|90`, `--platform`, `--channel`, `--fresh` and `--json`;
+`npm run stats -- help` lists them. Each text says how fresh its numbers are and, when the period was sampled,
+that its totals are estimates. The exit code is 0 when the view was read, 1 when the site refused or could not
+be reached, and 2 for a wrong command line or setting (nothing is sent then).
+
+```text
+$ npm run stats -- release 9.1.0
+StykAnimate 9.1.0 · 6 days out · 1,050 sessions · compared with 9.0.0
+9.1.0 needs attention: a new engine stop reached 28 sessions, and 5 more things to look at.
+
+  Work is safe       99.7%    -0.3
+  Stays responsive   97.1%    -0.9   dragging, 50,000-200,000 segments, integrated graphics under 16 GB
+  Old files open     97.3%    same   8 of 42 opens of Stick Nodes 4.3 files failed
+  Doesn't crash      97.0%    +0.2   28 sessions hit an engine stop (new)
+
+Needs attention
+  E-a786  The engine stops: index out of bounds: the len is # but the i…  critical, new in 9.1.0
+  R-ff75  Dragging stutters in scenes of 50,000 to 200,000 segments on…   worse than 9.0.0
+  F-5a1c  Stick Nodes 4.3 files fail to open                              since 9.1.0
+  and 3 more not shown (the views give the three that reach most sessions)
+
+Numbers to 2026-11-12 23:30 UTC · last 7 days (2026-11-06 to 2026-11-12) · stable channel, all platforms
+9.0.0's totals are estimated from a sample.
+Next: npm run stats -- show E-a786        (add --json for the numbers alone)
+```
+
+(Releases 9.1.0 and 9.0.0 are the synthetic ones of the tests, `tests/stats-reader.test.mjs`.)
 
 The profiling command (`scripts/styk-profile.mjs`, [DEVTOOLS.md](DEVTOOLS.md)) reports smooth share with the
 collector's own frame counter (`smooth … % of <frames counted>` per scenario), so a number from the dashboard
