@@ -5,13 +5,19 @@
 //   npm run perf -- list                       scenarios, workloads, environments and suites
 //   npm run perf -- show [run] [scenario] [--env <id>] [--workload <id>]
 //   npm run perf -- compare <base run> [head run] [--all] [--fail-on-worse]
+//   npm run perf -- report [run …] [--notes <file.md>] [--out <file.html>]
 //
 // `run` starts this checkout's app on scratch data, in a window off-screen, once per pair of environment and workload,
 // and writes artifacts/perf/runs/<label>/ (result.json, summary.txt). `show` prints a run's summary, or one scenario in
 // full: its metrics, its frames by phase, its spans and where the profiled pass found the time, thread by thread.
 // `compare` says what changed between two runs beyond their own noise (the head defaults to the latest run).
+// `report` writes one HTML page of one or more runs (perf/report/): the grades of every scenario on every pair, what most
+// needs work, each scenario in full, memory and startup; several runs side by side, the first named the baseline of a
+// pair a later one measured again. --notes puts an analysis (Markdown) at its top. It defaults to report.html in the
+// last run's folder.
 // A run is `latest`, a label, or a folder. Exit codes: 0 done, 1 a scenario failed, a pair did not complete, or
 // `--fail-on-worse` found something worse; 2 usage.
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {performance} from 'node:perf_hooks';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -21,6 +27,7 @@ import {build, machine, read, SCHEMA, timeLabel, write} from './lib/result.mjs';
 import {runPair} from './lib/run.mjs';
 import {buildBundle, measureStartup} from './lib/startup.mjs';
 import {explain, overview} from './lib/summary.mjs';
+import {buildReport} from './report/build.mjs';
 import {open, SCENARIOS, select} from './scenarios/index.mjs';
 import {SUITES, suite as suiteNamed} from './suites.mjs';
 import {measure, workload, WORKLOADS} from './workloads.mjs';
@@ -111,11 +118,29 @@ function compared(argv) {
   return options['fail-on-worse'] && result.counts.worse ? 1 : 0;
 }
 
+async function report(argv) {
+  const {words, options} = parse(argv);
+  const names = words.length ? words : ['latest'];
+  const runs = names.map(name => read(name));
+  const twice = runs.find((run, index) => runs.findIndex(other => other.folder === run.folder) !== index);
+  if (twice) throw new Usage(`The run "${twice.label}" is named twice.`);
+  let notes = null;
+  if (options.notes) {
+    try { notes = readFileSync(path.resolve(options.notes), 'utf8'); } catch (error) { throw new Usage(`--notes: ${error.code === 'ENOENT' ? `no file at ${path.resolve(options.notes)}` : error.message}`); }
+  }
+  const out = path.resolve(options.out ?? path.join(runs.at(-1).folder, 'report.html'));
+  mkdirSync(path.dirname(out), {recursive: true});
+  writeFileSync(out, await buildReport(runs, {notes, notesName: options.notes ? path.basename(options.notes) : null}));
+  console.log(`Written to ${out}`);
+  return 0;
+}
+
 const COMMANDS = {run, show, compare: compared, list: catalogue};
+COMMANDS.report = report;
 
 async function main(argv) {
   const [command, ...rest] = argv;
-  if (!command || command === 'help' || command === '--help') { console.log('Usage: npm run perf -- <run|list|show|compare> …  (docs/PERFORMANCE.md)'); return command ? 0 : 2; }
+  if (!command || command === 'help' || command === '--help') { console.log(`Usage: npm run perf -- <${Object.keys(COMMANDS).join('|')}> …  (docs/PERFORMANCE.md)`); return command ? 0 : 2; }
   if (!COMMANDS[command]) throw new Usage(`Unknown command ${JSON.stringify(command)}: one of ${Object.keys(COMMANDS).join(', ')}.`);
   return COMMANDS[command](rest);
 }

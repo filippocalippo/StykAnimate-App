@@ -34,6 +34,9 @@ export function machine() {
   return {platform: process.platform, arch: process.arch, release: os.release(), cpu: cpus[0]?.model?.trim() ?? '', threads: cpus.length, memoryGB: Math.round(os.totalmem() / 2 ** 30), node: process.version};
 }
 
+/** Above this share of the processor in use by other work, a run, its summary and its report say the machine was busy. */
+export const BUSY_PERCENT = 20;
+
 /**
  * How busy the machine is with everything else, as the share of its processor in use over `ms`: other programs take
  * time from the app and make a run's numbers worse and noisier. A run records it before each launch.

@@ -15,7 +15,7 @@ import {launch} from './app.mjs';
 import {createInput, paths} from './input.mjs';
 import {aggregate, captureMetrics, defaultJudge, format, judge} from './metrics.mjs';
 import {startProbes} from './probes.mjs';
-import {backgroundLoad} from './result.mjs';
+import {backgroundLoad, BUSY_PERCENT} from './result.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const megabytes = bytes => (Number.isFinite(bytes) ? round(bytes / 1048576, 1) : null);
@@ -211,7 +211,7 @@ export async function runPair({environment, workload, scenarios, open, passes = 
   try {
     // What else the machine is doing takes time from the app: the pair records it, and a busy machine is said so.
     const busy = await backgroundLoad();
-    if (busy > 20) log(`the machine is busy with other work (${busy}% of its processor): expect slower and noisier numbers`);
+    if (busy > BUSY_PERCENT) log(`the machine is busy with other work (${busy}% of its processor): expect slower and noisier numbers`);
     app = await launch(environment, {log});
     // The display's period is measured while the app rests: every frame of the run is judged against it.
     const display = await app.request('display.period');
