@@ -45,14 +45,17 @@ const memoryStore = (dir, options) => ({
   get: async () => JSON.parse(memory.get(path.join(dir, options.filename)) ?? '{}'),
   set: async value => { memory.set(path.join(dir, options.filename), new WorkspacePreferences(dir, options).serialize(value)); return { saved: true }; },
 });
-async function service(dir, { clock = { t: START }, fetch = intake().fetch, disk = false, ...options } = {}) {
+/** A service as at a start; `shown` (the default) is an installation whose Home already displayed the first-start line. */
+async function service(dir, { clock = { t: START }, fetch = intake().fetch, disk = false, shown = true, ...options } = {}) {
   const stats = new StatsService({ directory: dir, schemaPath, version: '1.2.6', channel: 'stable', siteUrl: 'https://stats.example', env: {},
     machine: { graphics: 'integrated', vendor: 'intel', memory: '8', cores: '8' }, fetchImpl: fetch, now: () => clock.t,
     randomHex: () => (++counter).toString(16).padStart(32, '0'), timers: false, ...(disk ? {} : { openStore: memoryStore }), localDay: utcDay,
     localWeekday: t => new Date(t).getUTCDay(), localHour: t => new Date(t).getUTCHours(), ...options });
   stats.clock = clock;
   services.push(stats);
-  return stats.init();
+  await stats.init();
+  if (shown) await stats.markNoticeShown();
+  return stats;
 }
 const sessionFile = async dir => JSON.parse(await readFile(path.join(dir, 'stats-session.json'), 'utf8'));
 
@@ -112,6 +115,32 @@ test('turning statistics off deletes what was waiting; turning them on starts a 
   assert.notEqual(stats.running.sid, sid);
   assert.deepEqual(changes, [false, true]);
   await assert.rejects(stats.setEnabled('yes'), TypeError);
+});
+
+test('nothing is uploaded before Home displayed the first-start line once; counting runs before that', async () => {
+  const dir = await folder(), { calls, fetch } = intake({ status: 200, body: { ok: true } });
+  const first = await service(dir, { fetch, shown: false, disk: true });
+  assert.equal(first.getState().counting, true, 'counting may run');
+  assert.equal(first.recordReport(fileReport()), true);
+  assert.equal(await first.upload(), false);
+  await first.close();
+  assert.equal(calls.length, 0, 'not even when the app quits');
+  // The next start: the report waited on disk. Home shows the line, and only then is it sent.
+  const second = await service(dir, { fetch, shown: false, disk: true });
+  assert.equal(await second.upload(), false);
+  assert.equal(calls.length, 0);
+  await second.markNoticeShown();
+  assert.equal(await second.upload(), true);
+  assert.equal(calls.length, 1);
+  assert.equal(JSON.parse(await readFile(path.join(dir, 'stats-state.json'), 'utf8')).noticeShown, true, 'kept for the next starts');
+  assert.equal((await service(dir, { fetch, shown: false, disk: true })).announced, true);
+  // An answered line counts as shown: Reject in the old consent window, and a person who used the switch.
+  const old = await folder();
+  await writeFile(path.join(old, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false } }));
+  const rejected = await service(old, { fetch, shown: false });
+  assert.equal(rejected.announced, true);
+  const switched = await service(await folder(), { fetch, shown: false });
+  assert.deepEqual([switched.announced, (await switched.setEnabled(true)).noticeSeen, switched.announced], [false, true, true], 'the switch answers the line');
 });
 
 test('everything is checked at the boundary: a refused summary or report changes nothing', async () => {
@@ -287,7 +316,7 @@ test('the bridge is the table in docs/STATISTICS.md and nothing more, each call 
   const exposed = [...preload.matchAll(/^\s+(\w*Stats\w*):/gm)].map(match => match[1]).sort();
   const documented = [...doc.matchAll(/^\| `(\w+)\(/gm)].map(match => match[1]).sort();
   assert.deepEqual(exposed, documented);
-  assert.deepEqual(exposed, ['getStatsState', 'markStatsNoticeSeen', 'onStatsState', 'previewStats', 'sendStatsReport', 'sendStatsSession', 'setStatsEnabled']);
+  assert.deepEqual(exposed, ['getStatsState', 'markStatsNoticeSeen', 'markStatsNoticeShown', 'onStatsState', 'previewStats', 'sendStatsReport', 'sendStatsSession', 'setStatsEnabled']);
   for (const channel of [...preload.matchAll(/'(styk:stats-[a-z-]+)'/g)].map(match => match[1]).filter(channel => channel !== 'styk:stats-state-changed'))
     assert.ok(main.includes(`handle('${channel}'`), `${channel} has a handler`);
   for (const text of [preload, main]) assert.doesNotMatch(text, /telemetry|contentTracing|performance-trace/i);
