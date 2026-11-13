@@ -328,6 +328,17 @@ test('a stage prepared ahead of its owner is taken once, and a failed start reac
   assert.equal(started.length, 2, 'a stage is handed over once; the next take starts its own');
   await handoff.take(other);
   assert.equal(started.length, 3);
+  // A canvas keeps one context: a start that comes after its owner took the canvas starts nothing.
+  handoff.prepare(other);
+  assert.equal(started.length, 3, 'a taken canvas is not prepared again');
+  // A stage nobody takes (its engine was given up) is freed.
+  let freed = 0;
+  const releasing = stageHandoff(() => Promise.resolve({free: () => { freed++; }}));
+  const loose = {};
+  releasing.prepare(loose);
+  releasing.release(loose);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(freed, 1);
   const failing = stageHandoff(() => Promise.reject(new Error('no device')));
   failing.prepare(canvas);
   await assert.rejects(failing.take(canvas), /no device/);

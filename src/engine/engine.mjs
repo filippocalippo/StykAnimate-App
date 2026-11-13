@@ -40,8 +40,9 @@ export const expectedAdapterInfo = () => adapterInfo;
 
 /**
  * Loads the engine once per page.
- * @param {{workers?: number, deviceMemory?: number, stage?: HTMLCanvasElement}} [options] `stage`: the scene canvas, whose stage starts as soon as the
- *   module is instantiated (before its threads have joined), for `createStage` to take (engine-start.mjs)
+ * @param {{workers?: number, deviceMemory?: number, stage?: Promise<HTMLCanvasElement|null>}} [options] `stage`: the scene canvas (when it settles),
+ *   whose stage starts as soon as both it and the module are ready (before the engine's threads have joined), for `createStage` to take
+ *   (engine-start.mjs). A canvas whose stage was taken already is left alone.
  * @returns {Promise<{handle: EngineHandle, workers: number, threaded: boolean, createStage(canvas: HTMLCanvasElement): Promise<Stage>,
  *   open(bytes: Uint8Array, extension: string, name: string): Promise<object>, whenProgress(seen?: number, timeoutMs?: number): Promise<void>, progressSeen(): number, destroy(): void}>}
  */
@@ -130,14 +131,14 @@ async function load({workers = tuned('engine.workers', defaultWorkerCount(), WOR
     return created;
   });
   // The stage needs the engine's handle, not its threads: its graphics device is asked for while they start.
-  if (stage) stages.prepare(stage);
+  const preparing = stage ? Promise.resolve(stage).then(canvas => { if (canvas) stages.prepare(canvas); return canvas; }, () => null) : null;
   try {
     const joining = performance.now();
     if (threaded) await Promise.all(Array.from({length: Math.min(workers, LAUNCH_WORKERS)}, spawn));
     traceComplete('engine threads join', joining, performance.now() - joining, null, 'engine start');
   } catch (error) {
     // This engine is given up (the application's call loads another): the stage it started is nobody's.
-    if (stage) stages.take(stage).then(started => started.free?.(), () => {});
+    preparing?.then(canvas => canvas && stages.release(canvas));
     throw error;
   }
   if (span !== 0) traceEnd(span, {workers, threaded});
@@ -209,10 +210,11 @@ async function load({workers = tuned('engine.workers', defaultWorkerCount(), WOR
  * over once (starting one when none was prepared), so a canvas never gets two.
  */
 export function stageHandoff(start) {
-  const prepared = new WeakMap();
+  const prepared = new WeakMap(), taken = new WeakSet();
   return {
     prepare(canvas) {
-      if (prepared.has(canvas)) return;
+      // A canvas keeps one context: once its owner has a stage over it, nothing else starts one.
+      if (prepared.has(canvas) || taken.has(canvas)) return;
       const stage = start(canvas);
       // The owner that takes the stage reports its failure; until then it is not an unhandled rejection.
       stage.catch(() => {});
@@ -221,7 +223,14 @@ export function stageHandoff(start) {
     take(canvas) {
       const stage = prepared.get(canvas);
       prepared.delete(canvas);
+      taken.add(canvas);
       return stage ?? start(canvas);
+    },
+    /** Frees the stage prepared over `canvas` that nobody took (its engine was given up). */
+    release(canvas) {
+      const stage = prepared.get(canvas);
+      prepared.delete(canvas);
+      stage?.then(started => started.free?.(), () => {});
     },
   };
 }

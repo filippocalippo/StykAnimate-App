@@ -43,10 +43,10 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   two workers at launch (`engine-worker.mjs`); `grow()` starts the rest, up to `navigator.hardwareConcurrency - 1` and at most 8, when a file or a
   large document opens, when playback prepares frames for someone waiting (not the idle warm-up) and when an export starts, so an empty editor holds
   two threads (about 40 MiB less than eight). Work queued meanwhile runs on the threads there are. Without cross-origin isolation the same module
-  runs without workers through `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), asks the browser for the scene's WebGPU adapter at once
+  runs without workers through `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine and, once the page has painted its first frame, asks the browser for the scene's WebGPU adapter
   (`engine-adapter.mjs`: the answer takes most of a second on a first launch, so it comes back while the engine loads; it is handed to the
-  engine's own request with the same options, and its description is the adapter's name in the status line), loads the engine and starts the
-  stage over the scene canvas as soon as the module is instantiated, before its threads have joined (`loadEngine({stage})`); the application's
+  engine's own request with the same options, and its description is the adapter's name in the status line), and starts the
+  stage over the scene canvas as soon as the module is instantiated too, before its threads have joined (`loadEngine({stage})`); the application's
   `loadEngine()` and `createStage()` take what it started (`stageHandoff`). The engine asks for each device's adapter once
   (`styk-wasm` `gpu.rs`): WebGPU where the browser gives an adapter, else WebGL2, with no separate detection request. `join` hands another thread what it needs to join the engine (the
   compiled module, the memory, a stack size, the progress counter's address).

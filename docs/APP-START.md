@@ -12,8 +12,8 @@ steps on the way (the desktop shell, the page and its scripts, the interface, th
    Chromium's renderer main thread pays a fixed cost per request, so the number of requests matters more than their size.
 3. **The scripts and styles**: the packaged app serves the application as a bundle (below): about a dozen files at launch. From source the page loads about 370 modules
    and 92 stylesheets, which is slower to start and exists so that tests and development see the sources.
-4. **The engine and the stage** (`src/engine/engine-start.mjs`, the page's first script): the scene's WebGPU adapter is asked for at once, the engine's
-   WebAssembly compiles, and the stage starts over the scene canvas as soon as the module is instantiated (below, "Asking for the device sooner").
+4. **The engine and the stage** (`src/engine/engine-start.mjs`, the page's first script): the engine's WebAssembly compiles; once the page has painted its
+   first frame, the scene's WebGPU adapter is asked for and the stage starts over the scene canvas (as soon as the module is instantiated too) (below, "Asking for the device sooner").
 5. **`init()`** (`src/app.mjs`): settings, locale, the shell, then the stage (`createRenderer`), which takes the stage started in step 4 and waits for it.
 
 ## The bundle
@@ -50,7 +50,7 @@ WebGPU detection (an adapter asked for and dropped), the adapter, the device, an
 for the adapter's name. A worker asked for its own adapter and device meanwhile, which warmed nothing the page uses: each page and worker has its own
 connection to the graphics process. Now (spans of the `graphics calls` and `engine start` lanes, `npm run perf -- show <run> app.start`):
 
-- **The adapter is asked for when the page starts** (`src/engine/engine-adapter.mjs`), beside the engine's compile, and its answer is handed to the engine's
+- **The adapter is asked for once the page has painted** (`src/engine/engine-adapter.mjs`), beside the engine's compile, and its answer is handed to the engine's
   own request with the same options (wgpu asks through `navigator.gpu`, so the hand-off is there; a second stage, after a lost device, asks afresh). Its
   description names the adapter in the status line, which the warm-up worker did before; the worker is gone. The page's first WebGPU call holds the
   interface thread while its connection is set up (`syncMs` on the span: 2 to 300 ms, more when the graphics process is busy); it did so before too, inside the stage.
@@ -58,6 +58,8 @@ connection to the graphics process. Now (spans of the `graphics calls` and `engi
   browser gives an adapter, else WebGL2, without wgpu's detection. On a busy machine (other builds at 100% of the processor) the detection took 1.1 s and the
   adapter after it 0.66 s; a machine whose driver is refused waits for one "no adapter" instead of two.
 - **The stage starts before the engine's threads join** (`loadEngine({stage})`): it needs the engine's handle, not its threads.
+- **Both wait for the page's first paint** (at most 0.3 s, `afterFirstPaint` in `engine-start.mjs`): started before it, their synchronous parts (the
+  connection's setup, WebGL2's shader link) held the first pixels back by 0.2 to 0.5 s on every environment.
 - **A WebGL2 stage is named by the engine** (`adapterName` in `src/engine/engine-stage.mjs`): asking WebGPU for the name of a WebGL2 stage waited for one more
   "no adapter", up to 1.5 s, and would have named another device.
 
