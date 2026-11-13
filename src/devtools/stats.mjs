@@ -6,8 +6,16 @@
 /** Rounds to `digits` decimals; null for a value that is not a finite number. */
 export const round = (value, digits = 3) => (typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 10 ** digits) / 10 ** digits : null);
 
-/** The finite numbers of `values`, ascending, as a new array. */
-export const sorted = values => Array.from(values).filter(Number.isFinite).sort((a, b) => a - b);
+/**
+ * The finite numbers of `values`, ascending, as a new Float64Array: a typed array sorts natively, several times faster
+ * than a comparator, which the live panels pay for four times a second over thousands of spans.
+ */
+export function sorted(values) {
+  const list = new Float64Array(values.length ?? 0);
+  let count = 0;
+  for (const value of values) if (Number.isFinite(value)) list[count++] = value;
+  return list.subarray(0, count).sort();
+}
 
 /** The nearest-rank quantile `q` (0 to 1) of an ascending list: the smallest value with at least `q` of the list at or below it. */
 export const quantile = (ascending, q) => (ascending.length ? ascending[Math.min(ascending.length - 1, Math.max(0, Math.ceil(q * ascending.length) - 1))] : null);

@@ -93,26 +93,80 @@ none and runs as the machine it is.
 
 ## Panels
 
-`src/devtools/panels.mjs` is one floating panel, marked DEVELOPER, opened with **Ctrl+Shift+D**. It has five tabs:
-- **Profiler.** Record, or take the last 5 s from the ring after a hitch. A timeline shows one lane per thread (the
-  interface, display frames, input); wheel zooms and a click selects a span, with its arguments, similar spans and its
-  children. The span table lists count, total, p50, p95 and worst. **Export Perfetto** saves Chrome trace JSON for
-  ui.perfetto.dev.
-- **Logs.** Filter by level, module and text; copy as JSON lines.
+One panel, marked DEVELOPER, opened with **Ctrl+Shift+D**, and the performance overlay, **Ctrl+Shift+O**. Both are
+watchers (`runtime.watch` in `src/devtools/devtools.mjs`): while either is on screen the frame recorder, the engine
+boundary meter and the sampler run (four samples a second); closed, collapsed or parked, nothing samples, ticks or
+redraws, and no `display frame` span enters the ring (`tests/devtools.browser.mjs` checks it). Every refresh of the
+panel is a span, `devtools panel`, and every drawing of the overlay one, `devtools overlay`: the tools' own cost shows
+in what they measure. The panel's text is developer-only English, outside the localized catalogue.
+
+The panel computes no measurement of its own. Its numbers are the runtime's summary of a stretch
+(`runtime.summarize`, which is `analyze` in `src/devtools/capture.mjs`: the summary the control channel's
+`trace.stop` returns and the profiling runner stores), the sampler's reads and the boundary meter's. A gesture recorded
+in the panel and the same gesture in a profiling run report the same numbers and the same grade
+(`src/devtools/grades.mjs`, which `perf/lib/metrics.mjs` re-exports).
+
+Six tabs; the first opens by default:
+- **Performance.** Live, what the interface thread, the engine and memory are doing now:
+  - *Frames*: the last three seconds of display frames as a chart. Each column is a frame: the pale bar behind is
+    how long it stayed on screen, in front the interface thread's work stacked by phase (input handlers, script,
+    rendering). A dashed line marks the display's period, a dotted one the late limit (one and a half periods); a late
+    frame's column turns the late colour and gets a triangle over it. With more frames than columns, each column is
+    the slowest of its frames. Pointing at a column shows that frame's numbers and the spans that began in it; a click
+    keeps it.
+  - *Now* (last two seconds): frames per second, the frame time a person sees (`felt`, graded), late frames,
+    interface work per frame (p95, share of the period, mean), input delay (p95 graded, p50), paints per second.
+  - *Where the interface's time goes*: the heaviest span groups (interface updates by surface, input handlers by
+    target, paint, stage draw, the tools' own), milliseconds per second with a bar, count per second, p95 and worst.
+    The order holds still while values move: a row passes the one above only when it weighs a quarter more.
+  - *Calls into the engine*: the heaviest calls of the last two seconds (calls, total, worst). The tools' own reads of
+    the engine are not counted (`unmetered` in `src/devtools/boundary.mjs`).
+  - *Engine*: frames its threads prepared per second and the time of one, frames prepared on the interface thread for
+    want of a ready one, pictures pending, playback's ready frames, the frame cache, the threads.
+  - *Memory*: the JavaScript heap, the engine's memory in use and reserved (its linear memory, which never shrinks),
+    the stage's GPU memory, each with its last minute as a line. The GPU figure is all the stage reports; the stage's
+    own `gpuBytes` (the app's count, shown beside it) leaves out its render targets and sprite pages.
+
+  **Record** starts a capture (the control channel's and the runner's kind) and **Stop** ends it; the tab then shows
+  exactly that stretch, frozen, with its grade against the limits (the frame time seen against 16.7 / 33.3 / 100 ms
+  and the input delay p95 against 34 / 67 / 150 ms; the worse decides, as in a run). **Last 5 s** holds what the rings
+  kept of the last five seconds, after a hitch. **Save** downloads the summary as JSON (with its grade); **Perfetto**
+  exports the spans as Chrome trace JSON for ui.perfetto.dev. **Live** lets the held stretch go.
+- **Profiler.** The held stretch (the same Record, Last 5 s and exports) on a timeline: a lane per thread, in this
+  order: `interface` (the app's spans, nested), `display` (a late frame taller and in the late colour), `input` (the
+  browser's slow inputs), `long tasks`, `phases` (the app's start), `tasks`, then any other. The wheel zooms; a click
+  selects a span and shows its arguments, the spans like it and its children. While a capture runs, the timeline
+  follows its last five seconds. Under it, every span group: thread, count, total, p50, p95 and worst.
+- **Logs.** Filter by level, module and text; copy as JSON lines. New lines are appended; the newest 500 are kept.
 - **Parameters.** Change values live, reset them, and save or load named sets.
 - **Inspector.** The read view's document tree, paged 50 rows at a time. The big tables list their rows without
   fetching records. Also: the evaluated frame on show, the history labels, and the log of edit session calls, which
   can be saved.
-- **Jobs.** Engine threads, lost workers, preparation, the frame cache, pictures pending and busy; the stage's
-  geometry and submit times; memory (JS heap, the engine's linear memory, live and peak, the frame cache, GPU); and
-  every worker the page started.
+- **Jobs.** What the Performance tab does not chart: the engine's threads (lost, the document generation, busy), what
+  the interface is doing (playing, buffering, importing, playback's buffer), the stage (back end, frames drawn, the
+  last draw's geometry and submit times, a refusal), the browser's long tasks and slow inputs since the page started,
+  and every worker the page started.
 
-The **performance overlay** (**Ctrl+Shift+O**) sits over the stage and lets input through. It shows:
-- frame time, p50, p95 and worst;
-- late frames;
-- paint p95 and playback fps;
-- queue depths and memory;
-- a bar strip of recent frames.
+The **performance overlay** is a small pill over the stage's bottom-right corner that lets input through. It shows the
+frame time seen and the input delay p95 (each with its grade), frames per second, late frames, the interface's work
+p95 against the period, the frames the engine's threads prepare, memory, and the last two seconds' frame chart in
+miniature. It is one canvas, drawn four times a second from reads the tools already keep, with no layout, in the
+thread's idle time after a frame; its place is read when the stage's size changes. Measured during a drag at 144 Hz, a
+drawing takes about 0.35 ms of script and 0.2 ms of canvas (its span reads about 1 ms on a loaded machine): under
+0.05 ms a display frame, and no difference in late frames beyond the noise on the `large` workload.
+
+Live, the Performance tab's chart redraws four times a second (about 0.4 ms) and its numbers and lists twice (about
+2.5 ms on the `large` workload during a drag, in the thread's idle time after a frame, so it does not delay the next);
+nothing is rebuilt, only text, bar transforms and canvases change, and each section contains its own layout. The tabs listen through
+handler properties (`onclick`, `onpointermove`), never `addEventListener`, which the early script times as the app's
+input handling.
+
+The code is a folder, `src/devtools/panels/`: `panels.mjs` (the panel, its tabs, when a tab refreshes), a module per
+tab (`performance.mjs`, `profiler.mjs`, `logs.mjs`, `parameters.mjs`, `inspector.mjs`, `jobs.mjs`), `overlay.mjs`, and
+the shared pieces: `recording.mjs` (the held stretch, shared by Performance and Profiler), `chart.mjs` (the frame
+chart), `dom.mjs` (elements, live tables and ranked lists that update in place, canvases that follow their size),
+`rank.mjs` (the steady order) and `style.mjs` (the stylesheet over the app's tokens with fallbacks, light and dark,
+and the colours the canvases read from it; canvases draw at the display's pixel ratio).
 
 The panel is a dock panel, `developer`, which the tools define at run time (`window.styk.shell.define`): the shipping
 build's catalogue and default layouts never name it. Its descriptor's `defaultDock: 'hidden'` places it closed in
@@ -150,7 +204,7 @@ A request is `{id, op, args?, detail?: "short" | "full"}`. The answer is `{id, o
 |---|---|
 | `hello` | protocol version (1), build, operations |
 | `state` | document summary, playback, view, focus, open dialogs, window, cross-origin isolation, WebGPU |
-| `metrics`, `threads`, `memory` | the overlay's numbers; the page's workers; the page's, the engine's and the GPU's memory |
+| `metrics`, `threads`, `memory` | the frames, inputs, paint, queues and memory now; the page's workers; the page's, the engine's and the GPU's memory |
 | `boundary` | `{limit, reset}`: the calls the interface made into the engine since the last capture began, heaviest first |
 | `environment` | what a profiling run asked the page to pretend, and what the page, the engine and the stage report |
 | `startup` | the launch's milestones and the app's start as phases, in ms from the page's start |
@@ -203,7 +257,9 @@ accepts the gate's import of it.
   meter, the requested environment's filter, Perfetto, log filters, inspector paging, the inert instrumentation layer,
   the shipping check and the shipped file set.
 - `node tests/devtools.browser.mjs`: the early script injected in Chrome, every control operation, a real joint drag
-  reaching the edit session, the Perfetto export, and each panel and the overlay rendering without errors.
+  reaching the edit session, the Perfetto export, each tab and the overlay rendering without errors, the Performance
+  tab during a drag, Record then Stop giving a graded summary with frames and inputs, the tools' own cost, and
+  nothing ticking once everything is closed. It writes screenshots to `artifacts/devtools/`.
 - `tests/devtools.test.mjs` also holds the packaged app to its file lists (no `desktop/devtools.cjs`, no
   `src/devtools/`) and the shipped desktop code to carrying no developer marker.
 - The shipping check on the shipping bundle (`build/app`) and the built site (`build/web`).

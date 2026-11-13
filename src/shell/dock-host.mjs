@@ -977,7 +977,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
 
   /** Shows a panel: activates its tab, opens its flyout, the sheet or the timeline's body, or reopens it; `focus` moves focus to it. */
   /**
-   * A panel defined after the arrangements were read (the developer build's tools, src/devtools/panels.mjs) is placed in
+   * A panel defined after the arrangements were read (the developer build's tools, src/devtools/panels/panels.mjs) is placed in
    * each workspace that lacks it, as a repair places any missing panel: where its descriptor's `defaultDock` says
    * (closed for 'hidden'), so no layout changes shape on its own. A panel already placed stays where it is.
    */

@@ -5,7 +5,12 @@
  * prints it the same way. A scenario is graded on one metric (its `judge`): the grade says how the scenario feels to a
  * person, in four steps, from limits that come from how people perceive delay, not from what the app does today.
  */
+import {GESTURE, GRADES, LIMITS, grade, judgeValues} from '../../src/devtools/grades.mjs';
 import {spread} from '../../src/devtools/stats.mjs';
+
+// The limits of the grades and the grading live with the developer tools, whose Record summary grades in the page
+// (perf/ is not served to it): one copy, re-exported here for every import of them from this module.
+export {GRADES, LIMITS, grade};
 
 /** key → {title, short, unit, better: 'lower' | 'higher', digits}. `short` is the name in a one-line summary. A scenario may add its own (`scenario.metrics`). */
 export const METRICS = Object.freeze({
@@ -37,39 +42,19 @@ export const METRICS = Object.freeze({
 });
 
 /**
- * Limits of the grades, as [good, fair, poor]: at or under the first is good, the second fair, the third poor, beyond
- * it bad (for a `higher` metric: at or over).
- *   frame       a frame of a continuous gesture: 60 a second is smooth, 30 is usable, under 10 is a slideshow;
- *   response    the wait after one action (a click, a key, an undo): 100 ms feels instant, 1 s keeps the thought;
- *   input       how far the picture trails the hand in a drag: two frames at 60 Hz is tight, over 150 ms it swims.
- */
-export const LIMITS = Object.freeze({frame: [1000 / 60 + .5, 1000 / 30 + .5, 100], response: [100, 300, 1000], input: [34, 67, 150]});
-export const GRADES = ['good', 'fair', 'poor', 'bad'];
-
-/** The grade of `value` against `limits` ([good, fair, poor]) for a metric that is better `lower` or `higher`. */
-export function grade(value, limits, better = 'lower') {
-  if (!Number.isFinite(value)) return null;
-  const step = limits.findIndex(limit => (better === 'higher' ? value >= limit : value <= limit));
-  return GRADES[step < 0 ? 3 : step];
-}
-
-/**
  * The criteria a scenario of `kind` is judged on unless it names its own. A gesture is as good as the worse of two
  * things: how smooth it looks (the frame time a person sees) and how closely the picture follows the hand.
  */
-export const defaultJudge = kind => (kind === 'gesture' ? [{metric: 'frame.felt', limits: LIMITS.frame}, {metric: 'input.p95', limits: LIMITS.input}] : [{metric: 'duration', limits: LIMITS.response}]);
+export const defaultJudge = kind => (kind === 'gesture' ? [...GESTURE] : [{metric: 'duration', limits: LIMITS.response}]);
 
 /**
- * Judges a scenario's aggregated `metrics` on each of its `criteria` ({metric, limits}): the grade is the worst
- * criterion's, and `decided` names it. A criterion the scenario did not measure (no input in playback) is left out.
+ * Judges a scenario's aggregated `metrics` (their medians) on each of its `criteria` ({metric, limits}): the grade is
+ * the worst criterion's, and `decided` names it (grades.mjs `judgeValues`). A criterion the scenario did not measure
+ * (no input in playback) is left out.
  */
 export function judge(criteria, metrics, definitions = {}) {
-  const judged = criteria.map(({metric, limits}) => {
-    const value = metrics[metric]?.median;
-    return {metric, limits, value: value ?? null, grade: grade(value, limits, (definitions[metric] ?? METRICS[metric])?.better ?? 'lower')};
-  }).filter(row => row.grade !== null);
-  const worst = judged.reduce((found, row) => (!found || GRADES.indexOf(row.grade) > GRADES.indexOf(found.grade) ? row : found), null);
-  return {grade: worst?.grade ?? null, decided: worst?.metric ?? criteria[0]?.metric ?? null, value: worst?.value ?? null, criteria: judged};
+  const judged = judgeValues(criteria.map(({metric, limits}) => ({metric, limits, value: metrics[metric]?.median, better: (definitions[metric] ?? METRICS[metric])?.better})));
+  return {...judged, decided: judged.decided ?? criteria[0]?.metric ?? null};
 }
 
 /** The metrics every capture gives (`summary` is the control channel's full capture summary), as plain numbers. */

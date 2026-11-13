@@ -8,7 +8,7 @@
  * The channel reads through the same narrow reads the panels use, changes the document only through the app's own actions
  * and commands (so every change is a session command with undo), and offers no way to run arbitrary code.
  */
-import {analyze, perfettoTrace, ringEvents} from './capture.mjs';
+import {perfettoTrace, ringEvents} from './capture.mjs';
 import {round} from './stats.mjs';
 import {commandLog, documentSummary, framePage, historyPage, treePage} from './inspector.mjs';
 import {recordWrites} from './mutations.mjs';
@@ -44,8 +44,8 @@ function focused() {
 }
 
 export function createControl(runtime) {
-  const {app, early, sampler, capture} = runtime;
-  let lastTrace = null, markCount = 0, preparedBefore = null, writes = null;
+  const {app, early, sampler} = runtime;
+  let lastTrace = null, markCount = 0, writes = null;
   const marks = new Map();
   const editor = () => app.editor ?? fail('The editor is not ready.', {hint: 'Wait for window.styk.ready.'});
 
@@ -134,9 +134,7 @@ export function createControl(runtime) {
      * it costs a little per write, so ask for it in a pass that explains, not in one that is timed.
      */
     'trace.start': ({label = '', writes: recordsWrites = false} = {}) => {
-      const started = capture.start(label);
-      runtime.watch(true);
-      preparedBefore = sampler.preparation();
+      const started = runtime.startCapture(label);
       writes = recordsWrites ? recordWrites() : null;
       return started;
     },
@@ -144,11 +142,9 @@ export function createControl(runtime) {
     'trace.stop': ({series = false} = {}, full) => {
       const written = writes?.stop() ?? null;
       writes = null;
-      const taken = capture.stop();
-      runtime.watch(false);
+      const taken = runtime.stopCapture();
       const text = JSON.stringify(perfettoTrace(taken.events, {origin: taken.startedAt, metadata: {label: taken.label, startedTime: taken.startedTime}}));
-      const period = sampler.displayPeriod();
-      const summary = {...analyze(taken, {periodMs: period.measured ? period.periodMs : null, series}), preparation: preparationSince(preparedBefore, sampler.preparation()), ...(written ? {writes: written} : {})};
+      const summary = {...runtime.summarize(taken, {series}), ...(written ? {writes: written} : {})};
       lastTrace = {text, summary};
       return {label: taken.label, events: taken.events.length, dropped: taken.dropped, ms: Math.round(taken.stoppedAt - taken.startedAt), traceBytes: text.length,
         pages: Math.ceil(text.length / TRACE_PAGE), summary: full ? summary : shortSummary(summary)};
@@ -161,8 +157,7 @@ export function createControl(runtime) {
     },
     /** The ring's recent events, summarized: what happened in the last `ms` (a hitch, after the fact). */
     'trace.recent': ({ms = 5000} = {}, full) => {
-      const period = sampler.displayPeriod();
-      const summary = analyze(runtime.recent(ms), {periodMs: period.measured ? period.periodMs : null});
+      const summary = runtime.summarize(runtime.recent(ms));
       return full ? summary : shortSummary(summary);
     },
 
@@ -304,15 +299,6 @@ export function createControl(runtime) {
 export function shortSummary(summary) {
   return {ms: summary.ms, frames: summary.frames, inputs: summary.inputs, spans: summary.spans.slice(0, 10), slowest: summary.slowest.slice(0, 5),
     boundary: summary.boundary?.slice(0, 8) ?? null, counters: summary.counters, ...(summary.preparation ? {preparation: summary.preparation} : {})};
-}
-
-/** What the engine's threads prepared between two reads of its counters: frames, and the mean time of one (ms). */
-export function preparationSince(before, after) {
-  if (!before || !after) return null;
-  // The engine starts its counters afresh for a new document: what it counts then is all since.
-  const since = after.prepared >= before.prepared ? before : {prepared: 0, totalMs: 0, inline: 0};
-  const frames = after.prepared - since.prepared;
-  return {frames, msPerFrame: frames > 0 ? round((after.totalMs - since.totalMs) / frames) : null, inline: Math.max(0, after.inline - since.inline)};
 }
 
 /** The stage's place in the window (CSS pixels): where input is aimed. */

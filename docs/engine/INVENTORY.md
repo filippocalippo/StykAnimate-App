@@ -484,9 +484,22 @@ Interface: stays in JS.
 | `src/devtools/devtools.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/early.js` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/frames.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/grades.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/inspector.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/mutations.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
-| `src/devtools/panels.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/chart.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/dom.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/inspector.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/jobs.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/logs.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/overlay.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/panels.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/parameters.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/performance.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/profiler.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/rank.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/recording.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/panels/style.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/sampler.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/stats.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/drawing-brush-labels.mjs` |  | stays |  |
