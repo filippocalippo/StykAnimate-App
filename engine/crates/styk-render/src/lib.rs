@@ -191,7 +191,8 @@ pub struct Renderer {
     /// simpler shaders (`shading::Shading::SIMPLER`), each created with the first frame that draws with it. Off ([`Renderer::set_shading_runs`]:
     /// the default but on a software rasterizer), every prim draws with the general one.
     pub(crate) shading_runs: Arc<[(u32, u32, shading::Shading)]>,
-    pub(crate) shading_pipelines: [Option<wgpu::RenderPipeline>; 4],
+    /// By form (`[general view, plain]`, `shading::Shading::entry`), then by simpler shader.
+    pub(crate) shading_pipelines: [[Option<wgpu::RenderPipeline>; 5]; 2],
     pub(crate) shading_on: bool,
     pub(crate) prim_shader: wgpu::ShaderModule,
     pub(crate) prim_layout: wgpu::PipelineLayout,

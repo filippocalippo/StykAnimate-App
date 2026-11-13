@@ -3,9 +3,11 @@
 //! `prim.wgsl` shades every kind in one function. A software rasterizer (SwiftShader, which Chromium draws WebGL2 with
 //! where there is no usable graphics card) runs a fragment through both sides of every branch, so each pixel of a solid
 //! rectangle paid for pictures, glyphs, gradients and generated effects: the document's background alone cost 61 ms of a
-//! 78 ms frame. So the shader has five entry points over the same functions (`fs_flat`, `fs_vector`, `fs_image`,
+//! 78 ms frame. So the shader has entry points over the same functions (`fs_flat`, `fs_stroke`, `fs_vector`, `fs_image`,
 //! `fs_composite`, `fs_main`), each holding the code of fewer kinds, and a pass draws each run of primitives with the
-//! simplest one that holds all of the run's kinds. The pixels are the same whichever draws them (`tests/shading.rs`).
+//! simplest one that holds all of the run's kinds; an upright view with the native painter takes the `_plain` form of the
+//! simpler ones, without the turned artboard's clip and the Canvas painter's masks. The pixels are the same whichever
+//! draws them (`tests/shading.rs`).
 
 use styk_draw::*;
 
@@ -14,7 +16,9 @@ use styk_draw::*;
 pub(crate) enum Shading {
     /// `fs_flat`: triangles and the view's fill in their own colour.
     Flat,
-    /// `fs_vector`: those and the shapes covered by their distance (segments, boxes, arcs, polylines, discs, rings).
+    /// `fs_stroke`: those and segments, discs and rings (what stick figures are drawn with).
+    Stroke,
+    /// `fs_vector`: those and the other shapes covered by their distance (boxes, arcs, polylines).
     Vector,
     /// `fs_image`: pictures and drawing tiles.
     Image,
@@ -26,16 +30,23 @@ pub(crate) enum Shading {
 
 impl Shading {
     /// The simpler entry points, in the order a renderer keeps their pipelines.
-    pub(crate) const SIMPLER: [Shading; 4] = [Shading::Flat, Shading::Vector, Shading::Image, Shading::Composite];
+    pub(crate) const SIMPLER: [Shading; 5] = [Shading::Flat, Shading::Stroke, Shading::Vector, Shading::Image, Shading::Composite];
 
-    /// The entry point's name in `prim.wgsl`.
-    pub(crate) fn entry(self) -> &'static str {
-        match self {
-            Shading::Flat => "fs_flat",
-            Shading::Vector => "fs_vector",
-            Shading::Image => "fs_image",
-            Shading::Composite => "fs_composite",
-            Shading::Full => "fs_main",
+    /// The entry point's name in `prim.wgsl`; `plain` for an upright view with the native painter (no turned artboard to clip
+    /// to, no Canvas masks), which the general one has no form of its own for.
+    pub(crate) fn entry(self, plain: bool) -> &'static str {
+        match (self, plain) {
+            (Shading::Flat, false) => "fs_flat",
+            (Shading::Flat, true) => "fs_flat_plain",
+            (Shading::Stroke, false) => "fs_stroke",
+            (Shading::Stroke, true) => "fs_stroke_plain",
+            (Shading::Vector, false) => "fs_vector",
+            (Shading::Vector, true) => "fs_vector_plain",
+            (Shading::Image, false) => "fs_image",
+            (Shading::Image, true) => "fs_image_plain",
+            (Shading::Composite, false) => "fs_composite",
+            (Shading::Composite, true) => "fs_composite_plain",
+            (Shading::Full, _) => "fs_main",
         }
     }
 
@@ -46,7 +57,10 @@ impl Shading {
 
     /// Whether this entry point holds every kind `other` holds.
     pub(crate) fn holds(self, other: Shading) -> bool {
-        self == other || self == Shading::Full || (self == Shading::Vector && other == Shading::Flat)
+        self == other
+            || self == Shading::Full
+            || (self == Shading::Stroke && other == Shading::Flat)
+            || (self == Shading::Vector && matches!(other, Shading::Flat | Shading::Stroke))
     }
 
     /// The simplest entry point that holds the kinds of both.
@@ -72,7 +86,8 @@ pub(crate) fn shading(p: &Prim) -> Shading {
     }
     match kind {
         K_TRI | K_FILL_VIEW => Shading::Flat,
-        K_CAPSULE | K_BOX | K_ARC | K_POLYLINE | K_DISC | K_RING => Shading::Vector,
+        K_CAPSULE | K_DISC | K_RING => Shading::Stroke,
+        K_BOX | K_ARC | K_POLYLINE => Shading::Vector,
         K_IMAGE => Shading::Image,
         K_COMPOSITE => Shading::Composite,
         _ => Shading::Full,
@@ -146,7 +161,10 @@ mod tests {
         assert_eq!(shading(&prim(K_FILL_VIEW)), Shading::Flat);
         assert_eq!(shading(&prim(K_TRI)), Shading::Flat);
         assert_eq!(shading(&prim(K_TRI | F_GLYPH_VECTOR)), Shading::Flat, "a lone glyph's outline is a flat triangle");
-        for kind in [K_CAPSULE, K_BOX, K_ARC, K_POLYLINE | F_CLOSED, K_DISC, K_RING | F_RING_FILL] {
+        for kind in [K_CAPSULE, K_DISC, K_RING, K_RING | F_RING_FILL] {
+            assert_eq!(shading(&prim(kind)), Shading::Stroke, "kind {kind}");
+        }
+        for kind in [K_BOX, K_ARC, K_POLYLINE, K_POLYLINE | F_CLOSED] {
             assert_eq!(shading(&prim(kind)), Shading::Vector, "kind {kind}");
         }
         for kind in [K_IMAGE, K_IMAGE | F_DRAWING, K_IMAGE | F_TINT | F_SMOOTH] {
@@ -165,7 +183,7 @@ mod tests {
     #[test]
     fn a_join_holds_both() {
         use Shading::*;
-        let all = [Flat, Vector, Image, Composite, Full];
+        let all = [Flat, Stroke, Vector, Image, Composite, Full];
         for a in all {
             for b in all {
                 let j = a.join(b);
@@ -174,19 +192,22 @@ mod tests {
             }
         }
         assert_eq!(Flat.join(Vector), Vector);
+        assert_eq!(Stroke.join(Flat), Stroke);
+        assert_eq!(Stroke.join(Vector), Vector);
+        assert_eq!(Stroke.join(Image), Full);
         assert_eq!(Vector.join(Image), Full);
         assert_eq!(Image.join(Composite), Full);
     }
 
     #[test]
     fn runs_cover_the_list_in_order_and_keep_the_background_apart() {
-        let prims = [prim(K_FILL_VIEW), prim(K_CAPSULE), prim(K_DISC), prim(K_TRI), prim(K_IMAGE), prim(K_GLYPH), prim(K_CAPSULE)];
-        assert_eq!(runs(&prims, 0..1), vec![(0, 1, Shading::Flat), (1, 3, Shading::Vector), (3, 4, Shading::Flat), (4, 5, Shading::Image), (5, 6, Shading::Full), (6, 7, Shading::Vector)]);
+        let prims = [prim(K_FILL_VIEW), prim(K_CAPSULE), prim(K_DISC), prim(K_ARC), prim(K_TRI), prim(K_IMAGE), prim(K_GLYPH), prim(K_CAPSULE)];
+        assert_eq!(runs(&prims, 0..1), vec![(0, 1, Shading::Flat), (1, 3, Shading::Stroke), (3, 4, Shading::Vector), (4, 5, Shading::Flat), (5, 6, Shading::Image), (6, 7, Shading::Full), (7, 8, Shading::Stroke)]);
         // A background whose kind is the scene's is still its own run.
         let prims = [prim(K_CAPSULE), prim(K_CAPSULE)];
-        assert_eq!(runs(&prims, 0..1), vec![(0, 1, Shading::Vector), (1, 2, Shading::Vector)]);
+        assert_eq!(runs(&prims, 0..1), vec![(0, 1, Shading::Stroke), (1, 2, Shading::Stroke)]);
         assert_eq!(runs(&[], 0..0), vec![]);
-        assert_eq!(runs(&prims, 0..0), vec![(0, 2, Shading::Vector)]);
+        assert_eq!(runs(&prims, 0..0), vec![(0, 2, Shading::Stroke)]);
     }
 
     #[test]
@@ -200,7 +221,7 @@ mod tests {
         let runs = runs(&prims, 0..1);
         assert!(runs.len() <= MAX_RUNS + 1, "{} runs", runs.len());
         assert_eq!(runs[0], (0, 1, Shading::Flat), "the background keeps its own shader");
-        assert_eq!(runs.last().unwrap().2, Shading::Vector, "a long run of segments keeps the simpler shader");
+        assert_eq!(runs.last().unwrap().2, Shading::Stroke, "a long run of segments keeps the simpler shader");
         let mut at = 0;
         for &(start, end, shader) in &runs {
             assert_eq!(start, at, "runs are contiguous");

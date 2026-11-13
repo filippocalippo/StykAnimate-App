@@ -23,10 +23,12 @@ tiles, glyphs, gradients, composites and generated effects. Measured in the app,
 
 ## Decision
 
-- The shader keeps one source and gets five fragment entry points over the same functions: `fs_flat` (triangles and the
-  view's fill in their own colour), `fs_vector` (those and the shapes covered by distance: segments, boxes, arcs,
-  polylines, discs, rings), `fs_image` (pictures and drawing tiles), `fs_composite` (isolated groups' layers) and
-  `fs_main` (everything, as before). Each holds the code of fewer kinds, so a software rasterizer runs only that code.
+- The shader keeps one source and gets more fragment entry points over the same functions: `fs_flat` (triangles and the
+  view's fill in their own colour), `fs_stroke` (those and segments, discs and rings), `fs_vector` (those and boxes, arcs,
+  polylines), `fs_image` (pictures and drawing tiles), `fs_composite` (isolated groups' layers) and `fs_main`
+  (everything, as before). Each holds the code of fewer kinds, so a software rasterizer runs only that code. Each simpler
+  one also has a `_plain` form, used for an upright view with the native painter (the stage), without the turned
+  artboard's clip and the Canvas painter's masks.
 - On a software rasterizer a pass draws each run of primitives with the simplest entry point that holds every kind in
   it (`styk-render/src/shading.rs`): a paint record (a gradient), a face of a depth run, an additive record, a lone glyph,
   the background picture, a generated effect, or a run mixing the kinds of two simpler ones takes `fs_main`. The root's background is a run of its own (it was its own draw call already).
@@ -54,7 +56,8 @@ tiles, glyphs, gradients, composites and generated effects. Measured in the app,
 ## Consequences
 
 - A frame on a software device costs several draw calls instead of one a pass (the background, then usually one or two
-  runs), and up to four more pipelines are built, each with the first frame that needs it.
+  runs), and up to ten more pipelines can be built, each with the first frame that needs it (the stage of a stick-figure
+  scene builds two: the flat and stroke shaders' plain forms).
 - Glyphs, gradients, the background picture and generated effects still draw with the general shader on a software
   device: the next step if their per-pixel cost matters there is another entry point beside these.
 - The live parameter `stage.shadingRuns` (developer tools) turns the runs on (1) or off (0) over the device's choice, so

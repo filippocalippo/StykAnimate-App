@@ -38,7 +38,7 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | Module | Holds |
 | --- | --- |
 | `pipeline.rs` | the one WGSL shader (`prim.wgsl`) for every kind and its pipelines, bind layouts ([D8](decisions/0008-renderer-without-storage-buffers.md)) |
-| `shading.rs` | which of the shader's five fragment entry points draws each run of primitives on a software rasterizer ([Without a graphics card](#without-a-graphics-card), [D20](decisions/0020-software-rasterizer-shading-runs.md)) |
+| `shading.rs` | which of the shader's fragment entry points draws each run of primitives on a software rasterizer ([Without a graphics card](#without-a-graphics-card), [D20](decisions/0020-software-rasterizer-shading-runs.md)) |
 | `frame.rs` | one frame: isolation layer passes by round and depth, each depth's effect stacks after its passes, then the frame pass (MSAA ×4, resolved once) |
 | `isolation.rs` | the layer atlas (8 pages of at least the frame's size, grown for larger effect layers, two for depth parity) and `plan_rounds`: layers that do not fit render in full-resolution rounds, the frame drawn between rounds |
 | `images.rs`, `pictures.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`: shelves, and the free space an earlier page left before a new page opens), uploads of decoded images (in bands of rows) and drawing tiles; the table that maps a layout page to its layer for drawing cel tiles, and the picture table (a hash table of which pictures are in the sprite texture, in which layer) with the soft atlas (a texel to 8 of the page's, 20 MiB for 116 large pictures) that a picture not in it is drawn from: a renderer holding the whole layout has every picture in, the stage's, for a document with more pages than it keeps, does not ([memory.md](memory.md#pages-kept-against-a-budget-soft-copies-in-their-place)) |
@@ -236,10 +236,13 @@ fragments through both sides of every branch of a shader with the lanes masked: 
 the fragment function holds, whatever the primitive drawn. Through the one general function the document's background (one
 rectangle over the frame) cost 61 of a 78 ms frame on the small scene, and an early return for its kind gained nothing.
 
-So `prim.wgsl` has five fragment entry points over the same functions, each holding fewer kinds: `fs_flat` (triangles
-and the view's fill in their own colour), `fs_vector` (those and the shapes covered by distance: segments, boxes, arcs,
-polylines, discs, rings), `fs_image` (pictures and drawing tiles), `fs_composite` (isolated groups' layers composited into
-their parents: translucent figures, onion skins, effects) and `fs_main` (every kind). On a software rasterizer (`wgpu::DeviceType::Cpu`, which wgpu reports for
+So `prim.wgsl` has fragment entry points over the same functions, each holding fewer kinds: `fs_flat` (triangles and the
+view's fill in their own colour), `fs_stroke` (those and segments, discs and rings: what stick figures are drawn with),
+`fs_vector` (those and the other shapes covered by distance: boxes, arcs, polylines), `fs_image` (pictures and drawing
+tiles), `fs_composite` (isolated groups' layers composited into their parents: translucent figures, onion skins, effects)
+and `fs_main` (every kind). Each simpler one has a `_plain` form for an upright view with the native painter, the stage's,
+which leaves out the turned artboard's clip and the Canvas painter's masks: both are off there, but a software rasterizer
+ran their code for every fragment all the same. On a software rasterizer (`wgpu::DeviceType::Cpu`, which wgpu reports for
 SwiftShader and llvmpipe from the WebGL renderer string, and for lavapipe and WARP) a pass draws each run of primitives with
 the simplest one that holds every kind in it (`shading.rs`): a paint record (a gradient), a face of a depth run, an additive
 record, lone glyphs, the background picture and generated effects take `fs_main`, and so does a run that mixes the kinds of

@@ -100,7 +100,7 @@ fn depth_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthStencilAtt
 /// of the flat and vector fragment shaders and the list's runs of prims each draws (`crate::shading`).
 struct Shaders {
     full: wgpu::RenderPipeline,
-    runs: Option<([Option<wgpu::RenderPipeline>; 4], Arc<[(u32, u32, Shading)]>)>,
+    runs: Option<([Option<wgpu::RenderPipeline>; 5], Arc<[(u32, u32, Shading)]>)>,
 }
 
 impl Shaders {
@@ -467,7 +467,9 @@ impl Renderer {
             DepthRuns { flat: pipelines.flat.clone(), faces: pipelines.faces.clone(), flat_add: pipelines.flat_add.clone(), ranges }
         });
         let additive = (!self.add_ranges.is_empty()).then(|| Additive { pipeline: self.additive_pipeline(), ranges: self.add_ranges.clone() });
-        let shaders = Shaders { full: self.pipeline.clone(), runs: self.shading_on.then(|| (self.shading_pipelines(), self.shading_runs.clone())) };
+        // An upright view with the native painter draws with the simpler shaders' plain forms (`prim.wgsl`).
+        let plain = self.orientation.is_none() && self.paint_context == crate::paint::PaintContext::Native;
+        let shaders = Shaders { full: self.pipeline.clone(), runs: self.shading_on.then(|| (self.shading_pipelines(plain), self.shading_runs.clone())) };
         let (mut layer_depth, mut frame_depth) = (false, false);
         let mut from = root.0 + bg;
         for (r, _) in rounds.iter().enumerate() {

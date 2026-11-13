@@ -854,40 +854,56 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
     return shade_sampled(in, p, kind, base);
 }
 
+// Hairlines keep a one-pixel footprint and fade with their width (crisp: solid): the half width drawn, and the fade.
+fn hairline(width: f32, aa: f32) -> vec2<f32> {
+    var hw = width;
+    var fade = 1.0;
+    if (hw < aa * 0.5) {
+        fade = select(max(hw, 0.0) * 2.0 / aa, select(0.0, 1.0, hw > 0.0), crisp());
+        hw = aa * 0.5;
+    }
+    return vec2<f32>(hw, fade);
+}
+
+// A stroke at signed distance `d` from its edge, in `base` (straight alpha), premultiplied.
+fn stroked(base: vec4<f32>, d: f32, aa: f32, fade: f32) -> vec4<f32> {
+    let cov = coverage(d, aa) * fade;
+    if (cov <= 0.0) { discard; }
+    return premul(base) * cov;
+}
+
 // The shapes covered by their distance (segments, boxes, arcs, polylines, discs, rings) and the
 // flat ones (triangles, the view's fill), in `base` (straight alpha), premultiplied.
 fn shade_vector(p: Prim, kind: u32, w: vec2<f32>, aa: f32, base: vec4<f32>) -> vec4<f32> {
-    if (kind == K_CAPSULE || kind == K_BOX || kind == K_ARC || kind == K_POLYLINE) {
-        var hw = p.b.x;
-        if (kind == K_ARC) { hw = p.a.w; }
-        // Hairlines keep a one-pixel footprint and fade with their width (crisp: solid).
-        var fade = 1.0;
-        if (hw < aa * 0.5) {
-            fade = select(max(hw, 0.0) * 2.0 / aa, select(0.0, 1.0, hw > 0.0), crisp());
-            hw = aa * 0.5;
+    if (kind == K_BOX) {
+        let h = hairline(p.b.x, aa);
+        return stroked(base, sd_box(w, p.a.xy, p.a.zw, h.x), aa, h.y);
+    }
+    if (kind == K_POLYLINE) {
+        let h = hairline(p.b.x, aa);
+        let start = bitcast<u32>(p.b.y);
+        let count = bitcast<u32>(p.b.z);
+        var best = 1e30;
+        for (var k = 0u; k + 1u < count; k = k + 1u) {
+            best = min(best, sd_segment(w, polyline_point(start + k), polyline_point(start + k + 1u)));
         }
-        var d = 0.0;
-        if (kind == K_CAPSULE) {
-            d = sd_segment(w, p.a.xy, p.a.zw) - hw;
-        } else if (kind == K_BOX) {
-            d = sd_box(w, p.a.xy, p.a.zw, hw);
-        } else if (kind == K_POLYLINE) {
-            let start = bitcast<u32>(p.b.y);
-            let count = bitcast<u32>(p.b.z);
-            var best = 1e30;
-            for (var k = 0u; k + 1u < count; k = k + 1u) {
-                best = min(best, sd_segment(w, polyline_point(start + k), polyline_point(start + k + 1u)));
-            }
-            if ((p.kind & F_CLOSED) != 0u && count > 2u) {
-                best = min(best, sd_segment(w, polyline_point(start + count - 1u), polyline_point(start)));
-            }
-            d = best - hw;
-        } else {
-            d = sd_arc(w, p.a.xy, p.a.z, p.b.x, p.b.y) - hw;
+        if ((p.kind & F_CLOSED) != 0u && count > 2u) {
+            best = min(best, sd_segment(w, polyline_point(start + count - 1u), polyline_point(start)));
         }
-        let cov = coverage(d, aa) * fade;
-        if (cov <= 0.0) { discard; }
-        return premul(base) * cov;
+        return stroked(base, best - h.x, aa, h.y);
+    }
+    if (kind == K_ARC) {
+        let h = hairline(p.a.w, aa);
+        return stroked(base, sd_arc(w, p.a.xy, p.a.z, p.b.x, p.b.y) - h.x, aa, h.y);
+    }
+    return shade_stroke(p, kind, w, aa, base);
+}
+
+// What stick figures are drawn with: segments, discs and rings, and the flat kinds (triangles, the view's fill).
+fn shade_stroke(p: Prim, kind: u32, w: vec2<f32>, aa: f32, base: vec4<f32>) -> vec4<f32> {
+    if (kind == K_CAPSULE) {
+        let h = hairline(p.b.x, aa);
+        return stroked(base, sd_segment(w, p.a.xy, p.a.zw) - h.x, aa, h.y);
     }
     if (kind == K_DISC) {
         let cov = coverage(length(w - p.a.xy) - p.a.z, aa);
@@ -896,13 +912,8 @@ fn shade_vector(p: Prim, kind: u32, w: vec2<f32>, aa: f32, base: vec4<f32>) -> v
     }
     if (kind == K_RING) {
         let dist = length(w - p.a.xy);
-        var hw = p.a.w;
-        var fade = 1.0;
-        if (hw < aa * 0.5) {
-            fade = select(max(hw, 0.0) * 2.0 / aa, select(0.0, 1.0, hw > 0.0), crisp());
-            hw = aa * 0.5;
-        }
-        let ring = coverage(abs(dist - p.a.z) - hw, aa) * fade;
+        let h = hairline(p.a.w, aa);
+        let ring = coverage(abs(dist - p.a.z) - h.x, aa) * h.y;
         var out = premul(base) * ring;
         if ((p.kind & F_RING_FILL) != 0u) {
             let fill = premul(unpack(bitcast<u32>(p.b.x))) * coverage(dist - p.a.z, aa);
@@ -1079,12 +1090,14 @@ fn canvas_masked(src: vec4<f32>, alpha: f32) -> vec4<f32> {
     return floor(paint * (alpha + 1.0) / 256.0) / 255.0;
 }
 
-// Five entry points shade the same records with the same functions. A fragment runs the code of every kind its
-// shader holds where a software rasterizer (SwiftShader, without a graphics card) executes both sides of a branch, so
-// a run of records that are all of the simpler kinds draws with a shader holding only theirs (`shading.rs`): `fs_flat`
-// for flat colour (triangles, the view's fill), `fs_vector` for those and the shapes covered by distance, `fs_image` for
-// pictures and drawing tiles, `fs_composite` for isolated groups' layers, `fs_main` for everything. Their pixels are
-// the same (tests/shading.rs).
+// Entry points over the same functions. A fragment runs the code of every kind its shader holds where a software
+// rasterizer (SwiftShader, without a graphics card) executes both sides of a branch, so a run of records that are all of
+// the simpler kinds draws with a shader holding only theirs (`shading.rs`): `fs_flat` for flat colour (triangles, the view's
+// fill), `fs_stroke` for those and segments, discs and rings, `fs_vector` for those and the other shapes covered by distance,
+// `fs_image` for pictures and drawing tiles, `fs_composite` for isolated groups' layers, `fs_main` for everything. Each
+// simpler one has a `_plain` form for an upright view with the native painter (the stage's), which leaves out the turned
+// artboard's clip and the Canvas painter's masks: both are off there, but a software rasterizer would run their code too.
+// Their pixels are the same (tests/shading.rs).
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
@@ -1101,46 +1114,68 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     return canvas_masked(src, canvas_alpha(in.pos.xy, kind));
 }
 
-// Segments, boxes, arcs, polylines, discs, rings, triangles and the view's fill, in their own colour (no paint record).
-@fragment
-fn fs_vector(in: VsOut) -> @location(0) vec4<f32> {
-    discard_outside_orient_artboard(in);
-    discard_outside_clip(in);
-    let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
-    let kind = p.kind & 255u;
-    let src = shade_vector(p, kind, in.world, in.aa, unpack(p.color));
-    if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
-    return canvas_masked(src, canvas_alpha(in.pos.xy, kind));
-}
-
-// Pictures and drawing tiles (K_IMAGE without a paint record: a drawing tile's `paint` names its parent tile).
-@fragment
-fn fs_image(in: VsOut) -> @location(0) vec4<f32> {
-    discard_outside_orient_artboard(in);
-    discard_outside_clip(in);
-    let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
-    let src = shade_image(in, p, unpack(p.color));
-    if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
-    return canvas_masked(src, canvas_alpha(in.pos.xy, K_IMAGE));
-}
-
-// Isolated groups' layers composited into their parents (K_COMPOSITE without a paint record).
-@fragment
-fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
-    discard_outside_orient_artboard(in);
-    discard_outside_clip(in);
-    let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
-    let src = shade_composite(in, p, unpack(p.color));
-    if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
-    return canvas_masked(src, canvas_alpha(in.pos.xy, K_COMPOSITE));
-}
-
-// Triangles and the view's fill in their own colour (no paint record).
-@fragment
-fn fs_flat(in: VsOut) -> @location(0) vec4<f32> {
-    discard_outside_orient_artboard(in);
-    discard_outside_clip(in);
-    let src = premul(unpack(in.head.z));
+// A root paint of the Canvas painter (the camera monitor's) is masked by its clip; everything else is as shaded.
+fn painted(in: VsOut, src: vec4<f32>) -> vec4<f32> {
     if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
     return canvas_masked(src, canvas_alpha(in.pos.xy, in.head.x & 255u));
 }
+
+fn prim_of(in: VsOut) -> Prim {
+    return Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
+}
+
+// Triangles and the view's fill in their own colour (no paint record).
+fn flat_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    return premul(unpack(in.head.z));
+}
+
+// Segments, discs, rings and the flat kinds, in their own colour.
+fn stroke_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    return shade_stroke(p, p.kind & 255u, in.world, in.aa, unpack(p.color));
+}
+
+// Segments, boxes, arcs, polylines, discs, rings, triangles and the view's fill, in their own colour.
+fn vector_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    return shade_vector(p, p.kind & 255u, in.world, in.aa, unpack(p.color));
+}
+
+// Pictures and drawing tiles (K_IMAGE without a paint record: a drawing tile's `paint` names its parent tile).
+fn image_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    return shade_image(in, p, unpack(p.color));
+}
+
+// Isolated groups' layers composited into their parents (K_COMPOSITE without a paint record).
+fn composite_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    return shade_composite(in, p, unpack(p.color));
+}
+
+@fragment
+fn fs_flat(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, flat_color(in)); }
+@fragment
+fn fs_stroke(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, stroke_color(in)); }
+@fragment
+fn fs_vector(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, vector_color(in)); }
+@fragment
+fn fs_image(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, image_color(in)); }
+@fragment
+fn fs_composite(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, composite_color(in)); }
+
+@fragment
+fn fs_flat_plain(in: VsOut) -> @location(0) vec4<f32> { return flat_color(in); }
+@fragment
+fn fs_stroke_plain(in: VsOut) -> @location(0) vec4<f32> { return stroke_color(in); }
+@fragment
+fn fs_vector_plain(in: VsOut) -> @location(0) vec4<f32> { return vector_color(in); }
+@fragment
+fn fs_image_plain(in: VsOut) -> @location(0) vec4<f32> { return image_color(in); }
+@fragment
+fn fs_composite_plain(in: VsOut) -> @location(0) vec4<f32> { return composite_color(in); }
