@@ -4,14 +4,19 @@
  */
 import canvas from './canvas.mjs';
 import files, {open} from './files.mjs';
+import interfaceScenarios from './interface.mjs';
 import playback from './playback.mjs';
 import pose from './pose.mjs';
+import selection from './selection.mjs';
 import timeline from './timeline.mjs';
 
 /** The scenario that opens the workload's document: the runner runs it first. */
 export {open};
 
-export const SCENARIOS = Object.freeze([...files, ...playback, ...timeline, ...canvas, ...pose]);
+export const SCENARIOS = Object.freeze([...files, ...playback, ...timeline, ...canvas, ...pose,
+  ...selection,
+  ...interfaceScenarios,
+]);
 
 /**
  * The scenarios `words` name: an id (`canvas.pan`), an area (`canvas`) or part of an id. No words: all of them.
