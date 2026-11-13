@@ -1644,16 +1644,18 @@ function loop(now) {
       const editStarted = performance.now();
       const drawingPreview=drawingController?.renderPreview;
       // The geometry the overlay reads. The engine draws from its session, so the picture does not wait for it: it is read after the picture.
-      const heldGeometry = drawingPreview?.geometry || motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
+      // A drawing's first stroke reads its preview's whole geometry only when the overlay needs it (a dense frame's is a read of every figure).
+      const heldGeometry = drawingPreview ? null : motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
       const source = drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null;
       editingDrawn = state.renderer.render({
         tick: editor.tick,
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
         documentReport: editor.report,
-        // The frame as poses is read only by a draw that does not take it from the session.
+        // The frame as poses is read only by a draw that does not take it from the session. The preview's frame is one object for the
+        // whole stroke: the stage sends it once.
         get frame() { return drawingPreview?.frame ?? currentFrame(); },
-        geometry: source ? undefined : heldGeometry ?? editor.geometry,
+        geometry: source || drawingPreview ? undefined : heldGeometry ?? editor.geometry,
         // The engine draws the frame its session shows; the interface's own frame (a drawing's first stroke) crosses as poses.
         source,
         view: state.view,
@@ -1672,7 +1674,7 @@ function loop(now) {
       // What is presented is what was drawn: a frame the stage could not draw yet leaves the previous picture on show.
       if (editingDrawn) state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
         sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
-      overlayRender(() => heldGeometry ?? editor.geometry);
+      overlayRender(() => drawingPreview?.geometry ?? heldGeometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       // What a paint at a new tick costs the interface decides how the next playhead drag of this document scrubs.
       if (editingDrawn && !drawingPreview) seekCosts.record(editor.report, editor.tick, performance.now() - editStarted);

@@ -36,8 +36,8 @@ let shared = null;
 
 /** What belongs to one `Stage` (one canvas and device): a new stage starts without any of it. */
 const perStage = () => ({
-  /** Geometry groups the engine last received, by slot: an unchanged group is not sent again. */
-  groups: [], count: -1, fields: null, frameSent: false,
+  /** Geometry groups the engine last received, by slot: an unchanged group is not sent again; and the frame they came in. */
+  groups: [], count: -1, fields: null, frameSent: false, posedFrame: null,
   /** The drawing cels the engine holds live: strokes drawn before they are published. */
   live: null,
   /** Counts the frames drawn: a wait for pictures ends when another frame is drawn. */
@@ -274,10 +274,13 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
    * A pose as the engine reads it: the frame's own fields, and per object either its
    * pose or `null` when the editor has not rebuilt its geometry since `known` last saw it.
    * `null` when nothing changed since `known` last saw the frame (its fields included:
-   * a frame without objects still changes the background and camera).
+   * a frame without objects still changes the background and camera). Without a geometry,
+   * the frame `known` saw last is unchanged (a drawing's first stroke draws one frame object
+   * throughout: its objects are not sent again with every stroke frame).
    */
   const frameJSON = (frame, geometry, known) => {
-    const objects = frame.objects ?? [], groups = geometry?.objects, same = known.count === objects.length && groups;
+    const objects = frame.objects ?? [], groups = geometry?.objects, same = known.count === objects.length && (groups || known.posedFrame === frame);
+    known.posedFrame = frame;
     let sent = 0;
     const items = objects.map((object, slot) => {
       const group = groups?.get(slot) ?? object;

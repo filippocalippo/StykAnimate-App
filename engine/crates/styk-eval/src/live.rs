@@ -711,10 +711,16 @@ impl<'a> LiveView<'a> {
 /// (`prim.wgsl`, `F_DRAWING`). `base` is the atlas layer of the first live page. A drawing tile
 /// in an isolation group is drawn at a scale this does not know, so it asks for every level.
 pub fn shown_levels(list: &DrawList, base: u32, scale: f64) -> Levels {
+    shown_levels_in(list, &[(0, list.prims.len() as u32)], base, scale)
+}
+
+/// [`shown_levels`] of the primitives in `runs` (ranges of `list`'s primitives that hold all its drawing tiles: a dense frame's are a
+/// block among hundreds of thousands of segments).
+pub fn shown_levels_in(list: &DrawList, runs: &[(u32, u32)], base: u32, scale: f64) -> Levels {
     // The shader's own test in single precision; the margin keeps a boundary on both sides.
     const MARGIN: f64 = 1.0 / 64.0;
     let mut shown: Levels = 0;
-    for prim in &list.prims {
+    for prim in runs.iter().flat_map(|&(start, end)| &list.prims[start as usize..end as usize]) {
         if prim.kind & 255 != K_IMAGE || prim.kind & F_DRAWING == 0 || (prim.b[2] as u32) < base {
             continue;
         }

@@ -184,6 +184,10 @@ impl Renderer {
             paint_context: crate::paint::PaintContext::Native,
             orientation: None,
             root_gpu_source: false,
+            keep_frames: false,
+            kept: None,
+            within: None,
+            clear_part: None,
             device,
             queue,
             pipeline,
@@ -219,7 +223,7 @@ impl Renderer {
             page_frame: [0, 0],
             exact_sizes: false,
             executor: None,
-            stats: Stats { prims: 0, groups: 0, passes: 0, downscaled: false, rounds: 0, effect_layers: 0, effect_passes: 0, effect_bytes: 0, layer_bytes: 0, depth_bytes: 0, material_bytes: 0, glyph_masks: 0, glyph_masks_filled: 0, glyph_bytes: 0 },
+            stats: Stats { prims: 0, groups: 0, passes: 0, downscaled: false, rounds: 0, effect_layers: 0, effect_passes: 0, effect_bytes: 0, layer_bytes: 0, depth_bytes: 0, material_bytes: 0, glyph_masks: 0, glyph_masks_filled: 0, glyph_bytes: 0, part: false },
         }
     }
 }

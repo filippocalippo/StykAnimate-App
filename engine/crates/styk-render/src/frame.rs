@@ -37,6 +37,128 @@ pub struct FramePlan {
     pub(crate) biggest: [u32; 2],
 }
 
+/// The runs of `range` of `list`'s primitives that can reach the part `rect` (output pixels `[x, y, width, height]`) through `matrix`: those whose
+/// rectangle ([`styk_eval::drawlist::prim_bounds`]) grown by the antialiasing fringe meets it, and those whose reach is not known, in order.
+fn part_runs(list: &styk_draw::DrawList, range: std::ops::Range<u32>, matrix: [f64; 6], rect: [u32; 4]) -> Vec<(u32, u32)> {
+    // The fringe a shape is drawn with (`prim.wgsl`: one and a half pixels), and room for the rounding of corners.
+    const FRINGE: f64 = 3.0;
+    let part = [rect[0] as f64 - FRINGE, rect[1] as f64 - FRINGE, (rect[0] + rect[2]) as f64 + FRINGE, (rect[1] + rect[3]) as f64 + FRINGE];
+    let reaches = |p: &styk_draw::Prim| {
+        let Some(b) = styk_eval::drawlist::prim_bounds(p) else { return true };
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for [x, y] in [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]] {
+            let (px, py) = (matrix[0] * x + matrix[2] * y + matrix[4], matrix[1] * x + matrix[3] * y + matrix[5]);
+            (x0, y0, x1, y1) = (x0.min(px), y0.min(py), x1.max(px), y1.max(py));
+        }
+        x1 >= part[0] && y1 >= part[1] && x0 <= part[2] && y0 <= part[3]
+    };
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    for at in range {
+        if !reaches(&list.prims[at as usize]) {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(run) if run.1 == at => run.1 = at + 1,
+            _ => runs.push((at, at + 1)),
+        }
+    }
+    runs
+}
+
+/// What the frame in the output was drawn of, for a frame drawn again in a part of it ([`Renderer::redraw_within`]): the next frame is
+/// drawn in a part only when all of this is the same (the view, the target and how it is painted, the list's background).
+#[derive(Clone, PartialEq)]
+pub(crate) struct KeptFrame {
+    size: [u32; 2],
+    samples: u32,
+    view: [u64; 17],
+    flags: [bool; 3],
+    orientation: Option<[u64; 6]>,
+    paint_context: crate::paint::PaintContext,
+    drawing_grid: crate::DrawingGrid,
+    background_prims: u32,
+}
+
+impl KeptFrame {
+    fn of(renderer: &Renderer, view: &ViewParams, size: [u32; 2], list: &styk_draw::DrawList) -> KeptFrame {
+        let mut bits = [0u64; 17];
+        for (to, value) in bits.iter_mut().zip(view.matrix.iter().chain(&view.artboard).chain(&view.clear).chain([&view.zoom, &view.pan[0], &view.pan[1]])) {
+            *to = value.to_bits();
+        }
+        bits[16] = view.stretch.to_bits() ^ view.camera_limit.to_bits().rotate_left(1);
+        KeptFrame {
+            size,
+            samples: renderer.samples,
+            view: bits,
+            flags: [view.clip_to_artboard, view.camera_view, renderer.shading_on],
+            orientation: renderer.orientation.map(|m| m.map(f64::to_bits)),
+            paint_context: renderer.paint_context,
+            drawing_grid: renderer.drawing_grid,
+            background_prims: list.background_prims,
+        }
+    }
+}
+
+impl Renderer {
+    /// Keeps each frame's multisampled picture after it is resolved (`true`), so that a frame that differs from the one before it in a
+    /// part can be drawn in that part alone ([`Renderer::redraw_within`]). The stage keeps its frames; an export draws each frame whole.
+    pub fn set_keep_frames(&mut self, keep: bool) {
+        self.keep_frames = keep;
+        if !keep {
+            self.kept = None;
+        }
+    }
+
+    /// Says that the next frame rendered differs from the frame rendered last only inside `rect` (output pixels `[x0, y0, x1, y1]`):
+    /// the same view and size, and the same list but in primitives that lie inside `rect` before and after, over pictures that changed
+    /// only there. The renderer then draws that part alone where it can (a frame kept, a list without isolation groups, effects, faces,
+    /// light or glyphs), and the whole frame otherwise. The pixels are the same either way: the part is cleared and every primitive is
+    /// drawn into it in its order, so each pixel there takes all its samples as a whole frame gives them, and every pixel outside keeps
+    /// the ones it had. Forgotten after the next frame.
+    pub fn redraw_within(&mut self, rect: [f64; 4]) {
+        self.within = Some(rect);
+    }
+
+    /// Whether the last frame rendered was drawn in a part of it ([`Renderer::redraw_within`]).
+    pub fn drew_part(&self) -> bool {
+        self.stats.part
+    }
+
+    /// The frame kept is not what the next frame would be drawn over any more: pictures it sampled changed.
+    pub(crate) fn forget_kept(&mut self) {
+        self.kept = None;
+    }
+
+    /// The pipeline that clears a part of the frame: a triangle over the target, under the part's scissor ([`Renderer::redraw_within`]).
+    fn clear_part_pipeline(&mut self) -> wgpu::RenderPipeline {
+        if let Some((samples, pipeline)) = &self.clear_part
+            && *samples == self.samples
+        {
+            return pipeline.clone();
+        }
+        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("styk clear part"), source: wgpu::ShaderSource::Wgsl(include_str!("clear.wgsl").into()) });
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("styk clear part"), bind_group_layouts: &[], immediate_size: 0 });
+        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("styk clear part"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_clear"), compilation_options: Default::default(), buffers: &[] },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_clear"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        self.clear_part = Some((self.samples, pipeline.clone()));
+        pipeline
+    }
+}
+
 /// Receipt of the composite operations just encoded for one owning target.
 /// Uses the same published shader group record; no document/effect scan or
 /// pixel readback. Opacity-zero, unplaced and clipped sources are not consumed.
@@ -307,6 +429,7 @@ impl Renderer {
     pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &ViewParams, size: [u32; 2]) {
         let Some(list) = self.list.clone() else {
             self.root_gpu_source = false;
+            self.kept = None;
             self.ensure_output(size.map(|n| n.max(1)));
             self.clear_only(encoder, view);
             return;
@@ -325,6 +448,9 @@ impl Renderer {
         self.page_frame = size;
         self.root_gpu_source = false;
         let foreground = matches!(self.paint_context, crate::paint::PaintContext::CanvasForeground { .. });
+        // A part is drawn only over the frame drawn last, in the targets it was drawn in.
+        let targets_kept = self.output.as_ref().is_some_and(|o| o.3 == size) && (self.samples == 1 || self.msaa_main.as_ref().is_some_and(|m| m.1 == size));
+        let within = self.within.take();
         self.ensure_output(size);
         if self.bind0.is_none() {
             self.rebind();
@@ -470,6 +596,23 @@ impl Renderer {
         // An upright view with the native painter draws with the simpler shaders' plain forms (`prim.wgsl`).
         let plain = self.orientation.is_none() && self.paint_context == crate::paint::PaintContext::Native;
         let shaders = Shaders { full: self.pipeline.clone(), runs: self.shading_on.then(|| (self.shading_pipelines(plain), self.shading_runs.clone())) };
+        // A frame that differs from the kept one in a part is drawn in that part alone ([`Renderer::redraw_within`]): `Some(None)` for a part
+        // that lies outside the target (nothing is drawn).
+        let key = KeptFrame::of(self, view, size, &list);
+        let plain_list = passes.is_empty() && rounds.len() == 1 && depth_runs.is_none() && additive.is_none() && list.groups.len() <= 1 && list.layers.is_empty() && list.glyphs.is_empty() && list.materials == 0;
+        let part = within.filter(|_| self.keep_frames && targets_kept && plain_list && !foreground && view.clear == [0.0; 4] && self.kept.as_ref() == Some(&key)).map(|rect| {
+            let mut r = [rect[0].floor().max(0.0), rect[1].floor().max(0.0), rect[2].ceil().min(size[0] as f64), rect[3].ceil().min(size[1] as f64)];
+            if view.clip_to_artboard {
+                r = [r[0].max(artboard[0].floor()), r[1].max(artboard[1].floor()), r[2].min(artboard[2].ceil()), r[3].min(artboard[3].ceil())];
+            }
+            (r[2] > r[0] && r[3] > r[1]).then(|| [r[0] as u32, r[1] as u32, (r[2] - r[0]) as u32, (r[3] - r[1]) as u32])
+        });
+        let clear_part = part.flatten().map(|_| self.clear_part_pipeline());
+        // A software rasterizer sets up every triangle it is given, wherever the scissor lets it draw: in a part it is given the primitives
+        // that can reach the part alone, in their order (one whose rectangle the part does not meet draws nothing there). A graphics card
+        // is given them all: it sets them up for nothing, and a pass over a dense frame's primitives here would cost more than it saves.
+        let part_runs = part.flatten().filter(|_| self.shading_on).map(|rect| part_runs(&list, root.0 + bg..root.1, view.matrix, rect));
+        let keep = self.keep_frames;
         let (mut layer_depth, mut frame_depth) = (false, false);
         let mut from = root.0 + bg;
         for (r, _) in rounds.iter().enumerate() {
@@ -544,12 +687,13 @@ impl Renderer {
                     depth_slice: None,
                     resolve_target: if last && msaa.is_some() { Some(output) } else { None },
                     ops: wgpu::Operations {
-                        load: if r == 0 {
+                        load: if r == 0 && part.is_none() {
                             wgpu::LoadOp::Clear(wgpu::Color { r: view.clear[0], g: view.clear[1], b: view.clear[2], a: view.clear[3] })
                         } else {
                             wgpu::LoadOp::Load
                         },
-                        store: if last && msaa.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
+                        // A frame kept for a redraw in a part keeps its samples.
+                        store: if last && msaa.is_some() && !keep { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
                     },
                 })],
                 depth_stencil_attachment: depth_view.as_ref().map(depth_attachment),
@@ -557,14 +701,35 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            if let (Some(Some([x, y, w, h])), Some(clear)) = (part, &clear_part) {
+                // The part is cleared as the whole frame is, then drawn under the same scissor.
+                pass.set_scissor_rect(x, y, w, h);
+                pass.set_pipeline(clear);
+                pass.draw(0..3, 0..1);
+            }
             pass.set_bind_group(0, &bind0, &[(passes.len() as u64 * UNIFORM_STRIDE) as u32]);
             pass.set_bind_group(1, &self.sprite_bind, &[]);
             pass.set_bind_group(2, &self.layer_binds[1], &[]);
             pass.set_vertex_buffer(0, self.prims.slice(..));
-            if r == 0 && bg > 0 {
+            if let Some(part) = part {
+                if part.is_some() {
+                    if bg > 0 {
+                        draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, root.0..root.0 + bg);
+                    }
+                    match &part_runs {
+                        Some(runs) => {
+                            for &(start, end) in runs {
+                                draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, start..end);
+                            }
+                        }
+                        None if until > from => draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until),
+                        None => {}
+                    }
+                }
+            } else if r == 0 && bg > 0 {
                 draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, root.0..root.0 + bg);
             }
-            if until > from {
+            if part.is_none() && until > from {
                 if view.clip_to_artboard {
                     let a = artboard;
                     let x0 = a[0].clamp(0.0, size[0] as f64).floor() as u32;
@@ -603,6 +768,7 @@ impl Renderer {
         if !frame_depth {
             self.depth_main = None;
         }
+        self.kept = keep.then_some(key);
         let fx = self.executor.as_ref().map(|e| e.stats).unwrap_or_default();
         // An atlas always has two layers at least (resources::array_texture).
         let layer_bytes = self.layers.iter().map(|a| a.size[0] as u64 * a.size[1] as u64 * 4 * a.pages.max(2) as u64).sum();
@@ -623,6 +789,7 @@ impl Renderer {
             glyph_masks: self.glyphs.count() as u32,
             glyph_masks_filled: self.glyphs.filled,
             glyph_bytes: self.glyphs.bytes(),
+            part: part.is_some(),
         };
     }
 

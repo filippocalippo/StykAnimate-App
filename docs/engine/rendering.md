@@ -582,6 +582,35 @@ about 41 ms to about 6 ms of the interface thread (the stage's part from about 3
 about 4 ms; natively (`styk-engine/tests/dense_bench.rs`) the drag step's session frame fell from 21 ms to under 1 ms, its geometry read from
 6 ms to under 0.1 ms and its list from 19 ms to under 1 ms.
 
+## A frame drawn in a part of the one before it
+
+A stroke changes the frame where its tiles are: the cel's slots the frame samples, and the cel's quads when it gains tiles (a live cel's
+quads are written in a block with room for more, so the list keeps its layout: [drawing.md](drawing.md#live-cels)). Without a graphics
+card every pixel of the frame was shaded again for each of them, and in software compositing the browser reads the stage's picture back
+on the interface thread, so that time was the frame's: a cel painted over the canvas cost about 58 ms a stroke frame.
+
+The stage's renderer keeps each frame (`Renderer::set_keep_frames`: the frame pass stores its multisampled picture instead of discarding it
+after the resolve), and the stage says where the next edit frame differs from it (`Renderer::redraw_within`): around the drawing tiles whose
+slot or parent's slot was written since the frame on show and the primitives the list differs in, before and after (`styk_engine::LiveWrites`,
+filled by `Stage::flush_live`; `None`, the whole frame, when a changed primitive is anything but a drawing tile of the root). The renderer
+draws that part alone where it can: over a frame it kept, of the same view, size, sample count, orientation, painter, shading and background,
+with no picture uploaded or table replaced since (each of those forgets the kept frame), for a list with no isolation groups, effects, faces,
+added light or glyphs, cleared to transparency. Then the frame pass loads the kept samples, draws a triangle over the target that writes
+transparency under the part's scissor, and draws the background and every primitive under the same scissor, in their order. Each pixel of the
+part takes all its samples as the whole frame gives them, and every pixel outside keeps the ones it had, which the whole frame would give it
+too; the resolve covers the whole target. Anything else draws the whole frame, as before; prepared frames always do. A tile of a level
+the view does not show draws nothing and adds nothing to the part (a moved floating selection's upper levels are many times its size). On a
+software rasterizer, which sets up every triangle it is given wherever the scissor lets it draw, the part is drawn from the primitives that can
+reach it alone, in their order: those whose rectangle (`drawlist::prim_bounds`, the culling's own) grown by the antialiasing fringe meets
+it, and every one whose reach is not known; a graphics card is given them all, since a pass over a dense frame's primitives on the
+interface thread would cost more than the GPU saves.
+`styk-raster/tests/drawing_sampling.rs` draws frames in a part and whole and compares them byte for byte (four samples and one, three views, the simpler shaders on and off, segments across the part, at its edge and far from it,
+moved and removed tiles; on Vulkan, Direct3D 12 and GL), and that another view, a picture uploaded since and a renderer that keeps no frame
+draw it whole; `styk-engine`'s `images::tests` hold the part to the quads written and changed. The stage counts the frames drawn in a part
+(`partFrames` in `Stage::stats`). Where a list's drawing tiles lie is kept while the lists drawn keep their layout (`styk_engine::DrawingRuns`:
+for a list encoded over the one they were found in, while its changes lie in them), so the part and the levels a frame shows
+(`styk_eval::live::shown_levels_in`) read the cel's block, not the 200,000 segments of a dense frame.
+
 ## In the app
 
 `src/engine/engine-stage.mjs` draws the page's scene canvas (`#scene`) with the

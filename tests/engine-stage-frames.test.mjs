@@ -212,6 +212,23 @@ test("the new-cel preview of a drawing is drawn from its draft while the documen
   renderer.destroy();
 });
 
+test("a drawing's first stroke sends the frame it previews as poses once, while it is the same frame", async () => {
+  const {renderer, stage} = await open();
+  const figure = {figure_type_id: 7}, editor = {figure_types: [{figure_type_id: 1}], _styk: {layers: {assignments: {}}}};
+  const draft = {figure_types: [...editor.figure_types, figure], _styk: {layers: {assignments: {2: 'layer-2'}}}};
+  // The preview's frame: every figure of the frame on show and the new cel's object, one object for the whole stroke, with no geometry.
+  const preview = {objects: [{unique_id: 1, figure_type_id: 1, angles: [0.5]}, {unique_id: 2, figure_type_id: 7, angles: [0]}], camera: null};
+  const sent = () => stage.calls.filter(([name]) => name === 'edit_frame').map(([, json]) => JSON.parse(json).objects);
+  for (let frame = 0; frame < 3; frame++) assert.equal(renderer.render(request({report: draft, documentReport: editor, frame: preview, geometry: undefined})), true);
+  assert.deepEqual(sent().map(objects => objects.map(object => object?.unique_id ?? null)), [[1, 2]], 'its poses crossed once, for every frame of the stroke');
+  assert.equal(stage.calls.filter(([name]) => name === 'render_edit').length, 3, 'and every frame was drawn');
+  // Another frame object (another stroke's preview) is sent again.
+  const next = {...preview, objects: [...preview.objects]};
+  assert.equal(renderer.render(request({report: draft, documentReport: editor, frame: next, geometry: undefined})), true);
+  assert.equal(sent().length, 2, 'another frame is sent again');
+  renderer.destroy();
+});
+
 test('live drawing cels are synced before an edited frame and told once it was drawn', async () => {
   const order = [];
   const {renderer} = await open({render_edit() { order.push('render'); return order.filter(name => name === 'render').length > 1; }});
