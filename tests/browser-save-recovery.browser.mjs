@@ -23,7 +23,7 @@ async function open(context){
   await page.goto(site.origin);
   try{await page.waitForFunction(()=>window.styk?.ready===true,null,{timeout:120000});}
   catch(error){console.error(['The editor did not start. The page said:',...said,await page.evaluate(()=>document.body.innerText.slice(0,400)).catch(()=>'')].join('\n'));throw error;}
-  await page.evaluate(()=>{document.querySelector('.styk-privacy [data-decline]')?.click();styk.settingsUI.commit({autosaveSeconds:0});});
+  await page.evaluate(()=>{styk.settingsUI.commit({autosaveSeconds:0});});
   return page;
 }
 const edit=page=>page.evaluate(()=>{const e=styk.editor;e.select(e.frame.objects[0].unique_id,-1);e.beginTranslationDrag();e.moveSelection(20,0,{fromStart:true});e.commitDrag();});

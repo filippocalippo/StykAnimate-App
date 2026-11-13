@@ -44,7 +44,6 @@ async function open(context, { blockStorage = false } = {}) {
   }, blockStorage);
   await page.goto(site.origin, { waitUntil: 'load' });
   await start.ready();
-  await page.evaluate(() => document.querySelector('.styk-privacy [data-decline]')?.click());
   return { page, problems, start };
 }
 const panel = (page) => page.locator('#user-library');

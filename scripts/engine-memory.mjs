@@ -13,7 +13,7 @@ async function measure(file) {
   const app = await _electron.launch({executablePath: createRequire(path.join(root, 'package.json'))('electron'), args: [root, '--js-flags=--expose-gc'], cwd: root, env});
   const page = await app.firstWindow();
   await page.waitForFunction(() => window.styk?.ready === true);
-  await page.evaluate(() => { document.querySelector('.styk-privacy [data-decline]')?.click(); for (const d of document.querySelectorAll('dialog[open]')) d.close(); window.__r = styk.editor.report; });
+  await page.evaluate(() => { for (const d of document.querySelectorAll('dialog[open]')) d.close(); window.__r = styk.editor.report; });
   await page.locator('#file-input').setInputFiles(file);
   await page.waitForFunction(() => styk.editor.report !== window.__r && !styk.state.busy, null, {timeout: 600000});
   const info = await page.evaluate(async () => {

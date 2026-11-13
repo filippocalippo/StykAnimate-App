@@ -514,7 +514,7 @@ async function launchWeb(options) {
       versions: async () => ({ browser: `${browser.browserType().name()} ${browser.version()}` }) };
   } catch (error) { await browser.close().catch(() => {}); throw error; }
 }
-const dismissDialogs = (page) => page.evaluate(() => { document.querySelector('.styk-privacy [data-decline]')?.click(); for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); });
+const dismissDialogs = (page) => page.evaluate(() => { for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); });
 
 /** A running app, ready in the editor, with the probe installed and the throttle applied. */
 async function openSession(options, result) {

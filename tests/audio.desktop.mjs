@@ -15,7 +15,7 @@ try {
   const page=await app.firstWindow(),errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.waitForFunction(()=>window.styk?.ready&&window.stykDesktop?.beginAudioImport,null,{timeout:45000});
   await page.evaluate(()=>{
-    const dismiss=()=>document.querySelectorAll('dialog.release-splash[open],dialog.styk-privacy[open]').forEach(dialog=>dialog.close());dismiss();new MutationObserver(dismiss).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['open']});
+    const dismiss=()=>document.querySelectorAll('dialog.release-splash[open]').forEach(dialog=>dialog.close());dismiss();new MutationObserver(dismiss).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['open']});
     styk.editor.setFPS(8);styk.editor.sheetInsertFrames(['scene','camera',...styk.editor.report._styk.layers.order],1,31);
   });
   await page.getByLabel('Choose audio recording').setInputFiles(path.join(out,'Voice.mp3'));

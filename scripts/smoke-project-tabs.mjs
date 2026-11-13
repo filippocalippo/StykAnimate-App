@@ -17,7 +17,7 @@ const launch = () => electron.launch({args: [appRoot], cwd: appRoot, timeout: 60
   env: {...process.env, STYK_USER_DATA_DIR: profile, STYK_STARTUP_VIEW: 'editor'}});
 const checks = [], check = (name, value) => { assert.ok(value, name); checks.push(name); console.log('PASS', name); };
 const ready = page => page.waitForFunction(() => window.styk?.ready, null, {timeout: 60000});
-const dismissPrompts = async page => { for (const selector of ['.styk-privacy [data-decline]', '.release-splash [aria-label="Close welcome screen"]']) await page.locator(selector).click({timeout: 1500}).catch(() => {}); };
+const dismissPrompts = async page => { await page.locator('.release-splash [aria-label="Close welcome screen"]').click({timeout: 1500}).catch(() => {}); };
 let app;
 try {
   app = await launch();

@@ -28,7 +28,6 @@ try {
   page.on('console', (message) => { if (message.type() === 'error') problems.push(message.text()); });
   await page.goto(site.origin, { waitUntil: 'load' });
   await page.waitForFunction(() => window.styk?.ready === true, undefined, { timeout: 60000 });
-  await page.evaluate(() => document.querySelector('.styk-privacy [data-decline]')?.click());
   const cdp = await context.newCDPSession(page);
   const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], id) => ({ x, y, id })) });
   const view = () => page.evaluate(() => ({ ...window.styk.state.view }));

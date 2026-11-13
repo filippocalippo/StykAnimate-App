@@ -19,7 +19,7 @@ try {
   await page.waitForFunction(() => window.styk?.ready && typeof window.stykDesktop?.beginVideoFrame === 'function', undefined, {timeout: 30000});
   await page.evaluate(() => {
     // Dismiss first-run overlays in this isolated test profile.
-    const dismiss = () => document.querySelectorAll('dialog.release-splash[open], dialog.styk-privacy[open]').forEach(dialog => dialog.close());
+    const dismiss = () => document.querySelectorAll('dialog.release-splash[open]').forEach(dialog => dialog.close());
     dismiss(); new MutationObserver(dismiss).observe(document.body, {subtree: true, childList: true, attributes: true, attributeFilter: ['open']});
   });
   result = await page.evaluate(async () => {
