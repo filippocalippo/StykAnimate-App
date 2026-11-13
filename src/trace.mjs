@@ -54,6 +54,12 @@ export function traceComplete(name, start, duration, args, thread) {
   if (listener !== null && listened.has(name)) listener(name, duration);
 }
 
+/**
+ * A run of phases that follow one another (the app's start): ends the phase before and begins `name`; null ends the
+ * last. Each is a span of the profiler's phases lane, so a start says which of its steps the time went to.
+ */
+export function tracePhase(name) { if (sink !== null) sink.phase(name); }
+
 /** A moment worth marking (a document opened, a device lost). */
 export function traceInstant(name, args) { if (sink !== null) sink.instant(name, args); }
 

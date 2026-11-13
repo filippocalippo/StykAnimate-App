@@ -87,7 +87,8 @@ Browser tests (`tests/*.browser.mjs`) run against `npm run serve` with Chrome or
 | `src/locales/`, `src/localization*.mjs` | Translations |
 | `desktop/` | Electron main process, preload bridge, file access, updates |
 | `web/` | Browser build: service worker and Cloudflare configuration |
-| `tests/`, `scripts/` | Tests, smoke tests, benchmarks, build and release scripts |
+| `tests/`, `scripts/` | Tests, smoke tests, build and release scripts |
+| `perf/` | Measuring the app's speed: scenarios, environments, reports (`npm run perf`, [docs/PERFORMANCE.md](docs/PERFORMANCE.md)) |
 | `docs/` | Feature contracts and architecture |
 
 Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Feature behavior is documented in `docs/`, for example [the timeline](docs/TIMELINE.md), [scene editing](docs/SCENE-EDITING.md) and [the engine's rendering](docs/engine/rendering.md).

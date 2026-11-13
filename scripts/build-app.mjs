@@ -15,9 +15,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Electron 39's Chromium. */
 const TARGET = 'chrome142';
-/** Loaded by the page, by URL, and kept as separate entries. The modules the benchmark imports from the page (it reads the engine's memory and
- * patches `PlaybackMetrics`) and the export renderer the determinism smoke creates are entries so that they meet the application's module
- * and not a second copy; tests/app-bundle.test.mjs keeps the list in step with the scripts. */
+/** Loaded by the page, by URL, and kept as separate entries. The modules a script imports from the page by URL (the developer tools read
+ * the canvas's handles through `canvas-interactions.mjs` and `renderer-geometry.mjs`) and the export renderer the determinism smoke creates
+ * are entries so that they meet the application's module and not a second copy; tests/app-bundle.test.mjs keeps the list in step with the
+ * developer tools. `engine.mjs` and `playback-metrics.mjs` became entries for a benchmark that `perf/` has replaced; they stay, because
+ * taking an entry out changes the bundle's chunks, which is a change of its own to measure (docs/APP-START.md). */
 const PAGE_ENTRIES = ['src/app.mjs', 'src/engine/engine-start.mjs', 'src/engine/engine.mjs', 'src/engine/engine-export.mjs', 'src/playback-metrics.mjs', 'src/canvas-interactions.mjs', 'src/renderer-geometry.mjs'];
 /** The tables of where the page's and the workers' bundled lines came from (frameTable). Nothing loads them at start: statistics
  * fetch them the first time they describe a problem (src/stats/stack.mjs `loadFrameTables`). */

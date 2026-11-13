@@ -273,7 +273,8 @@ memory grows to the job's working set, 5–12 MiB for strokes, 40–68 MiB for f
 garbage-collected peaks were 0–22 MiB except blur (149 MiB) and publication (59 MiB). The
 instance is replaced after a job once it holds more than 256 MiB.
 
-Live drawing in a browser (`scripts/benchmark-drawing-latency.mjs`, blank 1080p cel at 2×, Canvas 2D,
+Live drawing in a browser (measured in October 2026 by a script since replaced by the drawing scenarios of
+`npm run perf`, [PERFORMANCE.md](../PERFORMANCE.md); blank 1080p cel at 2×, Canvas 2D,
 four interleaved rounds), input-to-visible p50 JavaScript/Rust: small 30.1/29.6, pencil
 40.7/32.3, charcoal 30.1/29.5, soft 160 px 56.1/39.0, oil 26.4/32.9 ms; pen-up to commit
 57.3/52.2, 65.7/52.6, 59.5/52.9, 79.3/79.4, 47.9/57.2 ms. Worker memory after a few strokes

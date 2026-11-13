@@ -80,7 +80,7 @@ and dynamic-branch double-click semantics.
 - `node tests/connected-selection.browser.mjs`: connected/branch selection and
   copy/paste regression passed. Its count now reads the displayed selection
   frame, which includes authored figures, rather than the native source frame.
-- `node scripts/benchmark-node-selection.mjs`: a synthetic 30,000-segment rig
+- A Node measurement of hit-testing (September 2026, with a script since removed): a synthetic 30,000-segment rig
   (29,000 static nodes) took about 22 ms for cold selection descriptors, 9 ms
   for its first spatial index and 0.0084 ms at the 95th percentile of 1,000 warm
   picks on this workstation. These are Node hit-testing measurements, not an

@@ -1,9 +1,9 @@
 # App start
 
 What happens between launching the desktop app and a usable window, how it is measured, and what keeps it short.
-`scripts/benchmark-app.mjs` (`docs/performance/APP-BENCHMARK.md`) times the launch; its `ready` row stops when the application module has
-run and `window.styk` exists (before `init()` goes on to create the stage), and `window.styk.ready` is set after the stage exists. Both are worth
-watching: the first is what the scoreboard reports, the second is when drawing is possible.
+`npm run perf -- run` times the launch as its `app.start` scenario ([PERFORMANCE.md](PERFORMANCE.md#how-a-run-works)): fresh processes on fresh profiles, started from a
+bundle built from the checkout, from the process's launch to `window.styk.ready`, which `init()` sets after the stage exists and drawing is possible. The result names the
+steps on the way (the desktop shell, the page and its scripts, the interface, the stage and its graphics device), which `init()` marks with `tracePhase`.
 
 ## The path
 
@@ -19,7 +19,7 @@ watching: the first is what the scoreboard reports, the second is when drawing i
 `scripts/build-app.mjs` (esbuild, `npm run app:bundle`) writes `build/app`: an overlay of files that answer in place of the web assets with the same paths.
 
 - The page's entries (`src/app.mjs`, `src/engine/engine-start.mjs`, `src/engine/engine.mjs`) are bundled together and share chunks (`src/chunks/`).
-  `engine.mjs` is an entry so that a script importing it from the page (the benchmark does) gets the application's engine rather than a second copy.
+  `engine.mjs` is an entry so that a script importing it from the page gets the application's engine rather than a second copy.
 - Every `src/**/*-worker.mjs` is a self-contained bundle at its own path, so `new Worker(new URL('./x-worker.mjs', import.meta.url))` finds it.
   `tests/app-bundle.test.mjs` fails when a worker the application starts is not an entry.
 - `import.meta.url` becomes the module's own URL (`/src/...` on the page's origin) because modules locate their neighbours with it (the engine's WebAssembly, the codec glue).
@@ -33,7 +33,7 @@ The overlay is `resources/bundle` in a packaged app (`before-pack.cjs` builds it
 `STYK_BUNDLE_DIR=build/app electron .` serves a bundle built by `npm run app:bundle`; without it the page loads the modules, so a plain `npm start` always runs the code on disk.
 A bundle named by `STYK_BUNDLE_DIR` that is missing stops the app from starting. The browser build (`docs/WEB.md`) is not bundled.
 
-A change in a module reaches a packaged app through the bundle: a script that loads source modules by URL and shares state with the application (as the benchmark does for the engine)
+A change in a module reaches a packaged app through the bundle: a script that loads source modules by URL and shares state with the application (as the developer tools do for the canvas's handles)
 needs the module as an entry (`PAGE_ENTRIES` in `scripts/build-app.mjs`), or it gets its own copy.
 
 The scripts are not minified: five interleaved runs each gave the same ready time (1,100 ms against 1,095) and DOMContentLoaded (374 against 405 ms) for 1.5 MB less, and a stack trace keeps its function names. esbuild keeps legal comments at the end of a script, and a vendored library's licence header is turned into one, so opentype.js's MIT notice stays in the bundle beside `vendor/text/opentype.LICENSE` and `THIRD_PARTY_NOTICES.md`, which ship with the web assets.

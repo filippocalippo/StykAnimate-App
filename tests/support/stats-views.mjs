@@ -20,8 +20,8 @@ const VERDICT = '9.1.0 needs attention: a new engine stop reached 28 sessions, a
 const BRIEF_R = [
   'Finding R-ff75, release 9.1.0, 57 sessions in 7 days.',
   'While dragging in scenes of 50,000 to 200,000 segments on integrated graphics with less than 16 GB of memory, 71% of frames were smooth (9.0.0: 88%).',
-  'Reproduce: node scripts/styk-profile.mjs <file of 50,000 to 200,000 segments> drag --desktop',
-  'Measure: the smooth share while dragging, as the profiling command reports it.',
+  'Reproduce: npm run perf -- run --scenario pose.drag-joint --workload stress',
+  'Measure: what npm run perf -- compare <the run before the change> says about pose.drag-joint, before and after the change.',
   'Done when: smooth share is back to 88% or better here, and the other interactions hold.',
   'Read first: docs/engine/README.md, docs/engine/editing.md',
 ].join('\n');
@@ -80,6 +80,8 @@ export const overview = () => ({
 
 export const findings = () => ({ ...envelope('findings'), verdict: VERDICT, findings: FINDINGS, notShown: 3 });
 
+/** The performance runner's workload nearest each scene size, as the site names it in a command. */
+const WORKLOADS = ['small', 'medium', 'large', 'stress', 'stress'];
 const SCENES = [['under-1k', 'under 1,000 segments'], ['1k-10k', '1,000 to 10,000 segments'], ['10k-50k', '10,000 to 50,000 segments'], ['50k-200k', '50,000 to 200,000 segments'], ['over-200k', 'over 200,000 segments']];
 const MACHINES = [['integrated-small', 'Integrated graphics, under 16 GB'], ['integrated-large', 'Integrated graphics, 16 GB or more'], ['discrete', 'Separate graphics card']];
 
@@ -90,7 +92,7 @@ export const responsiveness = () => {
       grid.push({ scene, machine, sessions: 57, frames: 42541, late: 12167, smooth: 0.714, p50: 17, p95: 100, worst: 420,
         stages: [{ stage: 'evaluate', label: 'evaluating the frame', ms: 375437, share: 0.44 }, { stage: 'geometry', label: 'building geometry', ms: 196250, share: 0.23 }, { stage: 'draw', label: 'drawing', ms: 110000, share: 0.13 }],
         compare: { sessions: 29, frames: 24145, late: 2969, smooth: 0.877, p50: 12, p95: 83, worst: 420 }, change: -0.163,
-        command: 'node scripts/styk-profile.mjs <file of 50,000 to 200,000 segments> drag --desktop' });
+        command: 'npm run perf -- run --scenario pose.drag-joint --workload stress' });
     } else if (scene === 'over-200k' || (scene === '50k-200k' && machine !== 'discrete')) {
       grid.push({ scene, machine, sessions: 18 - mi, tooFew: true });
     } else {
@@ -98,7 +100,7 @@ export const responsiveness = () => {
       grid.push({ scene, machine, sessions: 140 - si * 20 + mi * 10, frames: 90000 - si * 10000, late: Math.round((90000 - si * 10000) * (1 - smooth)), smooth,
         p50: 8, p95: 21 + si * 4, worst: 120, stages: [{ stage: 'draw', label: 'drawing', ms: 2000 + si * 100, share: 0.5 }],
         compare: si === 3 ? { sessions: 12, tooFew: true } : { sessions: 90, frames: 60000, late: 900, smooth: Number((smooth + 0.002).toFixed(4)), p50: 8, p95: 21, worst: 110 },
-        change: si === 3 ? null : -0.002, command: `node scripts/styk-profile.mjs <file of ${SCENES[si][1]}> drag --desktop` });
+        change: si === 3 ? null : -0.002, command: `npm run perf -- run --scenario pose.drag-joint --workload ${WORKLOADS[si]}` });
     }
   }));
   return {
@@ -113,7 +115,7 @@ export const responsiveness = () => {
       { id: 'draw', label: 'Drawing', scenario: null, frames: 900, smooth: null, compare: null },
     ],
     axes: { scenes: SCENES.map(([id, label]) => ({ id, label })), machines: MACHINES.map(([id, label]) => ({ id, label })) },
-    profile: { scenario: 'drag', command: 'node scripts/styk-profile.mjs <file of this size> drag --desktop' },
+    profile: { scenario: 'pose.drag-joint', command: 'npm run perf -- run --scenario pose.drag-joint --workload <workload of this size>' },
     total: { frames: 829104, late: 23774, smooth: 0.9713, compare: { frames: 585866, late: 11791, smooth: 0.9799 } },
     grid,
     slowest: [{ ms: 420, day: '2026-11-06', scene: '50k-200k', machine: 'integrated-small', stages: [{ stage: 'evaluate', label: 'evaluating the frame', ms: 2891.7, share: 0.44 }] }],

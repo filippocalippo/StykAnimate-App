@@ -408,7 +408,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       const span = traceBegin('stage draw');
       try {
         const drawn = drawEdit(request);
-        if (span !== 0) traceEnd(span, tracing ? {drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs} : undefined);
+        if (span !== 0) traceEnd(span, tracing ? {tick: request.tick, drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs} : undefined);
         if (drawn) { engineShown = true; preparePickSoon(); }
         return drawn;
       } catch (error) {

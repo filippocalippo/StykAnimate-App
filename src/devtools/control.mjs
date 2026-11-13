@@ -8,8 +8,10 @@
  * The channel reads through the same narrow reads the panels use, changes the document only through the app's own actions
  * and commands (so every change is a session command with undo), and offers no way to run arbitrary code.
  */
-import {perfettoTrace, summarize} from './capture.mjs';
+import {perfettoTrace, ringEvents} from './capture.mjs';
+import {round} from './stats.mjs';
 import {commandLog, documentSummary, framePage, historyPage, treePage} from './inspector.mjs';
+import {recordWrites} from './mutations.mjs';
 
 export const PROTOCOL_VERSION = 1;
 /** Pages of trace text `trace.read` hands out. */
@@ -42,8 +44,8 @@ function focused() {
 }
 
 export function createControl(runtime) {
-  const {app, early, sampler, capture} = runtime;
-  let lastTrace = null, markCount = 0;
+  const {app, early, sampler} = runtime;
+  let lastTrace = null, markCount = 0, writes = null;
   const marks = new Map();
   const editor = () => app.editor ?? fail('The editor is not ready.', {hint: 'Wait for window.styk.ready.'});
 
@@ -66,6 +68,7 @@ export function createControl(runtime) {
         playback: {playing: Boolean(s.playing), buffering: Boolean(s.buffering), loop: Boolean(s.loop), scrubbing: Boolean(s.scrubbing)},
         view: s.view ? {x: s.view.x, y: s.view.y, scale: s.view.scale} : null,
         renderer: s.renderer?.stats ? {backend: s.renderer.stats.backend, adapter: full ? s.renderer.stats.adapter : undefined} : null,
+        stage: stageRect(),
         focus: focused(),
         dialogs: [...document.querySelectorAll('dialog[open]')].map(dialog => dialog.id || dialog.className || 'dialog'),
         window: {width: innerWidth, height: innerHeight, devicePixelRatio, crossOriginIsolated: globalThis.crossOriginIsolated === true, webgpu: Boolean(navigator.gpu)},
@@ -75,6 +78,48 @@ export function createControl(runtime) {
 
     metrics: (args) => sampler.snapshot(args),
     threads: (args) => ({rows: sampler.threads(args)}),
+    memory: () => sampler.memory(),
+    /** The calls the interface made into the engine since the last capture began (or `reset: true`), heaviest first. */
+    boundary: ({limit = 40, reset = false} = {}) => {
+      const rows = runtime.boundary.rows().slice(0, Math.max(1, Math.min(500, limit))).map(row => ({name: row.name, calls: row.calls, totalMs: round(row.totalMs), worstMs: round(row.worstMs)}));
+      if (reset) runtime.boundary.reset();
+      return {rows};
+    },
+    /** The machine this page runs as: what a profiling run asked it to pretend, and what the page, the engine and the stage report. */
+    environment: () => ({
+      asked: early.environment,
+      navigator: {hardwareConcurrency: navigator.hardwareConcurrency ?? null, deviceMemoryGiB: navigator.deviceMemory ?? null, userAgent: navigator.userAgent},
+      engine: runtime.engine ? {threads: runtime.engine.workers, threaded: runtime.engine.threaded, memoryMaximumBytes: runtime.engine.memoryMaximumBytes} : null,
+      renderer: app.state?.renderer?.stats ? {backend: app.state.renderer.stats.backend, adapter: app.state.renderer.stats.adapter ?? null} : null,
+      display: sampler.displayPeriod(),
+      window: {width: innerWidth, height: innerHeight, devicePixelRatio, crossOriginIsolated: globalThis.crossOriginIsolated === true, webgpu: Boolean(navigator.gpu)},
+    }),
+    /**
+     * The launch's milestones in milliseconds from the page's start: the document parsed, the first pixels, the engine
+     * loaded, the app ready, and the steps of the app's start one after another (`phases`). `timeOrigin` is the page's
+     * start as a clock time, so a launcher can add the time before it.
+     */
+    startup: () => {
+      const navigation = performance.getEntriesByType('navigation')[0];
+      const paints = Object.fromEntries(performance.getEntriesByType('paint').map(entry => [entry.name, entry.startTime]));
+      const events = ringEvents(early.ring).events.filter(event => event.start <= runtime.readyAt);
+      const engineLoad = events.find(event => event.name === 'engine load');
+      // The app's own steps (src/trace.mjs `tracePhase`), and before the first of them the page and its scripts loading.
+      const steps = events.filter(event => event.thread === 'phases').map(event => ({name: event.name.replace(/^start: /, ''), startMs: round(event.start, 1), ms: round(event.duration, 1)}));
+      const longTasks = events.filter(event => event.name === 'long task');
+      return {timeOrigin: performance.timeOrigin, responseEndMs: round(navigation?.responseEnd, 1), domContentLoadedMs: round(navigation?.domContentLoadedEventEnd, 1),
+        firstPaintMs: round(paints['first-paint'], 1), firstContentfulPaintMs: round(paints['first-contentful-paint'], 1),
+        engineLoadedMs: engineLoad ? round(engineLoad.start + engineLoad.duration, 1) : null, engineLoadMs: engineLoad ? round(engineLoad.duration, 1) : null,
+        readyMs: round(runtime.readyAt, 1), phases: steps.length ? [{name: 'page and scripts', startMs: 0, ms: steps[0].startMs}, ...steps] : [],
+        longTasks: {count: longTasks.length, ms: round(longTasks.reduce((total, event) => total + event.duration, 0), 1)}};
+    },
+    /** Measures the display's period over `frames` frames (call it while the app is idle): the budget every frame is judged against. */
+    'display.period': async ({frames: count = 45} = {}) => {
+      runtime.watch(true);
+      try { for (let index = 0; index < Math.max(30, Math.min(600, count)); index++) await frame(); }
+      finally { runtime.watch(false); }
+      return sampler.displayPeriod();
+    },
 
     /** Log lines, newest last: filtered by least level, module (substring), text (substring) and sequence. */
     logs: ({level = 'debug', module = '', text = '', since = 0, limit = 100} = {}) => {
@@ -84,14 +129,25 @@ export function createControl(runtime) {
       return {rows: rows.slice(-Math.max(1, Math.min(1000, limit))), matched: rows.length, last: early.logs.sequence, dropped: early.logs.dropped};
     },
 
-    'trace.start': ({label = ''} = {}) => { runtime.watch(true); return capture.start(label); },
-    'trace.stop': ({lateMs} = {}, full) => {
-      const taken = capture.stop();
-      runtime.watch(false);
+    /**
+     * Starts a capture. `writes: true` also records which interface elements are rewritten meanwhile (mutations.mjs):
+     * it costs a little per write, so ask for it in a pass that explains, not in one that is timed.
+     */
+    'trace.start': ({label = '', writes: recordsWrites = false} = {}) => {
+      const started = runtime.startCapture(label);
+      writes = recordsWrites ? recordWrites() : null;
+      return started;
+    },
+    /** Ends the capture. `series: true` adds the frames as chart series; `detail: "full"` returns every span group. */
+    'trace.stop': ({series = false} = {}, full) => {
+      const written = writes?.stop() ?? null;
+      writes = null;
+      const taken = runtime.stopCapture();
       const text = JSON.stringify(perfettoTrace(taken.events, {origin: taken.startedAt, metadata: {label: taken.label, startedTime: taken.startedTime}}));
-      lastTrace = {text, summary: summarize(taken.events, {lateMs})};
+      const summary = {...runtime.summarize(taken, {series}), ...(written ? {writes: written} : {})};
+      lastTrace = {text, summary};
       return {label: taken.label, events: taken.events.length, dropped: taken.dropped, ms: Math.round(taken.stoppedAt - taken.startedAt), traceBytes: text.length,
-        pages: Math.ceil(text.length / TRACE_PAGE), summary: full ? lastTrace.summary : shortSummary(lastTrace.summary)};
+        pages: Math.ceil(text.length / TRACE_PAGE), summary: full ? summary : shortSummary(summary)};
     },
     /** A page of the last capture's Perfetto JSON text: concatenate the pages in order. */
     'trace.read': ({page = 0} = {}) => {
@@ -101,8 +157,7 @@ export function createControl(runtime) {
     },
     /** The ring's recent events, summarized: what happened in the last `ms` (a hitch, after the fact). */
     'trace.recent': ({ms = 5000} = {}, full) => {
-      const events = runtime.recent(ms);
-      const summary = summarize(events);
+      const summary = runtime.summarize(runtime.recent(ms));
       return full ? summary : shortSummary(summary);
     },
 
@@ -240,9 +295,16 @@ export function createControl(runtime) {
   return {handle, ops};
 }
 
-/** The short summary: frames, the ten heaviest span groups and the five slowest spans. */
+/** The short summary: frames and inputs, the ten heaviest span groups, the five slowest spans and the eight heaviest calls into the engine. */
 export function shortSummary(summary) {
-  return {frames: summary.frames, spans: summary.spans.slice(0, 10), slowest: summary.slowest.slice(0, 5), counters: summary.counters};
+  return {ms: summary.ms, frames: summary.frames, inputs: summary.inputs, spans: summary.spans.slice(0, 10), slowest: summary.slowest.slice(0, 5),
+    boundary: summary.boundary?.slice(0, 8) ?? null, counters: summary.counters, ...(summary.preparation ? {preparation: summary.preparation} : {})};
+}
+
+/** The stage's place in the window (CSS pixels): where input is aimed. */
+function stageRect() {
+  const rect = document.getElementById('viewport')?.getBoundingClientRect();
+  return rect ? {x: rect.left, y: rect.top, width: rect.width, height: rect.height} : null;
 }
 
 export function filterLogs(rows, {least = 0, levels = ['debug', 'info', 'warn', 'error'], module = '', text = '', since = 0} = {}) {

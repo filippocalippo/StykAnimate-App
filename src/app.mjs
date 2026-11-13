@@ -177,7 +177,7 @@ import {
   inverseCameraScale,
 } from "./pivot/background.mjs";
 import {findFigureType, figureRows} from './figure-types.mjs';
-import {traceComplete, tracing, tuned} from './trace.mjs';
+import {traceBegin, traceComplete, traceEnd, tracePhase, tracing, tuned} from './trace.mjs';
 import {tableOf} from './lazy-table.mjs';
 import {startDevtools} from './devtools-gate.mjs';
 
@@ -1623,7 +1623,7 @@ function loop(now) {
   if (scenePainted) {
     state.dirtyRender = false;
     state.dirtyOverlay = false;
-    const start = performance.now();
+    const start = performance.now(), span = traceBegin('paint');
     // A dense scene's scrub shows the prepared frame of the newest tick the pointer passed, in the editing view; until one is ready the picture stays.
     const scrubFrame = scrubPreview.active && !state.playing ? scrubPreview.next() : null;
     const packet = state.playing ? state.playbackPacket : previewPacket();
@@ -1699,7 +1699,7 @@ function loop(now) {
     paintCameraMonitor();
     const elapsed = performance.now() - start;
     // Span arguments only in the developer build: the shipping frame allocates nothing for tracing.
-    if (tracing) traceComplete('paint', start, elapsed, {playing: state.playing, prepared: preparedPresented});
+    if (span !== 0) traceEnd(span, tracing ? {playing: state.playing, prepared: preparedPresented} : undefined);
     // The statistics' frame counter: a frame drawn for something a person does (no clock read of its own).
     if (stats.on && (preparedPresented || editingDrawn)) { const doing = statsDoing(viewChanging); if (doing) stats.frames.drawn(doing, start, start + elapsed); }
     state.renderSamples.push(elapsed);
@@ -5802,6 +5802,7 @@ function stopAudioScrub() {
   audioScrubController?.abort(); audioEngine.stop();
 }
 async function init() {
+  tracePhase('start: document activation');
   if (desktop?.activateDocument) {
     const activation = desktop.activateDocument({});
     documentActivation = activation.catch(() => {});
@@ -5813,7 +5814,9 @@ async function init() {
     ? await desktop.getEditorSettings()
     : storedEditorSettings();
   // The saved language is loaded before anything chooses it.
+  tracePhase('start: language');
   await loadLocale(settingsValue?.locale);
+  tracePhase('start: interface');
   appLocalization = new AppLocalization({ locale: settingsValue?.locale });
   editorSettings = new EditorSettings({
     value: settingsValue,
@@ -6113,9 +6116,11 @@ async function init() {
   status({messageKey: "app.preparingCanvasAndEffects", messageParams: {}}, false, true);
   // A stage that cannot start is reported by the catch of init() below: nothing else draws the scene. A start that fails or
   // never settles is tried again over a new canvas first (startStage).
+  tracePhase('start: stage and graphics device');
   state.renderer = await startStage(surface => createRenderer(surface, rendererOptions()), canvas, {
     replace: () => { const replacement = canvas.cloneNode(false); canvas.replaceWith(replacement); canvas = replacement; return canvas; },
   });
+  tracePhase('start: first layout');
   // The document was loaded into playback before the stage existed: the engine takes it now.
   state.playbackRevision = null;
   new ResizeObserver(resize).observe(viewport);
@@ -6124,6 +6129,7 @@ async function init() {
   updateUI();
   status({messageKey: "app.ready", messageParams: {}});
   window.styk.ready = true;
+  tracePhase(null);
   markEditorReady();
   window.styk.stats = stats;
   // The developer build's tools (src/devtools/, never shipped): nothing happens in the shipping build.

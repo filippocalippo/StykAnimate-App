@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {builderFixture} from '../scripts/builder-benchmark-fixture.mjs';
+import {builderFixture} from './support/builder-fixture.mjs';
 import {bucketRegion,enclosedRegions} from '../src/builder-fill.mjs';
 import {ownedEditorFor} from './support/owned-editor.mjs';
 export function squareFixture(){const f=builderFixture(4);f.figure_types[0].segments.forEach((s,i)=>{s.parent_id=i;s.length=80;s.angle_rad=i*Math.PI/2;s.thickness=4;});f.keyframes[0].objects[0].angles=f.figure_types[0].segments.map(s=>s.angle_rad);return f;}

@@ -21,9 +21,9 @@ is [`../RUST-ENGINE-PORT.md`](../RUST-ENGINE-PORT.md); decisions are in
 | [drawing.md](drawing.md) | the drawing raster engine: brushes, strokes, fill, selections, transforms, tile and undo codecs (S6) |
 
 Commands: `npm run engine:build`, `npm run engine:test` (seconds once built),
-`npm run engine:parity` (`-- --corpus` adds the Pivot codec's recorded answers), `npm run engine:bench`
-(one benchmark run; `scripts/engine-bench-matrix.sh` for rounds) and
-`npm run engine:bench:summary <label>`.
+`npm run engine:parity` (`-- --corpus` adds the Pivot codec's recorded answers), and for speed
+`npm run perf -- engine` (the engine by itself in Node, in seconds) and `npm run perf -- run` (the whole app, with
+where each scenario's time went, by engine module among the rest): [PERFORMANCE.md](../PERFORMANCE.md).
 
 `styk-edit` and `styk-eval` build their integration tests as one binary each (`tests/suite.rs`, one module per test
 file), because linking one binary per file took longer than the tests themselves:

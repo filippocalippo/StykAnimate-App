@@ -191,8 +191,8 @@ gesture owner. Pivot feedback draws a constant number of overlay primitives.
 
 Regression coverage: tests/selection-workflow.browser.mjs,
 tests/canvas-interactions.test.mjs, tests/hotkeys.test.mjs, and the existing
-multi-figure, joining and tablet browser tests. Performance comparison:
-node scripts/benchmark-selection-workflow.mjs <baseline-ref>.
+multi-figure, joining and tablet browser tests. Performance: the selection scenarios of
+`npm run perf -- run`, compared between two runs with `npm run perf -- compare` ([PERFORMANCE.md](PERFORMANCE.md)).
 
 ## Joints in dense frames
 

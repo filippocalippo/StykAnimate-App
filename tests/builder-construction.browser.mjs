@@ -1,7 +1,7 @@
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
-import {builderFixture} from '../scripts/builder-benchmark-fixture.mjs';
+import {builderFixture} from './support/builder-fixture.mjs';
 const b=await chromium.launch({channel:'chrome',headless:true});const p=await b.newPage({viewport:{width:1440,height:1000}}),errors=[];
 p.on('pageerror',e=>errors.push(e.message));const settle=()=>p.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
 try {

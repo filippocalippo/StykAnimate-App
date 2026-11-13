@@ -325,9 +325,10 @@ Next: npm run stats -- show E-a786        (add --json for the numbers alone)
 
 (Releases 9.1.0 and 9.0.0 are the synthetic ones of the tests, `tests/stats-reader.test.mjs`.)
 
-The profiling command (`scripts/styk-profile.mjs`, [DEVTOOLS.md](DEVTOOLS.md)) reports smooth share with the
-collector's own frame counter (`smooth … % of <frames counted>` per scenario), so a number from the dashboard
-and a number from a desk mean the same thing.
+A responsiveness finding names the command that reproduces it at a desk: `npm run perf -- run` with the scenario of
+the activity and the workload nearest the scene size ([PERFORMANCE.md](PERFORMANCE.md)). That tool measures frames
+with the developer tools' recorder, not with the collector's counter, so judge a change by
+`npm run perf -- compare <the run before>`, and expect the dashboard's smooth share to follow once a release is out.
 
 ## Checks
 

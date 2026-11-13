@@ -220,7 +220,7 @@ describe('the text of each command', () => {
       '  10,000-50,000 segments, graphics card: 96.9% (9.0.0: 97.1%), p50 8 ms, p95 29 ms, worst 120 ms',
       '    drawing 50%',
       '',
-      'Reproduce: node scripts/styk-profile.mjs <file of 50,000 to 200,000 segments> drag --desktop',
+      'Reproduce: npm run perf -- run --scenario pose.drag-joint --workload stress',
       ...FOOTER,
     ].join('\n');
     assert.equal(formatResponsiveness(responsiveness()), expected);
