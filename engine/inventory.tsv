@@ -122,6 +122,7 @@ src/canvas-color-sample.mjs	engine	styk-render	js
 src/canvas-context-menu.mjs	ui	-	stays	
 src/canvas-guides.mjs	ui	-	stays	
 src/canvas-handle-overlay.mjs	ui	-	stays	
+src/canvas-handle-sprites.mjs	ui	-	stays	
 src/canvas-handles.mjs	ui	-	stays	
 src/canvas-interactions.mjs	engine	styk-eval::picking	partial	Rust: handle/body/closest-joint picking, origin and explicit measured-bounds marquee predicates; borrowed painter order matches 201792 queries; bounds/resource readiness and app query/gesture stream still JS
 src/canvas-pinch.mjs	ui	-	stays	
