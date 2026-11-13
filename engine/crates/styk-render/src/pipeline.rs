@@ -1,8 +1,10 @@
-//! The one pipeline every primitive kind draws with (prim.wgsl), its bind group
-//! layouts, and the copy of a finished frame onto the host's surface.
+//! The pipelines of the one shader every primitive kind draws with (prim.wgsl: the general
+//! fragment entry point, and on a software rasterizer the simpler ones of `shading`), its bind
+//! group layouts, and the copy of a finished frame onto the host's surface.
 
 use crate::isolation::LayerAtlas;
 use crate::resources::*;
+use crate::shading::Shading;
 use crate::{Edges, Renderer, Stats, FORMAT, SAMPLES, UNIFORM_STRIDE};
 
 impl Renderer {
@@ -33,6 +35,7 @@ impl Renderer {
         self.samples = samples;
         self.pipeline = prim_pipeline(&self.device, &self.prim_layout, &self.prim_shader, None, false, self.samples);
         self.pipeline_add = None;
+        self.shading_pipelines = None;
         self.depth_pipelines = None;
         self.msaa_main = None;
         self.msaa_layer = None;
@@ -168,6 +171,11 @@ impl Renderer {
             depth_main: None,
             depth_layer: None,
             depth_faces: Vec::new(),
+            shading_runs: std::sync::Arc::from(Vec::new()),
+            shading_pipelines: None,
+            // Only a software rasterizer runs every branch of a fragment shader: on a graphics card the general shader is as
+            // fast and one shader keeps the frame the same whatever compiler builds it (Direct3D 12's moved a pixel by a level).
+            shading_on: device.adapter_info().device_type == wgpu::DeviceType::Cpu,
             prim_shader: shader,
             prim_layout: pipeline_layout,
             samples,
@@ -221,6 +229,11 @@ impl Renderer {
 /// else draws as before, in painter order. `additive` adds colour and alpha to the
 /// target (styk-draw `F_ADD`, generated effects that add light). `samples` per pixel.
 pub(crate) fn prim_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, depth: Option<wgpu::DepthStencilState>, additive: bool, samples: u32) -> wgpu::RenderPipeline {
+    shaded_pipeline(device, layout, shader, depth, additive, samples, Shading::Full)
+}
+
+/// [`prim_pipeline`] with the fragment entry point of `shading` ([`crate::shading`]).
+pub(crate) fn shaded_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, depth: Option<wgpu::DepthStencilState>, additive: bool, samples: u32, shading: Shading) -> wgpu::RenderPipeline {
     let dst_factor = if additive { wgpu::BlendFactor::One } else { wgpu::BlendFactor::OneMinusSrcAlpha };
     let premultiplied = wgpu::BlendState {
         color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor, operation: wgpu::BlendOperation::Add },
@@ -228,6 +241,8 @@ pub(crate) fn prim_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(match (depth.is_some(), additive) {
+            (false, false) if shading == Shading::Flat => "styk flat prims",
+            (false, false) if shading == Shading::Vector => "styk vector prims",
             (false, false) => "styk prims",
             (true, false) => "styk prims with depth",
             (false, true) => "styk additive prims",
@@ -249,7 +264,7 @@ pub(crate) fn prim_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout
         multisample: wgpu::MultisampleState { count: samples, mask: !0, alpha_to_coverage_enabled: false },
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(shading.entry()),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: Some(premultiplied), write_mask: wgpu::ColorWrites::ALL })],
         }),
@@ -283,6 +298,13 @@ impl Renderer {
                 flat_add: prim_pipeline(device, layout, shader, Some(state(wgpu::CompareFunction::Always)), true, samples),
             }
         })
+    }
+
+    /// The pipelines of the flat and vector fragment shaders ([`crate::shading`]), created with the first frame that draws
+    /// with them.
+    pub(crate) fn shading_pipelines(&mut self) -> [wgpu::RenderPipeline; 2] {
+        let (device, layout, shader, samples) = (&self.device, &self.prim_layout, &self.prim_shader, self.samples);
+        self.shading_pipelines.get_or_insert_with(|| [Shading::Flat, Shading::Vector].map(|s| shaded_pipeline(device, layout, shader, None, false, samples, s))).clone()
     }
 
     /// The additive pipeline, created with the first list that adds light.

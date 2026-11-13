@@ -1,6 +1,7 @@
 //! wgpu renderer for StykAnimate draw lists.
 //!
-//! * One instanced draw per pass, whatever the primitive mix. Primitive records are
+//! * One instanced draw per pass, whatever the primitive mix (on a software rasterizer, one per
+//!   run of primitives a simpler fragment entry point holds: [`shading`]). Primitive records are
 //!   instance attributes and the tables shaders look up (gradients, isolation group
 //!   placements, polyline vertices) are float textures, so the same pipeline runs on
 //!   WebGPU, Vulkan/Metal/DX12 and WebGL2, which has no storage buffers.
@@ -13,7 +14,8 @@
 //! * Output is drawn into an offscreen `Rgba8Unorm` frame (gamma-space blending,
 //!   like Canvas 2D) and copied into the host's surface.
 
-//! Modules: [`pipeline`] (the shader pipeline and bind layouts), [`frame`]
+//! Modules: [`pipeline`] (the shader's pipelines and bind layouts), [`shading`] (which fragment
+//! entry point draws a run of primitives), [`frame`]
 //! (passes of one frame), [`isolation`] (layer atlas and rounds), [`images`]
 //! (sprite and drawing atlas), [`resources`] (record layouts, lookup tables),
 //! [`present`] (surface copy and read-back), [`view`], [`effects`].
@@ -56,6 +58,8 @@ mod pipeline;
 mod present;
 #[cfg(feature = "gpu")]
 mod resources;
+#[cfg(feature = "gpu")]
+mod shading;
 #[cfg(all(test, feature = "gpu"))]
 mod lifetime_tests;
 mod view;
@@ -183,6 +187,12 @@ pub struct Renderer {
     pub(crate) depth_layer: Option<(wgpu::Texture, [u32; 2])>,
     /// Ranges of the current list's prims that are depth-tested faces; empty when it has none.
     pub(crate) depth_faces: Vec<(u32, u32)>,
+    /// Of the current list: the runs of prims and the fragment shader each draws with ([`shading`]), and the pipelines of the
+    /// simpler shaders (flat, vector), created with the first frame that draws with them. Off ([`Renderer::set_shading_runs`]:
+    /// the default but on a software rasterizer), every prim draws with the general one.
+    pub(crate) shading_runs: Arc<[(u32, u32, shading::Shading)]>,
+    pub(crate) shading_pipelines: Option<[wgpu::RenderPipeline; 2]>,
+    pub(crate) shading_on: bool,
     pub(crate) prim_shader: wgpu::ShaderModule,
     pub(crate) prim_layout: wgpu::PipelineLayout,
     /// Samples per pixel of the frame and layer passes: [`SAMPLES`], or 1 for [`Edges::Crisp`].
@@ -257,10 +267,11 @@ impl Renderer {
             && ranges.iter().all(|&(start, end)| start <= end && end as usize <= list.prims.len())
         {
             let structural = |p: &styk_draw::Prim| p.kind & (styk_draw::F_DEPTH | styk_draw::F_ADD) != 0 || p.kind & 255 == styk_draw::K_COMPOSITE;
-            let mut same = true;
+            let mut same = since.background_prims == list.background_prims;
             for &(start, end) in &ranges {
                 let (start, end) = (start as usize, end as usize);
-                same &= !list.prims[start..end].iter().any(structural) && !since.prims[start..end].iter().any(structural) && list.prims[start..end].iter().zip(&since.prims[start..end]).all(|(a, b)| a.group == b.group);
+                same &= !list.prims[start..end].iter().any(structural) && !since.prims[start..end].iter().any(structural)
+                    && list.prims[start..end].iter().zip(&since.prims[start..end]).all(|(a, b)| a.group == b.group && shading::shading(a) == shading::shading(b));
                 self.queue.write_buffer(&self.prims, (start * std::mem::size_of::<GpuPrim>()) as u64, prims_bytes(&list.prims[start..end]));
             }
             let mut rebind = self.bind0.is_none();
@@ -337,6 +348,24 @@ impl Renderer {
         if !self.add_ranges.is_empty() {
             self.additive_pipeline();
         }
+        // The background (the root pass's leading fills) is drawn in a call of its own.
+        let root = list.passes.iter().find(|p| p.depth == 0).map_or((0, 0), |p| (p.start, p.end));
+        let background = root.0..root.0 + list.background_prims.min(root.1.saturating_sub(root.0));
+        self.shading_runs = shading::runs(&list.prims, background).into();
+    }
+
+    /// Whether runs of prims draw with the simpler fragment shaders that hold their kinds or every prim with the general one.
+    /// A renderer starts with them on where its device is a software rasterizer (`wgpu::DeviceType::Cpu`: SwiftShader, which
+    /// Chromium draws WebGL2 with when there is no usable graphics card, llvmpipe, WARP), where they make a frame several times
+    /// faster, and off on a graphics card. The pixels are the same either way on every adapter `tests/shading.rs` compares but
+    /// Direct3D 12's compiler, which moved one pixel of the Canvas painter by a level.
+    pub fn set_shading_runs(&mut self, on: bool) {
+        self.shading_on = on;
+    }
+
+    /// Whether runs of prims draw with the simpler fragment shaders ([`Renderer::set_shading_runs`]).
+    pub fn shading_runs(&self) -> bool {
+        self.shading_on
     }
 
     pub fn device(&self) -> &wgpu::Device {

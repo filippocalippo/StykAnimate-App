@@ -14,7 +14,7 @@
  * exposure, whose new cel the session does not hold yet. The onion skins are the session's as well.
  */
 import {loadEngine, expectedAdapterInfo} from './engine.mjs';
-import {traceBegin, traceEnd} from '../trace.mjs';
+import {traceBegin, traceEnd, tuned} from '../trace.mjs';
 import {holdsRevision} from './engine-open.mjs';
 import {engineTicket} from './engine-playback.mjs';
 import {failEngine, engineRefusal} from './engine-failure.mjs';
@@ -23,6 +23,12 @@ import {LiveCels} from './engine-live-cels.mjs';
 import {EngineCameraMonitor} from './engine-previews.mjs';
 import {viewportBackingSize} from '../preview-quality.mjs';
 import {messageError} from '../localized-error.mjs';
+
+/**
+ * The live parameter that overrides how the stage shades its primitives (src/trace.mjs `tuned`): -1 as the device chose
+ * (the simpler fragment shaders on a software rasterizer, docs/engine/rendering.md), 0 the general shader, 1 the simpler ones.
+ */
+const SHADING_SPEC = Object.freeze({min: -1, max: 1, description: 'Fragment shaders of the stage by run of primitives: 1 on, 0 off, -1 as the device chose (on without a graphics card)'});
 
 /** The engine side of the stage, shared by every stage the app creates (it survives the loss of a canvas or device). */
 let shared = null;
@@ -215,6 +221,15 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
   /** The engine's counters, read from the stage once per frame drawn. */
   let statsAt = -1, gpuStats = null;
   const backend = {name: stage.backend().startsWith('BrowserWebGpu') ? 'WebGPU' : 'WebGL2', adapter: await adapterName(stage, options.adapterNameMs)};
+  /** What the device chose for the shading of runs of primitives, and the live parameter's value last applied over it. */
+  const shadingChosen = stage.shading_runs?.() === true;
+  let shadingAsked = -1;
+  const applyShading = () => {
+    const asked = tuned('stage.shadingRuns', -1, SHADING_SPEC);
+    if (asked === shadingAsked) return;
+    shadingAsked = asked;
+    stage.set_shading_runs?.(asked < 0 ? shadingChosen : asked > 0);
+  };
 
   const invalidate = () => options.onInvalidate?.();
   /** Another attempt at a frame the engine could not draw yet, on the next animation frame. */
@@ -406,6 +421,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       if (engineRefusal(side, request.report, revision)) return false;
       const span = traceBegin('stage draw');
       try {
+        applyShading();
         const drawn = drawEdit(request);
         if (span !== 0) traceEnd(span, {tick: request.tick, drawn, geometryMs: side.stats.lastSendMs, submitMs: side.stats.lastDrawMs});
         if (drawn) { engineShown = true; preparePickSoon(); }
@@ -449,6 +465,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       const view = frame.view ?? {}, seen = side.engine.progressSeen();
       const span = traceBegin('stage draw prepared');
       try {
+        applyShading();
         stage.set_canvas_drawing(false);
         orient(view);
         const drawn = stage.render_ticket(ticket.generation, ticket.epoch, ticket.tick, (view.scale ?? 1) * deviceRatio, (view.x ?? 0) * deviceRatio, (view.y ?? 0) * deviceRatio, frame.cameraEnabled !== false, true);

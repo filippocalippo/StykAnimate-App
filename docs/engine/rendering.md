@@ -37,7 +37,8 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 
 | Module | Holds |
 | --- | --- |
-| `pipeline.rs` | the one WGSL pipeline (`prim.wgsl`) for every kind, bind layouts ([D8](decisions/0008-renderer-without-storage-buffers.md)) |
+| `pipeline.rs` | the one WGSL shader (`prim.wgsl`) for every kind and its pipelines, bind layouts ([D8](decisions/0008-renderer-without-storage-buffers.md)) |
+| `shading.rs` | which of the shader's three fragment entry points draws each run of primitives on a software rasterizer ([Without a graphics card](#without-a-graphics-card), [D20](decisions/0020-software-rasterizer-shading-runs.md)) |
 | `frame.rs` | one frame: isolation layer passes by round and depth, each depth's effect stacks after its passes, then the frame pass (MSAA ×4, resolved once) |
 | `isolation.rs` | the layer atlas (8 pages of at least the frame's size, grown for larger effect layers, two for depth parity) and `plan_rounds`: layers that do not fit render in full-resolution rounds, the frame drawn between rounds |
 | `images.rs`, `pictures.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`: shelves, and the free space an earlier page left before a new page opens), uploads of decoded images (in bands of rows) and drawing tiles; the table that maps a layout page to its layer for drawing cel tiles, and the picture table (a hash table of which pictures are in the sprite texture, in which layer) with the soft atlas (a texel to 8 of the page's, 20 MiB for 116 large pictures) that a picture not in it is drawn from: a renderer holding the whole layout has every picture in, the stage's, for a document with more pages than it keeps, does not ([memory.md](memory.md#pages-kept-against-a-budget-soft-copies-in-their-place)) |
@@ -167,7 +168,9 @@ mask bilinearly, clamped to its own texels, times the record's colour and opacit
 Invariants: no per-frame allocation in steady state; the no-effect path draws
 one pass per depth and round and creates no effect resource; a list without 3D
 faces creates no depth buffer and a list without additive records no additive
-pipeline, and either draws one instanced draw per pass; the material atlas is a
+pipeline, and either draws one instanced draw per pass (on a software rasterizer, one per run
+of primitives a simpler fragment shader holds, at most 64 runs besides the background's:
+[Without a graphics card](#without-a-graphics-card)); the material atlas is a
 placeholder texel until a list names a row, and the glyph atlas until a list has a
 lone glyph; glyph masks are filled only when first needed; WebGL2 limits (no storage buffers, one sampler
 per texture, array textures of at least two layers, [D11](decisions/0011-array-textures-two-layers.md)).
@@ -225,6 +228,35 @@ same output as before the warming; native wgpu gave the same bytes in 3,200 rend
 thin triangles by a sample against Vulkan and Chromium's WebGPU. The test draws thousands of thin triangles on Direct3D 12 (FXC)
 and on Vulkan and requires equal frames. Native hosts take Direct3D 12 with FXC first on Windows and fall back to the other
 backends (`styk_render::native_gpu`). What is left against Chromium's frames, and how it was measured: `docs/native/frame-parity.md`.
+
+### Without a graphics card
+
+Where there is no usable graphics card Chromium draws WebGL2 on the processor with SwiftShader, which runs a quad of
+fragments through both sides of every branch of a shader with the lanes masked: each pixel pays for the code of every kind
+the fragment function holds, whatever the primitive drawn. Through the one general function the document's background (one
+rectangle over the frame) cost 61 of a 78 ms frame on the small scene, and an early return for its kind gained nothing.
+
+So `prim.wgsl` has three fragment entry points over the same functions, each holding fewer kinds: `fs_flat` (triangles
+and the view's fill in their own colour), `fs_vector` (those and the shapes covered by distance: segments, boxes, arcs,
+polylines, discs, rings) and `fs_main` (every kind). On a software rasterizer (`wgpu::DeviceType::Cpu`, which wgpu reports for
+SwiftShader and llvmpipe from the WebGL renderer string, and for lavapipe and WARP) a pass draws each run of primitives with
+the simplest one that holds every kind in it (`shading.rs`): a paint record (a gradient), a face of a depth run, an additive
+record and every kind that samples a texture take `fs_main`. The root's background is a run of its own; the other runs of a
+list are at most 64, the shortest drawn with the shader their neighbours need when a list's kinds alternate. The runs are
+worked out when a list is set (`Renderer::derive`), again where a list drawn over the one before changes a primitive's
+shader, and shared with each frame without a copy. The pipelines of `fs_flat` and `fs_vector` are made with the first frame
+that draws with them.
+
+On a graphics card every primitive draws with `fs_main`, one draw a pass, as before: the general function is as fast
+there, and one shader keeps a frame the same whatever compiler builds it (on Direct3D 12 with FXC one pixel of the Canvas
+painter moved by one level between the two shaders). `Renderer::set_shading_runs` overrides the device's choice; in the
+app the developer tools' live parameter `stage.shadingRuns` does (1 on, 0 off, -1 the device's choice), and the stage's
+stats say which is in use (`shadingRuns`). Decision: [D20](decisions/0020-software-rasterizer-shading-runs.md).
+
+`tests/shading.rs` draws every vector kind over opaque, translucent and no backgrounds and five repository documents in six
+views (fitted, the canvas smaller than the view, partly off screen, through the camera, turned and mirrored, the Canvas
+painter), smooth and crisp, with the runs on and off, and requires the same bytes on each software rasterizer and on a
+graphics card's Vulkan; a second test changes a primitive's kind in a list drawn over the one before.
 
 ## Text
 

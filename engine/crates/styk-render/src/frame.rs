@@ -8,6 +8,7 @@ use crate::effects::{self, plan, recipe, Slot};
 use std::sync::Arc;
 use crate::isolation::{page_size, plan_rounds};
 use crate::resources::{buffer, GpuGroup, GpuView};
+use crate::shading::Shading;
 use crate::{Renderer, Stats, ViewParams, FORMAT, UNIFORM_STRIDE};
 
 /// One effect run of a frame: a filtered group's layer at `at` on `page` of its depth's atlas.
@@ -95,10 +96,41 @@ fn depth_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthStencilAtt
     wgpu::RenderPassDepthStencilAttachment { view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }), stencil_ops: None }
 }
 
+/// What prims blended over the target draw with outside depth runs: the general pipeline, and with `runs` the pipelines
+/// of the flat and vector fragment shaders and the list's runs of prims each draws (`crate::shading`).
+struct Shaders {
+    full: wgpu::RenderPipeline,
+    runs: Option<([wgpu::RenderPipeline; 2], Arc<[(u32, u32, Shading)]>)>,
+}
+
+impl Shaders {
+    /// Draws prims `range`: one instanced draw a run, each with the shader of its run.
+    fn draw(&self, pass: &mut wgpu::RenderPass<'_>, range: std::ops::Range<u32>) {
+        let Some((simpler, runs)) = &self.runs else {
+            pass.set_pipeline(&self.full);
+            pass.draw(0..6, range);
+            return;
+        };
+        let first = runs.partition_point(|&(_, end, _)| end <= range.start);
+        for &(start, end, shading) in &runs[first..] {
+            if start >= range.end {
+                break;
+            }
+            pass.set_pipeline(match shading {
+                Shading::Flat => &simpler[0],
+                Shading::Vector => &simpler[1],
+                Shading::Full => &self.full,
+            });
+            pass.draw(0..6, start.max(range.start)..end.min(range.end));
+        }
+    }
+}
+
 /// Draws prims `range` of the list in one instanced draw, split where generated effects
-/// add light (`additive`) and where depth-tested faces need the depth pipeline (`depth`:
-/// the flat and faces pipelines of a pass with a depth buffer, and the list's face ranges).
-fn draw_prims(pass: &mut wgpu::RenderPass<'_>, base: &wgpu::RenderPipeline, additive: Option<&Additive>, depth: Option<&DepthRuns>, range: std::ops::Range<u32>) {
+/// add light (`additive`), where depth-tested faces need the depth pipeline (`depth`:
+/// the flat and faces pipelines of a pass with a depth buffer, and the list's face ranges)
+/// and, elsewhere, where a run of prims draws with a simpler fragment shader (`shaders`).
+fn draw_prims(pass: &mut wgpu::RenderPass<'_>, base: &Shaders, additive: Option<&Additive>, depth: Option<&DepthRuns>, range: std::ops::Range<u32>) {
     let Some(add) = additive else { return draw_painted(pass, base, depth, range) };
     let mut at = range.start;
     let first = add.ranges.partition_point(|&(_, end)| end <= range.start);
@@ -119,10 +151,9 @@ fn draw_prims(pass: &mut wgpu::RenderPass<'_>, base: &wgpu::RenderPipeline, addi
 }
 
 /// [`draw_prims`] for prims blended over the target.
-fn draw_painted(pass: &mut wgpu::RenderPass<'_>, base: &wgpu::RenderPipeline, depth: Option<&DepthRuns>, range: std::ops::Range<u32>) {
+fn draw_painted(pass: &mut wgpu::RenderPass<'_>, base: &Shaders, depth: Option<&DepthRuns>, range: std::ops::Range<u32>) {
     let Some(DepthRuns { flat, faces, ranges, .. }) = depth else {
-        pass.set_pipeline(base);
-        pass.draw(0..6, range);
+        base.draw(pass, range);
         return;
     };
     let mut at = range.start;
@@ -439,6 +470,7 @@ impl Renderer {
             DepthRuns { flat: pipelines.flat.clone(), faces: pipelines.faces.clone(), flat_add: pipelines.flat_add.clone(), ranges }
         });
         let additive = (!self.add_ranges.is_empty()).then(|| Additive { pipeline: self.additive_pipeline(), ranges: self.add_ranges.clone() });
+        let shaders = Shaders { full: self.pipeline.clone(), runs: self.shading_on.then(|| (self.shading_pipelines(), self.shading_runs.clone())) };
         let (mut layer_depth, mut frame_depth) = (false, false);
         let mut from = root.0 + bg;
         for (r, _) in rounds.iter().enumerate() {
@@ -476,7 +508,7 @@ impl Renderer {
                     pass.set_bind_group(1, &self.sprite_bind, &[]);
                     pass.set_bind_group(2, &self.layer_binds[(depth as usize + 1) % 2], &[]);
                     pass.set_vertex_buffer(0, self.prims.slice(..));
-                    draw_prims(&mut pass, &self.pipeline, additive.as_ref(), face_runs, start..end);
+                    draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, start..end);
                     if let Some(sources) = &mut gpu_sources {
                         consume_gpu_sources(&list.prims[start as usize..end as usize], &placed, sources, Some(page_index), None);
                     }
@@ -531,7 +563,7 @@ impl Renderer {
             pass.set_bind_group(2, &self.layer_binds[1], &[]);
             pass.set_vertex_buffer(0, self.prims.slice(..));
             if r == 0 && bg > 0 {
-                draw_prims(&mut pass, &self.pipeline, additive.as_ref(), face_runs, root.0..root.0 + bg);
+                draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, root.0..root.0 + bg);
             }
             if until > from {
                 if view.clip_to_artboard {
@@ -542,7 +574,7 @@ impl Renderer {
                     let y1 = a[3].clamp(0.0, size[1] as f64).ceil() as u32;
                     if x1 > x0 && y1 > y0 {
                         pass.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
-                        draw_prims(&mut pass, &self.pipeline, additive.as_ref(), face_runs, from..until);
+                        draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until);
                         if let Some(sources) = &mut gpu_sources {
                             consume_gpu_sources(&list.prims[from as usize..until as usize], &placed, sources, None, Some([
                                 crate::paint::CanvasClip::new(view.artboard).rect()[0].max(x0 as f32),
@@ -552,7 +584,7 @@ impl Renderer {
                         }
                     }
                 } else {
-                    draw_prims(&mut pass, &self.pipeline, additive.as_ref(), face_runs, from..until);
+                    draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until);
                     if let Some(sources) = &mut gpu_sources {
                         consume_gpu_sources(&list.prims[from as usize..until as usize], &placed, sources, None, Some([0.0,0.0,size[0] as f32,size[1] as f32]));
                     }

@@ -13874,9 +13874,9 @@
   },
   "errors.engineStage.theDrawingEngineCouldNotStart": {
     "locations": [
-      "src/engine/engine-stage.mjs:188",
-      "src/engine/engine-stage.mjs:191",
-      "src/engine/engine-stage.mjs:195"
+      "src/engine/engine-stage.mjs:194",
+      "src/engine/engine-stage.mjs:197",
+      "src/engine/engine-stage.mjs:201"
     ],
     "context": "catch (error) { throw messageError(error, 'errors.engineStage.theDrawingEngineCouldNotStart', {reason: error?.message ?? error}); }"
   },
@@ -25810,7 +25810,7 @@
   },
   "rendererStatus.deviceDisconnected": {
     "locations": [
-      "src/engine/engine-stage.mjs:237"
+      "src/engine/engine-stage.mjs:252"
     ],
     "context": "messageKey: 'rendererStatus.deviceDisconnected', messageParams: {detail: reason}}));"
   },

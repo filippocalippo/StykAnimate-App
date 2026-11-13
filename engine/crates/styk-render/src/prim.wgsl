@@ -1,5 +1,6 @@
 // StykAnimate primitive shader. One instanced draw per pass covers every
-// primitive kind: the vertex stage expands a record into a quad (or triangle),
+// primitive kind (a software rasterizer draws runs of the simpler kinds with
+// `fs_flat` and `fs_vector`, below): the vertex stage expands a record into a quad (or triangle),
 // the fragment stage shades it analytically in world units. Nothing here
 // depends on the zoom level except the anti-aliasing width, so panning and
 // zooming only change the `View` uniform.
@@ -818,11 +819,20 @@ fn beam_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, aa: f32) -> vec4<f32> {
     return vec4<f32>(min(vec3<f32>(1.0), rgb) * alpha, alpha);
 }
 
-fn shade_primitive(in: VsOut) -> vec4<f32> {
+// A fragment outside the clip of the group it is drawn in is not drawn.
+fn discard_outside_clip(in: VsOut) {
     let pos = in.pos.xy;
     if (pos.x < in.clip.x || pos.y < in.clip.y || pos.x > in.clip.z || pos.y > in.clip.w) {
         discard;
     }
+}
+
+fn is_vector(kind: u32) -> bool {
+    return kind == K_CAPSULE || kind == K_BOX || kind == K_ARC || kind == K_POLYLINE || kind == K_DISC || kind == K_RING || kind == K_TRI || kind == K_FILL_VIEW;
+}
+
+fn shade_primitive(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
     let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
     let kind = p.kind & 255u;
     if (kind == K_PARTICLE) {
@@ -838,6 +848,15 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
     if (p.paint != NO_PAINT && (p.kind & F_DRAWING) == 0u) {
         base = paint_at(p.paint, w);
     }
+    if (is_vector(kind)) {
+        return shade_vector(p, kind, w, aa, base);
+    }
+    return shade_sampled(in, p, kind, base);
+}
+
+// The shapes covered by their distance (segments, boxes, arcs, polylines, discs, rings) and the
+// flat ones (triangles, the view's fill), in `base` (straight alpha), premultiplied.
+fn shade_vector(p: Prim, kind: u32, w: vec2<f32>, aa: f32, base: vec4<f32>) -> vec4<f32> {
     if (kind == K_CAPSULE || kind == K_BOX || kind == K_ARC || kind == K_POLYLINE) {
         var hw = p.b.x;
         if (kind == K_ARC) { hw = p.a.w; }
@@ -892,9 +911,13 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
         if (out.a <= 0.0) { discard; }
         return out;
     }
-    if (kind == K_TRI) {
-        return premul(base);
-    }
+    // K_TRI and K_FILL_VIEW.
+    return premul(base);
+}
+
+// What samples a texture: lone glyphs, pictures and drawing tiles, the background picture, composites.
+fn shade_sampled(in: VsOut, p: Prim, kind: u32, base: vec4<f32>) -> vec4<f32> {
+    let w = in.world;
     if (kind == K_GLYPH) {
         // The mask sampled bilinearly, clamped to its own texels as an exact texture's edge
         // would be, in the text's colour and opacity (the editor's glyph shader).
@@ -977,9 +1000,6 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
         let tex = textureSampleLevel(layers, linear_sampler, uv / size, i32(child.page), 0.0);
         return tex * base.a;
     }
-    if (kind == K_FILL_VIEW) {
-        return premul(base);
-    }
     return vec4<f32>(0.0);
 }
 
@@ -1026,26 +1046,68 @@ fn inside_orient_artboard(p: vec2<f32>) -> bool {
     return (e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0 && e3 >= 0.0) || (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0 && e3 <= 0.0);
 }
 
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    // The scene of a rotated view stays on the artboard (backgrounds are the artboard's quad already).
+// The scene of a rotated view stays on the artboard (backgrounds are the artboard's quad already).
+fn discard_outside_orient_artboard(in: VsOut) {
     if (view.orient_flags.y > 0.5 && in.head.y == 0u) {
         let drawn = in.head.x & 255u;
         if (drawn != K_FILL_VIEW && drawn != K_BG_IMAGE && !inside_orient_artboard(in.pos.xy)) { discard; }
     }
+}
+
+// The Canvas byte mask of a root paint other than the background picture: the clip's coverage, and the view fill's own.
+fn canvas_alpha(pos: vec2<f32>, kind: u32) -> f32 {
+    var alpha = canvas_clip_alpha(pos);
+    if (kind == K_FILL_VIEW && view.inv_t.w > 0.5) {
+        alpha = floor((alpha * canvas_fill_alpha(pos) + 127.0) / 255.0);
+    }
+    return alpha;
+}
+
+// The pinned Canvas byte-mask blitter uses alpha+1 with a right shift.
+fn canvas_masked(src: vec4<f32>, alpha: f32) -> vec4<f32> {
+    let paint = floor(clamp(src, vec4<f32>(0.0), vec4<f32>(1.0)) * 255.0 + vec4<f32>(0.5));
+    return floor(paint * (alpha + 1.0) / 256.0) / 255.0;
+}
+
+// Three entry points shade the same records with the same functions. A fragment runs the code of every kind its
+// shader holds where a software rasterizer (SwiftShader, without a graphics card) executes both sides of a branch, so
+// a run of records that are all of the simpler kinds draws with a shader holding only theirs (`Shading` in
+// frame.rs): `fs_flat` for flat colour (triangles, the view's fill), `fs_vector` for those and the shapes covered by
+// distance, `fs_main` for everything. Their pixels are the same (tests/shading.rs).
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    discard_outside_orient_artboard(in);
     let src = shade_primitive(in);
     if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
     let kind = in.head.x & 255u;
-    var alpha = canvas_clip_alpha(in.pos.xy);
-    if (kind == K_FILL_VIEW && view.inv_t.w > 0.5) {
-        alpha = floor((alpha * canvas_fill_alpha(in.pos.xy) + 127.0) / 255.0);
-    } else if (kind == K_BG_IMAGE) {
+    if (kind == K_BG_IMAGE) {
         let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
         let bounds = canvas_image_bounds(p);
         let w = to_world(in.pos.xy);
         if (any(w < bounds.xy) || any(w >= bounds.xy + bounds.zw)) { return vec4<f32>(0.0); }
     }
-    // The pinned Canvas byte-mask blitter uses alpha+1 with a right shift.
-    let paint = floor(clamp(src, vec4<f32>(0.0), vec4<f32>(1.0)) * 255.0 + vec4<f32>(0.5));
-    return floor(paint * (alpha + 1.0) / 256.0) / 255.0;
+    return canvas_masked(src, canvas_alpha(in.pos.xy, kind));
+}
+
+// Segments, boxes, arcs, polylines, discs, rings, triangles and the view's fill, in their own colour (no paint record).
+@fragment
+fn fs_vector(in: VsOut) -> @location(0) vec4<f32> {
+    discard_outside_orient_artboard(in);
+    discard_outside_clip(in);
+    let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
+    let kind = p.kind & 255u;
+    let src = shade_vector(p, kind, in.world, in.aa, unpack(p.color));
+    if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
+    return canvas_masked(src, canvas_alpha(in.pos.xy, kind));
+}
+
+// Triangles and the view's fill in their own colour (no paint record).
+@fragment
+fn fs_flat(in: VsOut) -> @location(0) vec4<f32> {
+    discard_outside_orient_artboard(in);
+    discard_outside_clip(in);
+    let src = premul(unpack(in.head.z));
+    if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
+    return canvas_masked(src, canvas_alpha(in.pos.xy, in.head.x & 255u));
 }
