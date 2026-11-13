@@ -298,7 +298,7 @@ test('the page\'s memory splits by owner, and what no part names is said as unex
   assert.deepEqual([megabytes.process, megabytes['engine memory'], megabytes.unexplained, megabytes.rows.workers[0]], [1600, 900, 190, {name: 'StykAnimate drawing pixels', mb: 67, count: 1}]);
 
   // The sampler reads the owners the early script keeps and the process's count from the desktop's bridge.
-  globalThis.__stykDevtoolsBridge = {processMemory: async () => ({private: 1600 * 1024, residentSet: 1700 * 1024, shared: 0, blink: {allocated: 1, total: 2}})};
+  globalThis.__stykDevtoolsBridge = {processMemory: async () => ({privateBytes: 1600 * MB, workingSetBytes: 1700 * MB})};
   try {
     const early = {frames: recorder(), workers: {rows: [], sequence: 0}, browser: {}, memory: {read: () => owners}};
     const sampler = new Sampler({app: {state: {}}, early, engine: {memoryBytes: 900 * MB, memory: () => engine}});

@@ -140,6 +140,11 @@ function startDevtools({ appRoot, page, openFile }) {
   const early = asked + readFileSync(path.join(appRoot, 'src', 'devtools', 'early.js'), 'utf8');
   // The preload script asks once, before the page's first script: a synchronous answer keeps the early script first.
   ipcMain.on('styk:developer-early', event => { event.returnValue = { script: early, bridge: BRIDGE }; });
+  // The asking page's own process as the system counts it, for the tools' memory by owner (docs/DEVTOOLS.md): the renderer cannot read it itself.
+  ipcMain.handle('styk:developer-process-memory', event => {
+    const pid = event.sender.getOSProcessId(), row = processMetrics().find(metric => metric.pid === pid);
+    return row ? { privateBytes: row.privateBytes, workingSetBytes: row.workingSetBytes } : null;
+  });
 
   const dialogs = createDialogAnswers();
   const restoreDialogs = answerDialogs(dialog, dialogs);
@@ -228,6 +233,7 @@ function startDevtools({ appRoot, page, openFile }) {
     close() {
       server.close();
       restoreDialogs();
+      ipcMain.removeHandler('styk:developer-process-memory');
       for (const ticket of [...waiting.keys()]) settle(ticket, failure(null, 'The app is closing.', ''));
       if (process.platform !== 'win32') { try { unlinkSync(file); } catch { /* already gone */ } }
     },

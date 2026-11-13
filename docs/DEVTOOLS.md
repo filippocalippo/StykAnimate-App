@@ -220,7 +220,7 @@ each at most, the collected ones dropped first), and reads their sizes at the ch
 
 The control channel's `memory {owners: true}` adds the owners to the page's memory, and `memory.breakdown {threads,
 processBytes}` returns the split (`threads` as the runner reads them from the inspector). In the desktop's developer launch the
-page reads its own process's count through the preload bridge (`processMemory`: `process.getProcessMemoryInfo()`); in a browser
+page reads its own process's count through the preload bridge (`processMemory`, which asks the main process: `app.getAppMetrics()` for the page's process; the renderer's own `process.getProcessMemoryInfo()` fails there); in a browser
 the count is unknown in the page and `unexplained` is null there. Without an inspector the workers are not measured and stay
 inside `unexplained` (`missing` says so).
 

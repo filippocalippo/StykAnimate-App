@@ -92,14 +92,14 @@ export class Sampler {
 
   /**
    * This renderer process's memory as the system counts it, where the desktop's developer launch can say (its preload
-   * bridge): {privateBytes, residentBytes, sharedBytes, blinkBytes}. Null elsewhere (a browser).
+   * bridge asks the main process): {privateBytes, workingSetBytes}. Null elsewhere (a browser).
    */
   async processMemory() {
     const bridge = globalThis.__stykDevtoolsBridge;
     if (typeof bridge?.processMemory !== 'function') return null;
     const info = await bridge.processMemory();
-    const kilobytes = value => (Number.isFinite(value) ? value * 1024 : null);
-    return {privateBytes: kilobytes(info?.private), residentBytes: kilobytes(info?.residentSet), sharedBytes: kilobytes(info?.shared), blinkBytes: kilobytes(info?.blink?.total)};
+    const bytes = value => (Number.isFinite(value) ? value : null);
+    return info ? {privateBytes: bytes(info.privateBytes), workingSetBytes: bytes(info.workingSetBytes)} : null;
   }
 
   /**
