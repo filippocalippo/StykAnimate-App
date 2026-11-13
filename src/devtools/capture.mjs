@@ -3,7 +3,7 @@
  * panel, the control channel and the profiling runner share. Developer build only.
  */
 import {frameSeries, frameWindow, inputWindow, summarizeFrames, summarizeInputs} from './frames.mjs';
-import {quantile, round} from './stats.mjs';
+import {quantile, round, sorted} from './stats.mjs';
 
 export const DEVELOPER = 'styk-devtools';
 
@@ -22,16 +22,47 @@ export function ringEvents(ring, from = 0) {
 }
 
 /**
+ * The events of the ring that began between `since` and `until` (performance.now ms), oldest first, read from the
+ * newest backwards so a look at the last seconds costs what those seconds hold, not the whole ring. The ring is in the
+ * order events ended, give or take a browser observer's delay (a long task is reported after it ends): the walk stops
+ * once 32 events in a row ended more than a second before `since`.
+ */
+export function recentEvents(ring, since, until = Infinity) {
+  const oldest = Math.max(0, ring.total - ring.capacity), events = [];
+  for (let index = ring.total - 1, old = 0; index >= oldest && old < 32; index--) {
+    const at = index % ring.capacity, start = ring.start[at], duration = ring.duration[at];
+    if (start + Math.max(0, duration) < since - 1000) { old++; continue; }
+    old = 0;
+    if (start < since || start > until) continue;
+    events.push({name: ring.names[ring.name[at]], thread: ring.threads[ring.thread[at]] ?? 'interface', start, duration, depth: ring.depth[at], value: ring.value[at], args: ring.args[at]});
+  }
+  return events.reverse();
+}
+
+/** What the engine's threads prepared between two reads of its counters (src/devtools/sampler.mjs `preparation`): frames, and the mean time of one (ms). */
+export function preparationSince(before, after) {
+  if (!before || !after) return null;
+  // The engine starts its counters afresh for a new document: what it counts then is all since.
+  const since = after.prepared >= before.prepared ? before : {prepared: 0, totalMs: 0, inline: 0};
+  const frames = after.prepared - since.prepared;
+  return {frames, msPerFrame: frames > 0 ? round((after.totalMs - since.totalMs) / frames) : null, inline: Math.max(0, after.inline - since.inline)};
+}
+
+/**
  * One capture at a time: `start()` marks the ring, `stop()` takes what was recorded since. With the frame recorder
- * (`frames`, the early script's) and the engine boundary meter (`boundary`) it also takes the frames, the inputs'
- * latencies and the calls into the engine of that stretch.
+ * (`frames`, the early script's), the engine boundary meter (`boundary`) and a read of the engine's preparation
+ * counters (`preparation`, the sampler's) it also takes the frames, the inputs' latencies, the calls into the engine
+ * and what the engine's threads prepared in that stretch.
  */
 export class Capture {
-  constructor(ring, {frames = null, boundary = null} = {}) { this.ring = ring; this.frames = frames; this.boundary = boundary; this.running = null; this.last = null; }
+  constructor(ring, {frames = null, boundary = null, preparation = null} = {}) {
+    Object.assign(this, {ring, frames, boundary, preparation, running: null, last: null});
+  }
   start(label = '') {
     if (this.running) throw new Error('A capture is already running: stop it first.');
     this.boundary?.reset();
-    this.running = {label, from: this.ring.total, framesFrom: this.frames?.total ?? 0, inputsFrom: this.frames?.inputs.total ?? 0, startedAt: performance.now(), startedTime: Date.now()};
+    this.running = {label, from: this.ring.total, framesFrom: this.frames?.total ?? 0, inputsFrom: this.frames?.inputs.total ?? 0, startedAt: performance.now(), startedTime: Date.now(),
+      prepared: this.preparation?.() ?? null};
     return {started: true, label};
   }
   stop() {
@@ -41,7 +72,7 @@ export class Capture {
     const {events, dropped} = ringEvents(this.ring, running.from);
     this.last = {label: running.label, startedAt: running.startedAt, startedTime: running.startedTime, stoppedAt: performance.now(), events, dropped,
       frames: this.frames ? frameWindow(this.frames, running.framesFrom) : null, inputs: this.frames ? inputWindow(this.frames, running.inputsFrom) : null,
-      boundary: this.boundary?.rows() ?? null};
+      boundary: this.boundary?.rows() ?? null, preparation: this.preparation ? preparationSince(running.prepared, this.preparation()) : null};
     return this.last;
   }
 }
@@ -51,8 +82,9 @@ export const spanKey = event => { const detail = event.args?.method ?? event.arg
 
 /**
  * Everything a capture says, as numbers: the spans' statistics (`summarize`), the display frames with the interface
- * thread's work by phase (`frames`), the inputs' latencies and the calls into the engine. `taken` is a capture, or
- * any {startedAt, stoppedAt, events, dropped, frames, inputs, boundary} (the last five seconds of the rings).
+ * thread's work by phase (`frames`), the inputs' latencies, the calls into the engine and what the engine's threads
+ * prepared. `taken` is a capture, or any {startedAt, stoppedAt, events, dropped, frames, inputs, boundary, preparation}
+ * (the last seconds of the rings). This is the summary the profiling runner stores and the performance panel shows.
  * `periodMs` is the display's period when the caller measured it; `series` adds the frames as chart series.
  */
 export function analyze(taken, {periodMs = null, slowest, series = false} = {}) {
@@ -63,6 +95,7 @@ export function analyze(taken, {periodMs = null, slowest, series = false} = {}) 
     frames: taken.frames ? summarizeFrames(taken.frames, {periodMs, seconds}) : null,
     inputs: taken.inputs ? summarizeInputs(taken.inputs) : null,
     boundary: taken.boundary ? taken.boundary.slice(0, 40).map(row => ({name: row.name, calls: row.calls, totalMs: round(row.totalMs), worstMs: round(row.worstMs)})) : null,
+    preparation: taken.preparation ?? null,
     shown: shownFrames(taken),
     ...(series && taken.frames ? {series: frameSeries(taken.frames)} : {}),
   };
@@ -108,9 +141,10 @@ export function summarize(events, {slowest = 10} = {}) {
       if (top.length > slowest * 4) { top.sort((a, b) => b.duration - a.duration); top.length = slowest; }
     }
   }
-  const spanRows = [...spans].map(([name, list]) => {
-    list.sort((a, b) => a - b);
-    const total = list.reduce((sum, value) => sum + value, 0);
+  const spanRows = [...spans].map(([name, durations]) => {
+    const list = sorted(durations);
+    let total = 0;
+    for (const value of list) total += value;
     return {name, thread: threads.get(name), count: list.length, totalMs: round(total), p50: round(quantile(list, .5)), p95: round(quantile(list, .95)), worst: round(list.at(-1))};
   }).sort((a, b) => b.totalMs - a.totalMs);
   top.sort((a, b) => b.duration - a.duration);

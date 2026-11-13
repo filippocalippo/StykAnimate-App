@@ -1,11 +1,13 @@
 // The developer tools in a browser (docs/DEVTOOLS.md): the early script injected as the developer build injects it,
-// the panels, the overlay and every control operation, on the app served from source.
+// the panels, the overlay and every control operation, on the app served from source. Screenshots of every tab, of the
+// Performance tab during a drag and after a recording, and of the overlay, in light and dark, go to artifacts/devtools/.
 //   node tests/devtools.browser.mjs            (serves the app itself; STYK_URL=<origin> to use a running server)
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {distribution} from '../src/devtools/stats.mjs';
 import {chromium} from './support/playwright.mjs';
 
 const require = createRequire(import.meta.url);
@@ -110,18 +112,91 @@ try {
   // A dock panel: placed in an island of the workspace, not a window over it.
   await page.waitForFunction(() => document.getElementById('styk-devtools')?.closest('.shell-island') && !document.getElementById('styk-devtools').hidden, null, {timeout: 5000});
   assert.ok(await page.evaluate(() => window.styk.shell.canPlace('developer')), 'the developer build defines the panel');
-  await page.waitForTimeout(700);
-  for (const tab of ['Profiler', 'Logs', 'Parameters', 'Inspector', 'Jobs']) {
+  assert.equal(await page.locator('#styk-devtools header button[aria-selected="true"]').textContent(), 'Performance', 'the Performance tab opens first');
+  const panel = page.locator('#styk-devtools'), overlay = page.locator('#styk-devtools-overlay');
+  // The app's own setting, as a person switches it (the app applies its stored theme again on its own otherwise).
+  const theme = name => page.evaluate(value => globalThis.styk.settingsUI.commit({theme: value}), name);
+  /** A drag of the joint the control channel finds (the panel took room from the stage, so it is found again); `held` runs before the release. */
+  const drag = async (held = async () => {}) => {
+    const handle = await ok('target.handle', {kind: 'pose'});
+    await page.mouse.move(handle.x, handle.y); await page.mouse.down();
+    for (let i = 1; i <= 40; i++) { await page.mouse.move(handle.x + (i % 20) * 3, handle.y - (i % 20) * 1.5); await page.waitForTimeout(12); }
+    await held();
+    await page.mouse.up();
+    await ok('settle');
+  };
+  // The Performance tab, live, shows the frames of a drag while it runs: the chart's numbers and the interface's spans.
+  const readLive = () => page.evaluate(() => ({frames: globalThis.__stykDevtoolsEarly.frames.total, watching: globalThis.__stykDevtoolsEarly.frames.watching,
+    tiles: [...document.querySelectorAll('#styk-devtools .dt-tile-value')].map(node => node.textContent),
+    spans: [...document.querySelectorAll('#styk-devtools .dt-ranked tr:not([hidden]) td.dt-name')].map(node => node.textContent)}));
+  let live = null;
+  for (const name of ['light', 'dark']) {
+    await theme(name);
+    await drag(async () => {
+      await page.waitForTimeout(700);
+      live = await readLive();
+      await panel.screenshot({path: path.join(out, `performance-live-drag-${name}.png`)});
+      await overlay.screenshot({path: path.join(out, `overlay-drag-${name}.png`)});
+    });
+  }
+  assert.ok(live.watching > 0 && live.frames > 30, `the panel and the overlay watch the frames: ${JSON.stringify(live)}`);
+  assert.notEqual(live.tiles[0], '–', `frames per second is shown: ${JSON.stringify(live.tiles)}`);
+  assert.ok(live.spans.includes('paint'), `the live list names where the interface's time went: ${JSON.stringify(live.spans)}`);
+  console.log('PASS performance tab live', JSON.stringify(live.tiles), live.spans.slice(0, 5).join(', '));
+  // Record, a drag, Stop: the tab holds exactly that stretch, with its frames, its inputs and its grade.
+  const bar = name => panel.locator('.dt-button', {hasText: new RegExp(`^${name}$`)}).first();
+  const panelShot = async name => { await page.waitForTimeout(400); await panel.screenshot({path: path.join(out, `${name}.png`)}); };
+  await theme('light');
+  await bar('Record').click();
+  await drag();
+  await bar('Stop').click();
+  const held = await page.evaluate(() => ({status: document.querySelector('#styk-devtools .dt-status').textContent, verdict: document.querySelector('#styk-devtools .dt-verdict').textContent,
+    hidden: document.querySelector('#styk-devtools .dt-verdict').hidden}));
+  const [, frameCount, inputCount] = /(\d+) frames · (\d+) inputs/.exec(held.status) ?? [];
+  assert.ok(Number(frameCount) > 10 && Number(inputCount) > 5, `the recording has frames and inputs: ${held.status}`);
+  assert.ok(!held.hidden && /^(good|fair|poor|bad)/.test(held.verdict), `the recording is graded: ${held.verdict}`);
+  console.log('PASS record and stop:', held.status, '|', held.verdict.slice(0, 120));
+  for (const name of ['light', 'dark']) { await theme(name); await panelShot(`performance-recorded-${name}`); }
+  // The Profiler on the same held stretch.
+  await page.locator('#styk-devtools header button', {hasText: 'Profiler'}).click();
+  for (const name of ['dark', 'light']) { await theme(name); await panelShot(`profiler-recorded-${name}`); }
+  await page.locator('#styk-devtools header button', {hasText: 'Performance'}).click();
+  await theme('light');
+  await bar('Live').click();
+  // What the overlay and the panel cost: their own spans, measured by the tools they are part of.
+  const cost = await page.evaluate(() => {
+    const ring = globalThis.__stykDevtoolsEarly.ring, found = {overlay: [], panel: []};
+    for (let index = Math.max(0, ring.total - ring.capacity); index < ring.total; index++) {
+      const at = index % ring.capacity, name = ring.names[ring.name[at]];
+      if (name === 'devtools overlay') found.overlay.push(ring.duration[at]); else if (name === 'devtools panel') found.panel.push(ring.duration[at]);
+    }
+    return found;
+  });
+  const overlayCost = distribution(cost.overlay), panelCost = distribution(cost.panel);
+  assert.ok(overlayCost.count > 4 && panelCost.count > 4, 'the overlay and the panel record their own cost');
+  console.log(`COST overlay: ${overlayCost.count} drawings, p50 ${overlayCost.p50} ms, p95 ${overlayCost.p95} ms, worst ${overlayCost.worst} ms; at four a second and 144 Hz that is ${(overlayCost.mean * 4 / 144).toFixed(3)} ms a frame`);
+  console.log(`COST panel refresh: ${panelCost.count}, p50 ${panelCost.p50} ms, p95 ${panelCost.p95} ms, worst ${panelCost.worst} ms`);
+  for (const tab of ['Profiler', 'Logs', 'Parameters', 'Inspector', 'Jobs', 'Performance']) {
     await page.locator('#styk-devtools header button', {hasText: tab}).click();
-    await page.waitForTimeout(150);
-    assert.equal(await page.locator('#styk-devtools .dt-error').count(), 0, `${tab} renders without an error`);
+    await page.waitForTimeout(tab === 'Performance' ? 600 : 300);
+    assert.equal(await page.locator('#styk-devtools .dt-failure').count(), 0, `${tab} renders without an error`);
     await page.screenshot({path: path.join(out, `panel-${tab.toLowerCase()}.png`)});
   }
-  assert.ok(await page.locator('#styk-devtools-overlay').isVisible());
+  assert.ok(await overlay.isVisible());
   console.log('PASS panels and overlay');
-  // Closed from its own button, the dock takes it away and it stops refreshing.
+  // Closed from its own button and its shortcut, nothing watches: the frame recorder stops and no display frame is recorded.
   await page.locator('#styk-devtools .dt-close').click();
-  await page.waitForFunction(() => document.getElementById('styk-devtools').hidden);
+  await page.keyboard.press('Control+Shift+O');
+  await page.waitForFunction(() => document.getElementById('styk-devtools').hidden && document.getElementById('styk-devtools-overlay').hidden);
+  const quiet = await page.evaluate(async () => {
+    const early = globalThis.__stykDevtoolsEarly, ring = early.ring, from = ring.total;
+    await new Promise(resolve => setTimeout(resolve, 600));
+    let frames = 0;
+    for (let index = from; index < ring.total; index++) if (ring.names[ring.name[index % ring.capacity]] === 'display frame') frames++;
+    return {watching: early.frames.watching, frames};
+  });
+  assert.deepEqual(quiet, {watching: 0, frames: 0}, 'with everything closed nothing ticks');
+  console.log('PASS closed: nothing watches, no display frame recorded');
   assert.deepEqual(errors, []);
 
   // The shipping page (no early script) knows no developer panel, and a developer layout stored in it opens cleanly.

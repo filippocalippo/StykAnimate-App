@@ -109,16 +109,29 @@ export function summarizeInputs(window) {
 
 /**
  * A window's frames as compact series for a chart, at most `limit` points: each point is the worst of its bucket, so
- * a single slow frame never disappears. {interval, handlers, script, render} in tenths of a millisecond precision.
+ * a single slow frame never disappears. {interval, handlers, script, render} in tenths of a millisecond precision;
+ * `indices: true` adds `index`, each point's frame in the window (a chart that shows the frame under the pointer).
+ * The buckets end at the newest frame, so a live chart's columns keep their frames while new ones arrive.
  */
-export function frameSeries(window, limit = 600) {
+export function frameSeries(window, limit = 600, {indices = false} = {}) {
   const count = window.interval.length, bucket = Math.max(1, Math.ceil(count / limit)), series = {bucket, interval: [], handlers: [], script: [], render: []};
-  for (let start = 0; start < count; start += bucket) {
-    let worst = start;
-    for (let index = start + 1; index < Math.min(count, start + bucket); index++) if (window.interval[index] > window.interval[worst]) worst = index;
+  if (indices) series.index = [];
+  for (let start = count - Math.ceil(count / bucket) * bucket; start < count; start += bucket) {
+    let worst = Math.max(0, start);
+    for (let index = worst + 1; index < start + bucket; index++) if (window.interval[index] > window.interval[worst]) worst = index;
     for (const key of ['interval', ...PHASES]) series[key].push(round(window[key][worst], 1));
+    series.index?.push(worst);
   }
   return series;
+}
+
+/**
+ * When the frame `index` of a window did its work on the interface thread (performance.now ms): from the frame before
+ * (its input handlers ran since then) to the end of its own rendering. The spans that began in it are that frame's.
+ */
+export function frameBounds(window, index) {
+  const at = window.at[index];
+  return {from: at - window.interval[index], to: at + window.script[index] + window.render[index]};
 }
 
 const pick = (object, keys) => Object.fromEntries(keys.map(key => [key, object[key]]));

@@ -5,7 +5,12 @@
  * prints it the same way. A scenario is graded on one metric (its `judge`): the grade says how the scenario feels to a
  * person, in four steps, from limits that come from how people perceive delay, not from what the app does today.
  */
+import {GRADES, LIMITS, grade} from '../../src/devtools/grades.mjs';
 import {spread} from '../../src/devtools/stats.mjs';
+
+// The limits of the grades and the grading live with the developer tools, whose Record summary grades in the page
+// (perf/ is not served to it): one copy, re-exported here for every import of them from this module.
+export {GRADES, LIMITS, grade};
 
 /** key → {title, short, unit, better: 'lower' | 'higher', digits}. `short` is the name in a one-line summary. A scenario may add its own (`scenario.metrics`). */
 export const METRICS = Object.freeze({
@@ -35,23 +40,6 @@ export const METRICS = Object.freeze({
   'memory.engine': {title: 'Engine memory in use', unit: 'MB', better: 'lower', digits: 0},
   'memory.jsHeap': {title: 'JavaScript heap', unit: 'MB', better: 'lower', digits: 0},
 });
-
-/**
- * Limits of the grades, as [good, fair, poor]: at or under the first is good, the second fair, the third poor, beyond
- * it bad (for a `higher` metric: at or over).
- *   frame       a frame of a continuous gesture: 60 a second is smooth, 30 is usable, under 10 is a slideshow;
- *   response    the wait after one action (a click, a key, an undo): 100 ms feels instant, 1 s keeps the thought;
- *   input       how far the picture trails the hand in a drag: two frames at 60 Hz is tight, over 150 ms it swims.
- */
-export const LIMITS = Object.freeze({frame: [1000 / 60 + .5, 1000 / 30 + .5, 100], response: [100, 300, 1000], input: [34, 67, 150]});
-export const GRADES = ['good', 'fair', 'poor', 'bad'];
-
-/** The grade of `value` against `limits` ([good, fair, poor]) for a metric that is better `lower` or `higher`. */
-export function grade(value, limits, better = 'lower') {
-  if (!Number.isFinite(value)) return null;
-  const step = limits.findIndex(limit => (better === 'higher' ? value >= limit : value <= limit));
-  return GRADES[step < 0 ? 3 : step];
-}
 
 /**
  * The criteria a scenario of `kind` is judged on unless it names its own. A gesture is as good as the worse of two
