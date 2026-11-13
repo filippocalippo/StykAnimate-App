@@ -38,7 +38,6 @@ async function open(context, { blocked = false } = {}) {
   if (blocked) await page.addInitScript(() => { IDBFactory.prototype.open = () => { throw new DOMException('Storage is blocked.', 'SecurityError'); }; });
   await page.goto(site.origin, { waitUntil: 'load' });
   await start.ready();
-  await page.evaluate(() => document.querySelector('.styk-privacy [data-decline]')?.click());
   return { page, problems, start };
 }
 const recovery = (page) => page.evaluate(async () => {
@@ -73,7 +72,6 @@ try {
   check('A moment after an edit the work is copied into the browser', written.size > 100 && Math.abs(written.savedAt - Date.now()) < 30000);
   await first.page.reload({ waitUntil: 'load' });
   await first.start.ready();
-  await first.page.evaluate(() => document.querySelector('.styk-privacy [data-decline]')?.click());
   const offer = first.page.getByText('Restore unsaved work', { exact: true });
   await until('the restore offer', () => offer.isVisible());
   check('After a reload the work is offered back, with when it was kept', /from \d/.test(await first.page.locator('body').innerText()));

@@ -77,8 +77,9 @@ function openFailure(error) {
   const failure = restoreMessageError(new Error(data.message), data);
   if (data.code) failure.code = data.code;
   if (data.status) failure.status = data.status;
-  failure.telemetryCode = data.code === 'out_of_memory' ? 'out_of_memory' : data.status >= 500 ? 'backend_unavailable' : data.status ? 'backend_rejected' : 'decode_failed';
-  failure.telemetryStage = data.stage === 'prepare' ? 'prepare' : 'decode';
+  if (data.code === 'out_of_memory') failure.fileReason = 'out-of-memory';
+  else if (data.status >= 500) failure.fileReason = 'service-unavailable';
+  failure.fileStage = data.stage === 'prepare' ? 'prepare' : data.status ? 'request' : 'decode';
   return failure;
 }
 

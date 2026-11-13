@@ -1,15 +1,17 @@
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 // An import that does not open (docs/PROJECT-TABS.md: a file opens in a tab of its own, so nothing is
 // replaced and nothing asks; the one refusal left is the limit of open projects) keeps every open project
-// as it was and is recorded as exactly one cancellation.
+// as it was and is recorded as exactly one cancellation. The page is the developer page (src/devtools/early.js), whose
+// statistics collector counts file operations without a desktop process (docs/STATISTICS.md, "Files").
 const browser=await chromium.launch({channel:'chrome',headless:true});
 try{
-  const page=await browser.newPage();await page.goto(process.env.STYK_URL||'http://127.0.0.1:47843');await page.waitForFunction(()=>window.styk?.ready);
+  const page=await browser.newPage();await page.addInitScript({path:path.resolve(import.meta.dirname,'../src/devtools/early.js')});await page.goto(process.env.STYK_URL||'http://127.0.0.1:47843');await page.waitForFunction(()=>window.styk?.ready);
   await page.evaluate(async()=>{
     const {emptyDocument}=await import('/src/demo.mjs'),{buildContainerV2}=await import('/tests/support/native-files.mjs');
     const source=emptyDocument();source._styk={...source._styk,format:'StykAnimate',format_version:1};
-    window.projectBytes=await buildContainerV2(source,'styk');styk.telemetry.configure({analytics:true,diagnostics:true});
+    window.projectBytes=await buildContainerV2(source,'styk');
     styk.editor.updateProject({fps:31});
     // An untouched new animation gives its place to the next project, so each one is edited before the next opens.
     for(let guard=0;!styk.projects.tabs.full&&guard<20;guard++){await styk.actions.new();styk.editor.updateProject({fps:20+guard});styk.editor.markSaved();}
@@ -19,9 +21,11 @@ try{
   });
   const result=await page.evaluate(async()=>({result:await window.cancelledImport,sameDocument:styk.editor.report===window.beforeImport,dirty:styk.editor.dirty,
     sameProjects:styk.projects.tabs.items.map(item=>item.id).join()===window.open,importing:styk.state.importing,
-    counters:styk.telemetry.data.counters,outcomes:styk.telemetry.data.operationContexts.filter(r=>r.operation==='import'&&r.stage==='complete').map(r=>r.outcome)}));
+    collecting:styk.stats.on,summary:styk.stats.flush()}));
   assert.equal(result.result,false);assert.ok(result.sameDocument&&result.dirty&&result.sameProjects);assert.equal(result.importing,false);
-  assert.equal(result.counters.import_started,1);assert.equal(result.counters.import_cancelled,1);assert.equal(result.counters.import_succeeded,undefined);assert.equal(result.counters.import_failed,undefined);assert.deepEqual(result.outcomes,['cancelled']);
+  assert.ok(result.collecting,'the developer page collects statistics');
+  assert.deepEqual(result.summary.files,[{op:'open',format:'styk',ok:0,failed:0,cancelled:1,ms:0}],'one open, counted as cancelled and not as failed');
+  assert.equal(result.summary.counts.problems,undefined,'a refused import is not a problem');
   assert.match(await page.locator('#toast').innerText(),/Close a project/);
   console.log('A refused native import preserves every open project and records exactly one cancellation.');
   // Once a project closes, the same file opens beside the others and the edited project keeps its changes.

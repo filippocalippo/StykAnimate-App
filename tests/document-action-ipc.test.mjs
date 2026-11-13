@@ -6,20 +6,20 @@ import vm from 'node:vm';
 const main = await readFile(new URL('../desktop/main.cjs', import.meta.url), 'utf8');
 const guard = main.slice(main.indexOf('function documentActionCurrent('), main.indexOf('function registerIpc('));
 const windowHandler = main.slice(main.indexOf("handle('styk:window',"), main.indexOf("handle('styk:window-state',"));
-const restartHandler = main.slice(main.indexOf("handle('styk:update-restart',"), main.indexOf('  const withTelemetry ='));
+const restartHandler = main.slice(main.indexOf("handle('styk:update-restart',"), main.indexOf('  const withStats ='));
 
 function host() {
   const state = {revision: 'document:1:0:3', dirty: false, name: 'Animation'}, calls = {closed: 0, restarted: 0, updateRequests: 0, actions: []};
-  const hooks = {stage: async () => {}, telemetry: async () => {}, dialog: async () => ({response: 1})};
+  const hooks = {stage: async () => {}, stats: async () => {}, dialog: async () => ({response: 1})};
   const handlers = new Map();
   const context = vm.createContext({documentState: state,
     handle(channel, handler) {handlers.set(channel, handler);}, trusted() {}, t: key => key,
     sendAction(action) {calls.actions.push(action);}, messageError: error => error,
     window: {close() {calls.closed++;}}, windowState: () => ({closed: calls.closed > 0}),
-    dialog: {showMessageBox: () => hooks.dialog()}, telemetry: {close: () => hooks.telemetry()},
+    dialog: {showMessageBox: () => hooks.dialog()}, stats: {close: () => hooks.stats()},
     updates: {async restart(prepare) {calls.updateRequests++; await hooks.stage(); if (!await prepare()) return false; calls.restarted++; return true;}},
   });
-  vm.runInContext(`let telemetryClosed = false, quitting = false; ${guard}\n${windowHandler}\n${restartHandler}`, context);
+  vm.runInContext(`let statsClosed = false, quitting = false; ${guard}\n${windowHandler}\n${restartHandler}`, context);
   return {state, calls, hooks, close: checkpoint => handlers.get('styk:window')({}, 'close', checkpoint),
     restart: checkpoint => handlers.get('styk:update-restart')({}, checkpoint)};
 }
@@ -48,10 +48,10 @@ test('restart refuses a checkpoint superseded while staging an update', async ()
   assert.equal(await a.restart(checkpoint), false); assert.equal(a.calls.restarted, 0);
 });
 
-test('restart rechecks dirty state and mutation epoch after awaited telemetry', async () => {
+test('restart rechecks dirty state and mutation epoch after statistics close', async () => {
   for (const mutate of [state => {state.dirty = true;}, state => {state.revision = 'document:1:0:4';}]) {
     const a = host(), checkpoint = {revision: a.state.revision, saved: true};
-    a.hooks.telemetry = async () => {mutate(a.state);};
+    a.hooks.stats = async () => {mutate(a.state);};
     assert.equal(await a.restart(checkpoint), false); assert.equal(a.calls.restarted, 0);
   }
 });

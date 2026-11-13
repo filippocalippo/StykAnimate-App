@@ -2,7 +2,7 @@
 const { t, messageError, useLocale } = require('./localization.cjs');
 
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session, clipboard, contentTracing, protocol } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session, clipboard, protocol } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs/promises');
@@ -27,12 +27,14 @@ const { RecentFiles } = require('./recent-files.cjs');
 const { ProjectLibrary } = require('./project-library.cjs');
 const { LibraryStore } = require('./library-store.cjs');
 const { PublicLibrary, DownloadLedger, isPublicId } = require('./public-library.cjs');
-const { TelemetryService } = require('./telemetry.cjs');
+const { StatsService, machineFacts, statsEndpoint } = require('./stats.cjs');
+const serviceConfig = require('./service-config.json');
 const { UpdateService, updateAvailabilityDetails } = require('./updates.cjs');
 const releaseInfo = require('./release-info.json');
 const getReleaseHistory = require('./release-history.cjs').createReleaseHistory();
-let telemetryBuild = {};
-try { telemetryBuild = require('./telemetry-build.json'); } catch { /* Unpackaged/older source has unknown build metadata. */ }
+// An internal test build (STYK_INTERNAL_BUILD=1 while packaging) reports on the channel `internal` (scripts/before-pack.cjs).
+let buildChannel = {};
+try { buildChannel = require('./build-channel.json'); } catch { /* A source checkout and older packages have none. */ }
 const { RELEASES_URL, DONATE_URL } = require('./release-links.cjs');
 
 // On Wayland the window cannot show WebGPU content, and Chromium picks its display
@@ -59,12 +61,11 @@ let vfwExports;
 let recentFiles;
 let projectLibrary;
 let library;
-let telemetry;
-let telemetryReady;
-let telemetryClosed = false;
+let stats;
+let statsReady;
+let statsClosed = false;
 let updates;
 let startupShown = false;
-let traceRunning = false;
 // What the main process sends to the page on its own waits here until the page's listeners are on (desktop/page-pushes.cjs).
 const pushes = new PagePushes((channel, args) => { if (window && !window.isDestroyed()) window.webContents.send(channel, ...args); });
 let pendingProtocol = process.argv.find(value => /^stykanimate:\/\//i.test(value));
@@ -311,13 +312,13 @@ function registerIpc() {
         if (answer.response === 0) { sendAction('save-and-update'); return false; }
         if (answer.response !== 2) return false;
       }
-      if (telemetry && !telemetryClosed) { await telemetry.close().catch(() => {}); telemetryClosed = true; }
+      if (stats && !statsClosed) { await stats.close().catch(() => {}); statsClosed = true; }
       if (documentState.revision !== revision || !documentActionCurrent(checkpoint)) return false;
       quitting = true;
       return true;
     }, () => { quitting = false; });
   });
-  const withTelemetry = handler => async (event, value) => { trusted(event); await telemetryReady; if (!telemetry) throw messageError(new Error(''), 'desktop.main.errors.privacySettingsAreUnavailablePleaseRestartStykAnimate', {}); return handler(value); };
+  const withStats = handler => async (event, ...args) => { trusted(event); await statsReady; if (!stats) throw messageError(new Error(''), 'desktop.main.errors.privacySettingsAreUnavailablePleaseRestartStykAnimate', {}); return handler(...args); };
   const support = new SupportService({ directory: app.getPath('userData'), version: app.getVersion(), development: !app.isPackaged });
   handle('styk:support-context', event => { trusted(event); return support.context(); });
   handle('styk:support-live', (event, id) => { trusted(event); return support.connectLive(id, value => { if (!event.sender.isDestroyed()) event.sender.send('styk:support-live-event', value); }); });
@@ -338,37 +339,21 @@ function registerIpc() {
     if (destination.canceled || !destination.filePath) return { saved: false };
     await atomicWrite(destination.filePath, Buffer.from(result.bytes)); return { saved: true };
   });
-  handle('styk:telemetry-state', withTelemetry(() => telemetry.getState()));
-  handle('styk:telemetry-consent', withTelemetry(value => telemetry.setConsent(value)));
-  handle('styk:telemetry-record', withTelemetry(value => telemetry.record(value)));
-  handle('styk:telemetry-preview', withTelemetry(() => telemetry.preview()));
-  handle('styk:telemetry-sync', withTelemetry(async () => { await telemetry.upload(); return telemetry.getState(); }));
-  handle('styk:telemetry-delete', withTelemetry(() => telemetry.deleteData()));
-  handle('styk:telemetry-feedback', withTelemetry(value => telemetry.feedback(value)));
-  handle('styk:telemetry-export', withTelemetry(async () => {
-    const result = await dialog.showSaveDialog(window, { title: t('desktop.main.saveOptionalTelemetryReport'), defaultPath: 'StykAnimate-telemetry.json', filters: [{ name: t('desktop.main.jsonReport'), extensions: ['json'] }] });
-    if (result.canceled || !result.filePath) return { saved: false };
-    await fs.writeFile(result.filePath, JSON.stringify(telemetry.preview(), null, 2), 'utf8'); return { saved: true };
-  }));
-  handle('styk:service-page', withTelemetry(page => {
-    const route = { home: '/', download: '/download/' }[page];
-    if (!route) throw messageError(new Error(''), 'desktop.main.errors.unknownStykAnimatePage', {});
-    if (!telemetry.siteUrl) throw messageError(new Error(''), 'desktop.main.errors.thePublicWebsiteIsNotConfiguredYetContactAleRipresoGmailCom', {});
-    return shell.openExternal(telemetry.siteUrl + route);
-  }));
-  handle('styk:performance-trace', async event => {
+  // Statistics (docs/STATISTICS.md): the bridge's calls, and nothing else of the service.
+  handle('styk:stats-state', withStats(() => stats.getState()));
+  handle('styk:stats-enabled', withStats(on => stats.setEnabled(on)));
+  handle('styk:stats-notice-seen', withStats(() => stats.markNoticeSeen()));
+  handle('styk:stats-notice-shown', withStats(() => stats.markNoticeShown()));
+  handle('styk:stats-session', withStats((summary, facts) => stats.recordSession(summary, facts)));
+  handle('styk:stats-report', withStats(report => stats.recordReport(report)));
+  handle('styk:stats-preview', withStats(() => stats.preview()));
+  handle('styk:service-page', (event, page) => {
     trusted(event);
-    if (traceRunning) throw messageError(new Error(''), 'desktop.main.errors.aPerformanceRecordingIsAlreadyRunning', {});
-    traceRunning = true;
-    let temporary;
-    try {
-      await contentTracing.startRecording({ included_categories: ['v8.execute', 'disabled-by-default-v8.cpu_profiler', 'devtools.timeline'], recording_mode: 'record-until-full', trace_buffer_size_in_kb: 16384 });
-      await new Promise(resolve => setTimeout(resolve, !app.isPackaged && process.env.STYK_TRACE_TEST === '1' ? 2000 : 30000));
-      temporary = await contentTracing.stopRecording();
-      const result = await dialog.showSaveDialog(window, { title: t('desktop.main.saveLocalPerformanceTraceReviewBeforeSharing'), defaultPath: 'StykAnimate-performance-trace.json', filters: [{ name: t('desktop.main.chromePerfettoTrace'), extensions: ['json'] }] });
-      if (result.canceled || !result.filePath) return { saved: false };
-      await fs.copyFile(temporary, result.filePath); return { saved: true };
-    } finally { traceRunning = false; if (temporary) await fs.unlink(temporary).catch(() => {}); }
+    const route = { home: '/', download: '/download/', privacy: '/privacy/' }[page];
+    if (!route) throw messageError(new Error(''), 'desktop.main.errors.unknownStykAnimatePage', {});
+    const site = statsEndpoint(!app.isPackaged ? process.env.STYK_SITE_URL || serviceConfig.siteUrl : serviceConfig.siteUrl, !app.isPackaged);
+    if (!site) throw messageError(new Error(''), 'desktop.main.errors.thePublicWebsiteIsNotConfiguredYetContactAleRipresoGmailCom', {});
+    return shell.openExternal(site + route);
   });
   for (const [channel, method] of [['list','list'], ['mkdir','createFolder'], ['thumbnail','thumbnail'], ['save-begin','beginSave'], ['write','write'], ['finish','finish'], ['cancel','cancel'], ['read-begin','beginRead'], ['read','read'], ['change','change']])
     handle(`styk:library-${channel}`, (event, ...args) => { trusted(event); return library[method](...args); });
@@ -506,7 +491,9 @@ function registerIpc() {
   });
   handle('styk:vfx-presets-get', (event) => { trusted(event); return vfxPresets.get(); });
   handle('styk:vfx-presets-set', (event, value) => { trusted(event); return vfxPresets.set(value); });
-  fileStreams = new FileStreams({onCommitError:error=>telemetry?.error(error?.name||'Error','app',null,{code:error?.code||'write_failed',stage:'write'})});
+  // A file already committed whose clean-up failed: a problem for statistics, never a failed save.
+  fileStreams = new FileStreams({onCommitError: error => stats?.recordReport({kind: 'problem', type: 'error', message: /^\w{1,40}$/.test(error?.code ?? '') ? error.code : 'Error',
+    stack: [], doing: 'saving', trail: [], times: 1})});
   const projectTransfers = new Map();
   let projectRequestPending = false;
   // A save belongs to the project in front: bringing another one there ends what the previous one had in flight.
@@ -747,6 +734,7 @@ function registerIpc() {
     const unsaved = Number.isSafeInteger(state?.unsaved) ? Math.max(dirty ? 1 : 0, Math.min(64, state.unsaved)) : dirty ? 1 : 0;
     documentState = { name, dirty, revision: String(state?.revision || '').slice(0, 160), unsaved,
       unsavedName: String(state?.unsavedName || name).slice(0, 180) };
+    stats?.noteUnsaved(dirty);
     // The title names the project in front; its dot is that project's own.
     window.setTitle(`${(state?.activeDirty ?? dirty) ? '• ' : ''}${name} — StykAnimate`);
     window.setDocumentEdited(dirty);
@@ -831,15 +819,15 @@ async function createWindow(storageCleared = Promise.resolve()) {
   window.webContents.on('render-process-gone', (_event, details) => {
     if (details.reason === 'clean-exit' || quitting) return;
     rendererFailed = true; pushes.reset();
-    telemetry?.error('RendererCrash', 'renderer', 'renderer_crashes');
-    // One bounded, local diagnostic survives even when optional telemetry is
-    // disabled. It contains no document contents or user identifiers.
+    stats?.windowGone(details.reason);
+    // One bounded, local diagnostic survives even when statistics are off.
+    // It contains no document contents or user identifiers.
     void atomicWrite(path.join(instanceDirectory, 'last-renderer-crash.json'), Buffer.from(JSON.stringify({
       version: app.getVersion(), occurredAt: new Date().toISOString(), reason: details.reason, exitCode: details.exitCode,
     }))).catch(() => {});
     void offerRendererRecovery();
   });
-  window.on('unresponsive', () => telemetry?.error('RendererHang', 'renderer', 'renderer_hangs'));
+  window.on('unresponsive', () => stats?.unresponsive());
   for (const event of ['maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen', 'focus', 'blur']) {
     window.on(event, () => window.webContents.send('styk:window-state', windowState()));
   }
@@ -887,20 +875,19 @@ async function start() {
     onState: value => { if (value.status === 'error') quitting = false; if (window && !window.isDestroyed()) window.webContents.send('styk:update-state-changed', value); },
   });
   if (app.isPackaged) app.setAsDefaultProtocolClient('stykanimate');
-  telemetryReady = new TelemetryService({ directory: app.getPath('userData'), schemaPath: path.join(app.isPackaged ? path.join(process.resourcesPath, 'web') : APP_ROOT, 'src', 'telemetry-schema.mjs'), version: app.getVersion(), development: !app.isPackaged,
-    build: telemetryBuild.build, internal: telemetryBuild.internal === true,
-    onState: value => { if (window && !window.isDestroyed()) window.webContents.send('styk:telemetry-state-changed', value); },
-  }).init().then(service => { telemetry = service; return service; }).catch(() => { /* Optional reporting cannot prevent startup. */ });
-  const memoryTimer = setInterval(() => {
-    if (telemetry?.state.consent.diagnostics && window?.isFocused()) {
-      const metrics = app.getAppMetrics();
-      const phase=telemetry.resourcePhase||'unknown';
-      // The Pivot codec runs in a worker of the editor page, so the renderer's share includes it.
-      telemetry.sampleResources({memory_process:metrics.reduce((sum,item)=>sum+(item.memory?.workingSetSize||0),0)/1024},phase);
-      telemetry.sampleMemory(metrics.reduce((sum, item) => sum + (item.memory?.workingSetSize || 0), 0) / 1024);
-      telemetry.record({ epoch: telemetry.epoch, data: { gauges: { process_cpu_percent: metrics.reduce((sum, item) => sum + (item.cpu?.percentCPUUsage || 0), 0) } } });
-    }
-  }, 60000); memoryTimer.unref();
+  // Statistics (desktop/stats.cjs): a development run uploads only to a local site that STYK_SITE_URL names.
+  const localSite = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/?$/.test(process.env.STYK_SITE_URL ?? '') ? process.env.STYK_SITE_URL : '';
+  statsReady = new StatsService({ directory: app.getPath('userData'), instanceDirectory,
+    schemaPath: path.join(app.isPackaged ? path.join(process.resourcesPath, 'web') : APP_ROOT, 'src', 'stats', 'schema.mjs'), version: app.getVersion(),
+    channel: !app.isPackaged ? 'development' : buildChannel.internal === true ? 'internal' : serviceConfig.channel,
+    siteUrl: app.isPackaged ? serviceConfig.siteUrl : localSite,
+    machine: machineFacts({ totalmem: os.totalmem(), cores: os.availableParallelism() }),
+    onState: value => { if (window && !window.isDestroyed()) window.webContents.send('styk:stats-state-changed', value); },
+  }).init().then(service => { stats = service; return service; }).catch(() => { /* Statistics never keep the app from starting. */ });
+  // The graphics card's vendor and kind, once the GPU process has answered (never its model).
+  void Promise.all([app.getGPUInfo('basic'), statsReady]).then(([gpuInfo, service]) => {
+    if (service) service.machine = machineFacts({ gpuInfo, totalmem: os.totalmem(), cores: os.availableParallelism() });
+  }).catch(() => {});
   library = new LibraryStore(process.env.STYK_LIBRARY_DIR || path.join(app.getPath('documents'), 'StykAnimate', 'library'));
   // A temporarily unavailable Documents volume should not prevent animation work.
   void library.init().catch(error => console.warn('Library initialization:', error.message));
@@ -926,7 +913,7 @@ app.on('before-quit', (event) => {
   if (window && documentState.dirty && !quitting) { event.preventDefault(); window.close(); }
   else {
     quitting = true;
-    if (telemetry && !telemetryClosed) { event.preventDefault(); telemetryClosed = true; void telemetry.close().catch(() => {}).finally(() => app.quit()); }
+    if (stats && !statsClosed) { event.preventDefault(); statsClosed = true; void stats.close().catch(() => {}).finally(() => app.quit()); }
   }
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

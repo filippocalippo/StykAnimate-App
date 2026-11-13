@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const root=path.resolve('.'),out=path.join(root,'artifacts/drawing-history'),profile=path.join(out,`profile-${Date.now()}`),checks=[];
 await mkdir(profile,{recursive:true});
-await writeFile(path.join(profile,'telemetry-state.json'),JSON.stringify({decided:true,consent:{analytics:false,diagnostics:false,policyVersion:'2026-09-10',updatedAt:Date.now()}}));
+await writeFile(path.join(profile,'stats-state.json'),JSON.stringify({v:1,enabled:false,noticeSeen:true}));
 const env={...process.env,STYK_USER_DATA_DIR:profile,STYK_LIBRARY_DIR:path.join(profile,'library')};delete env.ELECTRON_RUN_AS_NODE;
 const check=(name,value)=>{assert.ok(value,name);checks.push(name);console.log('PASS',name);};
 const applications=[];

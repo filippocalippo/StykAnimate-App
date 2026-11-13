@@ -46,7 +46,6 @@ export default Object.freeze({
   "applicationMenu.checkForUpdates": "Check for updates…",
   "applicationMenu.whatSNew": "What’s new",
   "applicationMenu.supportDevelopment": "Support development",
-  "applicationMenu.privacyDiagnostics": "Privacy & diagnostics",
   "applicationMenu.stykanimateWebsite": "StykAnimate website",
   "applicationMenu.exactValues": "Exact values…",
   "applicationMenu.splitSegment": "Split segment",

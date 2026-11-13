@@ -1,4 +1,4 @@
-// What the app is launched with reaches the page: a document file, and a stykanimate://privacy link (which the main process turns into a menu action).
+// What the app is launched with reaches the page: a document file, and a stykanimate://privacy link (which the main process turns into a menu action that opens Preferences at its Privacy section).
 // The main process sends both as soon as the page has loaded, and the page's listeners come on a little later (desktop/page-pushes.cjs).
 //
 //   node scripts/smoke-launch-link.mjs                 the source tree (STYK_BUNDLE_DIR=build/app serves it with the bundle)
@@ -26,8 +26,9 @@ const expect = (name, condition, detail = '') => { if (!condition) failures.push
 
 async function launch(args) {
   const profile = await mkdtemp(path.join(work, 'profile-'));
-  await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
-  const env = { ...process.env, STYK_USER_DATA_DIR: profile, STYK_BACKGROUND_WINDOW: '1' };
+  // Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
+  const env = { ...process.env, STYK_USER_DATA_DIR: profile, STYK_LIBRARY_DIR: path.join(profile, 'library'), STYK_BACKGROUND_WINDOW: '1' };
   delete env.ELECTRON_RUN_AS_NODE; delete env.STYK_STARTUP_VIEW;
   const app = await electron.launch({ executablePath, args: packaged ? args : [appRoot, ...args], cwd: appRoot, timeout: 60000, env });
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 2, checkboxChecked: false }); });
@@ -63,11 +64,11 @@ try {
     } finally { await withFile.close(); }
     const withLink = await launch(['stykanimate://privacy']);
     try {
-      linked.push(await withLink.page.waitForSelector('dialog.styk-privacy[open]', { timeout: 30000 }).then(() => true, () => false));
+      linked.push(await withLink.page.waitForSelector('dialog.styk-settings[open] [data-tab="privacy"][aria-selected="true"]', { timeout: 30000 }).then(() => true, () => false));
     } finally { await withLink.close(); }
   }
   expect('A file the app is launched with opens, every launch', opened.every(Boolean), opened.join(', '));
-  expect('A stykanimate://privacy link the app is launched with opens the privacy settings, every launch', linked.every(Boolean), linked.join(', '));
+  expect('A stykanimate://privacy link the app is launched with opens Preferences at Privacy, every launch', linked.every(Boolean), linked.join(', '));
 } finally {
   await rm(work, { recursive: true, force: true }).catch(() => {});
 }

@@ -33,6 +33,7 @@ Several agents and people work in this repository at the same time. Run `git sta
 | Packaging, updates, releases | `docs/DESKTOP-RELEASE.md`, `docs/UPDATES.md`, `docs/RELEASING.md` |
 | Anything for speed, or how speed is measured | `docs/PERFORMANCE.md` |
 | The developer tools inside the app | `docs/DEVTOOLS.md` |
+| Statistics: what is sent, the numbers | `docs/STATISTICS.md` |
 
 ## Checking your work
 
@@ -46,6 +47,7 @@ Run what your change can affect, and say in your report what you ran and what it
 - `scripts/smoke-*.mjs`: the desktop app in a real window, for a change to saving, files, windows or exports.
 - `npm run engine:parity`: the engine against its recorded fixtures. Slow; run it for a change to evaluation, formats or editing commands.
 - `npm run perf -- run`: the app's speed, scenario by scenario, with where each one's time went (about four minutes; `--scenario`, `--workload` and `--env` narrow it to seconds). `npm run perf -- compare <before>` says what a change made better or worse beyond noise, and `npm run perf -- engine` measures the engine alone. `docs/PERFORMANCE.md`.
+- `npm run stats`: what real people experience with a release, from the app's anonymous statistics: the four promises (work is safe, the editor stays responsive, old files open, no crashes), what needs attention with a brief for an agent, and responsiveness by scene size and machine (`docs/STATISTICS.md`). It needs the read-only key in `STYK_STATS_KEY`, which is never written into the repository. Read it before choosing what to fix or optimise, and after a release to confirm that a fix reached people.
 
 The Tests workflow runs the checks and unit tests on Linux and Windows for every pull request, the Rust tests on Linux when `engine/` or `tests/fixtures/` changed, and builds the browser version and a packaged Linux app. It is meant to finish in about five minutes for a change outside the engine and under ten for one inside it: a job that makes it slower needs a reason. It does not run the full browser suite or the desktop smoke scripts, which need a real GPU and a real window that the runners lack: run the ones your change affects on your own machine, and all of `npm run test:browser` before a release. Parity runs weekly and after an engine change reaches `main`.
 

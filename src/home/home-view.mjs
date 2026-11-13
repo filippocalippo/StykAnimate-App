@@ -4,6 +4,7 @@
  * through `on[name](detail, event)`; it holds no project data of its own and
  * runs no command.
  *
+ *   notice    the first-start line about statistics (desktop, until it is answered)
  *   head      a greeting and the way back to the open animation
  *   start     a new animation in one of three canvas shapes, or a file to open
  *   projects  the project list (desktop): search, order, grid or list, pins
@@ -71,6 +72,8 @@ export function createHomeView({root, on = {}, document: doc = root.ownerDocumen
   page.tabIndex = -1;
   const body = el('div', 'home-body', page);
   const main = el('div', 'home-main', body);
+  const notice = el('div', 'home-notice', main);
+  notice.hidden = true;
   const head = el('header', 'home-head', main);
   const start = el('section', 'home-section home-start', main);
   const projects = el('section', 'home-section home-projects', main);
@@ -90,6 +93,25 @@ export function createHomeView({root, on = {}, document: doc = root.ownerDocumen
     localizedText(label, 'home.continue', {name: state.documentName});
     back.prepend(label);
     replaceLocalized(head, words, back);
+  }
+
+  // ---- The first-start line (src/privacy-settings.mjs): one quiet line, in the page, never over anything --------------
+  function renderNotice(state) {
+    if (!state.statsNotice) {
+      // Answered: focus that was on one of its buttons stays on the page.
+      if (notice.contains(doc.activeElement)) page.focus({preventScroll: true});
+      notice.hidden = true;
+      replaceLocalized(notice);
+      return;
+    }
+    notice.hidden = false;
+    if (notice.childElementCount) return;
+    const words = text('p', 'home-notice-text', null, 'privacy.notice.text');
+    const actions = el('div', 'home-notice-actions');
+    button('ui-button', actions, {name: 'stats-details', variant: 'ghost', size: 'sm', key: 'privacy.notice.details'});
+    button('ui-button', actions, {name: 'stats-off', variant: 'ghost', size: 'sm', key: 'privacy.notice.turnOff'});
+    button('ui-button', actions, {name: 'stats-ok', variant: 'outline', size: 'sm', key: 'privacy.notice.ok'});
+    replaceLocalized(notice, words, actions);
   }
 
   // ---- Start ---------------------------------------------------------------------------------------------------------
@@ -385,7 +407,7 @@ export function createHomeView({root, on = {}, document: doc = root.ownerDocumen
     else if (chip) { event.preventDefault(); on['folder-menu']?.({folder: chip.dataset.folder}, event, null); }
   });
 
-  const RENDER = {head: renderHead, start: renderStart, projects: renderProjects, learn: renderLearn, help: renderHelp};
+  const RENDER = {notice: renderNotice, head: renderHead, start: renderStart, projects: renderProjects, learn: renderLearn, help: renderHelp};
   return {
     root, page,
     /** Draws the named sections (all of them by default) from `state`. */

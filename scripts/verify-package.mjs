@@ -104,7 +104,7 @@ async function walkBundle(directory, prefix = '') {
   }
 }
 await walkBundle(bundleRoot);
-for (const required of ['index.html', 'src/app.mjs', 'src/frame-map.js', 'src/styles/app.css'])
+for (const required of ['index.html', 'src/app.mjs', 'src/frame-map.json', 'src/styles/app.css'])
   if (!bundleFiles.includes(required)) throw new Error(`resources/bundle/${required} is missing: the package would run the unbundled modules. Run npm run pack.`);
 if (!snapshot) {
   const { buildApp } = await import('./build-app.mjs');

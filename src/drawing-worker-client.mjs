@@ -1,4 +1,5 @@
 import {restoreMessageError, messageError} from './localized-error.mjs';
+import {enginePanicked} from './engine/engine-panic.mjs';
 
 /** Lazy, bounded worker requests shared by pixel operations and preview
  * captures. Cancellation closes this worker; the next request can reopen it. */
@@ -20,6 +21,7 @@ export class DrawingWorker {
         const pending=this.pending.get(data.id);
         if(!pending){data.bitmap?.close();return;}
         const error=data.error?restoreMessageError(new Error(data.error), data):null;
+        if(data.panic)enginePanicked(data.panic);
         if(error&&typeof data.code==='string')error.code=data.code;
         if(data.fatal){data.bitmap?.close();this.dispose(error??restoreMessageError(messageError(new Error(''), "errors.drawingResources.drawingWorkerCouldNotLoadRetryTheOperation", {}), data));return;}
         this.pending.delete(data.id);

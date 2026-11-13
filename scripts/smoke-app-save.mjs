@@ -11,9 +11,9 @@ const output = path.join(appRoot, 'artifacts');
 const directory = path.join(output, `app-save-${Date.now()}`);
 const profile = path.join(directory, 'profile');
 await mkdir(directory, { recursive: true });
-// No first-run privacy prompt over the controls: the choice is recorded as declined.
 await mkdir(profile, { recursive: true });
-await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({ decided: true, consent: { analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now() } }));
+// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
 const targets = Object.fromEntries(['First', 'Second', 'New', 'Pivot', 'Closed'].map(name => [name, path.join(directory, `${name}.styk`)]));
 const pivot = path.join(appRoot, '..', 'Goku_Broly_Movie_by_Killer1.piv');
 const pivotDigest = createHash('sha256').update(await readFile(pivot)).digest('hex');

@@ -25,10 +25,16 @@ exposes the bridge the control channel answers through. Without the argument non
 The interface code is the same in both. Three small hooks are shipping code, and each is inert without a developer
 launch:
 - **`src/trace.mjs`, the one instrumentation layer.** Call sites build span arguments only behind `if (tracing)` or an
-  open span, and live parameters' specs are module constants, so the shipping build pays a null check and allocates
+  open span (`tracing ? {…} : undefined` for a span statistics listen to, which is open in every build), and live parameters' specs are module constants, so the shipping build pays a null check and allocates
   nothing (`tests/devtools.test.mjs` scans for it). `traceBegin/traceEnd/traceComplete/traceInstant/traceCounter`,
   `tracePhase(name)` (a run of steps that follow one another: the app's start) and `tuned(name, default, spec)`. Its sink is `globalThis.__stykTrace`, which only the early script defines: in the
   shipping build each call is a null check and `tuned` returns its default.
+
+  Statistics (docs/STATISTICS.md) may also listen, in every build, while they are on: `listenSpans(names, onSpan)` hears
+  the name and duration of each completed span named in `names`, nothing else. A span it listens to takes its token
+  from 64 preallocated slots (a negative number; the sink's tokens are positive), so it allocates nothing, and the
+  sink still receives every span with its arguments. A span nobody listens to costs what it did. `stopListening()`
+  puts the layer back as it was. The listener is the statistics collector's frame counter (src/stats/frames.mjs).
 - **`src/devtools-gate.mjs`.** It loads `src/devtools/devtools.mjs` by URL when the early script marked the page
   (`__STYK_DEVTOOLS__`). The URL is built at run time, so no bundler follows it: the tools are never in a bundle.
   The app calls it as the last step of its start, so the tools know when the app was ready.
@@ -38,7 +44,8 @@ launch:
 
 Instrumented once, at the owning layer:
 - the frame loop's `paint` (src/app.mjs), with what it draws nested inside;
-- `stage draw` and `stage draw prepared` (src/engine/engine-stage.mjs), with the tick drawn and the geometry and submit times;
+- `stage draw` and `stage draw prepared` (src/engine/engine-stage.mjs), with the tick drawn and the geometry and submit
+  times; and an edited frame's two parts as spans of their own, `stage geometry` and `stage submit`;
 - every edit session call, by method (src/engine/engine-owner.mjs `sessionCall`);
 - every `interface update`, by surface (src/ui/ui-invalidation.mjs): which part of the chrome a pass paid for;
 - the app's start as phases (`init()` in src/app.mjs): document activation, language, interface, stage and graphics

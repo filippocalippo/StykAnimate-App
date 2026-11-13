@@ -292,10 +292,10 @@ test('native frame delivery rejects stale revisions and malformed PNG responses 
 });
 
 test('worker failures keep their actionable error and release the export', async t => {
-  const frames = [{module: 'engine-export-worker.mjs', line: 180}];
-  const state = environment(t, answer({start: () => ({ok: false, code: 'export_memory_limit', error: 'Source image exceeds allowance.', name: 'RangeError', telemetryCode: 'out_of_memory', telemetryStage: 'prepare', telemetryFrames: frames})}));
+  const stack = 'RangeError: Source image exceeds allowance.\n    at load (styk-app://app/src/engine/engine-export-worker.mjs:180:7)';
+  const state = environment(t, answer({start: () => ({ok: false, code: 'export_memory_limit', error: 'Source image exceeds allowance.', name: 'RangeError', fileReason: 'out-of-memory', fileStage: 'prepare', workerStack: stack})}));
   const renderer = exporter();
-  await assert.rejects(renderer.load(report()), {code: 'export_memory_limit', name: 'RangeError', telemetryCode: 'out_of_memory', telemetryStage: 'prepare', telemetryFrames: frames});
+  await assert.rejects(renderer.load(report()), {code: 'export_memory_limit', name: 'RangeError', fileReason: 'out-of-memory', fileStage: 'prepare', workerStack: stack});
   assert.equal(renderer.canvas.width, 1);
   assert.equal(state.workers[0].messages.at(-1).operation, 'release');
   renderer.dispose();

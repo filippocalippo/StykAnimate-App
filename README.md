@@ -26,12 +26,16 @@
 - **Export** MP4, WebM (with transparency), GIF, APNG, PNG/JPEG/SVG frames, and editable `.piv`/`.stk`.
 - **27 interface languages**, light and dark themes, a touch interface for phones and tablets.
 
-Everything (decoding, editing, saving and rendering) runs locally. Optional, consent-based diagnostics are described in [docs/telemetry.md](docs/telemetry.md).
+Everything (decoding, editing, saving and rendering) runs locally.
 
 ## Get StykAnimate
 
 - **Windows and Linux:** download Setup, Portable or the AppImage from the [releases page](https://github.com/filippocalippo/styk-animate-releases/releases/latest). Installed apps update themselves.
 - **Browser:** open [app.stykanimate.com](https://app.stykanimate.com). It works offline once loaded.
+
+## Privacy
+
+Your animations stay on your computer. The desktop app sends anonymous statistics about speed and crashes and which features are used, with no account, no identifier and nothing from your animations. Home says so in one line at first start, and Preferences › Privacy turns them off and shows exactly what was last sent. [docs/STATISTICS.md](docs/STATISTICS.md) lists everything that is sent and why.
 
 ## Build from source
 

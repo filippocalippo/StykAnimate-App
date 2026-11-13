@@ -15,7 +15,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.waitForFunction(() => window.styk?.ready && window.stykDesktop?.beginVideoExport, undefined, { timeout: 30000 });
   await page.evaluate(() => {
-    const dismiss = () => document.querySelectorAll('dialog.release-splash[open], dialog.styk-privacy[open]').forEach(dialog => dialog.close());
+    const dismiss = () => document.querySelectorAll('dialog.release-splash[open]').forEach(dialog => dialog.close());
     dismiss(); new MutationObserver(dismiss).observe(document.body, {subtree:true,childList:true,attributes:true,attributeFilter:['open']});
   });
   await page.evaluate(async () => {

@@ -18,6 +18,10 @@
 import {initSync, Previews} from './pkg/styk_engine.js';
 import {libraryPreviewMatte, LIBRARY_MATTES} from '../library-matte.mjs';
 import {inside, guarded} from './engine-guard.mjs';
+import {capturePanics, lastPanic} from './engine-panic.mjs';
+
+// An engine panic here is kept and sent with the failure it causes (docs/STATISTICS.md, "Problems").
+capturePanics();
 
 /** Side of a library preview and of the samples its backdrop is chosen from (styk_engine::thumbnails::library). */
 const SIZE = 320, SAMPLE = 40;
@@ -275,6 +279,6 @@ self.addEventListener('message', ({data: message}) => {
     self.postMessage({id: message.id, ok: true, ...result}, transfer);
   }, error => {
     cancelled.delete(message.id);
-    self.postMessage({id: message.id, ok: false, error: String(error?.message ?? error), name: error?.name});
+    self.postMessage({id: message.id, ok: false, error: String(error?.message ?? error), name: error?.name, panic: lastPanic() ?? undefined});
   });
 });

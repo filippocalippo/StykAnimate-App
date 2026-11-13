@@ -226,7 +226,7 @@ directives a tag cannot carry: `script-src 'self' 'wasm-unsafe-eval'` (WebAssemb
 compiles; `eval` does not), `worker-src 'self' blob:`, `object-src 'none'`,
 `frame-ancestors 'none'`, `nosniff`, `no-referrer`, and a Permissions-Policy with
 camera, microphone, geolocation and payment off. The browser build sends no
-telemetry and has no feedback channel, update check or server codec.
+statistics and has no feedback channel, update check or server codec.
 Never deploy `backend/server.py` (the Python codec, kept as a development test oracle)
 publicly: it can read the folder it runs in.
 
@@ -287,7 +287,7 @@ else's request is lost.
 | My library | Yes, in the browser's own storage (IndexedDB) |
 | Community library | Yes, through the editor's own origin |
 | System fonts | Where the browser offers local fonts (Chromium); otherwise open a font file |
-| Feedback, telemetry, updates | Not present |
+| Feedback, statistics, updates | Not present |
 | Phones and tablets | The touch interface: layouts, gestures and sheets made for fingers and pens ([docs/TOUCH.md](TOUCH.md)) |
 
 `tests/web-build.browser.mjs` runs the built site in a real browser, including

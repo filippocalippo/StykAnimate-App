@@ -49,8 +49,9 @@ function endProcess(child, waitMs = 5000) {
  */
 export async function launch(environment, {root = ROOT, bundle = null, log = () => {}} = {}) {
   const data = await mkdtemp(path.join(os.tmpdir(), 'styk-perf-'));
-  // A profile that has answered the privacy question, so no prompt covers the stage; nothing is sent from a scratch profile.
-  await writeFile(path.join(data, 'telemetry-state.json'), JSON.stringify({decided: true, consent: {analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now()}}));
+  // A profile that has seen Home's line about statistics, with statistics on as most people run the app, so what they cost is in the
+  // measurement. A development run sends nothing (docs/STATISTICS.md).
+  await writeFile(path.join(data, 'stats-state.json'), JSON.stringify({v: 1, enabled: true, noticeSeen: true, noticeShown: true}));
   const port = await freePort();
   const host = environment.host === 'browser' ? await launchBrowser(environment, {root, port, data}) : launchDesktop(environment, {root, port, data, bundle});
   const started = Date.now();

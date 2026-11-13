@@ -45,7 +45,7 @@ if (inventory.status !== 0) process.stderr.write(`${inventory.stdout ?? ''}${inv
 else console.log('Engine inventory: every source module has a row.');
 // src/app.mjs wires the application together and has grown far past what one module should hold. It may shrink, not grow:
 // a feature goes in a module of its own that app.mjs calls, and this number goes down when code moves out.
-const APP_MODULE_LINES = 6500;
+const APP_MODULE_LINES = 6404;
 const appLines = readFileSync(path.join(appRoot, 'src/app.mjs'), 'utf8').split('\n').length;
 const appGrew = appLines > APP_MODULE_LINES;
 if (appGrew) console.error(`src/app.mjs has ${appLines} lines; its limit is ${APP_MODULE_LINES}. Put the new code in its own module (see AGENTS.md) instead of raising the limit.`);

@@ -45,17 +45,16 @@
   .performance-activity > li { min-inline-size: 0; overflow-wrap: anywhere; }
   .performance-activity time { margin-inline-end: var(--space-1); color: var(--text-3); font-variant-numeric: tabular-nums; }
   .performance-activity > [data-tone="error"] { color: var(--danger-text); }
-  /* ---- Privacy (privacy-ui.mjs) and What's new (support-ui.mjs), the desktop app's first-run dialogs ---- */
-  /* The title takes the focus for screen readers only: it is not a control, so it shows no ring. */
-  .styk-privacy h2:focus { outline: none; }
-  /* Accept and Reject stay equal: two soft pills of one size. */
-  .styk-privacy .privacy-choice {
-    block-size: var(--control-lg); border: 0; border-radius: var(--radius-pill); background: var(--surface-well);
-    color: var(--text-1); font: var(--type-button); box-shadow: none;
+  /* ---- Preferences › Privacy › See the last report (privacy-settings.mjs): the JSON exactly as sent, on a sunken well ---- */
+  .privacy-report { display: grid; gap: var(--space-3); min-inline-size: 0; }
+  .privacy-report > p { margin: 0; }
+  .privacy-report-empty { color: var(--text-2); font: var(--type-ui); }
+  .privacy-report-json {
+    max-block-size: min(360px, 50dvh); margin: 0; padding: var(--space-3) var(--space-4); overflow: auto;
+    border-radius: var(--radius-md); background: var(--surface-sunken); color: var(--text-1);
+    font: var(--weight-regular) var(--text-12)/var(--leading-12) var(--font-mono); white-space: pre; tab-size: 2;
   }
-  .styk-privacy .privacy-choice:where(:hover) { background: var(--surface-pressed); }
-  .styk-privacy .privacy-choice:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-  .styk-privacy .privacy-choice-note { font: var(--type-small); color: var(--text-3); }
+  .privacy-report-json:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
   /* What's new reads like the site's changelog page: a blue eyebrow over a tight display title with the name in
    * blue, the version as a blue pill, then each group as a coloured pill whose bullets share its colour. */
   dialog.release-splash {

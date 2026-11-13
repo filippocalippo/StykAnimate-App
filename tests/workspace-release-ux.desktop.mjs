@@ -83,7 +83,7 @@ try {
     const dismiss = () =>
       document
         .querySelectorAll(
-          "dialog.release-splash[open], dialog.styk-privacy[open]",
+          "dialog.release-splash[open]",
         )
         .forEach((dialog) => dialog.close());
     dismiss();

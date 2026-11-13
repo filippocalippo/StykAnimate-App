@@ -16,7 +16,7 @@ __pycache__/
 !.env.sample
 
 # Generated per-package source identity (contains no user information).
-desktop/telemetry-build.json
+desktop/build-channel.json
 
 # Local scratch output, Cloudflare dry-run builds, and sample projects.
 tmp/
