@@ -37,6 +37,34 @@ pub struct FramePlan {
     pub(crate) biggest: [u32; 2],
 }
 
+/// The runs of `range` of `list`'s primitives that can reach the part `rect` (output pixels `[x, y, width, height]`) through `matrix`: those whose
+/// rectangle ([`styk_eval::drawlist::prim_bounds`]) grown by the antialiasing fringe meets it, and those whose reach is not known, in order.
+fn part_runs(list: &styk_draw::DrawList, range: std::ops::Range<u32>, matrix: [f64; 6], rect: [u32; 4]) -> Vec<(u32, u32)> {
+    // The fringe a shape is drawn with (`prim.wgsl`: one and a half pixels), and room for the rounding of corners.
+    const FRINGE: f64 = 3.0;
+    let part = [rect[0] as f64 - FRINGE, rect[1] as f64 - FRINGE, (rect[0] + rect[2]) as f64 + FRINGE, (rect[1] + rect[3]) as f64 + FRINGE];
+    let reaches = |p: &styk_draw::Prim| {
+        let Some(b) = styk_eval::drawlist::prim_bounds(p) else { return true };
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for [x, y] in [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]] {
+            let (px, py) = (matrix[0] * x + matrix[2] * y + matrix[4], matrix[1] * x + matrix[3] * y + matrix[5]);
+            (x0, y0, x1, y1) = (x0.min(px), y0.min(py), x1.max(px), y1.max(py));
+        }
+        x1 >= part[0] && y1 >= part[1] && x0 <= part[2] && y0 <= part[3]
+    };
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    for at in range {
+        if !reaches(&list.prims[at as usize]) {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(run) if run.1 == at => run.1 = at + 1,
+            _ => runs.push((at, at + 1)),
+        }
+    }
+    runs
+}
+
 /// What the frame in the output was drawn of, for a frame drawn again in a part of it ([`Renderer::redraw_within`]): the next frame is
 /// drawn in a part only when all of this is the same (the view, the target and how it is painted, the list's background).
 #[derive(Clone, PartialEq)]
@@ -580,6 +608,10 @@ impl Renderer {
             (r[2] > r[0] && r[3] > r[1]).then(|| [r[0] as u32, r[1] as u32, (r[2] - r[0]) as u32, (r[3] - r[1]) as u32])
         });
         let clear_part = part.flatten().map(|_| self.clear_part_pipeline());
+        // A software rasterizer sets up every triangle it is given, wherever the scissor lets it draw: in a part it is given the primitives
+        // that can reach the part alone, in their order (one whose rectangle the part does not meet draws nothing there). A graphics card
+        // is given them all: it sets them up for nothing, and a pass over a dense frame's primitives here would cost more than it saves.
+        let part_runs = part.flatten().filter(|_| self.shading_on).map(|rect| part_runs(&list, root.0 + bg..root.1, view.matrix, rect));
         let keep = self.keep_frames;
         let (mut layer_depth, mut frame_depth) = (false, false);
         let mut from = root.0 + bg;
@@ -684,8 +716,14 @@ impl Renderer {
                     if bg > 0 {
                         draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, root.0..root.0 + bg);
                     }
-                    if until > from {
-                        draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until);
+                    match &part_runs {
+                        Some(runs) => {
+                            for &(start, end) in runs {
+                                draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, start..end);
+                            }
+                        }
+                        None if until > from => draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until),
+                        None => {}
                     }
                 }
             } else if r == 0 && bg > 0 {

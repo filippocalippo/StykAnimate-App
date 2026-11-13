@@ -226,10 +226,12 @@ fn a_frame_drawn_in_a_part_is_the_frame_drawn_whole() {
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
     let (assets, decoded, _) = images();
-    for (edges, multisampled) in [(Edges::Smooth, true), (Edges::Smooth, false), (Edges::Crisp, false)] {
+    // With the simpler shaders a software rasterizer draws with, a part is drawn from the primitives that can reach it alone.
+    for (edges, multisampled, software) in [(Edges::Smooth, true, false), (Edges::Smooth, false, false), (Edges::Crisp, false, false), (Edges::Smooth, true, true), (Edges::Crisp, false, true)] {
         let fresh = || {
             let mut renderer = Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, edges);
             renderer.set_multisampled(multisampled);
+            renderer.set_shading_runs(software);
             renderer.prepare_sprites(&assets);
             renderer.upload_images(&assets, &decoded);
             renderer
@@ -245,16 +247,24 @@ fn a_frame_drawn_in_a_part_is_the_frame_drawn_whole() {
             (read_frame(&device, &queue, renderer.frame_texture().expect("a frame")).2, renderer.drew_part())
         };
         for (scale, rotated) in [(1.0, false), (1.3, true), (0.71, false)] {
-            let what = format!("{edges:?}, multisampled {multisampled}, scale {scale}, rotated {rotated}");
+            let what = format!("{edges:?}, multisampled {multisampled}, software {software}, scale {scale}, rotated {rotated}");
             let view = view(scale, rotated);
-            let before = Arc::new(list(&assets, false, false));
+            // The cel's tiles over segments: one across the part, one whose fringe alone reaches it, one far from it.
+            let with_segments = || {
+                let mut list = list(&assets, false, false);
+                let segment = |a: [f32; 4], hw: f32| Prim { kind: styk_draw::K_CAPSULE, group: 0, color: 0xff30_60c0, paint: NO_PAINT, a, b: [hw, 0.0, 0.0, 0.0], c: [0.0; 4] };
+                list.prims.splice(0..0, [segment([-20.0, 20.0, 150.0, 40.0], 3.0), segment([100.0, -3.4, 100.0, -40.0], 1.0), segment([150.0, 150.0, 170.0, 160.0], 2.0)]);
+                for pass in &mut list.passes { pass.end += 3; }
+                list
+            };
+            let before = Arc::new(with_segments());
             // A tile moves by a few units and another goes (its quad becomes the room of a live cel's block): what a stroke frame changes.
-            let mut changed = list(&assets, false, false);
-            changed.prims[1].a[0] += 3.25;
-            changed.prims[1].a[1] -= 1.5;
-            changed.prims[2] = styk_eval::drawlist::room_quad(&changed.prims[2]);
+            let mut changed = with_segments();
+            changed.prims[4].a[0] += 3.25;
+            changed.prims[4].a[1] -= 1.5;
+            changed.prims[5] = styk_eval::drawlist::room_quad(&changed.prims[5]);
             let after = Arc::new(changed);
-            let part = [1usize, 2].iter().flat_map(|&i| [quad_bounds(&before.prims[i], &view), quad_bounds(&after.prims[i], &view)]).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
+            let part = [4usize, 5].iter().flat_map(|&i| [quad_bounds(&before.prims[i], &view), quad_bounds(&after.prims[i], &view)]).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
             let whole = draw(&mut fresh(), &after, &view, None).0;
 
             let mut kept = fresh();

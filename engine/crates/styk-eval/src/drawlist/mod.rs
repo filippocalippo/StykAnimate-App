@@ -13,7 +13,7 @@
 mod generators;
 mod retained;
 mod cull;
-pub use cull::cull_outside;
+pub use cull::{cull_outside, prim_bounds};
 pub use retained::{RetainedBytesError, retained_bytes_checked};
 pub(crate) use retained::AllocationObservation;
 
