@@ -6,7 +6,7 @@ import {readFileSync} from 'node:fs';
 import {Editor} from '../src/editor.mjs';
 import {installEngineOwner} from '../src/engine/engine-owner.mjs';
 import {holdsRevision, registeredEngine} from '../src/engine/engine-open.mjs';
-import {engineBuilt} from './support/engine-node.mjs';
+import {engineBindings, engineBuilt} from './support/engine-node.mjs';
 import {ownedEditor} from './support/owned-editor.mjs';
 import {createDemo} from '../src/demo.mjs';
 
@@ -73,6 +73,39 @@ test('a gesture rebuilds the groups of the figures it moves and keeps the others
     for (const slot of joined) assert.notEqual(moved.objects.get(slot), held.objects.get(slot), `slot ${slot} moves with what it hangs from`);
     for (const slot of [1, 4].map(uid => slotOf(uid))) assert.equal(moved.objects.get(slot), held.objects.get(slot), `slot ${slot} is not joined to them`);
     editor.cancelDrag();
+  } finally { owner.release(); }
+});
+
+test('a press that moves nothing leaves the frame on show as it was, without reading it again', {skip: !engineBuilt}, async () => {
+  const {editor, owner} = await poses();
+  const asked = [];
+  try {
+    editor.seek(11);
+    editor.select(4, -1);
+    const frame = editor.evaluatedFrame;
+    void editor.geometry;
+    const {EditSession} = await engineBindings();
+    const original = EditSession.prototype.query;
+    EditSession.prototype.query = function counted(kind, ...rest) { asked.push(kind); return original.call(this, kind, ...rest); };
+    try {
+      for (const release of ['commitDrag', 'cancelDrag']) {
+        asked.length = 0;
+        editor.beginTranslationDrag();
+        editor[release]();
+        assert.equal(editor.evaluatedFrame, frame, `${release}: the frame on show is the one held before the press`);
+        assert.deepEqual(asked.filter(kind => kind === 'frame'), [], `${release}: the frame is not read again`);
+      }
+    } finally { EditSession.prototype.query = original; }
+    // It is the frame the session shows: a fresh read gives the same.
+    const held = JSON.stringify(editor.evaluatedFrame);
+    editor._invalidate();
+    assert.equal(JSON.stringify(editor.evaluatedFrame), held);
+    // A press that moves the figure changes the frame on show.
+    editor.beginTranslationDrag();
+    editor.moveSelection(6, 0, {fromStart: true});
+    editor.commitDrag();
+    assert.notEqual(editor.evaluatedFrame, frame);
+    assert.equal(editor.evaluatedFrame.objects.find(object => object.unique_id === 4).root_x, frame.objects.find(object => object.unique_id === 4).root_x + 6);
   } finally { owner.release(); }
 });
 

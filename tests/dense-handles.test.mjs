@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {DENSE_HANDLE_BUDGET, definitionHandleCount, denseHandles, frameHandleCount, getPivotHandles, pickCanvasHandle, pickCanvasSegment, rescalePivotHandles} from '../src/canvas-interactions.mjs';
 import {createDemo, createFrame, createObject} from '../src/demo.mjs';
 import {isStatic} from '../src/pivot/read-view.mjs';
-import {engineBuilt} from './support/engine-node.mjs';
+import {engineBindings, engineBuilt} from './support/engine-node.mjs';
 import {ownedEditor} from './support/owned-editor.mjs';
 import {shownLimits} from '../src/engine/engine-shown.mjs';
 
@@ -149,6 +149,34 @@ test('with the figures not selected showing their origin only, a selected figure
     assert.equal(pickCanvasHandle(geometry, group(2).root, {handles}).kind, 'origin', 'an origin is picked where it is drawn');
     for (const item of geometry.objects.values()) if (item.obj.unique_id !== 3) assert.ok(!built(item), `picking did not build figure ${item.obj.unique_id}`);
   } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
+});
+
+test('the joints of many selected figures shown light are built with one request of the session, as each would be built alone', {skip: !engineBuilt}, async () => {
+  // Small documents, read as a dense frame is: built on first read.
+  shownLimits.eagerSegments = 0;
+  const {EditSession} = await engineBindings();
+  const {editor, owner} = await ownedEditor({demo: false}, crowd(6));
+  const original = EditSession.prototype.query_packet, asked = [];
+  EditSession.prototype.query_packet = function counted(kind, ...rest) { asked.push(kind); return original.call(this, kind, ...rest); };
+  try {
+    editor.seek(1);
+    const walker = editor.report.figure_types[0], selected = new Set([2, 3, 5]);
+    editor.selectMany([...selected]);
+    const geometry = editor.geometry, frame = editor.evaluatedFrame;
+    asked.length = 0;
+    const handles = getPivotHandles(geometry, {frame, selectedUid: 5, selectedUids: selected, showUnselected: false, viewScale: 1});
+    assert.deepEqual(asked, ['geometryGroups'], 'one request for the selected figures');
+    for (const uid of [1, 2, 3, 4, 5, 6])
+      assert.equal(handles.filter(handle => handle.uid === uid).length, selected.has(uid) ? 1 + definitionHandleCount(walker) : 1, `figure ${uid}: its joints`);
+    for (const group of geometry.objects.values()) assert.equal(built(group), selected.has(group.obj.unique_id), `figure ${group.obj.unique_id} is built only when selected`);
+    // The same groups as built one by one, each with a request of its own.
+    const alone = freshRead(editor);
+    for (const [slot, group] of geometry.objects) if (selected.has(group.obj.unique_id)) { void alone.objects.get(slot).segments; sameGroup(group, alone.objects.get(slot), `slot ${slot}`); }
+    // Built groups ask nothing more.
+    asked.length = 0;
+    getPivotHandles(geometry, {frame, selectedUid: 5, selectedUids: selected, showUnselected: false, viewScale: 1});
+    assert.deepEqual(asked, []);
+  } finally { EditSession.prototype.query_packet = original; owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
 });
 
 test('a zoom resizes the descriptors to what they would be built as at the new scale', {skip: !engineBuilt}, async () => {

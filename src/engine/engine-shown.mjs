@@ -2,7 +2,7 @@
  * What the interface reads of the frame on show, from the engine's session (docs/engine/evaluation.md,
  * "The interface's frame"): the evaluated frame record (`editor.evaluatedFrame`), the timeline rows
  * (`editor.timeline`) and the geometry (`editor.geometry`) in the shape the canvas, the handles and the
- * pickers read: `{objects: Map<slot, group|null>, orderedObjects, drawables, token, changedSlots, warnings}`
+ * pickers read: `{objects: Map<slot, group|null>, orderedObjects, drawables, token, changedSlots, warnings, build(groups)}`
  * with groups `{slot, obj, fig, root, joints, segments, polys, bounds, solvedAngles, solvedLengths}`.
  *
  * The session also samples the frames around the one on show (docs/engine/evaluation.md, "The interface's views"): the
@@ -106,7 +106,10 @@ const CULLED_POLY = 1, DEPTH_POLY = 2;
 function geometryRecord({objects, orderedObjects, token, previousToken, changedSlots, warnings}) {
   let flat;
   return {objects, orderedObjects, token, previousToken, changedSlots,
-    get drawables() { if (!flat) { EngineGroup.wholeAll(orderedObjects); flat = orderedObjects.flatMap(group => group.drawables); } return flat; }, warnings};
+    get drawables() { if (!flat) { EngineGroup.wholeAll(orderedObjects); flat = orderedObjects.flatMap(group => group.drawables); } return flat; }, warnings,
+    /** Builds the groups of `groups` that are not built yet with one request of the session for all of them, as a reader that is about to
+     * read them all would otherwise make one for each (the joints of thousands of selected figures). */
+    build(groups) { EngineGroup.wholeAll(groups); }};
 }
 
 /** Gives `group` its `drawables` (what paints, in painter order: the faces, then the visible segments, Stick Nodes shapes expanded). Outside

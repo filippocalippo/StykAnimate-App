@@ -674,6 +674,7 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
     let before = editor.report().clone();
     let retained = editor.retained_frame();
     let draft = editor.authored.as_ref().map(|edit| edit.frame.clone());
+    let composed_on = editor.authored.as_ref().map(|edit| edit.source.clone());
     let gesture_before = editor.drag.as_ref().map(|drag| drag.serial);
     let project_requested = view.get("projectFieldsPublication") == Some(&Value::Bool(true))
         && matches!(method, "setFPS" | "setCanvasSize" | "updateProject")
@@ -1028,6 +1029,15 @@ fn call_values(editor: &mut Editor, method: &str, args: &Value, view: &Value, wo
         // The committed frame the session still keeps on show, unchanged by the call.
         if editor.retained_frame().is_some_and(|frame| retained.as_ref().is_some_and(|old| old.same_node(&frame))) {
             answer.push(("retainedKept", Value::Bool(true)));
+        }
+        // A gesture the call ended without changing anything (a press and release that moved nothing): the frame on show is again the
+        // frame it was composed on, which the view holds, so it need not read the frame again (thousands of figures on a dense scene).
+        if let Some(source) = composed_on.as_ref()
+            && editor.authored.is_none()
+            && editor.report().same_node(&before)
+            && editor.document_frame_ready().is_some_and(|frame| frame.same_node(source))
+        {
+            answer.push(("shownKept", Value::Bool(true)));
         }
         // The gesture draft's frame fields (draw order) when the call changed them.
         if let (Some(edit), Some(_)) = (&editor.authored, &editor.drag) {

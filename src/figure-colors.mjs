@@ -31,6 +31,25 @@ export function figurePalette(report, figure, object) {
   });
   return [...colors.values()].sort((a,b)=>b.segments.length-a.segments.length || a.color.localeCompare(b.color));
 }
+/**
+ * The colours `figurePalette` lists for the figures `objects` together (`figureOf(object)`: the figure each shows), as a set. A figure with no
+ * style of its own and no colour mode of its own shows the colours of its definition under its colour override alone, so figures alike are
+ * listed once: a selection of thousands of figures has a few kinds.
+ */
+export function paletteColors(report, objects, figureOf) {
+  const colors = new Set(), listed = new Map();
+  for (const object of objects) {
+    const figure = figureOf(object);
+    if (figure && !object._stykStyle && object._styk?.colorMode !== 'segments') {
+      let overrides = listed.get(figure);
+      if (!overrides) listed.set(figure, overrides = new Set());
+      if (overrides.has(object.color_override_raw)) continue;
+      overrides.add(object.color_override_raw);
+    }
+    for (const entry of figurePalette(report, figure, object)) colors.add(entry.color);
+  }
+  return colors;
+}
 /** Palette membership is scoped by instance: attached rigs can reuse handle IDs. */
 export function attachedFigurePalette(report, frame, uid) {
   const objects=frame.objects, start=objects.findIndex(object=>object.unique_id===uid);

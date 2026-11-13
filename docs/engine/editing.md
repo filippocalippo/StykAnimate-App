@@ -605,7 +605,10 @@ it on the editor, for every document.
   the queries and the lifecycle stay the editor's. Its answer (`patch: true`) carries the document patch
   (`styk_edit::patch`, copy-on-write identity diff), the state, the gesture and its draft,
   the retained frame and the change events; it carries nothing else of what a command published (the sheet, its tracks, the
-  layers and the frame sources, which the patch already holds: a commit that keys a pose is the pose once, not three times). The owner applies the patch to `editor.report`
+  layers and the frame sources, which the patch already holds: a commit that keys a pose is the pose once, not three times). A call
+  that keeps the frame on show says so instead of sending it: `retainedKept` for the frame a commit retains, `shownKept` for a gesture
+  that ended changing nothing (a press that moved nothing), whose frame on show is again the one it was composed on and the view holds
+  (`tests/engine-shown.test.mjs`). The owner applies the patch to `editor.report`
   copy-on-write (`src/engine/engine-patch.mjs`), refreshes what the editor derives from the
   records (layer index, frame index, caches), sets selection and counters, mirrors the
   gesture into `_drag`/`_authoredPoseEdit` and re-emits the events.
