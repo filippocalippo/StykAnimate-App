@@ -280,7 +280,7 @@
   },
   "app.denseFrameShowsOrigins": {
     "locations": [
-      "src/canvas-handles.mjs:59"
+      "src/canvas-handles.mjs:62"
     ],
     "context": "if (announce) app.status({messageKey: \"app.denseFrameShowsOrigins\", messageParams: {}});"
   },

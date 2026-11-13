@@ -228,10 +228,10 @@ the same way by the delta: its joints are stamped once at the press and then onl
 view, and painted afresh once the drag rests a moment and when it ends; figures moved by different deltas are stamped over
 the picture every frame. A zoom resizes the joints' descriptors instead of building them again (in place, after the first
 resize of a gesture: those descriptors are the overlay's own), and when the zoom makes every joint the smallest (or largest)
-size the segments' lengths are not read at all. While the view's scale changes from one frame to the next, each joint is
-stamped at its size rounded down to half a backing pixel, so a zoom paints a few pictures instead of a hundred new ones each
-frame, and a joint is never drawn larger than where a click finds it; once the zoom rests, the joints are painted at their
-exact sizes.
+size the segments' lengths are not read at all. While a zoom is in progress (the view's scale changed less than 150 ms
+ago, `ZOOM_REST_MS` in `src/canvas-handles.mjs`), each joint is stamped at its size rounded down to half a backing pixel,
+so a zoom paints a few pictures instead of a hundred new ones each frame, and a joint is never drawn larger than where a
+click finds it; once the scale has been still that long, the joints are painted at their exact sizes.
 
 Each joint is a stamp, not a path (`src/canvas-handle-sprites.mjs`). Two paths a joint, a fill and an outline, kept the
 graphics process busy rasterising: 3,200 joints held a busy scene at 30 frames a second while scrubbing. Each look (shape,
