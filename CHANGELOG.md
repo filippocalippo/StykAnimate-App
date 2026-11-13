@@ -6,76 +6,43 @@ What's new in each version of StykAnimate.
 
 ## [Unreleased]
 
+## [1.3.0]
+
+Project tabs, a new Home and a much faster StykAnimate
+
 ### Added
 
 - StykAnimate is now open source: its code is on GitHub under the GPL-3.0 license.
-- Everyday Props · Pivot 3D: 30 editable everyday objects with working hinges and wheels for your animations.
-- Vehicles · Pivot 3D asset pack with twelve editable vehicles, spinning wheels, steering and opening parts.
-- Named poses for articulated figures, with detailed controls that can be shown when needed.
-- Change individual colors on 3D figures from the Colors palette.
-- Keep several projects open at once in tabs, each with its own undo history, and switch between them with a click or Ctrl+Tab.
+- Keep several projects open at once in tabs, each with its own undo history, and switch between them with Ctrl+Tab.
 - A new Home page to start an animation in landscape, vertical or square, reopen your projects and organize them with pins and folders.
-- Five short interactive tutorials that guide you step by step through the canvas, posing, the timeline and the panels.
+- Five short interactive tutorials that guide you through the canvas, posing, the timeline and the panels.
+- Arrange panels freely: dock them beside the stage or each other, group them as tabs, float or collapse them, and save your own layouts to share.
+- Named poses for articulated figures, and individual colors on 3D figures from the Colors palette.
 - Right-click a joint and choose Disconnect segment to turn that part of a figure into a figure of its own.
-- Arrange panels freely: drag any panel beside the stage or another panel, group panels as tabs, float them, or collapse them to icon strips, with a preview of where each one will land.
-- Save your own panel layouts for each workspace, and export or import them to share.
 
 ### Changed
 
-- The desktop app now sends anonymous statistics about speed and crashes, never anything from your animations. You can turn them off, and see exactly what was sent, in Preferences under Privacy.
-- The privacy window at first start is gone: Home tells you about statistics in one line instead.
-- Ctrl-dragging a node that uses IK stretches it like any other node.
-- A calmer top bar: the menus are in a short StykAnimate menu, and your open projects take their place.
-- Shorter right-click menus on the canvas, with less frequent figure commands grouped under More figure actions.
-- Exports preserve effects and 3D artwork when No smoothing is selected.
+- The desktop app now sends anonymous statistics about speed and crashes, never anything from your animations, instead of asking at first start. You can turn them off and see exactly what was sent in Preferences under Privacy.
+- A calmer top bar and shorter right-click menus: the main menus live in one StykAnimate menu, and your open projects take their place.
 - Recent colors, personal palettes and your brush library are kept between launches on desktop.
 
 ### Fixed
 
-- Fixed Home missing open projects and their pictures when opened through a linked folder.
-- Moving a figure shows its new position immediately.
-- The canvas no longer stays empty when graphics fail to start at launch: StykAnimate tries again on its own.
-- Onion skins of styled figures no longer show an old shape after you change the figure’s settings, such as an angle lock.
-- Repeated pastes keep the expected spacing between copied figures.
-- Pasting segment settings no longer fails after changing the selected segment.
-- Undoing a timeline change made of several steps keeps your selection and shows the right frame.
-- Timeline and camera previews show the correct frame and parallax layer positions.
-- Moving a segment while building a figure no longer bends other parts of the figure.
-- Fixed fine brush detail on drawing layers and clipped edges in camera previews with blur, glow or outlines.
-- Fixed errors when adjusting motion paths on joined figures.
-- Failed attempts to add figures or movieclips keep the project and figure joins unchanged.
-- Fixed an inspector error when viewing between frames.
-- Fixed an error when deleting your last color palette.
-- Fixed changing a figure's draw order on a keyframe with a custom easing curve.
-- Fixed editing an existing text figure, which opened with the default text instead of its own.
-- Fixed Auto key, builder snapping and camera follow missing from the command palette.
-- Fixed the command palette failing when you search for a figure by its name.
-- Saving no longer fails when Windows is still scanning the file you just saved over, and a save that runs out of memory now says your project is still open.
-- Fixed projects that would not open again after you made a movieclip in a project that already had another movieclip on its timeline. Projects already saved that way now open, and StykAnimate tells you it repaired them.
-- Saving now repairs damage it finds in a project, so the saved file opens again.
-- Exporting the same animation twice no longer occasionally leaves a frame with garbled pixels.
-- The timeline’s buttons stay inside the window after you change the interface language.
+- Projects that would not open again after you made a second movieclip now open, and saving repairs damage it finds so the file opens again.
+- Saving no longer fails when Windows is still scanning the file you just saved over.
+- The canvas no longer stays empty when graphics fail to start at launch.
+- Drawing with no smoothing no longer shows thin flickering lines ahead of the pen.
+- Exports keep effects and 3D artwork with No smoothing, and no longer occasionally leave a frame with garbled pixels.
+- Many smaller fixes to onion skins, copy and paste, undo, the timeline, the command palette and text figures.
 
 ### Performance
 
-- Large Pivot files open several times faster, and in the web app the first one no longer waits for a large download.
-- StykAnimate starts faster, and large projects save in a fraction of the time without pausing the app.
-- Large projects play without stutters, and artwork near the edge of the canvas no longer blinks during playback.
-- Dragging joints, releasing a pose and undoing keep up better on large animations with onion skins, and undoing a brush stroke no longer pauses.
-- Editing large animations and 3D figures is faster.
-- Exporting animations with effects, particles, 3D or many figures is several times faster.
-- Animations with particles, auras, beams, smoke or explosions play and edit more smoothly.
-- Fills, magic wand selections, filters and saving are faster on drawing layers.
-- Timeline and asset library previews appear almost instantly, and large projects use less memory, while they are shown and once opened.
-- Smoother playback for animations with parallax layers, a following camera, moved figure origins, Stick Nodes sprites, turning 3D drawings or animated properties.
-- Undoing and redoing big movieclip edits is much faster.
-- StykAnimate now plays, poses and draws smoothly on computers without a dedicated graphics card.
-- Scenes with thousands of figures stay smooth when you pan, zoom, click, drag joints, drag the playhead, jump to another frame, hold a key to step through frames, or select and move many figures at once. Their figures show only an origin joint until you select one.
-- Drawing keeps up with the pen on scenes with thousands of figures.
-- Scrubbing, stepping and zooming busy scenes are smoother, and so are dragging a panel divider and resizing the window.
-- GIF exports are about three times faster.
-- Drawing for a long time no longer keeps growing the memory StykAnimate uses.
-- Stepping through frames with the keyboard shows the next frame sooner on large animations.
+- StykAnimate starts faster, opens large Pivot files several times faster and saves large projects in a fraction of the time.
+- Scenes with thousands of figures stay smooth while you play, scrub, pan, zoom, pose, draw or move many figures at once. Their figures show only an origin joint until you select one.
+- Plays, poses and draws smoothly on computers without a dedicated graphics card.
+- Effects, particles, parallax layers and 3D figures play and edit more smoothly.
+- Exports with effects, particles, 3D or many figures are several times faster, and GIF exports are about three times faster.
+- Drawing layers are faster, and large projects and long drawing sessions use less memory.
 
 ### Removed
 
