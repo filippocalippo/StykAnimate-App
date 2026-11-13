@@ -107,6 +107,18 @@ function geometryRecord({objects, orderedObjects, token, previousToken, changedS
   let flat;
   return {objects, orderedObjects, token, previousToken, changedSlots,
     get drawables() { if (!flat) { EngineGroup.wholeAll(orderedObjects); flat = orderedObjects.flatMap(group => group.drawables); } return flat; }, warnings,
+    /** The first drawable of the object `uid` (of `type`, when given) in painter order: what `drawables.find` answers, from the groups of
+     * that object alone. A drawable belongs to its object's group, and flattening `drawables` builds every group of the scene: on a dense
+     * one the drawing tools' lookup of their cel built the scene's 2,000 groups for each new geometry (65 MB of garbage each time, twice
+     * a stroke on the stress scene). */
+    drawableOf(uid, type = null) {
+      for (const group of orderedObjects) {
+        if (group?.obj?.unique_id !== uid) continue;
+        const found = group.drawables.find(item => item.obj.unique_id === uid && (type === null || item.type === type));
+        if (found) return found;
+      }
+      return undefined;
+    },
     /** Builds the groups of `groups` that are not built yet with one request of the session for all of them, as a reader that is about to
      * read them all would otherwise make one for each (the joints of thousands of selected figures). */
     build(groups) { EngineGroup.wholeAll(groups); }};

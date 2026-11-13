@@ -39,6 +39,12 @@ test('the frame, geometry and timeline are the session\'s', {skip: !engineBuilt}
       });
     }
     assert.equal(geometry.orderedObjects.every(group => group.drawables.length > 0), true, 'the objects in painter order have artwork');
+    // An object's drawable, from its own group, is the one the scene's whole list finds first.
+    for (const object of frame.objects) for (const type of [null, 'line', 'image']) {
+      const whole = geometry.drawables.find(item => item.obj.unique_id === object.unique_id && (type === null || item.type === type));
+      assert.equal(geometry.drawableOf(object.unique_id, type), whole, `object ${object.unique_id}, ${type ?? 'any'}`);
+    }
+    assert.equal(geometry.drawableOf(-1), undefined);
     assert.equal(editor.timeline.at(-1).start + editor.timeline.at(-1).count, editor.totalTicks);
     assert.ok(editor.totalTicks > 11);
     // The same geometry is read again as it was held.

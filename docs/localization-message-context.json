@@ -13009,7 +13009,7 @@
     "locations": [
       "src/drawing-controller.mjs:387"
     ],
-    "context": "geometryItem(target){let item;if(target.created||target.migratedFrom)item=this.previewItem(target);else item=this.editor.geometry.drawables.find(i=>i.obj.unique"
+    "context": "geometryItem(target){let item;if(target.created||target.migratedFrom)item=this.previewItem(target);else item=this.editor.geometry.drawableOf(target.object.uniqu"
   },
   "errors.drawingController.theOperationExceedsTheDrawingWorkingMemoryLimit": {
     "locations": [
