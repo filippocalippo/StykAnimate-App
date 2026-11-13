@@ -277,6 +277,18 @@ impl<'a> Sampler<'a> {
         }
     }
 
+    /// Whether [`Sampler::value_from`] reads the values at keys index-1 and index+2 (those at index and index+1 it always reads):
+    /// a channel whose value there it does not read need not be looked up.
+    fn reads_outer(&self) -> [bool; 2] {
+        if self.auto {
+            [self.auto_prev && self.has_prev, self.auto_next && self.has_next2]
+        } else if self.legacy {
+            [self.has_prev && self.ticks[0] > 1.0, self.can_extend_right && self.ticks[2] > 1.0]
+        } else {
+            [false, false]
+        }
+    }
+
     /// `v` = values at keys [index-1, index, index+1, index+2].
     fn value(&self, v: [Option<f64>; 4], angular: bool) -> f64 {
         self.value_from(v, angular, None)
@@ -543,13 +555,13 @@ fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, 
         needed
     });
     let mut objects = Vec::with_capacity(a.frame.objects.len());
-    for o in &a.frame.objects {
+    for (slot, o) in a.frame.objects.iter().enumerate() {
         if cancelled() { return Frame::default(); }
         if needed.as_ref().is_some_and(|needed| !needed.contains(&o.uid)) {
             objects.push(o.clone());
             continue;
         }
-        let Some(next) = b.frame.object(o.uid).filter(|n| n.figure == o.figure) else {
+        let Some(next) = b.frame.object_near(o.uid, slot).filter(|n| n.figure == o.figure) else {
             objects.push(o.clone());
             continue;
         };
@@ -557,7 +569,7 @@ fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, 
             objects.push(o.clone());
             continue;
         };
-        let recs: [Option<&Object>; 4] = frames.map(|f| f.and_then(|f| f.object(o.uid)).filter(|x| x.figure == o.figure).map(|x| &**x));
+        let recs: [Option<&Object>; 4] = frames.map(|f| f.and_then(|f| f.object_near(o.uid, slot)).filter(|x| x.figure == o.figure).map(|x| &**x));
         objects.push(Arc::new(tween_object(&sampler, fig, o, next, &recs, auto, cancelled)));
     }
     let camera = match (a.frame.camera, b.frame.camera) {
@@ -602,7 +614,11 @@ fn tween_interval(doc: &Document, seq: &Seq, index: usize, t: f64, exact: bool, 
 
 fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Option<&Object>; 4], auto: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Object {
     let t = s.t;
-    let read = |f: &dyn Fn(&Object) -> f64| recs.map(|r| r.map(f));
+    // The poses the interpolation of a number reads: the keys before and after the interval only where it reads them, so that a
+    // channel is not worked out for every segment at a key it is not read at.
+    let outer = s.reads_outer();
+    let used: [Option<&Object>; 4] = [recs[0].filter(|_| outer[0]), recs[1], recs[2], recs[3].filter(|_| outer[1])];
+    let read = |f: &dyn Fn(&Object) -> f64| used.map(|r| r.map(f));
     let mut out = o.clone();
     // IK: controller targets and follower angles tween with the pose (`interpolateIK`).
     if let Some(table) = &o.ik {
@@ -639,23 +655,24 @@ fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Op
         o.transparency + ((next.transparency - o.transparency) * t).trunc()
     };
     let n = fig.segments.len();
+    // Each array is collected straight into the shared slice the object keeps (one allocation, not a vector and its copy).
     if o.lengths.is_some() || next.lengths.is_some() || s.legacy {
-        let lengths: Vec<f64> = (0..n)
+        let lengths: Arc<[f64]> = (0..n)
             .map(|i| {
                 let base = fig.segments[i].length;
-                s.value(recs.map(|r| r.map(|x| x.lengths.as_ref().map_or(base, |l| l.get(i).copied().unwrap_or(f64::NAN)))), false)
+                s.value(used.map(|r| r.map(|x| x.lengths.as_ref().map_or(base, |l| l.get(i).copied().unwrap_or(f64::NAN)))), false)
             })
             .collect();
-        out.lengths = Some(lengths.into());
+        out.lengths = Some(lengths);
     }
     if o.bends.is_some() || next.bends.is_some() || s.legacy {
-        let bends: Vec<f64> = (0..n)
+        let bends: Arc<[f64]> = (0..n)
             .map(|i| {
                 let base = fig.segments[i].bend;
-                s.value(recs.map(|r| r.map(|x| x.bends.as_ref().map_or(base, |l| l.get(i).copied().unwrap_or(f64::NAN)))), false)
+                s.value(used.map(|r| r.map(|x| x.bends.as_ref().map_or(base, |l| l.get(i).copied().unwrap_or(f64::NAN)))), false)
             })
             .collect();
-        out.bends = Some(bends.into());
+        out.bends = Some(bends);
     }
     // A figure with an animation origin tweens the angles of its original tree (`animationOriginLayout`
     // or its retained support graph) rather than of its construction tree.
@@ -672,11 +689,11 @@ fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Op
                 crate::origin::tween_support(fig, support, &first, &mut out, &sample);
             }
         }
-        return finish_colors(s, o, next, recs, auto, out);
+        return finish_colors(s, o, next, &used, auto, out);
     }
     let plan = &fig.plan;
-    let mut angles: Vec<f64> = (0..n).map(|i| o.angles.get(i).copied().unwrap_or(fig.segments[i].angle)).collect();
-    let mut done = vec![false; n];
+    let mut angles: Arc<[f64]> = (0..n).map(|i| o.angles.get(i).copied().unwrap_or(fig.segments[i].angle)).collect();
+    let tweened = Arc::get_mut(&mut angles).expect("a slice made here has no other owner");
     for &i in &plan.order {
         if cancelled() { return out; }
         let i = i as usize;
@@ -694,8 +711,8 @@ fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Op
             }
             value
         };
-        let relative = s.angle(recs.map(|r| r.map(relative_of)), &|k| s.seq.keys.get(k).and_then(|f| f.frame.object(o.uid)).filter(|x| x.figure == o.figure).map(|x| relative_of(x)));
-        angles[i] = if parent == u32::MAX {
+        let relative = s.angle(used.map(|r| r.map(relative_of)), &|k| s.seq.keys.get(k).and_then(|f| f.frame.object(o.uid)).filter(|x| x.figure == o.figure).map(|x| relative_of(x)));
+        tweened[i] = if parent == u32::MAX {
             relative
         } else {
             let p = parent as usize;
@@ -703,12 +720,11 @@ fn tween_object(s: &Sampler, fig: &Figure, o: &Object, next: &Object, recs: &[Op
                 Some(b) => b[p],
                 None => fig.segments[p].bend,
             };
-            angles[p] + bend + relative
+            tweened[p] + bend + relative
         };
-        done[i] = true;
     }
-    out.angles = angles.into();
-    finish_colors(s, o, next, recs, auto, out)
+    out.angles = angles;
+    finish_colors(s, o, next, &used, auto, out)
 }
 
 /// The colour override of a tween, the last channel `tween_object` writes.
@@ -1226,11 +1242,11 @@ impl Prepared {
 
     /// `sample(id)` in `sampleLayerSheet`: the layer's own pose, then the movieclip
     /// frames its key replaces; with what the editor's frame object is (see [`Sampled`]).
-    fn sample_track(&self, id: &str, tick: f64) -> Option<(Frame, Sampled)> { self.sample_track_checked(id, tick, &|| false) }
-    fn sample_track_checked(&self, id: &str, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<(Frame, Sampled)> {
+    fn sample_track(&self, id: &str, tick: f64) -> Option<(Frame, Sampled)> { self.sample_track_checked(id, tick, &|| false, None) }
+    fn sample_track_checked(&self, id: &str, tick: f64, cancelled: &(dyn Fn() -> bool + Sync), sources: Option<&SourceSamples>) -> Option<(Frame, Sampled)> {
         if cancelled() { return None; }
         let track = self.doc.sheet.as_ref()?.tracks.get(id)?;
-        let sampled = self.sample_base_checked(id, track, tick, cancelled);
+        let sampled = self.sample_base_checked(id, track, tick, cancelled, sources);
         if tick >= track.end as f64 {
             return sampled;
         }
@@ -1344,8 +1360,25 @@ impl Prepared {
         Frame { objects, origins, continuations, draw_order: order.iter().filter_map(|uid| slots.get(uid).copied()).collect(), ..base }
     }
 
+    /// `sourceAt(time)`: the native timeline at `time`, which the keys of an imported layer stand for. One evaluation of the sheet
+    /// asks for it once for the scene, once for the camera and once for each imported layer, all at the same time when their keys
+    /// are the same: it is evaluated once for all of them (`sources`), as the editor's `sampleLayerSheet` keeps it. Evaluation is a
+    /// pure function of the document and the time, so each gets the frame its own evaluation would have given.
+    fn source_at(&self, time: f64, cancelled: &(dyn Fn() -> bool + Sync), sources: Option<&SourceSamples>) -> Frame {
+        let Some(sources) = sources else { return self.native_at_fraction_checked(time, cancelled) };
+        let bits = time.to_bits();
+        if let Some((_, frame)) = sources.0.borrow().iter().find(|(held, _)| *held == bits) {
+            return frame.clone();
+        }
+        let frame = self.native_at_fraction_checked(time, cancelled);
+        if !cancelled() {
+            sources.0.borrow_mut().push((bits, frame.clone()));
+        }
+        frame
+    }
+
     /// `baseSample`: the layer's pose from its keys, without movieclip replacements.
-    fn sample_base_checked(&self, id: &str, track: &SheetTrack, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<(Frame, Sampled)> {
+    fn sample_base_checked(&self, id: &str, track: &SheetTrack, tick: f64, cancelled: &(dyn Fn() -> bool + Sync), sources: Option<&SourceSamples>) -> Option<(Frame, Sampled)> {
         if tick >= track.end as f64 && !FIXED.contains(&id) {
             return None;
         }
@@ -1360,7 +1393,7 @@ impl Prepared {
             && matches!(n.value, SheetValue::Frame(None))
         {
             return match &key.value {
-                SheetValue::SourceTick(t) => Some((self.native_at_fraction_checked(*t, cancelled), Sampled::Native(t.to_bits()))),
+                SheetValue::SourceTick(t) => Some((self.source_at(*t, cancelled, sources), Sampled::Native(t.to_bits()))),
                 SheetValue::Frame(Some(id)) => self.doc.pose_source(id).map(|k| {
                     (frame_of(&KeyRef { frame: k.clone(), duration: 1, easing: None, origin: Some(FrameRef::Source(id.clone())) }), Sampled::Source(id.clone()))
                 }),
@@ -1378,7 +1411,7 @@ impl Prepared {
                 None => (0.0, source),
             };
             let time = source + fraction * (target - source);
-            return Some((self.native_at_fraction_checked(time, cancelled), Sampled::Native(time.to_bits())));
+            return Some((self.source_at(time, cancelled, sources), Sampled::Native(time.to_bits())));
         }
         if self.imported.get(id).copied().unwrap_or(false) {
             let index = at - 1;
@@ -1481,11 +1514,13 @@ impl Prepared {
     /// `sampleLayerSheet`: compose each layer's own pose track.
     fn sample_sheet_checked(&self, tick: f64, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Frame> {
         let doc = &self.doc;
-        let scene = self.sample_track_checked("scene", tick, cancelled);
-        let camera = self.sample_track_checked("camera", tick, cancelled);
+        let sources = SourceSamples::default();
+        let scene = self.sample_track_checked("scene", tick, cancelled, Some(&sources));
+        let camera = self.sample_track_checked("camera", tick, cancelled, Some(&sources));
         let layers = doc.layers.clone().unwrap_or_default();
         let mut frames = Vec::new();
-        for id in &layers.order { if cancelled() { return None; } frames.push((id, self.sample_track_checked(id, tick, cancelled))); }
+        for id in &layers.order { if cancelled() { return None; } frames.push((id, self.sample_track_checked(id, tick, cancelled, Some(&sources)))); }
+        drop(sources);
         // Imported layers that share one native pose are that pose, whole, slots included.
         if let (Some((scene, identity)), Some((_, other))) = (&scene, &camera)
             && *identity != Sampled::Track
@@ -1626,6 +1661,12 @@ enum Sampled {
     /// A frame of the layer's own (never shared with another layer's).
     Track,
 }
+
+/// The native timeline sampled for one evaluation of the layer sheet, by the bits of the time ([`Prepared::source_at`]). It lives
+/// for that one call on the thread making it, and holds a frame for each time its tracks sample (one in a document whose layers
+/// all stand for the imported animation).
+#[derive(Default)]
+struct SourceSamples(std::cell::RefCell<Vec<(u64, Frame)>>);
 
 /// The pose track of a layer: its keys that carry a pose of their own.
 fn pose_track(doc: &Document, id: &str, track: &SheetTrack) -> Seq {

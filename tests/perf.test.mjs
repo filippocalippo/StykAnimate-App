@@ -27,6 +27,9 @@ test('a function belongs to one layer: a JavaScript module by its path, an engin
     [script('stroke', 'drawing-controller.mjs'), 'drawing'], [script('run', 'export-flow.mjs'), 'export'], [script('other', 'something-new.mjs'), 'interface-other'],
     [wasm('styk_eval[30fd614d899501a1]::geometry::build_object'), 'engine-eval'], [wasm('<styk_edit[aaaaaaaaaaaaaaaa]::session::Session>::call'), 'engine-edit'],
     [wasm('<styk_alloc[a8028a0bce19ac18]::wasm::GrowAhead as core[8d8d0c3c88249b01]::alloc::global::GlobalAlloc>::alloc'), 'engine-memory'], [wasm('memcpy'), 'engine-memory'],
+    // The platform's trigonometry is the compiler's builtins on WebAssembly: arithmetic, not memory.
+    [wasm('compiler_builtins[5b9610afaf291e0a]::math::partial_availability::sin'), 'engine-math'], [wasm('libm[30c61d01c84697d8]::math::atan::atan'), 'engine-math'],
+    [wasm('styk_math[667ebf1d22961e0]::atan2'), 'engine-math'],
     [wasm('core[8d8d0c3c88249b01]::ptr::drop_glue::<styk_eval[30fd614d899501a1]::geometry::Scene>'), 'engine-eval'], [wasm('<alloc[eddc4579fb4d62d8]::raw_vec::RawVecInner>::finish_grow'), 'engine-std'],
     [wasm('serde_json[bbbbbbbbbbbbbbbb]::de::from_str'), 'engine-json'], [wasm('wgpu_core[cccccccccccccccc]::device::queue::write_buffer'), 'engine-render'], [wasm('wasm-to-js'), 'engine-binding'],
     [wasm('wasm-function[8586]'), 'engine-other'], [wasm('<std[ffc7df3265e32aa1]::sys::sync::condvar::futex::Condvar>::wait_timeout'), 'idle'],

@@ -23,7 +23,14 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   [memory.md](memory.md)); the protected playhead
   and separately retained payloads prevent treating it as a physical memory cap.
   Try hidden/effects setters advance the epoch; playback retries only its latest
-  pending controls while Busy keeps it cold.
+  pending controls while Busy keeps it cold. A worker builds frame after frame in
+  the buffers the frame before it left (`frames::Spares`, `geometry::build_reusing`):
+  a dense frame's scene needs four buffers of a kilobyte or more for every figure,
+  which the allocator serves under the lock every thread shares. The spares hold no
+  part of a document, at most a thirty-second of the memory for one worker and an
+  eighth for all of them together (a worker beyond either builds as before), and are
+  let go before any other kind of work and once the worker has waited eight times in a
+  row with nothing to do ([memory.md](memory.md)).
 - Images: decoded on workers (`take_images` hands them to the renderer a few
   megabytes per frame, and only a budget of them is decoded ahead of it: [memory.md](memory.md));
   drawing cels decode one task each. The stage remembers which

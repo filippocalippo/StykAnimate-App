@@ -286,6 +286,16 @@ pictures arrive. Not done.
   session keeps the scene before the one on show and the stage keeps the draw list before the one drawn, to write the next frame over them
   in place; both are let go of once the frame stays on show for 60 ms (when the stage prepares a pick), so a frame at rest holds one scene
   and one list, as before. A dense frame of 2,000 figures of 100 segments is about 70 MB of scene and 13 MB of list.
+- **A worker's spare scene** (`styk_engine::frames::Spares`, `geometry::SceneSpares`): a preparation worker keeps the buffers of the
+  scene it built last (each object's joints, lengths and segments, the scene's items, points and spans; no figure, effect or other part
+  of a document) to build the next frame in them, while it makes frame after frame. A worker's scene of the dense document above is
+  about 47 MB (232 bytes a segment: no measured primitives or angles). They are let go of when one worker's would hold more than a thirty-second of
+  the memory (64 MiB of 2 GiB) or all the workers' together more than an eighth (256 MiB, `Spares::most_held`, five such scenes): that
+  worker builds its next frame in fresh buffers, as before. They are also let go of before the worker runs any other kind of work (a
+  save's helpers, pictures, idle tasks), and once it has waited eight times in a row with nothing to do (at most 50 ms each). While
+  workers prepare frames each holds about one scene at once either way; the spares keep that memory between two of its frames, which
+  raised the engine's peak during the open of the dense document (whose first frames the workers prepare meanwhile) by about
+  150 MB in one measurement on 2026-11-13.
 - **History** keeps its byte limit (`HistoryLimits`, 48 MiB by default): an entry larger than the limit
   retires the older ones (testingupload's movieclip edit weighs 100 MiB by the history's accounting and
   holds 3 MiB of memory).

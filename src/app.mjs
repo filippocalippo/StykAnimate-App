@@ -32,7 +32,7 @@ import { Editor } from "./editor.mjs";
 import { worldToScreen, screenToWorld, objectBounds } from "./renderer-geometry.mjs";
 import { createStage, startStage } from "./engine/engine-stage.mjs";
 import { createStagePlayback } from "./engine/engine-playback.mjs";
-import { createScrubPreview, createSeekCosts } from "./engine/engine-scrub.mjs";
+import { createScrubPreview, createSeekCosts, FIRST_STEP_MS } from "./engine/engine-scrub.mjs";
 import { installEngineOwner } from "./engine/engine-owner.mjs";
 import { loadEngine } from "./engine/engine.mjs";
 import { useEngine, prepareOpen } from "./engine/engine-open.mjs";
@@ -653,8 +653,8 @@ const scrubPreview = createScrubPreview({
   playback, total: () => editor.totalTicks, engine: () => state.renderer?.engineSide?.engine ?? null,
   prepare: (ticks, playhead) => { syncPlayback(); void playback.prepareRange(ticks, {playhead}).catch(error => { if (error.name !== "AbortError") fail(error); }); },
 });
-/** Whether steering the playhead shows prepared frames. The prepared frames have the scene's background: Build's canvas colour keeps the editing scrub. */
-const scrubDear = () => seekCosts.dear(editor.report) && builderBackgroundColor(state.settings, state) === undefined;
+/** Whether steering the playhead shows prepared frames (from a press that starts a run, `first`, only where its exact frame is far dearer: FIRST_STEP_MS). The prepared frames have the scene's background: Build's canvas colour keeps the editing scrub. */
+const scrubDear = ({first = false} = {}) => seekCosts.dear(editor.report, first ? FIRST_STEP_MS : undefined) && builderBackgroundColor(state.settings, state) === undefined;
 function scrubStarted({steps = false} = {}) {
   // Decided once for the drag (or a run of frame steps). A selected layer's figures are found in the frame of the tick it ends on.
   if (scrubDear()) { scrubPreview.begin(editor.tick, {steps}); editor.holdSheetFollow(true); }

@@ -171,7 +171,7 @@ fn frame_d7_paused_actual_completion_cannot_replace_the_new_resource_or_settings
         // Work::step's fourth actual State lock follows take_wanted and produce.
         // The old tick is inflight. Completion holds storage, but no State
         // guard, so interface controls can still supersede it immediately.
-        let old = std::thread::spawn(move || crate::allocation::with_pause(pointer, 4, pause, || work.step(&worker)));
+        let old = std::thread::spawn(move || crate::allocation::with_pause(pointer, 4, pause, || work.step(&worker, &mut crate::frames::Spares::default())));
         barriers[0].wait();
         if resource { engine.inner.state.lock().frames.invalidate_resources(); }
         else { engine.set_effects(false); engine.request_samples(1.25, &[1.25]); }

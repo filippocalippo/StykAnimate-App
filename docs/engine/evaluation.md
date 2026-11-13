@@ -36,7 +36,11 @@ the JavaScript keeps only what a document stores (the validation of its records,
    composes layers in order. Imported keys sample the native timeline with the
    sheet's `legacyAnimation` channels; when every layer, the scene and the camera
    share one native sample (or a layer has nothing), that sample is the frame,
-   slots and all, as the editor returns its one object.
+   slots and all, as the editor returns its one object. One evaluation of the sheet
+   samples the native timeline once for each time its tracks ask for
+   (`Prepared::source_at`, as the editor's `sampleLayerSheet` keeps `sourceAt(time)`):
+   the scene, the camera and every imported layer read that frame (a document opened
+   from a Pivot file tweened every figure three times a frame before).
 3. Movieclip instances choose their local time, layers order the draw order (`applyLayerOrder`).
 4. The scene camera ([below](#the-scene-camera)): where it travels moves parallax
    layers, then camera-motion impulses shake the shot.
@@ -374,8 +378,10 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   Where nothing is built in parallel (the WebAssembly build: its parallelism is whole frames on workers), a frame without joins
   built for no memory (a worker's frame, a movieclip's scene) is built and spliced one object at a time in draw order, each in
   the buffers of the one before (`build_streamed` in the tests), and a build nothing else holds gives the scene its geometry
-  rather than a copy. The scenes, the draw lists and every read are the ones the plain builds give
-  (`styk-eval/tests/build_throughput.rs`).
+  rather than a copy. A preparation worker builds each frame in the buffers of the scene it built before
+  (`build_reusing` and `SceneSpares`: each object's joints, lengths and segments, and the scene's items, points and spans), which it
+  keeps only from one frame to the next ([threading.md](threading.md)). The scenes, the draw lists and every read are the ones the
+  plain builds give (`styk-eval/tests/build_throughput.rs`).
 - A geometry read names the read the interface holds (`since`). The session sends the groups of the objects built since that
   read, or all of them when the read named is not the one the session last answered or the scene on show is older than that read
   (a scene the stage drew of this frame before the interface read another). The groups held stay as they are, so the

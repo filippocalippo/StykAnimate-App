@@ -155,7 +155,8 @@ impl Work {
         true
     }
 
-    pub(crate) fn step(&self, engine: &Engine) -> bool {
+    /// Prepares the next wanted frame, if any, in what the frame before it left (`spares`).
+    pub(crate) fn step(&self, engine: &Engine, spares: &mut Spares) -> bool {
         let mut storage = self.storage.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some((control, changed)) = self.apply(engine, &mut storage) else { return false; };
         if !control.allow_frames { return changed; }
@@ -166,7 +167,7 @@ impl Work {
         }
         let Some(tick) = storage.take_wanted() else { return changed; };
         drop(storage);
-        let data = produce(generation, tick.time(), &control.hidden, control.effects, true, engine.inner.clock.clone());
+        let data = produce_reusing(generation, tick.time(), &control.hidden, control.effects, true, engine.inner.clock.clone(), Some(spares));
         // Returned/ignored and stale data all remain owned outside State.
         self.finish(engine, tick, control.epoch, &control.hidden, control.effects, data, false);
         true

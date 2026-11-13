@@ -1720,6 +1720,62 @@ pub fn build_cancellable(doc: &Document, frame: &Frame, cancelled: &(dyn Fn() ->
     build_core_checked(doc, frame, None, Measure::Off, true, None, None, cancelled, STREAM)
 }
 
+/// What a scene a thread is done with leaves for the next one it builds ([`build_reusing`]): the buffers of its objects' joints,
+/// lengths and segments and of its items, points and spans, emptied. A worker that builds frame after frame of a dense scene so
+/// allocates nothing for them (a figure of a hundred segments needs four buffers of a kilobyte or more each, which the allocator
+/// serves under the lock every thread shares). It holds no part of a document (no figure, effect, mesh or solution: those go with
+/// the scene), only the room one scene's numbers took ([`SceneSpares::bytes`]); whoever keeps it bounds it and lets it go.
+#[derive(Default)]
+pub struct SceneSpares {
+    objects: Vec<ObjectGeometry>,
+    items: Vec<Item>,
+    points: Vec<[f64; 2]>,
+    spans: Vec<SlotSpan>,
+}
+
+impl SceneSpares {
+    /// Takes the buffers of `scene`, which nothing reads any more; the rest of it is let go of.
+    pub fn recycle(&mut self, scene: Scene) {
+        let Scene { mut objects, mut items, mut points, mut spans, .. } = scene;
+        for object in &mut objects {
+            let ObjectGeometry { ends, starts, lengths, raw_segments, angles, .. } = std::mem::take(object);
+            *object = ObjectGeometry { ends, starts, lengths, raw_segments, angles, ..Default::default() };
+        }
+        items.clear();
+        points.clear();
+        spans.clear();
+        *self = SceneSpares { objects, items, points, spans };
+    }
+
+    /// The memory the spares hold: what the buffers have room for.
+    pub fn bytes(&self) -> usize {
+        fn room<T>(v: &Vec<T>) -> usize { v.capacity().saturating_mul(size_of::<T>()) }
+        self.objects.iter().fold(room(&self.objects) + room(&self.items) + room(&self.points) + room(&self.spans), |bytes, o| {
+            bytes.saturating_add(room(&o.ends)).saturating_add(room(&o.starts)).saturating_add(room(&o.lengths)).saturating_add(room(&o.raw_segments)).saturating_add(room(&o.angles))
+        })
+    }
+
+    /// Whether there is nothing held.
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty() && self.items.capacity() == 0 && self.points.capacity() == 0 && self.spans.capacity() == 0
+    }
+}
+
+/// [`build`], in the buffers `spares` holds from a scene built before (on the same thread): the same scene, bit for bit, whatever the
+/// spares held (`tests/build_throughput.rs`). Where a frame is built one object at a time ([`STREAM`]: the WebAssembly build, whose
+/// workers build whole frames) each object is built in the buffers of the object of its slot in that scene; elsewhere the spares are
+/// not read. Give the scene back with [`SceneSpares::recycle`] once it is drawn.
+pub fn build_reusing(doc: &Document, frame: &Frame, spares: &mut SceneSpares) -> Scene {
+    build_spared(doc, frame, spares, STREAM)
+}
+
+/// [`build_reusing`] one object at a time wherever it runs (`stream`), as the WebAssembly build makes it: for the tests that hold it to
+/// the plain build.
+#[doc(hidden)]
+pub fn build_spared(doc: &Document, frame: &Frame, spares: &mut SceneSpares, stream: bool) -> Scene {
+    build_core_spared(doc, frame, None, Measure::Off, true, None, None, &|| false, stream, Some(spares)).expect("an uncancelled build gives a scene")
+}
+
 /// Builds the scene for an evaluated frame.
 pub fn build(doc: &Document, frame: &Frame) -> Scene {
     build_filtered(doc, frame, None, Measure::Off, true, None)
@@ -1817,7 +1873,12 @@ pub fn build_only_measured_cancellable(doc: &Document, frame: &Frame, slots: &[u
     build_core_checked(doc, frame, Some(&needed), Measure::Bounds, true, None, None, cancelled, STREAM)
 }
 
-fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>, cancelled: &(dyn Fn() -> bool + Sync), stream: bool) -> Option<Scene> {
+fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, memory: Option<&mut BuildMemory>, same_as: Option<&Scene>, cancelled: &(dyn Fn() -> bool + Sync), stream: bool) -> Option<Scene> {
+    build_core_spared(doc, frame, needed, measure, render_output, memory, same_as, cancelled, stream, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_core_spared(doc: &Document, frame: &Frame, needed: Option<&[bool]>, measure: Measure, render_output: bool, mut memory: Option<&mut BuildMemory>, same_as: Option<&Scene>, cancelled: &(dyn Fn() -> bool + Sync), stream: bool, lend: Option<&mut SceneSpares>) -> Option<Scene> {
     let count = frame.objects.len();
     if let Some(memory) = memory.as_deref_mut() {
         memory.begin(count, measure, doc.version);
@@ -1997,7 +2058,14 @@ fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, me
         }
     }
     if streamed {
-        scene.spans = vec![SlotSpan::default(); count];
+        // A scene built before on this thread lends its buffers (`build_reusing`): the scene's own, and to each object those of the object
+        // of its slot there. A buffer is refilled before it is read, so what it held changes nothing.
+        let SceneSpares { objects: mut lent, items, points, mut spans } = lend.map(std::mem::take).unwrap_or_default();
+        spans.clear();
+        spans.resize(count, SlotSpan::default());
+        scene.spans = spans;
+        scene.items = items;
+        scene.points = points;
         // Room for what the figures drawn usually make: a segment or a polygon an item (Stick Nodes shapes and movieclips make more).
         let estimate: usize = frame.draw_order.iter().filter_map(|&slot| scene.figures.get(*fig_of.get(slot as usize)? as usize)).map(|fig| fig.segments.len() + fig.polyfills.len()).sum();
         scene.items.reserve(estimate);
@@ -2010,7 +2078,11 @@ fn build_core_checked(doc: &Document, frame: &Frame, needed: Option<&[bool]>, me
             if level[slot] != 0 || std::mem::replace(&mut placed[slot], true) {
                 continue;
             }
-            let Some((_, b, _)) = make_with(slot, &built, &scene.figures, scratch.take()) else { continue };
+            let mut spare = scratch.take();
+            if let Some(geometry) = lent.get_mut(slot).map(std::mem::take) {
+                spare.get_or_insert_with(|| Built::new(ObjectGeometry::default())).geometry = geometry;
+            }
+            let Some((_, b, _)) = make_with(slot, &built, &scene.figures, spare) else { continue };
             if cancelled() { return None; }
             let export_vfx = object_export_vfx(frame, &scene.figures, &fig_of, slot);
             let mut b = Arc::try_unwrap(b).ok().expect("a build for no memory is held by nothing else");
