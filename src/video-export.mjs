@@ -241,6 +241,13 @@ async function encodeVideo(container, {width, height, fps, totalFrames, renderFr
   let failure, wake, completed = false;
   const frameWindow = videoFrameWindow(width, height);
   let submitted = 0;
+  // The next frame, drawn while this one is encoded: a VideoFrame holds its own copy of the canvas it is made from.
+  let ahead = null;
+  const renderAhead = index => {
+    const next = (async () => renderFrame(index))();
+    next.catch(() => {});
+    return next;
+  };
   const encoder = new VideoEncoder({
     output(chunk, metadata) { try { muxer.add(chunk, metadata); } catch (error) { failure ||= error; wake?.(error); } },
     error(error) { failure ||= error; wake?.(error); },
@@ -270,7 +277,8 @@ async function encodeVideo(container, {width, height, fps, totalFrames, renderFr
     });
     for (let index = 0; index < totalFrames; index++) {
       check();
-      const canvas = await renderFrame(index);
+      const canvas = await (ahead ?? renderAhead(index));
+      ahead = null;
       check();
       if (!canvas || canvas.width !== width || canvas.height !== height) throw messageError(new Error(''), "errors.nativeVideoExport.renderedVideoFrameHasTheWrongDimensions", {value: index + 1});
       const timestamp = Math.round(index * 1e6 / fps);
@@ -285,6 +293,7 @@ async function encodeVideo(container, {width, height, fps, totalFrames, renderFr
         source = padCanvas;
       }
       const frame = new VideoFrame(source, {timestamp, duration, alpha: 'discard'});
+      if (index + 1 < totalFrames) ahead = renderAhead(index + 1);
       try { submitted++; encoder.encode(frame, {keyFrame: index % Math.max(1, Math.round(fps * 2)) === 0}); }
       finally { frame.close(); }
       if (submitted - muxer.frames >= frameWindow) await drain();
