@@ -36402,7 +36402,7 @@
   },
   "webOffline.aNewVersionOfStykanimateIsReadyIt": {
     "locations": [
-      "src/web-offline.mjs:50"
+      "src/web-offline.mjs:54"
     ],
     "context": "onUpdate: () => globalThis.styk?.ui?.toasts?.show({message: interfaceText(\"webOffline.aNewVersionOfStykanimateIsReadyIt\"), messageKey: \"webOffline.aNewVersionOf"
   }

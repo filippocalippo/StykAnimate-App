@@ -80,6 +80,30 @@ test('only a replacement version is reported, never the first install', async ()
   }
 });
 
+test('a new version the browser found before the page listened is still reported', async () => {
+  // The browser checks for a new version on every visit, and the page registers a moment after loading.
+  const waiting = environment({controlled: true});
+  waiting.registration.waiting = {state: 'installed'};
+  const ready = [];
+  await enableOffline({env: waiting.env, onUpdate: registration => ready.push(registration)});
+  assert.deepEqual(ready, [waiting.registration], 'a version already waiting is reported once');
+
+  const installing = environment({controlled: true});
+  installing.registration.installing = installing.installing;
+  const later = [];
+  await enableOffline({env: installing.env, onUpdate: registration => later.push(registration)});
+  assert.equal(later.length, 0, 'not while installing');
+  installing.install('installed');
+  assert.deepEqual(later, [installing.registration], 'a version already installing is reported when it is ready');
+
+  const first = environment();
+  first.registration.installing = first.installing;
+  const none = [];
+  await enableOffline({env: first.env, onUpdate: registration => none.push(registration)});
+  first.install('installed');
+  assert.equal(none.length, 0, 'the first install is still not news');
+});
+
 test('a registration that fails is reported and never breaks the app', async () => {
   const page = environment();
   const failure = new Error('SecurityError');

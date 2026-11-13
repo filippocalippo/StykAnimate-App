@@ -29,11 +29,15 @@ export async function enableOffline({env = globalThis, delay = 3000, onUpdate = 
   try {
     const {serviceWorker} = env.navigator;
     const registration = await serviceWorker.register(OFFLINE_WORKER, {scope: './'});
-    registration.addEventListener('updatefound', () => {
-      const worker = registration.installing;
-      // A first install has no controller yet; only a replacement is news.
-      worker?.addEventListener('statechange', () => { if (worker.state === 'installed' && serviceWorker.controller) onUpdate(registration); });
-    });
+    // A first install has no controller yet; only a replacement is news.
+    const track = worker => worker?.addEventListener('statechange', () => { if (worker.state === 'installed' && serviceWorker.controller) onUpdate(registration); });
+    registration.addEventListener('updatefound', () => track(registration.installing));
+    // The browser looks for a new version on every visit, so one can be installing or already waiting before this
+    // page listens (it registers a moment after loading); that version is news too.
+    if (serviceWorker.controller) {
+      if (registration.waiting) onUpdate(registration);
+      else track(registration.installing);
+    }
     const ready = await serviceWorker.ready;
     if (!env.navigator.connection?.saveData) ready.active?.postMessage({type: 'precache-codec'});
     // An installed app is where losing the browser's storage would cost the most; ask it to keep it (silently, in Chromium).

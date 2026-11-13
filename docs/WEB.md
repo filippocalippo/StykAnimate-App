@@ -102,7 +102,8 @@ the web page by `build-web.mjs` and never reach the desktop app's page:
   save data, and is kept the first time it is used either way.
 - A new build installs in the background and takes over when every window of the
   old one has been closed, so an open project is never swapped under its owner;
-  the open app shows a short notice. Files whose hash did not change are copied
+  the open app shows a short notice, also when the browser found the new build
+  before the page started listening (it checks on every visit). Files whose hash did not change are copied
   from the previous cache instead of downloaded, so an update costs what changed
   (the Pivot codec is not fetched again unless it changed). The old cache is deleted when the new
   version takes over.
