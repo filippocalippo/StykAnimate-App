@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {mkdtemp, readFile, readdir, rm, stat} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import vm from 'node:vm';
 import {ourStack} from '../src/stats/stack.mjs';
-import {appEntries, bundledIndex, buildApp} from '../scripts/build-app.mjs';
+import {appEntries, bundledIndex, buildApp, sourceModule} from '../scripts/build-app.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** The application built once for the tests below, which only read it: where it is and what the build answered. */
@@ -105,6 +105,12 @@ test('the bundle is readable, keeps the vendored licence header, and leaves no s
   assert.ok(all.includes('// src/engine/engine-owner.mjs'), 'modules are told apart by their path comments, as unminified output does');
   assert.ok(all.some(line => line.includes('opentype.js.org') && line.includes('MIT License')), 'opentype.js keeps its MIT header');
   for (const directory of ['src', 'src/chunks', 'src/engine']) assert.ok(!(await readdir(path.join(output, directory))).some(name => name.endsWith('.map')), `no source map in ${directory}`);
+});
+
+test('a source of a script\'s map is its path in the repository, relative or as the file: URL an output on another drive gets', () => {
+  const folder = path.join(root, 'build', 'app', 'src', 'chunks');
+  assert.equal(sourceModule(root, folder, '../../../../src/stats/stack.mjs'), 'src/stats/stack.mjs');
+  assert.equal(sourceModule(root, path.join(os.tmpdir(), 'elsewhere'), pathToFileURL(path.join(root, 'src/my module.mjs')).href), 'src/my module.mjs');
 });
 
 test('a line of a built script is reported as the module of ours and source line it came from', async () => {

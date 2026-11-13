@@ -133,6 +133,11 @@ export function frameTable(map, moduleOf = (source) => source, ours = ourModule)
   return { modules, runs };
 }
 
+/** A source of a script's map as its path in `root`. The bundler names a source relative to the map's `folder`, or as a file: URL
+ * when the output is on another drive than the sources (a temporary folder on Windows). */
+export const sourceModule = (root, folder, source) =>
+  path.relative(root, source.startsWith('file:') ? fileURLToPath(source) : path.resolve(folder, source)).split(path.sep).join('/');
+
 /** The stylesheet imports its ninety-odd files with `@import`; bundled, it is one request. Fonts and images stay files of
  * the web assets, and their `url()`s are rewritten to be right from the bundled sheet's own place. */
 function stylesheetAssets(root, sheet) {
@@ -210,7 +215,7 @@ export async function buildApp({ root = appRoot, output = path.join(root, 'build
     for (const file of Object.keys(metafile.outputs).filter((name) => name.endsWith('.mjs'))) {
       const map = JSON.parse(await readFile(path.resolve(root, `${file}.map`), 'utf8'));
       const folder = path.dirname(path.resolve(root, file));
-      tables.push([path.resolve(root, file), frameTable(map, (source) => path.relative(root, path.resolve(folder, source)).split(path.sep).join('/'))]);
+      tables.push([path.resolve(root, file), frameTable(map, (source) => sourceModule(root, folder, source))]);
       await rm(path.resolve(root, `${file}.map`));
     }
     return tables;
