@@ -8450,14 +8450,14 @@
   "desktop.preload.errors.aCallbackIsRequired": {
     "locations": [
       "desktop/preload.cjs:4",
-      "desktop/preload.cjs:46"
+      "desktop/preload.cjs:48"
     ],
     "context": "\"desktop.preload.errors.aCallbackIsRequired\": \"A callback is required.\","
   },
   "desktop.preload.errors.uiScaleMustBe75200InStepsOf5": {
     "locations": [
       "desktop/preload.cjs:5",
-      "desktop/preload.cjs:72"
+      "desktop/preload.cjs:74"
     ],
     "context": "\"desktop.preload.errors.uiScaleMustBe75200InStepsOf5\": \"UI scale must be 75–200 in steps of 5.\""
   },
@@ -12936,7 +12936,7 @@
     "locations": [
       "src/drawing-controller.mjs:387"
     ],
-    "context": "geometryItem(target){let item;if(target.created||target.migratedFrom)item=this.previewItem(target);else item=this.editor.geometry.drawables.find(i=>i.obj.unique"
+    "context": "geometryItem(target){let item;if(target.created||target.migratedFrom)item=this.previewItem(target);else item=this.editor.geometry.drawableOf(target.object.uniqu"
   },
   "errors.drawingController.theOperationExceedsTheDrawingWorkingMemoryLimit": {
     "locations": [
@@ -13253,108 +13253,108 @@
   },
   "errors.drawingPreviewCache.drawingPreviewMemoryIsFull": {
     "locations": [
-      "src/drawing-preview-cache.mjs:78"
+      "src/drawing-preview-cache.mjs:79"
     ],
     "context": "if(!this.reserve(bytes)){result.bitmap.close();throw messageError(new Error(''), \"errors.drawingPreviewCache.drawingPreviewMemoryIsFull\", {});}"
   },
   "errors.drawingResources.aNewerDrawingWasRequested": {
     "locations": [
-      "src/drawing-resources.mjs:223"
+      "src/drawing-resources.mjs:232"
     ],
     "context": "if(this.decodeQueue.length>=2){const index=this.decodeQueue.findIndex(job=>!job.priority);if(index>=0)this.decodeQueue.splice(index,1)[0].reject(messageError(ne"
   },
   "errors.drawingResources.drawingChanged": {
     "locations": [
-      "src/drawing-resources.mjs:209"
+      "src/drawing-resources.mjs:218"
     ],
     "context": "if(this.disposed||e.disposed||generation!==this.generation)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingChanged\", {});"
   },
   "errors.drawingResources.drawingDocumentClosed": {
     "locations": [
-      "src/drawing-resources.mjs:197",
-      "src/drawing-resources.mjs:221",
-      "src/drawing-resources.mjs:359",
-      "src/drawing-resources.mjs:461"
+      "src/drawing-resources.mjs:206",
+      "src/drawing-resources.mjs:230",
+      "src/drawing-resources.mjs:368",
+      "src/drawing-resources.mjs:470"
     ],
     "context": "if(this.disposed)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingDocumentClosed\", {});"
   },
   "errors.drawingResources.drawingMemoryIsFullChoose1ResolutionOr": {
     "locations": [
-      "src/drawing-resources.mjs:142"
+      "src/drawing-resources.mjs:151"
     ],
     "context": "if(resident()+bytes>this.hardBudget)throw messageError(new Error(''), \"errors.drawingResources.drawingMemoryIsFullChoose1ResolutionOr\", {});"
   },
   "errors.drawingResources.drawingOperationCancelled": {
     "locations": [
-      "src/drawing-worker-client.mjs:13",
-      "src/drawing-worker-client.mjs:38"
+      "src/drawing-worker-client.mjs:23",
+      "src/drawing-worker-client.mjs:50"
     ],
     "context": "if(signal?.aborted)return Promise.reject(messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingOperationCancelled\", {}));"
   },
   "errors.drawingResources.drawingPixelsCouldNotBeTransferred": {
     "locations": [
-      "src/drawing-worker-client.mjs:35"
+      "src/drawing-worker-client.mjs:47"
     ],
     "context": "worker.onmessageerror=()=>{if(this.worker===worker)this.dispose(messageError(new Error(''), \"errors.drawingResources.drawingPixelsCouldNotBeTransferred\", {}));}"
   },
   "errors.drawingResources.drawingPublicationCancelled": {
     "locations": [
-      "src/drawing-resources.mjs:365",
-      "src/drawing-resources.mjs:372"
+      "src/drawing-resources.mjs:374",
+      "src/drawing-resources.mjs:381"
     ],
     "context": "if(signal?.aborted)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingPublicationCancelled\", {});"
   },
   "errors.drawingResources.drawingResourcesClosed": {
     "locations": [
-      "src/drawing-worker-client.mjs:46"
+      "src/drawing-worker-client.mjs:66"
     ],
     "context": "dispose(error=messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingResourcesClosed\", {})) {"
   },
   "errors.drawingResources.drawingStrokeWorkerStopped": {
     "locations": [
-      "src/drawing-resources.mjs:32"
+      "src/drawing-resources.mjs:33"
     ],
     "context": "open(){if(!this.worker){this.worker=new Worker(new URL('./drawing-stroke-worker.mjs',import.meta.url),{type:'module',name:'StykAnimate drawing stroke'});this.wo"
   },
   "errors.drawingResources.drawingWorkerCouldNotLoadRetryTheOperation": {
     "locations": [
-      "src/drawing-worker-client.mjs:26"
+      "src/drawing-worker-client.mjs:37"
     ],
     "context": "if(data.fatal){data.bitmap?.close();this.dispose(error??restoreMessageError(messageError(new Error(''), \"errors.drawingResources.drawingWorkerCouldNotLoadRetryT"
   },
   "errors.drawingResources.drawingWorkerIsBusyWaitForTheCurrent": {
     "locations": [
-      "src/drawing-worker-client.mjs:14"
+      "src/drawing-worker-client.mjs:24"
     ],
     "context": "if(this.pending.size>=this.maxPending)return Promise.reject(messageError(new Error(''), \"errors.drawingResources.drawingWorkerIsBusyWaitForTheCurrent\", {}));"
   },
   "errors.drawingResources.drawingWorkerStoppedRetryTheOperation": {
     "locations": [
-      "src/drawing-worker-client.mjs:33"
+      "src/drawing-worker-client.mjs:45"
     ],
     "context": "if(this.worker===worker)this.dispose((event.message ? new Error(event.message) : messageError(new Error(''), \"errors.drawingResources.drawingWorkerStoppedRetryT"
   },
   "errors.drawingResources.drawingWorkerTimedOutRetryTheOperation": {
     "locations": [
-      "src/drawing-worker-client.mjs:39"
+      "src/drawing-worker-client.mjs:51"
     ],
     "context": "const timeout=setTimeout(()=>this.dispose(messageError(new Error(''), \"errors.drawingResources.drawingWorkerTimedOutRetryTheOperation\", {})),120000);"
   },
   "errors.drawingResources.invalidDrawingMemoryReservation": {
     "locations": [
-      "src/drawing-resources.mjs:125"
+      "src/drawing-resources.mjs:134"
     ],
     "context": "if(!Number.isFinite(bytes)||bytes<0)throw messageError(new Error(''), \"errors.drawingResources.invalidDrawingMemoryReservation\", {});"
   },
   "errors.drawingResources.strokePixelsCouldNotBeTransferred": {
     "locations": [
-      "src/drawing-resources.mjs:32"
+      "src/drawing-resources.mjs:33"
     ],
     "context": "open(){if(!this.worker){this.worker=new Worker(new URL('./drawing-stroke-worker.mjs',import.meta.url),{type:'module',name:'StykAnimate drawing stroke'});this.wo"
   },
   "errors.drawingResources.theDrawingEncoderLostItsTileCacheTry": {
     "locations": [
-      "src/drawing-resources.mjs:430"
+      "src/drawing-resources.mjs:439"
     ],
     "context": "if(result.missing?.length)throw messageError(new Error(''), \"errors.drawingResources.theDrawingEncoderLostItsTileCacheTry\", {});"
   },

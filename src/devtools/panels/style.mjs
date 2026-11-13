@@ -79,6 +79,7 @@ export const STYLE = `
 #styk-devtools .dt-scroll { overflow-x: auto; }
 #styk-devtools .dt-empty { padding: 2px 6px; }
 #styk-devtools .dt-memory { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+#styk-devtools .dt-subhead { margin: 8px 0 2px; font-size: 11px; font-weight: 600; color: var(--dt-dim); }
 #styk-devtools-overlay { position: fixed; z-index: 2147482999; pointer-events: none; --dt-bg: var(--surface-inverse, #0c0d12); --dt-fg: var(--text-inverse, #f2f3f7);
   --dt-dim: var(--text-inverse-2, rgba(255,255,255,.68)); --dt-line: var(--inverse-line, rgba(255,255,255,.16)); --dt-bad: var(--inverse-danger, #ff8a8a);
   --dt-good: var(--inverse-success, #6ee7b7); --dt-late: var(--inverse-danger, #ff8a8a); contain: strict; width: 236px; height: 112px; }

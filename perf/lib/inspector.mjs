@@ -65,6 +65,12 @@ export class Inspector {
     } else if (message.method === 'Target.detachedFromTarget') {
       const target = this.targets.get(message.params.sessionId);
       this.targets.delete(message.params.sessionId);
+      // A target that went away (a worker that ended) never answers what it was asked: those requests fail now, not never.
+      for (const [id, pending] of this.waiting) {
+        if (pending.sessionId !== message.params.sessionId) continue;
+        this.waiting.delete(id);
+        pending.reject(new Error(`${pending.method}: the target went away (${target?.title || target?.url || 'a worker'}).`));
+      }
       if (target) for (const listener of this.targetListeners) listener(target, false);
     }
     for (const listener of this.listeners.get(message.method) ?? []) listener(message.params, message.sessionId ?? null);
@@ -75,7 +81,7 @@ export class Inspector {
     if (this.closed) return Promise.reject(new Error(`${method}: the inspector connection is closed.`));
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
-      this.waiting.set(id, {resolve, reject, method});
+      this.waiting.set(id, {resolve, reject, method, sessionId});
       this.socket.send(JSON.stringify({id, method, params, ...(sessionId ? {sessionId} : {})}));
     });
   }

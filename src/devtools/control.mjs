@@ -78,7 +78,16 @@ export function createControl(runtime) {
 
     metrics: (args) => sampler.snapshot(args),
     threads: (args) => ({rows: sampler.threads(args)}),
-    memory: () => sampler.memory(),
+    /** The page's, the engine's and the GPU's memory; `owners: true` adds the registered owners (src/trace.mjs `traceMemory`). */
+    memory: ({owners = false} = {}) => (owners ? {...sampler.memory(), owners: sampler.owners()} : sampler.memory()),
+    /**
+     * The page's memory by owner (memory.mjs `breakdown`). `threads`: what an inspector read of every thread
+     * ([{thread, name, interface, usedBytes, totalBytes, backingBytes}], the profiling runner's); `processBytes` the
+     * page's private bytes where the page cannot read them itself.
+     */
+    'memory.breakdown': async ({threads = null, processBytes = null} = {}) => {
+      return sampler.breakdown({threads: Array.isArray(threads) ? threads : null, processBytes: Number.isFinite(processBytes) ? processBytes : null});
+    },
     /** The calls the interface made into the engine since the last capture began (or `reset: true`), heaviest first. */
     boundary: ({limit = 40, reset = false} = {}) => {
       const rows = runtime.boundary.rows().slice(0, Math.max(1, Math.min(500, limit))).map(row => ({name: row.name, calls: row.calls, totalMs: round(row.totalMs), worstMs: round(row.worstMs)}));

@@ -16,7 +16,7 @@ const SAMPLING_INTERVAL = 500;
 const TRACE_CATEGORIES = ['toplevel', 'devtools.timeline', 'gpu', 'viz', 'cc', 'v8'];
 
 /** The name a profiled thread is reported under: the interface, the engine's threads numbered, or the worker's own name. */
-function threadNames(app) {
+export function threadNames(app) {
   const names = new Map([[app.page, 'interface']]), counts = new Map();
   for (const target of app.inspector.workersOf(app.page)) {
     const base = target.title === 'styk-engine' ? 'engine thread' : target.title || target.url.split('/').pop() || 'worker';

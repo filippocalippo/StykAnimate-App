@@ -9,9 +9,12 @@ import {processAttribution, profileAttribution, traceAttribution} from '../perf/
 import {change, compare} from '../perf/lib/compare.mjs';
 import {experimentLine, parseParameters, withParameters} from '../perf/lib/experiment.mjs';
 import {paths} from '../perf/lib/input.mjs';
+import {Inspector} from '../perf/lib/inspector.mjs';
 import {seekLatency, shownTicks} from '../perf/lib/latency.mjs';
 import {displayName, layerOf, LAYERS, rustModule} from '../perf/lib/layers.mjs';
 import {aggregate, captureMetrics, defaultJudge, format, grade, judge, LIMITS} from '../perf/lib/metrics.mjs';
+import {memoryText} from '../perf/lib/summary.mjs';
+import {breakdown, breakdownMegabytes} from '../src/devtools/memory.mjs';
 import {SCENARIOS, select} from '../perf/scenarios/index.mjs';
 import {CORE, launches, SUITES} from '../perf/suites.mjs';
 import {document as build, measure, scaled, workload, WORKLOADS} from '../perf/workloads.mjs';
@@ -217,4 +220,34 @@ test('an experiment changes the launch it is asked for and nothing else, and its
   assert.equal(experimentLine({}), null);
   assert.match(experimentLine({experiment: {name: 'no-overlay.js', sha256: 'abc'}, parameters: {'engine.workers': 1, typo: 3}, unreadParameters: ['typo']}),
     /^EXPERIMENT, not the app as it is: the page script no-overlay\.js \(abc\) ran before the scenarios; live parameters engine\.workers=1, typo=3; the app never read typo/);
+});
+
+test('a run\'s memory prints every checkpoint with the page split by owner, and what each part holds', () => {
+  const MB = 1048576;
+  const owners = breakdownMegabytes(breakdown({processBytes: 1200 * MB, engine: {heapBytes: 800 * MB, liveBytes: 300 * MB},
+    threads: [{thread: 'interface', name: 'interface', interface: true, usedBytes: 30 * MB, totalBytes: 40 * MB, backingBytes: 20 * MB},
+      {thread: 'StykAnimate drawing pixels 1', name: 'StykAnimate drawing pixels', usedBytes: MB, totalBytes: 2 * MB, backingBytes: 48 * MB}],
+    owners: [{owner: 'drawing: cel tiles', bytes: 12 * MB, count: 768, kind: 'buffers', where: 'page'}]}));
+  const result = {label: 'after', pairs: [{environment: {id: 'gpu'}, workload: {id: 'stress'}, memory: [{after: 'start', total: 700, page: 180}, {after: 'drawing.brush', total: 1900, page: 1200, owners}]}]};
+  const text = memoryText(result, {detail: true});
+  assert.match(text, /gpu \/ stress/);
+  assert.match(text, /drawing\.brush\s+1900\s+1200 .*\|\s+800\s+40\s+20\s+–\s+50\s+290/, text);
+  assert.match(text, /StykAnimate drawing pixels \(1\)\s+50\.0/);
+  assert.match(text, /drawing: cel tiles \(768\)\s+12\.0/);
+  assert.equal(memoryText(result, {workload: 'medium'}).includes('gpu / stress'), false, 'a pair not asked for is left out');
+});
+
+test('a request to an inspector target that goes away fails instead of waiting for good', async () => {
+  const {EventEmitter} = await import('node:events');
+  const socket = Object.assign(new EventEmitter(), {sent: [], send(text) { this.sent.push(JSON.parse(text)); }, close() {}});
+  const inspector = new Inspector(socket, {Browser: 'test'});
+  const deliver = message => socket.emit('message', JSON.stringify(message));
+  deliver({method: 'Target.attachedToTarget', params: {sessionId: 'worker-1', targetInfo: {type: 'worker', title: 'StykAnimate drawing pixels', url: 'x'}}, sessionId: 'page'});
+  const asked = inspector.send('Runtime.getHeapUsage', {}, 'worker-1'), other = inspector.send('Runtime.getHeapUsage', {}, 'page');
+  deliver({method: 'Target.detachedFromTarget', params: {sessionId: 'worker-1'}});
+  await assert.rejects(asked, /went away \(StykAnimate drawing pixels\)/);
+  // What was asked of another target still waits for its answer.
+  const id = socket.sent.find(message => message.sessionId === 'page' && message.method === 'Runtime.getHeapUsage').id;
+  deliver({id, result: {usedSize: 1}});
+  assert.deepEqual(await other, {usedSize: 1});
 });

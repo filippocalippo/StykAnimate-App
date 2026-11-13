@@ -294,6 +294,14 @@ caption { text-align: left; color: var(--text-2); padding-bottom: 4px; }
 .stack { display: flex; gap: 2px; height: 14px; border-radius: 7px; overflow: hidden; background: var(--well); }
 .stack-part { min-width: 1px; }
 .stack-part:hover { filter: brightness(1.15); }
+/* Who holds the page: a bar per checkpoint, its length the process against the largest. */
+.owners { display: flex; flex-direction: column; gap: 6px; }
+.owners h4 { margin: 6px 0 0; font-size: 13px; }
+.owner-rows { display: flex; flex-direction: column; gap: 4px; }
+.owner-row { display: grid; grid-template-columns: minmax(90px, 170px) 1fr 64px; gap: 8px; align-items: center; font-size: 12px; }
+.owner-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.owner-bar { min-width: 2px; }
+.owner-value { text-align: right; font-variant-numeric: tabular-nums; }
 .bars { display: flex; flex-direction: column; gap: 5px; }
 .bars-row { display: grid; grid-template-columns: minmax(120px, 230px) 1fr 70px; gap: 10px; align-items: center; font-size: 12.5px; }
 .bars-track { height: 10px; background: var(--well); border-radius: 0 5px 5px 0; }

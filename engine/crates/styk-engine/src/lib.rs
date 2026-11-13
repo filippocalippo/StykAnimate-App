@@ -174,6 +174,8 @@ struct Inner {
     progress: std::sync::atomic::AtomicU32,
     /// Worker threads that stopped under the engine ([`Engine::note_worker_lost`]).
     workers_lost: std::sync::atomic::AtomicU32,
+    /// The frames the workers are making, and what one holds while it is made ([`frames::Making`]).
+    making: frames::Making,
     notifier: Option<Notifier>,
 }
 
@@ -227,6 +229,7 @@ impl Engine {
                 pictures_decoded: Default::default(),
                 progress: std::sync::atomic::AtomicU32::new(0),
                 workers_lost: std::sync::atomic::AtomicU32::new(0),
+                making: Default::default(),
                 notifier,
             }),
         }
@@ -339,6 +342,8 @@ impl Engine {
     /// that waits for a job on one of the workers ([`Engine::run_together`]) gives up its wait.
     pub fn note_worker_lost(&self) {
         self.inner.workers_lost.fetch_add(1, Ordering::SeqCst);
+        // A thread that stopped making a frame never says it was done: it is no longer counted among the frames being made.
+        self.inner.making.lost();
     }
 
     /// How many worker threads have been reported stopped.

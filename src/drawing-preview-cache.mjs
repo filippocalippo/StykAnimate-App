@@ -53,7 +53,8 @@ export class DrawingPreviewCache {
       if(!current())return;
       job.version=job.entry.pixelStamp??0;
       const tiles=[],x=job.x*job.scale,y=job.y*job.scale,right=(job.x+job.width)*job.scale,bottom=(job.y+job.height)*job.scale;
-      const cached=this.source?.entry===job.entry&&this.source?.storeRef.deref()===job.store?this.source:null,versions=new Map();
+      // The worker holds the tiles it was sent last only while it is the same worker: one that ended while idle (or was cancelled) starts empty.
+      const cached=this.source?.entry===job.entry&&this.source?.storeRef.deref()===job.store&&(this.worker.active??true)&&this.source.instance===this.worker.instance?this.source:null,versions=new Map();
       let source=[];
       for(const tile of job.store){
         if(tile.tx*TILE>=right||(tile.tx+1)*TILE<=x||tile.ty*TILE>=bottom||(tile.ty+1)*TILE<=y)continue;
@@ -73,7 +74,7 @@ export class DrawingPreviewCache {
       source=null;this.hold(job,copyBytes);
       const result=await this.worker.request('preview',{tiles,reset:!cached,keep:[...versions.keys()],rect:{x:job.x,y:job.y,width:job.width,height:job.height},level:job.level},{transfer:tiles.map(t=>t.pixels)});
       if(!current()){result.bitmap.close();return;}
-      this.source={entry:job.entry,storeRef:new WeakRef(job.store),versions,bytes:workerBytes};this.hold(this,workerBytes);this.lastTransferredTiles=tiles.length;
+      this.source={entry:job.entry,storeRef:new WeakRef(job.store),versions,bytes:workerBytes,instance:this.worker.instance};this.hold(this,workerBytes);this.lastTransferredTiles=tiles.length;
       this.remove(job.key);const bytes=job.width*job.height*4;
       if(!this.reserve(bytes)){result.bitmap.close();throw messageError(new Error(''), "errors.drawingPreviewCache.drawingPreviewMemoryIsFull", {});}
       for(const key of this.cache.keys()){if(this.bytes+bytes<=this.budgetBytes)break;this.remove(key);}

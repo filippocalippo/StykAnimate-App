@@ -36,6 +36,8 @@ if ((process.argv ?? []).includes('--styk-developer')) {
       contextBridge.exposeInMainWorld(developer.bridge, Object.freeze({
         reply: (ticket, answer) => ipcRenderer.send('styk:developer-reply', ticket, answer),
         ready: () => ipcRenderer.send('styk:developer-ready'),
+        // This renderer process's memory as the system counts it (bytes), for the tools' memory by owner.
+        processMemory: () => ipcRenderer.invoke('styk:developer-process-memory'),
       }));
       webFrame.executeJavaScript(developer.script);
     }

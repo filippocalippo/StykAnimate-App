@@ -12,14 +12,14 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | Rust owner | Modules | Source at start | js | partial | ported | verified | removed | Covered by Rust | Partly covered | Deleted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
-| `styk-drawing` | 36 | 164 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
-| `styk-edit` | 93 | 600 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
+| `styk-drawing` | 36 | 166 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
+| `styk-edit` | 93 | 601 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
-| `styk-eval` | 80 | 312 KiB | 10 | 32 | 2 | 2 | 34 | 31 % | 56 % | 18 % |
+| `styk-eval` | 80 | 313 KiB | 10 | 32 | 2 | 2 | 34 | 31 % | 56 % | 18 % |
 | `styk-export` | 14 | 58 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
 | `styk-formats` | 55 | 711 KiB | 20 | 7 | 1 | 22 | 5 | 68 % | 8 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1973 KiB | 80 | 61 | 12 | 28 | 174 | 54 % | 18 % | 27 % |
+| **Total** | 355 | 1976 KiB | 80 | 61 | 12 | 28 | 174 | 54 % | 18 % | 27 % |
 
 ## Engine modules
 
@@ -487,6 +487,7 @@ Interface: stays in JS.
 | `src/devtools/frames.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/grades.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/inspector.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/memory.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/mutations.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/panels/chart.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/panels/dom.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |

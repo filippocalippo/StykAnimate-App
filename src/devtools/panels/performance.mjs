@@ -9,7 +9,10 @@
  *   Interface     the heaviest span groups (interface updates by surface, input handlers by target, paint, stage draw);
  *   Engine calls  the heaviest calls into the engine (boundary.mjs);
  *   Engine        frames its threads prepared and the time of one, queues, the frame cache;
- *   Memory        JavaScript, the engine's memory in use and reserved, the stage's GPU memory, each with its history.
+ *   Memory        JavaScript, the engine's memory in use and reserved, the stage's GPU memory, each with its history;
+ *                 under them the page's memory by owner (sampler.mjs `breakdown`, read once a second): the engine, the
+ *                 JavaScript heap, the owners that registered (src/trace.mjs `traceMemory`), the canvases and bitmaps,
+ *                 and what the page's process holds that none of them names.
  *
  * Every number is the runtime's summary of the stretch (`runtime.summarize`, capture.mjs `analyze`), the sampler's
  * reads or the boundary meter's: the tab only lays them out. Live, the chart redraws four times a second and the rest
@@ -128,7 +131,12 @@ export function createPerformanceTab({runtime, recording, panel, idle}) {
     cell.element.append(spark.canvas);
     return {...spec, cell, update(next, text, sub) { values = next; cell.update(text, sub); spark.redraw(); }};
   });
-  const memorySection = section('Memory', element('div', {className: 'dt-memory'}, ...memory.map(item => item.cell.element)));
+  const owners = rankedList(['Owner', 'MB', 'n'], {limit: 16, empty: 'Reading the owners…',
+    titles: ['Who holds the page\'s memory: the bar is its share of the page\'s process (outside the desktop, of what is named)', 'Megabytes it holds now', 'Its own count: tiles, canvases, entries']});
+  const ownerNote = element('div', {className: 'dt-dim'});
+  const memorySection = section('Memory', element('div', {className: 'dt-memory'}, ...memory.map(item => item.cell.element)),
+    element('h4', {className: 'dt-subhead', textContent: 'By owner'}), owners.element, ownerNote);
+  let ownersAt = -Infinity, ownersReading = false;
 
   const root = element('div', {}, bar.element, frames.element, now.element, interfaceSection.element, boundarySection.element, engineSection.element, memorySection.element);
 
@@ -175,6 +183,28 @@ export function createPerformanceTab({runtime, recording, panel, idle}) {
     engineTiles.threads.update(format(engine?.workers ?? null), `engine threads${engine?.workersLost ? `, ${engine.workersLost} lost` : ''} · ${format(jobs?.threads.live ?? null)} workers`);
   }
 
+  /** The page's memory by owner, read once a second: the engine, the heap, every owner, and what is left unexplained. */
+  function showOwners() {
+    if (ownersReading || performance.now() - ownersAt < 1000) return;
+    ownersReading = true; ownersAt = performance.now();
+    sampler.breakdown().then(split => {
+      const whole = split.processBytes ?? split.explainedBytes, rows = [], mb = bytes => format((bytes ?? 0) / 1048576, 1);
+      for (const part of split.parts) {
+        rows.push({name: part.part, share: part.bytes / whole, cells: [mb(part.bytes), '']});
+        const shown = part.part === 'array buffers' || part.part === 'pictures' || part.part === 'workers' ? 5 : 1;
+        for (const row of (part.rows ?? []).slice(0, shown)) rows.push({name: `· ${row.name}`, share: (row.bytes ?? 0) / whole, cells: [mb(row.bytes), format(row.count ?? null)]});
+      }
+      if (split.unexplainedBytes !== null) {
+        rows.push({name: 'unexplained', share: Math.max(0, split.unexplainedBytes) / whole, cells: [mb(split.unexplainedBytes), ''],
+          title: 'The page\'s process holds this and no part above names it: the browser\'s own (style, layout, fonts, compiled code), the workers, and whatever no owner registered'});
+      }
+      owners.update(rows.slice(0, 16));
+      const graphics = split.graphics.reduce((total, row) => total + row.bytes, 0);
+      setText(ownerNote, `${split.processBytes === null ? 'The process\'s own count cannot be read here: shares are of what is named.' : `The page's process holds ${megabytes(split.processBytes)}.`}`
+        + `${split.missing.includes('workers') ? ' The workers are in "unexplained": a profiling run reads each one\'s heap.' : ''}${graphics ? ` In the graphics process: ${megabytes(graphics)} of canvases.` : ''}`);
+    }, () => {}).finally(() => { ownersReading = false; });
+  }
+
   /** Memory: live from the sampler's last minute, or a held stretch's counters. */
   function showMemory(held) {
     if (held) {
@@ -184,6 +214,7 @@ export function createPerformanceTab({runtime, recording, panel, idle}) {
       }
       return;
     }
+    showOwners();
     const history = sampler.series(60000, MEMORY.map(item => item.key)), gpu = sampler.last?.memory;
     for (const item of memory) {
       const values = history[item.key].map(bytes => bytes / 1048576), last = history[item.key].at(-1), most = Math.max(...values.filter(Number.isFinite));

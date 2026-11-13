@@ -35,7 +35,14 @@ cache is refilled through the publication protocol's resend of missing tiles. Th
 worker does the same between strokes, the history worker after every chunk. A preview worker
 keeps its source cache (it is bounded by the viewport and accounted by its client). Jobs
 themselves are bounded by the same working-memory budgets as before (`maxBytes`, the owner's
-hard budget), checked by the same code.
+hard budget), checked by the same code. Below that allowance every instance still keeps its largest
+job's working set, and a document starts several pixel workers (the pixels, decoding, thumbnails,
+previews and up to four encoders: 5 held 243 MB of the page after the drawing scenarios on the
+200,000-segment scene, 152 MB on the busy one, measured by the developer tools' memory by owner on
+2026-11-13). So a pixel worker that has had no request for `DRAWING_WORKER_IDLE_MS` (10 s) ends
+(`src/drawing-worker-client.mjs`), and the next request starts another, as after a cancellation:
+the encode cache is refilled by the resend of missing tiles, and the preview cache, which records
+the worker's `instance` with its source, sends a new worker every tile.
 
 Still JavaScript, and why: the authoritative `TileStore` on the interface thread, its memory
 accounting (`drawing-tile-memory.mjs`) and history orchestration (`drawing-history.mjs`,

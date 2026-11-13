@@ -384,7 +384,7 @@ export class DrawingController {
     return this._viewRect;
   }
   point(event){const rect=this.viewRect();return screenToWorld({x:(event.clientX-rect.left)*rect.clientWidth/rect.width,y:(event.clientY-rect.top)*rect.clientHeight/rect.height},{report:this.editor.report,frame:this.editor.evaluatedFrame,view:this.state.view,cameraEnabled:false});}
-  geometryItem(target){let item;if(target.created||target.migratedFrom)item=this.previewItem(target);else item=this.editor.geometry.drawables.find(i=>i.obj.unique_id===target.object.unique_id&&i.type==='image');if(!item)throw messageError(new Error(''), "errors.drawingController.theDrawingPoseIsUnavailable", {});return item;}
+  geometryItem(target){let item;if(target.created||target.migratedFrom)item=this.previewItem(target);else item=this.editor.geometry.drawableOf(target.object.unique_id,'image');if(!item)throw messageError(new Error(''), "errors.drawingController.theDrawingPoseIsUnavailable", {});return item;}
   /** The image a cel the document does not hold yet draws, as the engine places it (read once for a target). */
   previewItem(target){
     if(!previewItems.has(target))previewItems.set(target,this.editor._shown?.previewGeometry(createFrame([target.object]),target.figure,target.id,target.object.unique_id)?.drawables[0]);
@@ -1025,7 +1025,8 @@ export class DrawingController {
       if(this.settings.mirrorX)line({x:r.canvas_width/2,y:-1e5},{x:r.canvas_width/2,y:1e5});
       if(this.settings.mirrorY)line({x:-1e5,y:r.canvas_height/2},{x:1e5,y:r.canvas_height/2});
     }
-    const item=target?.figure?(this.renderPreview?.geometry.drawables.find(i=>i.obj.unique_id===target.object.unique_id)??this.editor.geometry.drawables.find(i=>i.obj.unique_id===target.object.unique_id&&i.type==='image')):null;
+    // The cel's drawable from its own group: the scene's whole list builds every figure's group.
+    const item=target?.figure?(this.renderPreview?.geometry.drawableOf(target.object.unique_id)??this.editor.geometry.drawableOf(target.object.unique_id,'image')):null;
     const outline=this.marquee&&(this.marqueeOn(target)?this.marquee:null);
     const matrix=item?drawingPixelMatrix(item):outline?this.pixelMatrix(outline.target):null;
     if(matrix){

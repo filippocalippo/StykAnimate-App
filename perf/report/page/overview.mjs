@@ -1,7 +1,7 @@
 // The overview: the sections a person reads first, most important first. Each section is a function of the report's
 // data and the current view ({columns, rows, open}) that returns its panel, or null when the runs hold nothing for it,
 // so a new kind of result (the engine's own benchmarks, say) is one more function in SECTIONS.
-import {bars, lineChart, bullet, legend, timeline} from './charts.mjs';
+import {bars, lineChart, bullet, legend, stack, timeline} from './charts.mjs';
 import {capital, facts, h, mb, ms, number, panel, percent, subhead, table, tableView, words} from './dom.mjs';
 import {chip, glyph, limitsText, metric, short, STATUS, word} from './grades.mjs';
 
@@ -134,9 +134,40 @@ function memory(model, view) {
       lineChart({labels: pair.memory.map(point => point.after), text: mb, height: 210,
         series: used.map(([key, name], index) => ({name, slot: index + 1, values: pair.memory.map(point => point[key] ?? null)}))}),
       tableView('Table', () => {
-        const keys = [...new Set(pair.memory.flatMap(point => Object.keys(point)))].filter(key => key !== 'after');
+        const keys = [...new Set(pair.memory.flatMap(point => Object.keys(point)))].filter(key => key !== 'after' && key !== 'owners');
         return table([{label: 'after'}, ...keys.map(key => ({label: `${words(key)} MB`, numeric: true}))], pair.memory.map(point => [point.after, ...keys.map(key => number(point[key], 1))]));
-      })))));
+      }),
+      owners(pair)))));
+}
+
+/** The parts of the page's process a checkpoint's `owners` split names (src/devtools/memory.mjs), in the order they are drawn. */
+const OWNER_PARTS = [['engine memory', 'Engine memory'], ['JavaScript heap', 'JavaScript heap'], ['array buffers', 'Array buffers'], ['pictures', 'Canvases and bitmaps'], ['workers', 'Workers'], ['unexplained', 'Unexplained']];
+
+/**
+ * Who holds the page after every scenario: one bar per checkpoint, the page's process split by owner (docs/DEVTOOLS.md
+ * "Memory by owner"); hovering a part names it. The table under it lists every owner of every part, checkpoint by checkpoint.
+ */
+function owners(pair) {
+  const points = pair.memory.filter(point => point.owners);
+  if (!points.length) return null;
+  const used = OWNER_PARTS.filter(([key]) => points.some(point => Number.isFinite(point.owners[key])));
+  const most = Math.max(...points.map(point => point.owners.process ?? used.reduce((total, [key]) => total + Math.max(0, point.owners[key] ?? 0), 0)));
+  const sub = (point, key) => (point.owners.rows?.[key] ?? []).slice(0, 4).map(row => `${row.name} ${mb(row.mb)}`).join(', ');
+  return h('div', {class: 'owners'},
+    h('h4', {}, 'Who holds the page', h('span', {class: 'muted'}, ' · the page\'s process by owner; the bar\'s length is the process against the largest')),
+    legend(used.map(([, name], index) => ({label: name, swatch: `c${index + 1}`}))),
+    h('div', {class: 'owner-rows'}, points.map(point => {
+      const whole = point.owners.process ?? used.reduce((total, [key]) => total + Math.max(0, point.owners[key] ?? 0), 0);
+      return h('div', {class: 'owner-row'}, h('span', {class: 'owner-label'}, point.after), h('span', {class: 'owner-bar', style: `width:${(whole / most * 100).toFixed(2)}%`},
+        stack(used.map(([key, name], index) => ({label: name, value: Math.max(0, point.owners[key] ?? 0), slot: index + 1, text: mb(point.owners[key]), sub: sub(point, key)})), whole)),
+        h('span', {class: 'owner-value'}, mb(whole)));
+    })),
+    tableView('Every owner', () => {
+      const names = [...new Set(points.flatMap(point => used.flatMap(([key]) => (point.owners.rows?.[key] ?? []).map(row => `${key}: ${row.name}`))))];
+      const find = (point, name) => { const [key, ...rest] = name.split(': '); return point.owners.rows?.[key]?.find(row => row.name === rest.join(': '))?.mb; };
+      return table([{label: 'after'}, ...used.map(([, name]) => ({label: `${name} MB`, numeric: true})), ...names.map(name => ({label: `${name} MB`, numeric: true}))],
+        points.map(point => [point.after, ...used.map(([key]) => number(point.owners[key], 1)), ...names.map(name => number(find(point, name), 1))]));
+    }));
 }
 
 /** 5. What the numbers rest on: the runs, what each pair actually ran as, what failed, and the limits behind the grades. */

@@ -80,6 +80,8 @@ pub(crate) struct Spares {
     idle: u32,
     /// What this worker's spares add to [`HELD`].
     counted: usize,
+    /// What the buffers of the last frame made in them held, kept or let go ([`Spares::last_scene_bytes`]).
+    last: usize,
 }
 
 /// What the spares of every worker hold together (`Spares::counted` of each).
@@ -106,6 +108,7 @@ impl Spares {
         use std::sync::atomic::Ordering::SeqCst;
         self.idle = 0;
         let bytes = self.scene.bytes();
+        self.last = bytes;
         // This worker's count becomes `bytes`; the total is read with the new count added and the old one still in, so that two
         // workers counting at once both see each other (both may let theirs go, never both stay above the bound).
         let total = HELD.fetch_add(bytes, SeqCst).saturating_add(bytes).saturating_sub(self.counted);
@@ -114,6 +117,11 @@ impl Spares {
         if bytes > Self::most_bytes() || total > Self::most_held() {
             self.release();
         }
+    }
+
+    /// What the scene of the last frame made in these buffers held at its fullest, whether they were kept or let go after it.
+    pub(crate) fn last_scene_bytes(&self) -> usize {
+        self.last
     }
 
     /// The worker waited for work and found none.
@@ -150,6 +158,76 @@ impl Spares {
 impl Drop for Spares {
     fn drop(&mut self) {
         self.release();
+    }
+}
+
+/// The frames the workers are making now, whatever revision each is for, and what making one frame of the document holds at
+/// once (its scene's buffers and its draw list, as the last frame made measured it). An engine's, across the cache's publications.
+#[derive(Default)]
+pub(crate) struct Making {
+    count: std::sync::atomic::AtomicUsize,
+    lineage: std::sync::atomic::AtomicU64,
+    working: std::sync::atomic::AtomicUsize,
+    /// A worker found no room for a frame since the last frame was done.
+    refused: std::sync::atomic::AtomicBool,
+}
+
+impl Making {
+    /// What the frames being made may hold together: an eighth of the memory the module may use (240 MiB of 2 GiB, four frames of
+    /// 200,000 segments). One frame is always made.
+    pub(crate) fn most_bytes() -> usize {
+        styk_alloc::ceiling() / 8
+    }
+
+    /// Counts one more frame of `lineage` being made, if there is room for it: none is being made, or a frame of this document was
+    /// made before (until then what one holds is not known, and frames are made one at a time) and they fit [`Making::most_bytes`].
+    pub(crate) fn start(&self, lineage: u64) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        let known = self.lineage.load(SeqCst) == lineage;
+        let each = self.working.load(SeqCst);
+        let mut count = self.count.load(SeqCst);
+        loop {
+            if count != 0 && !(known && (count + 1).saturating_mul(each) <= Self::most_bytes()) {
+                self.refused.store(true, SeqCst);
+                return false;
+            }
+            match self.count.compare_exchange_weak(count, count + 1, SeqCst, SeqCst) {
+                Ok(_) => return true,
+                Err(now) => count = now,
+            }
+        }
+    }
+
+    /// A frame of `lineage` was made, holding `working` bytes at its fullest.
+    pub(crate) fn done(&self, lineage: u64, working: usize) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.working.store(working, SeqCst);
+        self.lineage.store(lineage, SeqCst);
+        self.lost();
+    }
+
+    /// One frame fewer is being made: it was done, or the thread making it stopped (at most one frame a thread; a thread that was making
+    /// none leaves the count one short, which lets one more frame start).
+    pub(crate) fn lost(&self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let mut count = self.count.load(SeqCst);
+        while count != 0 {
+            match self.count.compare_exchange_weak(count, count - 1, SeqCst, SeqCst) {
+                Ok(_) => break,
+                Err(now) => count = now,
+            }
+        }
+    }
+
+    /// Whether a worker found no room since this was last asked.
+    pub(crate) fn take_refused(&self) -> bool {
+        self.refused.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Frames being made now.
+    #[cfg(test)]
+    pub(crate) fn count(&self) -> usize {
+        self.count.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -431,6 +509,54 @@ mod tests {
         assert!(cache.entries.len() < 5);
         assert!(cache.entries.contains_key(&playhead));
         assert_eq!(cache.entries[&playhead].data.tick, 3.5);
+    }
+
+    /// Frames being made hold their scenes until they are done: one more starts only while they fit an eighth of the memory, a
+    /// document's first frame is made alone (what one holds is not known yet), and one frame is always made.
+    #[test]
+    fn frames_being_made_together_fit_the_memory_frames_may_take() {
+        // A memory of 1,024 MiB: frames may take 120 MiB (an eighth of the 960 below the reserve).
+        styk_alloc::with_limit(1 << 30, || {
+            let making = Making::default();
+            assert_eq!(Making::most_bytes(), 120 << 20);
+            assert!(making.start(1), "one frame is always made");
+            assert!(!making.start(1), "what a frame of this document holds is not known yet: one at a time");
+            assert!(making.take_refused());
+            making.done(1, 50 << 20);
+            assert!(making.start(1) && making.start(1), "two frames of 50 MiB fit");
+            assert!(!making.start(1), "a third does not");
+            assert!(!making.start(2), "nor a frame of another document, whose frames are not measured");
+            making.done(1, 50 << 20);
+            making.done(1, 50 << 20);
+            assert_eq!(making.count(), 0);
+            assert!(making.start(2), "with nothing being made, any frame starts");
+            making.done(2, 2 << 20);
+            assert!((0..60).all(|_| making.start(2)), "small frames are made as many at once as there are workers");
+            // A thread that stopped while it made a frame never says it was done: it is counted out when it is reported lost.
+            for _ in 0..60 { making.lost(); }
+            assert!(making.start(3) && !making.start(3), "the first frame of a new document is made alone, whatever was lost before");
+        });
+    }
+
+    /// The cache does not make a frame it would drop as soon as it was made: with the budget full of frames nearer the playhead, a
+    /// farther one waits; a nearer one, or one after the playhead moved past what is kept, is made.
+    #[test]
+    fn a_frame_the_full_cache_would_drop_at_once_is_not_made() {
+        let making = Making::default();
+        let mut cache = Cache::new(DrawList::default().bytes() * 3 + 3 * 256);
+        cache.reset(7);
+        cache.total = 20;
+        cache.playhead = 0.into();
+        let epoch = cache.epoch;
+        for tick in [0u32, 1, 2] { cache.finish(7, epoch, tick.into(), Some(frame(7, tick))).unwrap(); }
+        assert_eq!(cache.entries.len(), 3);
+        cache.wanted = vec![5.into()];
+        assert_eq!(cache.take_admitted(&making, 7), cache::Taken::Kept);
+        assert_eq!(making.count(), 0, "a frame not made is not counted");
+        // The playhead moves past the frames kept: they are the farthest now, and the next frame takes the place of one of them.
+        cache.playhead = 4.into();
+        assert_eq!(cache.take_admitted(&making, 7), cache::Taken::Tick(5.into()));
+        assert_eq!(making.count(), 1);
     }
 
     /// A worker makes each frame in the buffers its frame before left (`Spares`): the frames are the ones made from nothing, of every
