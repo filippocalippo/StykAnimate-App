@@ -138,14 +138,7 @@ impl Stage {
     /// Creates the surface of `canvas`: WebGPU where the browser has it, WebGL2 otherwise.
     pub async fn create(canvas: web_sys::HtmlCanvasElement, engine: &EngineHandle) -> Result<Stage, JsError> {
         let (width, height) = (canvas.width().max(1), canvas.height().max(1));
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        descriptor.backends = wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL;
-        let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
-        let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas)).map_err(js_error)?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, compatible_surface: Some(&surface), ..Default::default() })
-            .await
-            .map_err(js_error)?;
+        let (instance, surface, adapter) = crate::gpu::surface_and_adapter(wgpu::SurfaceTarget::Canvas(canvas)).await.map_err(js_error)?;
         let info = adapter.get_info();
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {

@@ -14,7 +14,7 @@
  * exposure, whose new cel the session does not hold yet. The onion skins are the session's as well.
  */
 import {loadEngine, expectedAdapterInfo} from './engine.mjs';
-import {traceBegin, traceEnd} from '../trace.mjs';
+import {traceBegin, traceComplete, traceEnd} from '../trace.mjs';
 import {holdsRevision} from './engine-open.mjs';
 import {engineTicket} from './engine-playback.mjs';
 import {failEngine, engineRefusal} from './engine-failure.mjs';
@@ -161,9 +161,12 @@ const ADAPTER_NAME_MS = 1500;
 
 /**
  * What the status line and telemetry call the graphics adapter: the browser's own description of it
- * (vendor, architecture, device) where WebGPU exists, else the name the engine got from the backend.
+ * (vendor, architecture, device) where the stage draws with WebGPU, else the name the engine got from the backend.
  */
 async function adapterName(stage, waitMs = ADAPTER_NAME_MS) {
+  // A WebGL2 stage is not on a WebGPU adapter: WebGPU's description would name another device, and where WebGPU was
+  // refused the browser takes as long to say it has no adapter as it takes to give one, which the start waited for.
+  if (!stage.backend().startsWith('BrowserWebGpu')) return stage.backend().split(' · ')[1] ?? '';
   try {
     // The name is a label: the stage exists by now, and a browser whose graphics process never answers the question
     // (seen on machines without a GPU, a later page of one browser) must not keep the editor from starting.
@@ -214,7 +217,9 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
   const warnings = [];
   /** The engine's counters, read from the stage once per frame drawn. */
   let statsAt = -1, gpuStats = null;
+  const naming = performance.now();
   const backend = {name: stage.backend().startsWith('BrowserWebGpu') ? 'WebGPU' : 'WebGL2', adapter: await adapterName(stage, options.adapterNameMs)};
+  traceComplete('stage: adapter name', naming, performance.now() - naming, null, 'engine start');
 
   const invalidate = () => options.onInvalidate?.();
   /** Another attempt at a frame the engine could not draw yet, on the next animation frame. */

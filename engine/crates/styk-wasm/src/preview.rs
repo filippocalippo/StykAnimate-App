@@ -102,13 +102,8 @@ impl Previews {
     /// Gets a GPU device that draws into `canvas`: WebGPU in this worker where the browser
     /// has it, else WebGL2. Fails when neither gives a device ([`Previews::create_cpu`] then).
     pub async fn create(canvas: web_sys::OffscreenCanvas) -> Result<Previews, JsError> {
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        descriptor.backends = wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL;
-        let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
         let (width, height) = (canvas.width().max(1), canvas.height().max(1));
-        let surface = instance.create_surface(wgpu::SurfaceTarget::OffscreenCanvas(canvas)).map_err(js_error)?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, compatible_surface: Some(&surface), ..Default::default() })
+        let (_instance, surface, adapter) = crate::gpu::surface_and_adapter(wgpu::SurfaceTarget::OffscreenCanvas(canvas))
             .await
             .map_err(|e| js_error(format!("no GPU adapter in this worker ({e})")))?;
         let info = adapter.get_info();

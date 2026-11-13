@@ -15,7 +15,7 @@ function standInStage(behaviour = {}) {
   const record = name => (...args) => { calls.push([name, ...args]); return behaviour[name]?.(...args); };
   const stage = {
     calls,
-    backend: () => 'BrowserWebGpu · Test GPU',
+    backend: () => behaviour.backend ?? 'BrowserWebGpu · Test GPU',
     stats: () => JSON.stringify({prims: 12, groups: 3, passes: 2, effectBytes: 1, layerBytes: 2, depthBytes: 3, materialBytes: 4,
       glyphBytes: 5, uploadBytes: 6, pictures: 7, multisampled: true}),
     take_device_errors: () => behaviour.errors?.() ?? '',
@@ -415,7 +415,7 @@ test('a stage starts although the browser never describes its adapter: it takes 
   const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   const {expectAdapterInfo} = await import('../src/engine/engine.mjs');
   try {
-    // The warm-up worker never answers.
+    // The page's early request never answers.
     expectAdapterInfo(new Promise(() => {}));
     assert.equal((await open({}, {adapterNameMs: 20})).renderer.stats.adapter, 'Test GPU');
     // No worker, and the browser's own answer never comes.
@@ -428,7 +428,27 @@ test('a stage starts although the browser never describes its adapter: it takes 
   }
 });
 
-test('the stage names its adapter from the warm-up worker\'s description, and asks the browser only when it has none', async () => {
+test('a WebGL2 stage is named by the engine and never asks WebGPU, whose answer the start would wait for', async () => {
+  let asked = 0;
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  // Where WebGPU was refused, the browser's "no adapter" takes as long as an adapter would.
+  Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {gpu: {requestAdapter: () => { asked++; return new Promise(() => {}); }}}});
+  const {expectAdapterInfo} = await import('../src/engine/engine.mjs');
+  try {
+    for (const warm of [Promise.resolve(null), new Promise(() => {}), Promise.resolve({vendor: 'webgpu', architecture: 'other', device: 'card'})]) {
+      expectAdapterInfo(warm);
+      const started = performance.now();
+      assert.equal((await open({backend: 'Gl · ANGLE (NVIDIA)'}, {adapterNameMs: 5000})).renderer.stats.adapter, 'ANGLE (NVIDIA)');
+      assert.ok(performance.now() - started < 1000, 'the start did not wait for the adapter name');
+    }
+    assert.equal(asked, 0);
+  } finally {
+    expectAdapterInfo(null);
+    if (original) Object.defineProperty(globalThis, 'navigator', original); else delete globalThis.navigator;
+  }
+});
+
+test('the stage names its adapter from the early request\'s description, and asks the browser only when it has none', async () => {
   let asked = 0;
   const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {gpu: {requestAdapter: async () => { asked++; return {info: {vendor: 'asked', architecture: '', device: ''}}; }}}});
