@@ -43,7 +43,7 @@ export function createSeekCosts({dearMs = DEAR_SEEK_MS, samples = SEEK_SAMPLES} 
       if (costs.length > samples) costs.shift();
     },
     /** Whether a scrub of `report` shows prepared frames. Asked once, when a drag starts: the mode holds until the release. */
-    dear(report) { return report === owner && costs.length > 0 && median(costs) > dearMs; },
+    dear(report, ms = dearMs) { return report === owner && costs.length > 0 && median(costs) > ms; },
     get samples() { return [...costs]; },
   };
 }
@@ -246,15 +246,23 @@ export function createScrubPreview({playback, prepare, total, engine, now = () =
 export const STEP_RUN_MS = 250;
 
 /**
+ * The interface time of a scene's editing paints at a new tick (the rule of `createSeekCosts`) above which a press that is no step of a
+ * run already starts one: its picture is a prepared frame, and the exact frame waits for the run's end. The exact frame of the dense
+ * scene (2,000 figures of 100 segments) costs 110 to 150 ms of a frozen interface, which also holds up the presses after it, while its
+ * prepared frame is usually ready (playback prepares the ticks around the playhead while the editor is idle) and shows in a few
+ * milliseconds. Below it the exact frame is the quicker picture: on the busy scenes with pictures or effects (paints of 14 to 45 ms) a
+ * press waited 56 to 68 ms for a frame of the workers against 14 to 45 ms for its exact frame.
+ */
+export const FIRST_STEP_MS = 50;
+
+/**
  * Whether a frame step is one of a run, which in a scene whose editing frame is dear moves the playhead without evaluating and shows
- * prepared frames, as a playhead drag does, until the run ends. In such a scene every step is one of a run, its first included:
- * `begin()`, asked at a step outside a run, says whether the scene scrubs from prepared frames (in an ordinary scene every step stays
- * exact). The exact frame of a dense scene costs the interface a hundred milliseconds and more, and a single press waited that long
- * for its picture with the interface frozen, which also held up the presses after it; its prepared frame is usually ready already
- * (playback prepares the ticks around the playhead while the editor is idle) and costs a few milliseconds to show.
- * A held key's run ends when the key is released; a run of taps ends `gapMs` after its last step. `end()` then draws the exact
- * editing frame of the tick the run reached.
- * @param {{begin(): boolean, end(): void, gapMs?: number, now?(): number, setTimer?: typeof setTimeout, clearTimer?: typeof clearTimeout}} options
+ * prepared frames, as a playhead drag does, until the run ends. `begin({first})`, asked at a step outside a run, says whether the scene
+ * scrubs from prepared frames: `first` is a press (no auto-repeat, not within `gapMs` of the step before), which starts a run only in a
+ * scene whose exact frame is much dearer than a prepared one (`FIRST_STEP_MS`); the steps after it start one wherever the scene is dear
+ * (in an ordinary scene every step stays exact). A held key's run ends when the key is released; a run of taps ends `gapMs` after its
+ * last step. `end()` then draws the exact editing frame of the tick the run reached.
+ * @param {{begin(step: {first: boolean}): boolean, end(): void, gapMs?: number, now?(): number, setTimer?: typeof setTimeout, clearTimer?: typeof clearTimeout}} options
  */
 export function createStepRun({begin, end, gapMs = STEP_RUN_MS, now = () => performance.now(), setTimer = setTimeout, clearTimer = clearTimeout}) {
   let active = false, last = -Infinity, held = null, repeated = false, timer = null;
@@ -268,10 +276,11 @@ export function createStepRun({begin, end, gapMs = STEP_RUN_MS, now = () => perf
      * True when it is a step of a run: the step then seeks without evaluating and the run's preview shows the new tick.
      */
     step(event = {}) {
-      last = now();
+      const time = now(), first = !event.repeat && !(time - last < gapMs);
+      last = time;
       if (event.code) held = event.code;
       if (!active) {
-        if (!begin()) return false;
+        if (!begin({first})) return false;
         active = true; repeated = false;
       }
       if (event.repeat) repeated = true;

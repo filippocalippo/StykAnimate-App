@@ -330,17 +330,21 @@ about 4 frames a second with the interface frozen in between (tasks of 450 to
 Steps in a dense scene are a scrub (`createStepRun` in
 `src/engine/engine-scrub.mjs`, owned by `timeline-host.mjs` beside the drag's hooks):
 
-- **A run** starts at the first step: a press, its auto-repeats, and taps within
-  250 ms of the one before are one run (`STEP_RUN_MS`: exact frames drawn between
-  taps that close leave the interface no time between them, and a person who looks at
-  each frame steps more slowly than four a second). Until 2026-11-13 one press was
-  exact and a run started at the second step: the press waited 110 to 150 ms for its
-  picture with the interface frozen, and the steps behind it waited with it, while
-  its prepared frame is usually ready (playback prepares the ticks around the playhead
-  while the editor is idle) and shows in a few milliseconds. The rule of the drag
-  decides whether the scene is dense, asked at a step outside a run; in an ordinary
-  scene, and while the playhead is dragged, every step stays exact. Each step of a run
-  seeks without evaluating
+- **A run** is a press, its auto-repeats, and taps within 250 ms of the one before
+  (`STEP_RUN_MS`: exact frames drawn between taps that close leave the interface no
+  time between them, and a person who looks at each frame steps more slowly than four
+  a second). It starts at its second step where the scene is dense (the rule of the
+  drag, asked at a step outside a run), and at the press itself where the exact frame
+  is far dearer than a prepared one: the lower median of the last three paints at a
+  new tick over `FIRST_STEP_MS` (50 ms). There, until 2026-11-13, the press waited 110
+  to 150 ms for its exact frame with the interface frozen (2,000 figures of 100
+  segments), and the steps behind it waited with it, while its prepared frame is
+  usually ready (playback prepares the ticks around the playhead while the editor is
+  idle) and shows in a few milliseconds. Below it the exact frame is the quicker
+  picture: on the busy scenes with pictures or effects (paints of 14 to 45 ms) a press
+  made a step of a run waited 56 to 68 ms for a frame of the workers against 14 to
+  45 ms for its exact frame. In an ordinary scene, and while the playhead is dragged,
+  every step stays exact. Each step of a run seeks without evaluating
   (`runTimelineHotkey(..., {evaluate:false})`, the timeline's `seek`, `jumpKey`,
   `_selectCell` and the filmstrip's `selectFrame` take the option) and moves the
   scrub preview's pointer, as a drag's move does: the stage shows the prepared frame of

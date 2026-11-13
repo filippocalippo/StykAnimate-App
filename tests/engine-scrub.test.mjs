@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createScrubPreview, createSeekCosts, createStepRun, DEAR_SEEK_MS, STEP_RUN_MS} from '../src/engine/engine-scrub.mjs';
+import {createScrubPreview, createSeekCosts, createStepRun, DEAR_SEEK_MS, FIRST_STEP_MS, STEP_RUN_MS} from '../src/engine/engine-scrub.mjs';
 
 test('a scene scrubs from prepared frames when its paints at a new tick cost over 12 ms, by the median of the last three', () => {
   const costs = createSeekCosts(), dense = {}, light = {};
@@ -26,6 +26,9 @@ test('a scene scrubs from prepared frames when its paints at a new tick cost ove
   assert.equal(costs.dear(dense), false);
   for (const [tick, ms] of [[1, 11.9], [2, 12], [3, 11]]) costs.record(light, tick, ms);
   assert.equal(costs.dear(light), false, 'paints that keep up with the display scrub as editing');
+  // Another threshold for the same paints (a press that would start a run asks with FIRST_STEP_MS).
+  for (const [tick, ms] of [[4, 30], [5, 40], [6, 35]]) costs.record(light, tick, ms);
+  assert.deepEqual([costs.dear(light), costs.dear(light, 50)], [true, false], 'dear for a drag, not dear enough for a press');
 });
 
 /** A playback adapter whose frames are ready when the test says, and an engine whose progress the test advances. */
@@ -195,15 +198,18 @@ test('a jump marks only the ticks nearest the pointer, and what is kept stays bo
   assert.equal(preview.next()?.tick, 1998);
 });
 
-/** A run of steps on a clock and timers the test moves; `dear` says whether the scene scrubs from prepared frames. */
-function stepSide({dear = true} = {}) {
+/**
+ * A run of steps on a clock and timers the test moves; `dear` says whether the scene scrubs from prepared frames, `dearFirst` whether a
+ * press does too (a scene whose exact frame is far dearer than a prepared one); `firsts` lists what `begin` was told of each step.
+ */
+function stepSide({dear = true, dearFirst = dear} = {}) {
   let time = 0, serial = 0;
-  const timers = new Map(), log = [];
+  const timers = new Map(), log = [], firsts = [];
   const run = createStepRun({
-    begin: () => { log.push('begin'); return side.dear; }, end: () => log.push('end'),
+    begin: ({first}) => { log.push('begin'); firsts.push(first); return first ? side.dearFirst : side.dear; }, end: () => log.push('end'),
     now: () => time, setTimer: (callback, ms) => { timers.set(++serial, {at: time + ms, callback}); return serial; }, clearTimer: id => timers.delete(id),
   });
-  const side = {run, log, dear,
+  const side = {run, log, firsts, dear, dearFirst,
     /** The clock moves on `ms`; the timers due fire. */
     wait(ms) { time += ms; for (const [id, timer] of [...timers]) if (timer.at <= time) { timers.delete(id); timer.callback(); } },
     /** A step `ms` after the one before, from the key `code` (its auto-repeat when `repeat`); true when it is a step of a run. */
@@ -259,6 +265,21 @@ test('taps closer than the gap are one run, which ends a gap after the last tap'
   side.step(0); side.step(100); side.step(500, {repeat: true});
   run.keyup({code: 'Period'});
   assert.deepEqual(log, ['begin', 'end', 'begin', 'end', 'begin', 'end']);
+});
+
+test('a press in a scene whose exact frame is dear but quick to draw stays exact; the run starts at its second step', () => {
+  assert.equal(FIRST_STEP_MS, 50);
+  const side = stepSide({dear: true, dearFirst: false}), {run, log, firsts} = side;
+  assert.equal(side.step(0), false, 'a lone press draws its exact frame: quicker than a frame of the workers there');
+  assert.equal(side.step(500, {repeat: true}), true, 'its auto-repeat starts the run');
+  assert.deepEqual(firsts, [true, false]);
+  run.keyup({code: 'Period'});
+  assert.deepEqual(log, ['begin', 'begin', 'end']);
+  // Taps within the gap: the first is exact, the second starts the run.
+  side.wait(1000);
+  assert.equal(side.step(0), false);
+  assert.equal(side.step(180), true);
+  assert.deepEqual(firsts.slice(-2), [true, false]);
 });
 
 test('steps in an ordinary scene, during a drag or after losing focus are as before', () => {

@@ -22,7 +22,7 @@ import {t as interfaceText, messageText as sayTimeline} from './localization.mjs
  * cancelPolygonDraft, interruptRecovery, cancelWarmPlayback, warmPlayback,
  * scheduleRecovery, requestRender, queueUI, renderInspector,
  * syncSelectionControls, rangeFrames(all), selectTrack, previewScrub,
- * scrubStarted({steps}), scrubEnded(), scrubDear(), scrubAudio(tick), stopAudioScrub(), changeFigureLayer,
+ * scrubStarted({steps}), scrubEnded(), scrubDear({first}), scrubAudio(tick), stopAudioScrub(), changeFigureLayer,
  * confirmDiscardFrame, simpleFrameCount, fail,
  * setTimelineMode(mode), onMount(timeline), and getters for what app.mjs
  * creates later: propertyControls(), cameraMotionControls(), drawing(),
@@ -128,8 +128,8 @@ export function createTimelineHost(ctx) {
   // A run of frame steps (a held key) in a scene whose editing frame is dear steers the playhead as a drag does, from its second step
   // to its end (docs/TIMELINE.md, "Stepping through a dense scene"); elsewhere, and during a drag, every step is exact.
   const steps = createStepRun({
-    begin: () => {
-      if (state.scrubbing || !ctx.scrubDear?.()) return false;
+    begin: ({first} = {}) => {
+      if (state.scrubbing || !ctx.scrubDear?.({first})) return false;
       startSteering({steps: true});
       return true;
     },
