@@ -25,7 +25,8 @@ import {compareEngine} from './lib/compare.mjs';
 import {build, machine, read, SCHEMA, timeLabel, write} from './lib/result.mjs';
 import {ENGINE_RUNS, ENGINE_SCHEMA, slug} from './lib/result.mjs';
 import {BENCHMARKS, SCALING_BENCHMARKS, select as selectBenchmarks} from './engine/benchmarks.mjs';
-import {SIZES} from './engine/scaling.mjs';
+import {scaling, SIZES} from './engine/scaling.mjs';
+import {atSpeed, machineSpeed} from './engine/speed.mjs';
 import {engineOverview} from './engine/summary.mjs';
 import {runPair} from './lib/run.mjs';
 import {buildBundle, measureStartup} from './lib/startup.mjs';
@@ -147,7 +148,15 @@ async function engine(argv) {
 function engineCompared(argv) {
   const {words, options} = parse(argv, ['all', 'fail-on-worse']);
   if (!words.length) throw new Usage('`engine-compare` needs the engine run to compare against: npm run perf -- engine-compare <base> [head].');
-  const from = {root: ENGINE_RUNS, schema: ENGINE_SCHEMA}, result = compareEngine(read(words[0], from), read(words[1] ?? 'latest', from));
+  const from = {root: ENGINE_RUNS, schema: ENGINE_SCHEMA}, base = read(words[0], from), head = read(words[1] ?? 'latest', from);
+  // Both runs' times counted at the base run's machine speed (perf/engine/speed.mjs): what the machine did is not the code's.
+  const speed = machineSpeed(base), headSpeed = machineSpeed(head);
+  const result = compareEngine(atSpeed(base, speed, scaling), atSpeed(head, speed, scaling));
+  if (speed && headSpeed) {
+    const ratio = speed / headSpeed;
+    result.notes = [`Counted at one machine speed: the reference work took ${speed.toFixed(2)} ms a round in ${base.label} and ${headSpeed.toFixed(2)} ms in ${head.label} `
+      + `(the machine ran ${head.label} ${ratio >= 1 ? `${ratio.toFixed(2)}× faster` : `${(1 / ratio).toFixed(2)}× slower`}); the times and rates of ${head.label} are scaled by that.`];
+  } else result.notes = ['One of the runs has no machine speed: times are compared as they were measured.'];
   process.stdout.write(comparisonText(result, {all: Boolean(options.all)}));
   return options['fail-on-worse'] && result.counts.worse ? 1 : 0;
 }

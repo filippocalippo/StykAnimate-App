@@ -65,10 +65,31 @@ export's request into a `.piv` file is a module of its own, not part of the engi
   why (a new publication for a cold frame, an editor that has just loaded the document for a session, an undo after a drag).
 - **Work is cut, not rounds.** Playback prepares about a million segments a repetition (4 to 48 frames); a Pivot export of
   more than a million segment-frames exports the same figures cut to as many ticks; a drag reads the geometry after every
-  fifth step. The default run (four workloads, five rounds) takes about 40 s of processor time, `--scale` about 35 s.
+  fifth step. On a machine 20 to 50 % busy with other work the default run (four workloads, five rounds) took 47 to 53 s
+  (43 to 48 s of processor time) and `--scale` 19 to 22 s; the stress scene is about half of the default run.
 - **The machine.** A run records how busy the processor was before and after it (`backgroundLoad`) and how much
   processor time it used: a run that took far longer than its processor time waited for other programs, and its numbers
-  are slower and noisier for it.
+  are slower and noisier for it. Before every round it also times a fixed piece of plain JavaScript (`speed.mjs`), the
+  machine's speed at that moment.
+
+## Comparing two runs
+
+`engine-compare` applies the rule of `compare`: a difference counts when it is larger than twice the wider of the two
+runs' spreads, and never less than 5 % of the value or the metric's `floor`. Before that, both runs' times and rates are
+counted at one machine speed: the head's are scaled by how much slower or faster its machine ran than the base's (the
+median of the reference taken before each round, one factor a run), and the capacities found again from the scaled rounds.
+
+That is needed on a shared machine. Another program on the other half of the same core, or every core busy and the clock
+lower for it, made the engine 20 to 70 % slower while it still had its processor to itself (the processor time it was
+charged did not change); rounds interleaved within one run share such a state, so their spread did not show it, and two
+runs of the same code half an hour apart came out "better" on 24 metrics. The reference is a walk through 384 KB in a
+scrambled order with arithmetic at each step: timed beside the engine building frames for a minute on a busy machine, it
+followed the engine's time best of the kinds of work tried (a correlation of 0.66; 0.60 for a walk through 8 MB, which
+the shared cache made four times noisier, and 0.55 for arithmetic alone). It is applied once a run, not round by round:
+scaled by each round's own reference, the stress scene's save (slower in a run's first rounds for reasons of its own) took
+on the reference's noise too, and two runs of the same code compared as a regression. The reference follows the machine,
+not perfectly: compare runs from a quiet machine for small changes, and read a run whose processor time is far below its
+wall time as noisy.
 
 ## Scaling and capacity
 

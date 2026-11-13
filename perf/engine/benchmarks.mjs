@@ -190,7 +190,7 @@ function drag(context, begin, step) {
     'step.answer': bytes / STEPS / 1024, 'commit.answer': commit.bytes / 1024, 'undo.answer': undo.bytes / 1024, 'redo.answer': redo.bytes / 1024};
 }
 
-/** The figure a drag takes (the middle one) and where it stands at the first tick: its root, and a joint in the middle of its second limb with that joint's parent. */
+/** The figure a drag takes (the middle one) and, where it stands at the first tick, a joint in the middle of its second limb and that joint's parent. */
 function dragTarget(context) {
   const {editor, spec} = context;
   if (editor.tick !== 0) editor.seek(0);

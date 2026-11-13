@@ -62,6 +62,7 @@ export function engineOverview(result) {
     'ONE THREAD: the engine runs here in Node without its workers, so every number is what one thread costs. The app spreads playback,',
     'opening and saving over its worker threads, and draws the stage on the graphics card, which is not measured here (perf/engine/README.md).',
     `${result.rounds} round${result.rounds === 1 ? '' : 's'} after a warm-up per benchmark; the median of the rounds ± their median deviation; ${Math.round(result.seconds)} s in all, ${Math.round(result.processorSeconds ?? 0)} s of processor time.`];
+  if (result.referenceMs) lines.push(`The machine's speed: a fixed piece of JavaScript took ${result.referenceMs.toFixed(2)} ms a round (perf/engine/speed.mjs); engine-compare counts two runs at one speed.`);
   const busy = Math.max(load?.beforePercent ?? 0, load?.afterPercent ?? 0);
   if (busy > 20) lines.push(`The machine was busy with other work (${load.beforePercent}% of its processor before the run, ${load.afterPercent}% after): the numbers are slower and noisier than on a quiet machine.`);
   lines.push('');

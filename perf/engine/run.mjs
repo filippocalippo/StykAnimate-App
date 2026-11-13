@@ -7,7 +7,8 @@
  * of every benchmark of every workload, then round 2, …), so that a change in what else the machine does spreads over every
  * benchmark's rounds and shows in their spread instead of moving one benchmark's median. A round repeats its benchmark until it has measured
  * about 25 ms (a batch, for calls of a fraction of a millisecond) and reports the mean of its repetitions; the metrics
- * are the median of the rounds with their spread (src/devtools/stats.mjs).
+ * are the median of the rounds with their spread (src/devtools/stats.mjs). Before every round the machine's speed is
+ * taken (speed.mjs), so that two runs can be compared at one speed.
  */
 import {performance} from 'node:perf_hooks';
 import v8 from 'node:v8';
@@ -24,6 +25,7 @@ import {backgroundLoad, build, ENGINE_SCHEMA, machine} from '../lib/result.mjs';
 import {document as buildDocument, measure as measureWorkload} from '../workloads.mjs';
 import {COMMON_METRICS} from './benchmarks.mjs';
 import {scaling} from './scaling.mjs';
+import {machineSpeed, reference} from './speed.mjs';
 
 const MB = 1048576;
 /** The editor as the app makes it (src/app.mjs): property channels and a layer sheet for every document. */
@@ -33,13 +35,14 @@ const EDITOR_OPTIONS = Object.freeze({demo: false, propertyChannels: true, layer
  * and again for speed once a function has run enough, and the interface's JavaScript the same way, so first runs are slower.
  * The second figure ends a warm-up whose repetitions are cheap to measure but dear to prepare (a session needs a fresh open).
  */
-const WARM_MS = 200, WARM_WALL_MS = 1500;
+const WARM_MS = 200, WARM_WALL_MS = 500;
 /** What a round measures at least, by repeating its benchmark, and the most a round may take with its preparation. */
-const ROUND_MS = 25, ROUND_WALL_MS = 400, MOST_REPEATS = 50;
+const ROUND_MS = 25, ROUND_WALL_MS = 250, MOST_REPEATS = 50;
 
 /**
- * The garbage collector, when it can be had (a flag set at run time): run between rounds so that collecting what one round
- * left does not land in the next one's measurement. Null when the runtime does not allow it.
+ * The garbage collector, when it can be had (a flag set at run time): run before each workload's round so that collecting
+ * what the rounds before left does not land in a measurement (once per benchmark cost seconds with every workload open).
+ * Null when the runtime does not allow it.
  */
 const collect = (() => {
   try { v8.setFlagsFromString('--expose-gc'); return vm.runInNewContext('gc'); } catch { return null; }
@@ -156,7 +159,7 @@ async function openWorkload(spec, benchmarks, {engine, app, measure, log}) {
   });
   for (const benchmark of benchmarks) {
     const row = {id: benchmark.id, layer: benchmark.layer, title: benchmark.title, description: benchmark.description, headline: benchmark.headline,
-      definitions: {...benchmark.metrics, ...COMMON_METRICS}, repeats: 0, warmup: 0, metrics: {}, rounds: {}, error: null, seconds: 0, processorSeconds: 0};
+      definitions: {...benchmark.metrics, ...COMMON_METRICS}, repeats: 0, warmup: 0, metrics: {}, rounds: {}, reference: [], error: null, seconds: 0, processorSeconds: 0};
     result.benchmarks.push(row);
     const run = {benchmark, row, state: undefined, values: []};
     entry.runs.push(run);
@@ -178,20 +181,26 @@ async function openWorkload(spec, benchmarks, {engine, app, measure, log}) {
   return entry;
 }
 
-/** One round of every benchmark of the workload `entry` that has not failed: its repetitions' mean, with the memory the round added. */
+/**
+ * One round of every benchmark of the workload `entry` that has not failed: its repetitions' mean, with the memory the round
+ * added and the machine's speed just before it.
+ */
 async function roundOf(entry, {engine, log}) {
+  await timed(entry.clock, () => collect?.());
   for (const run of entry.runs) {
     if (run.row.error) continue;
     await timed(run.row, async () => {
       try {
-        collect?.();
         // Every round starts from the workload's document freshly published, with nothing a round before prepared or queued
-        // still held: the memory the round adds is its own.
+        // still held: the memory the round adds is its own. (The allocator's count of what is handed out and its peak are
+        // kept apart and can differ by a little: what a round frees below the start counts as nothing added.)
         entry.context.publish();
+        const machine = reference();
         engine.handle.reset_memory_peak();
         const held = engine.memory().liveBytes, list = [];
         for (let repeat = 0; repeat < run.row.repeats; repeat++) list.push((await repetition(run.benchmark, entry.context, run.state)).values);
-        run.values.push({...meanOf(list), 'memory.peak': (engine.memory().peakBytes - held) / MB});
+        run.values.push({...meanOf(list), 'memory.peak': Math.max(0, engine.memory().peakBytes - held) / MB});
+        run.row.reference.push(round(machine, 4));
       } catch (error) { run.row.error = failure(error); log(`${entry.spec.id} ${run.benchmark.id}: ${run.row.error}`); }
     });
   }
@@ -263,6 +272,7 @@ export async function runEngine({label, workloads, benchmarks, scaled = [], scal
   const started = performance.now(), processor = processorSeconds(), loadBefore = await backgroundLoad();
   if (loadBefore > 20) log(`the machine is busy with other work (${loadBefore}% of its processor): expect slower and noisier numbers`);
   const loaded = await loadEngine(), {engine} = loaded;
+  reference();
   const result = {schema: ENGINE_SCHEMA, label, at: new Date().toISOString(), rounds, seconds: null, processorSeconds: null, build: build(), machine: machine(),
     load: {beforePercent: loadBefore, afterPercent: null}, engine: {threads: 1, workers: engine.workers, memoryMaximumMB: round(engine.memoryMaximumBytes / MB, 0), garbageCollected: Boolean(collect)},
     workloads: [], scaling: null};
@@ -276,6 +286,7 @@ export async function runEngine({label, workloads, benchmarks, scaled = [], scal
     result.workloads.push(...sizes);
     result.scaling = scaling(sizes, Object.fromEntries(scaleBenchmarks.map(benchmark => [benchmark.id, benchmark.metrics])));
   }
+  result.referenceMs = round(machineSpeed(result), 4);
   result.load.afterPercent = await backgroundLoad();
   result.seconds = round((performance.now() - started) / 1000, 1);
   result.processorSeconds = round(processorSeconds() - processor, 1);

@@ -9,6 +9,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {BENCHMARKS, COMMON_METRICS, SCALING_BENCHMARKS, select} from '../perf/engine/benchmarks.mjs';
 import {CAPACITY, crossing, growth, line, LIMITS, scaling, SIZES} from '../perf/engine/scaling.mjs';
+import {atSpeed, machineSpeed, reference} from '../perf/engine/speed.mjs';
 import {capacityLines, engineOverview} from '../perf/engine/summary.mjs';
 import {change, compareEngine, comparisonText} from '../perf/lib/compare.mjs';
 import {ENGINE_RUNS, ENGINE_SCHEMA, read, SCHEMA, write} from '../perf/lib/result.mjs';
@@ -70,15 +71,15 @@ test('the capacity of one thread is where a cost reaches a frame\'s time, with t
   assert.match(capacityLines(result).join('\n'), /a pose step runs .*beyond 200,000 segments \(the largest measured\)/);
 });
 
-/** An engine run of one workload with one benchmark whose metric `ms` came out as `values`. */
-function run(label, values, {error = null, capacity = null} = {}) {
+/** An engine run of one workload with one benchmark whose metric `ms` came out as `values`, the machine's `references` taken before its rounds. */
+function run(label, values, {error = null, capacity = null, references = null} = {}) {
   const definitions = {ms: {title: 'Engine open', unit: 'ms', better: 'lower', digits: 1, floor: .01}, ...COMMON_METRICS};
   return {schema: ENGINE_SCHEMA, label, rounds: values.length, seconds: 12, processorSeconds: 10, load: {beforePercent: 5, afterPercent: 6},
     build: {commit: 'abc1234', branch: 'perf/engine-tier', dirty: false, engine: {sha256: 'b96c05a6562c', profile: 'wasm'}},
     machine: {cpu: 'A processor', threads: 12, memoryGB: 64, node: 'v24.11.0'},
     workloads: [{id: 'small', figures: 12, segmentsPerFrame: 240, frames: 121, jsonMB: .13, memory: {openMB: .4}, seconds: 3, processorSeconds: 2.5, benchmarks: [
       {id: 'open', layer: 'open', title: 'Open the document', headline: ['ms'], definitions, error, rounds: {ms: values, 'memory.peak': values.map(() => 3)},
-        metrics: error ? {} : {ms: spread(values), 'memory.peak': spread(values.map(() => 3))}}]}],
+        ...(references ? {reference: references} : {}), metrics: error ? {} : {ms: spread(values), 'memory.peak': spread(values.map(() => 3))}}]}],
     scaling: capacity && {sizes: SIZES, rows: [], capacity: [{id: 'frame.between@60', title: 'a frame between keyframes is built within 16.7 ms (60 frames a second)', what: 'a frame between keyframes is built',
       rate: 60, limit: 16.67, bound: 'within', segments: capacity}]}};
 }
@@ -94,6 +95,20 @@ test('an engine run compared with itself is the same everywhere, and a change be
   const failed = compareEngine(base, run('head', [], {error: 'it broke'}));
   assert.deepEqual(failed.missing, ['small/open: failed in head']);
   assert.equal(failed.rows.length, 0);
+});
+
+test('two runs are counted at one machine speed: a machine slower before every round is not a slower engine', () => {
+  const values = [10, 10.2, 9.9, 10.1, 10], references = [2, 2.04, 1.98, 2.02, 2];
+  const base = run('base', values, {references}), slower = run('head', values.map(value => value * 1.3), {references: references.map(value => value * 1.3)});
+  assert.equal(machineSpeed(base), 2);
+  assert.equal(compareEngine(base, slower).counts.worse, 1, 'as measured, the busier machine looks like a slower engine');
+  const speed = machineSpeed(base), counted = compareEngine(atSpeed(base, speed), atSpeed(slower, speed));
+  assert.deepEqual(counted.counts, {better: 0, worse: 0, same: 2});
+  assert.equal(atSpeed(slower, speed).workloads[0].benchmarks[0].metrics['memory.peak'].median, 3, 'sizes are not scaled');
+  const regressed = run('head', values.map(value => value * 1.3), {references});
+  assert.equal(compareEngine(atSpeed(base, speed), atSpeed(regressed, speed)).counts.worse, 1, 'a slower engine on the same machine still shows');
+  assert.equal(atSpeed(run('old', values), speed).referenceMs, undefined, 'a run recorded without references is left as it was');
+  assert.ok(reference() > 0, 'the reference work takes a time');
 });
 
 test('a metric\'s own floor replaces its unit\'s: an engine timing resolves a microsecond, not a frame', () => {

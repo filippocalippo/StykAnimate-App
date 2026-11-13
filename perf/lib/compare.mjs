@@ -103,7 +103,7 @@ export function compareEngine(base, head) {
 
 /** A comparison as text: what changed first, then a line for everything that did not. */
 export function comparisonText(result, {all = false} = {}) {
-  const lines = [`${result.base} → ${result.head}: ${result.counts.better} better, ${result.counts.worse} worse, ${result.counts.same} within noise`, ''];
+  const lines = [`${result.base} → ${result.head}: ${result.counts.better} better, ${result.counts.worse} worse, ${result.counts.same} within noise`, ...(result.notes ?? []), ''];
   const line = row => `  ${`${row.environment}/${row.workload}`.padEnd(18)} ${row.scenario.padEnd(22)} ${((row.definitions[row.metric]?.title ?? row.metric).slice(0, 40)).padEnd(40)} `
     + `${format(row.metric, row.base, row.definitions).padStart(10)} → ${format(row.metric, row.head, row.definitions).padEnd(10)} ${row.ratio === null ? '' : `${row.ratio > 0 ? '+' : ''}${(row.ratio * 100).toFixed(0)}%`.padStart(6)}`;
   for (const [verdict, heading] of [['worse', 'WORSE'], ['better', 'BETTER']]) {
