@@ -309,7 +309,13 @@ pictures arrive. Not done.
   eighth of the memory (`Making::most_bytes`, 240 MiB of 2 GiB: four such frames). One frame is always made, and the first frame of a
   document is made alone (what one holds is not known until one was made). A worker refused for want of room lets its spares go and
   waits; the next frame done wakes it. The count is the engine's, across the cache's publications, so frames still being made for a
-  replaced revision count until they are done.
+  replaced revision count until they are done, and a thread reported lost is counted out (`Engine::note_worker_lost`). Measured the same
+  day: the live peak after the open fell to 529 MB and the frames were made in under a second instead of four; the linear memory after the
+  open was 593 to 754 MB in seven runs against 783 to 1,039 in five of the build before (interleaved on a busy machine), and 798 to 926 after
+  the run's scrubbing against 1,164 to 1,168. Opening and playback were no slower in the same runs (open 1,119 to 1,130 ms against 1,217
+  to 1,499; playback delivered 99.9 to 100% of its frames against 94.9 to 99.7%). What is left: the document and the session's views, the
+  stage's scene and the one before it (about 85 MB each at 200,000 segments), the frame cache and four frames being made; the linear memory
+  is about 2.5 times what stays in use at rest.
 - **History** keeps its byte limit (`HistoryLimits`, 48 MiB by default): an entry larger than the limit
   retires the older ones (testingupload's movieclip edit weighs 100 MiB by the history's accounting and
   holds 3 MiB of memory).
