@@ -7,6 +7,7 @@ import {vfxDescriptor} from './vfx.mjs';
 import {vfxVisibleKeys,vfxChannelLabel,vfxChannelMessage} from './vfx-key-channels.mjs';
 import {openVfxChannelMenu} from './vfx-key-channel-menu.mjs';
 import {clipTail} from './vfx-clip-views.mjs';
+import {setHidden, setProp} from './ui/dom-write.mjs';
 
 /** Where an effect lane's keys sit: under the clip's name, near the lane's foot (the lane is `size` px tall, timeline-rows.mjs). */
 const keyY=size=>size-9;
@@ -109,7 +110,7 @@ function syncFadeHandles(host){
  }
  const index=host.tracks.findIndex(r=>r.kind==='vfx'&&r.clips.some(c=>c.id===host.editor._selectedVfxClip)),row=host.tracks[index],source=row?.clips.find(c=>c.id===host.editor._selectedVfxClip),clip=source&&previewClip(host,source);
  const layout=host.layout,y=index<0?0:host.rowY(index),size=index<0?0:host.rowSize(index),ceiling=layout.pinned&&index<layout.system?layout.header:layout.contentTop;
- host.vfxHandles.hidden=!clip||clip.duration===null||y<ceiling||y+size>host.height;
+ setHidden(host.vfxHandles,!clip||clip.duration===null||y<ceiling||y+size>host.height);
  if(host.vfxHandles.hidden)return;
  const left=clip.start*host.pxPerTick-host._offsetX(),right=left+clip.duration*host.pxPerTick;
  for(const node of host.vfxHandles.children){const edge=node.dataset.vfxFade,x=clamp(fadeX(host,clip,edge),left+7,right-7);node.hidden=x<5||x>host.width-5||right-left<18;node.disabled=Boolean(row.locked);node.style.left=`${x}px`;node.style.top=`${y-layout.header+6}px`;node.dataset.dragging=String(host.gesture?.edge===edge);node.setAttribute('aria-valuemin','0');node.setAttribute('aria-valuemax',String(clip.duration));node.setAttribute('aria-valuenow',String(Math.min(clip[edge],clip.duration)));localizedAttribute(node, 'aria-valuetext', 'counts.frames', {count:clip[edge]});localizedAttribute(node, "title", 'vfxClipTimeline.valueValue1Frames', {value: edge==='fadeIn'?{messageKey: "vfxClipTimeline.fadeIn"}:{messageKey: "vfxClipTimeline.fadeOut"}, value1: clip[edge]});}
@@ -149,7 +150,7 @@ export function installVfxTimeline(Timeline){
   const g=this.gesture;
   if(!g?.kind.startsWith('vfx')){
    const hit=this._hit(event),clip=pickClip(this,hit),tick=clip&&pickKey(this,clip,hit);
-   this.scroll.title=clip?(tick!==undefined?interfaceText('vfxClipTimeline.frameValueValue1', {value: tick+clip.start-clip.offset+1, value1: Object.entries(vfxVisibleKeys(this.editor,clip)).filter(([,keys])=>keys[lowerBound(keys,tick)]?.tick===tick).map(([property])=>effectPropertyText(property,vfxDescriptor(property))).join(', ')}):name(clip)):'';
+   setProp(this.scroll,'title',clip?(tick!==undefined?interfaceText('vfxClipTimeline.frameValueValue1', {value: tick+clip.start-clip.offset+1, value1: Object.entries(vfxVisibleKeys(this.editor,clip)).filter(([,keys])=>keys[lowerBound(keys,tick)]?.tick===tick).map(([property])=>effectPropertyText(property,vfxDescriptor(property))).join(', ')}):name(clip)):'');
    const result=move.call(this,event);if(clip&&!g)this.scroll.style.cursor=this.tracks[hit.row].locked?'default':trimEdge(this,clip,hit)||tick!==undefined?'ew-resize':clip.duration!==null?'grab':'default';return result;
   }
   let delta=Math.round((event.clientX-g.x)/this.pxPerTick);

@@ -23,6 +23,7 @@ import {t as interfaceText} from '../localization.mjs';
  * A mouse keeps its own buttons and keys.
  */
 import {icon} from '../icons.mjs';
+import {setAttr, setHidden, setText} from '../ui/dom-write.mjs';
 
 /** A modifier: what it adds to the stage's events ({button: 2} or a key), its name and glyph. */
 const MODIFIERS = Object.freeze({
@@ -181,14 +182,14 @@ export function installModifierDock({touch, host, viewport, context, setHeld = (
 
   function render() {
     const on = active();
-    for (const [name, node] of buttons) node.setAttribute('aria-pressed', String(on.has(name)));
+    for (const [name, node] of buttons) setAttr(node, 'aria-pressed', String(on.has(name)));
     const names = offered.filter(name => on.has(name)).map(name => MODIFIERS[name].label);
-    stateLabel.textContent = names.join(' · ');
-    toggle.toggleAttribute('data-active', names.length > 0);
+    setText(stateLabel, names.join(' · '));
+    setAttr(toggle, 'data-active', names.length > 0);
     localizedAttribute(toggle, 'aria-label', (names.length ? 'modifierDock.modifiersValue' : "modifierDock.modifiers"), (names.length ? {value: names.join(', ')} : {}));
-    dock.toggleAttribute('data-expanded', expanded);
-    toggle.setAttribute('aria-expanded', String(expanded));
-    list.hidden = !expanded;
+    setAttr(dock, 'data-expanded', expanded);
+    setAttr(toggle, 'aria-expanded', String(expanded));
+    setHidden(list, !expanded);
   }
 
   function clear() {
@@ -207,7 +208,7 @@ export function installModifierDock({touch, host, viewport, context, setHeld = (
       offered = names;
       replaceLocalized(list, ...names.map(button));
     }
-    dock.hidden = !names.length;
+    setHidden(dock, !names.length);
     render();
   }
 

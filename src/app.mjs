@@ -162,7 +162,7 @@ import { TweenerControls } from "./tweener-controls.mjs";
 import { onFontsReady } from "./ui/font-loading.mjs";
 import { createOverlayManager } from "./ui/overlay-manager.mjs";
 import { createInvalidator } from "./ui/ui-invalidation.mjs";
-import { setAttr, setHidden, setMarkup, setText } from "./ui/dom-write.mjs";
+import { setAttr, setCanvasSize, setHidden, setMarkup, setProp, setText } from "./ui/dom-write.mjs";
 import { installMenuBar, menuFor, openMenu } from "./ui/ui-menu.mjs";
 import { createToasts } from "./ui/ui-toast.mjs";
 import { createStageHead } from "./shell/stage-head.mjs";
@@ -1186,7 +1186,7 @@ function nudgePathFalloff(step) {
 /** The canvas tooltip for the hovered trail point names both gestures. */
 function syncPathTooltip() {
   const hover = state.hoverPathPoint;
-  if (!hover) { clearTranslation(overlay, 'title'); overlay.title = ""; return; }
+  if (!hover) { clearTranslation(overlay, 'title'); setProp(overlay, "title", ""); return; }
   const frame = {messageKey:hover.tick===editor.tick?'exportSheet.currentFrame':'filmstrip.card',messageParams:{frame:hover.tick+1}};
   localizedAttribute(overlay, "title", (editor.motionPathFalloff() ? 'app.frameDragToReshapeMotionpathfalloffradiusFramesOfTheArc' : 'app.frameDragToReposeValue1RightDragToReshape'), (editor.motionPathFalloff() ? {frame, motionPathFalloffRadius: state.settings.motionPathFalloffRadius} : {frame, value1: hover.tick === editor.tick ? "" : {messageKey:'app.withoutLeavingThisFrameDoubleClickToGo'}}));
 }
@@ -1292,8 +1292,8 @@ function resize() {
   flushPoseMove();
   const r = viewport.getBoundingClientRect(),
     d = window.devicePixelRatio || 1;
-  overlay.width = Math.round(r.width * d);
-  overlay.height = Math.round(r.height * d);
+  // The overlay repaints in full after a resize; a size it already has is not written (a write clears and reallocates it).
+  setCanvasSize(overlay, Math.round(r.width * d), Math.round(r.height * d));
   state.renderer?.resize(r.width, r.height, d * previewRenderScale());
   timelineUI?.resize();
   if (isFittedView()) {

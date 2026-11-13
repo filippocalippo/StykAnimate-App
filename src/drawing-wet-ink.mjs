@@ -1,3 +1,5 @@
+import {setCanvasSize} from './ui/dom-write.mjs';
+
 /** Wet ink: the part of a stroke the worker has not yet rasterized onto the
  * screen, drawn the moment input arrives on a low-latency (desynchronized)
  * canvas between the scene and the overlay. The worker's exact pixels replace
@@ -22,7 +24,7 @@ export class WetInk {
     const rect = this.canvas.parentElement?.getBoundingClientRect(), dpr = globalThis.devicePixelRatio || 1;
     if (!rect) return;
     const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
-    if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; this.box = null; }
+    if (setCanvasSize(this.canvas, width, height)) this.box = null;
     this.dpr = dpr;
   }
   /** Draw polylines of {x, y, r} in viewport CSS pixels (r: radius). Opacity

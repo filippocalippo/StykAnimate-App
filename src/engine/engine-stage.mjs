@@ -22,6 +22,7 @@ import {drawingResourcesFor} from '../drawing-resources.mjs';
 import {LiveCels} from './engine-live-cels.mjs';
 import {EngineCameraMonitor} from './engine-previews.mjs';
 import {viewportBackingSize} from '../preview-quality.mjs';
+import {setCanvasSize} from '../ui/dom-write.mjs';
 import {messageError} from '../localized-error.mjs';
 
 /** The engine side of the stage, shared by every stage the app creates (it survives the loss of a canvas or device). */
@@ -471,7 +472,11 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
       if (destroyed || lost) return;
       const backing = viewportBackingSize(width, height, dpr, stage.max_texture());
       deviceRatio = backing.dpr;
-      if (canvas.width !== backing.pw || canvas.height !== backing.ph) { canvas.width = backing.pw; canvas.height = backing.ph; stage.resize(backing.pw, backing.ph); }
+      if (canvas.width === backing.pw && canvas.height === backing.ph) return;
+      // Configuring the surface sizes the canvas itself (both dimensions); the canvas is written here only where it did
+      // not, as each write of a canvas's size clears it and allocates its buffer again.
+      stage.resize(backing.pw, backing.ph);
+      setCanvasSize(canvas, backing.pw, backing.ph);
     },
     /** For an export (engine-export.mjs): why the engine cannot draw `report` at `revision`, or null. */
     prepareExport(report, revision) {

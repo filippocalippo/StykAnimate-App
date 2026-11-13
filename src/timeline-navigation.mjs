@@ -1,6 +1,7 @@
 import {OnionTimelineRange} from './onion-timeline-range.mjs';
 import {localizedAttribute} from './localization-bindings.mjs';
 import {installTimelineTouch} from './touch/timeline-touch.mjs';
+import {setFlag} from './ui/dom-write.mjs';
 
 /** How fast a drag held `depth` px inside a 28px edge zone scrolls the timeline, in px per second (the same on every
  * display, whatever its refresh rate). */
@@ -30,7 +31,8 @@ export function mountTimelineNavigation(host) {
     if(host._scrollToX)host._scrollToX(x);else surface.scrollLeft=x;
     surface.scrollTop=pan.top+pan.y-event.clientY;
   },{capture:true});
-  const end=()=>{pan=null;host.container.classList.remove('timeline-panning');};
+  // Every lost pointer capture ends here, panning or not.
+  const end=()=>{pan=null;setFlag(host.container,'timeline-panning',false);};
   on(host.container,'pointerup',event=>{if(!pan)return;event.preventDefault();event.stopImmediatePropagation();end();if(host.container.hasPointerCapture(event.pointerId))host.container.releasePointerCapture(event.pointerId);},{capture:true});
   on(host.container,'pointercancel',end);on(host.container,'lostpointercapture',end);
   on(host.container,'auxclick',event=>{if(event.button===1)event.preventDefault();});

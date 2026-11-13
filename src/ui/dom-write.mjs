@@ -62,8 +62,21 @@ export function setProp(element, name, value) {
   return true;
 }
 
-/** Sets a CSS custom property on the element's inline style when it differs; null removes it. */
-export function setVar(element, name, value) {
+/**
+ * Sizes a canvas's bitmap (`width` × `height` device pixels), writing only the dimension that differs. Any write of
+ * `width` or `height` clears the canvas and allocates its bitmap again, even a write of the value it has, so a resize
+ * along one axis must not also write the other. Returns true when it wrote (the canvas is then clear).
+ */
+export function setCanvasSize(canvas, width, height) {
+  if (!canvas) return false;
+  let wrote = false;
+  if (canvas.width !== width) { canvas.width = width; wrote = true; }
+  if (canvas.height !== height) { canvas.height = height; wrote = true; }
+  return wrote;
+}
+
+/** Sets a property of the element's inline style (`left`, `--swatch`) when it differs; null removes it. */
+export function setStyle(element, name, value) {
   if (!element) return false;
   const text = value === null || value === undefined ? '' : String(value);
   if (element.style.getPropertyValue(name) === text) return false;
@@ -71,6 +84,8 @@ export function setVar(element, name, value) {
   else element.style.removeProperty(name);
   return true;
 }
+/** A CSS custom property: the same write as setStyle. */
+export const setVar = setStyle;
 
 const markup = new WeakMap();
 /**
