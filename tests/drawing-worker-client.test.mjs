@@ -98,3 +98,16 @@ test('worker construction failures leave no pending operation and retry lazily',
   const retry=owner.request('preview');instances[0].reply({id:1,value:'recovered'});
   assert.equal((await retry).value,'recovered');owner.dispose();
 }));
+
+test('a drawing worker with nothing to do ends after its rest, and the next request starts another',()=>workerEnvironment(async instances=>{
+  const owner=new DrawingWorker(undefined,{idleMs:20});
+  const one=owner.request('one');assert.equal(owner.instance,1);
+  instances[0].reply({id:1,value:'first'});await one;
+  // A request within the rest keeps the worker.
+  const two=owner.request('two');await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(owner.worker,instances[0],'a pending request is never ended');instances[0].reply({id:2});await two;
+  await new Promise(resolve=>setTimeout(resolve,40));
+  assert.equal(owner.active,false);assert.equal(instances[0].terminated,true);
+  const three=owner.request('three');assert.equal(instances.length,2);assert.equal(owner.instance,2,'whoever kept state in the first worker can tell');
+  instances[1].reply({id:3,value:'again'});assert.equal((await three).value,'again');owner.dispose();
+}));

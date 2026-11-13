@@ -13326,7 +13326,7 @@
   },
   "errors.drawingPreviewCache.drawingPreviewMemoryIsFull": {
     "locations": [
-      "src/drawing-preview-cache.mjs:78"
+      "src/drawing-preview-cache.mjs:79"
     ],
     "context": "if(!this.reserve(bytes)){result.bitmap.close();throw messageError(new Error(''), \"errors.drawingPreviewCache.drawingPreviewMemoryIsFull\", {});}"
   },
@@ -13359,14 +13359,14 @@
   },
   "errors.drawingResources.drawingOperationCancelled": {
     "locations": [
-      "src/drawing-worker-client.mjs:12",
-      "src/drawing-worker-client.mjs:36"
+      "src/drawing-worker-client.mjs:22",
+      "src/drawing-worker-client.mjs:48"
     ],
     "context": "if(signal?.aborted)return Promise.reject(messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingOperationCancelled\", {}));"
   },
   "errors.drawingResources.drawingPixelsCouldNotBeTransferred": {
     "locations": [
-      "src/drawing-worker-client.mjs:33"
+      "src/drawing-worker-client.mjs:45"
     ],
     "context": "worker.onmessageerror=()=>{if(this.worker===worker)this.dispose(messageError(new Error(''), \"errors.drawingResources.drawingPixelsCouldNotBeTransferred\", {}));}"
   },
@@ -13379,7 +13379,7 @@
   },
   "errors.drawingResources.drawingResourcesClosed": {
     "locations": [
-      "src/drawing-worker-client.mjs:44"
+      "src/drawing-worker-client.mjs:64"
     ],
     "context": "dispose(error=messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingResourcesClosed\", {})) {"
   },
@@ -13391,25 +13391,25 @@
   },
   "errors.drawingResources.drawingWorkerCouldNotLoadRetryTheOperation": {
     "locations": [
-      "src/drawing-worker-client.mjs:24"
+      "src/drawing-worker-client.mjs:35"
     ],
     "context": "if(data.fatal){data.bitmap?.close();this.dispose(error??restoreMessageError(messageError(new Error(''), \"errors.drawingResources.drawingWorkerCouldNotLoadRetryT"
   },
   "errors.drawingResources.drawingWorkerIsBusyWaitForTheCurrent": {
     "locations": [
-      "src/drawing-worker-client.mjs:13"
+      "src/drawing-worker-client.mjs:23"
     ],
     "context": "if(this.pending.size>=this.maxPending)return Promise.reject(messageError(new Error(''), \"errors.drawingResources.drawingWorkerIsBusyWaitForTheCurrent\", {}));"
   },
   "errors.drawingResources.drawingWorkerStoppedRetryTheOperation": {
     "locations": [
-      "src/drawing-worker-client.mjs:31"
+      "src/drawing-worker-client.mjs:43"
     ],
     "context": "if(this.worker===worker)this.dispose((event.message ? new Error(event.message) : messageError(new Error(''), \"errors.drawingResources.drawingWorkerStoppedRetryT"
   },
   "errors.drawingResources.drawingWorkerTimedOutRetryTheOperation": {
     "locations": [
-      "src/drawing-worker-client.mjs:37"
+      "src/drawing-worker-client.mjs:49"
     ],
     "context": "const timeout=setTimeout(()=>this.dispose(messageError(new Error(''), \"errors.drawingResources.drawingWorkerTimedOutRetryTheOperation\", {})),120000);"
   },
