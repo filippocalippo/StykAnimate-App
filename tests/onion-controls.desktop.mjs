@@ -13,7 +13,6 @@ try{
     const {emptyDocument,createFrame,createObject}=await import('/src/demo.mjs');const report=emptyDocument();report.keyframes=Array.from({length:60},(_,i)=>createFrame([createObject(report.figure_types[0],1,200+i,250)],10));
     styk.editor.load(report);styk.editor.seek(200);styk.settingsUI.commit({onionRangeBefore:20,onionRangeAfter:20});styk.onionController.toggle();
   });
-  await page.locator('.styk-privacy').waitFor({state:'visible'});await page.getByRole('button',{name:'Close privacy settings',exact:true}).click();await page.locator('.styk-privacy').waitFor({state:'hidden'});
   const settle=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   await page.evaluate(()=>{window.onionPointerTrace=[];for(const type of ['pointerdown','pointermove','pointerup'])document.addEventListener(type,event=>{window.onionPointerTrace.push({type,x:event.clientX,target:event.target.className});window.onionPointerTrace=window.onionPointerTrace.slice(-8);},{capture:true});});
   const baseDpr=await page.evaluate(()=>devicePixelRatio),rail=page.getByRole('dialog',{name:'Onion skin settings',exact:true}),scrub=rail.getByRole('button',{name:'Drag frames before',exact:true});

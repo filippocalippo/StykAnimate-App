@@ -44,7 +44,7 @@ try {
   const page = await app.firstWindow({timeout: 60000});
   page.on('pageerror', error => report.errors.push(error.message.slice(0, 300)));
   await page.waitForFunction(() => window.styk?.ready === true, null, {timeout: 60000});
-  await page.evaluate(() => { document.querySelector('.styk-privacy [data-decline]')?.click(); for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); });
+  await page.evaluate(() => { for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close(); });
   // The native dialogs answer from a queue: an Open or Save the smoke did not plan fails it.
   await app.evaluate(({dialog}) => {
     globalThis.__opens = []; globalThis.__saves = [];

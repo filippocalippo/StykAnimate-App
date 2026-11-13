@@ -29,7 +29,7 @@ try {
   page.on('pageerror', error => result.errors.push(error.message));
   await page.waitForFunction(() => window.styk?.ready, null, {timeout:60000});
   await page.evaluate(() => {
-    const dismiss = () => document.querySelectorAll('dialog.release-splash[open],dialog.styk-privacy[open]').forEach(d=>d.close());
+    const dismiss = () => document.querySelectorAll('dialog.release-splash[open]').forEach(d=>d.close());
     dismiss();new MutationObserver(dismiss).observe(document.body,{subtree:true,attributes:true,childList:true,attributeFilter:['open']});
     styk.editor.markSaved();
   });

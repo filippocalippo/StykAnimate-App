@@ -202,8 +202,7 @@ async function install(page) {
 
 const setMark = (page, mark) => page.evaluate(m => { window.__bench.mark = m; }, mark);
 const dismiss = page => page.evaluate(() => {
-  document.querySelector('.styk-privacy [data-decline]')?.click();
-  for (const d of document.querySelectorAll('dialog[open]')) d.close();
+    for (const d of document.querySelectorAll('dialog[open]')) d.close();
 });
 
 /** Input → paint latency of one mark, the way a person sees it: each paint that shows something new (a new revision
