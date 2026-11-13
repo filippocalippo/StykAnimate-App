@@ -214,3 +214,61 @@ test('handle stamps: an atlas too small for one pass is made larger once, up to 
   assert.equal(sprites.size, 48, 'never past its limit');
   assert.deepEqual(target.named('fill').map(op => op[1]), ['#000020']);
 });
+
+test('a selection moved by one delta is a layer of its own: its pixels move, only strips are stamped, and the gesture\'s rest or end repaints', () => {
+  const raster = new Surface(), target = new Surface(), overlay = new CanvasHandleOverlay(raster);
+  const moving = {uid: 1, handles: [handle(1, 20, 50, '#ff0000'), handle(1, 100, 50, '#00ff00')]}, still = {uid: 2, handles: [handle(2, 60, 20, '#0000ff')]};
+  const translations = new Map([[1, {x: 0, y: 0}]]);
+  const options = {width: 200, height: 100, projectionKey: 'view', dpr: 1, matrix: [1, 0, 0, 1, 0, 0], translations};
+  const first = overlay.draw(target.context, grouped([moving, still]), options);
+  const layer = overlay.moving.surface;
+  assert.deepEqual(stamped(overlay, raster), ['#0000ff'], 'the stationary layer leaves the moving figures out');
+  assert.deepEqual(stamped(overlay, layer), ['#ff0000', '#00ff00'], 'the moving figures are painted on their own layer');
+  assert.deepEqual(target.copies.map(([source]) => source), [raster, layer], 'the moving layer is drawn over the stationary one');
+  assert.equal(first.settle, false);
+  forget(raster, target, layer);
+  // Dragged ten pixels right: the layer's pixels move, nothing is stamped (no handle reaches into the strip at the left).
+  translations.set(1, {x: 10, y: 0});
+  const dragged = overlay.draw(target.context, grouped([moving, still]), options);
+  assert.deepEqual(stamped(overlay, raster), []); assert.deepEqual(stamped(overlay, layer), []);
+  assert.equal(layer.copies[0][0], layer, 'the layer is drawn onto itself, moved'); assert.deepEqual(layer.copies[0].slice(1), [10, 0]);
+  assert.equal(dragged.settle, true, 'moved pixels ask to be painted afresh once the gesture rests, as a pan does');
+  forget(raster, target, layer);
+  // A fractional delta moves the pixels by whole ones; the rest paints the layer afresh where asked.
+  translations.set(1, {x: 12.4, y: 0});
+  assert.equal(overlay.draw(target.context, grouped([moving, still]), options).settle, true);
+  assert.deepEqual(overlay.moving.at, {x: 12, y: 0}, 'painted at the nearest whole backing pixel');
+  forget(layer);
+  overlay.draw(target.context, grouped([moving, still]), {...options, rest: true});
+  assert.deepEqual(stamped(overlay, layer), ['#ff0000', '#00ff00']); assert.deepEqual(overlay.moving.at, {x: 12.4, y: 0});
+  assert.deepEqual(stamped(overlay, raster), [], 'the stationary layer is not repainted');
+  // Figures moved by different deltas are stamped over the picture, as before.
+  forget(raster, target, layer);
+  const apart = new Map([[1, {x: 5, y: 0}], [2, {x: 0, y: 5}]]);
+  overlay.draw(target.context, grouped([moving, still]), {...options, translations: apart});
+  assert.deepEqual(stamped(overlay, target), ['#ff0000', '#00ff00', '#0000ff']);
+  // The gesture over, the layer is released and the figures are back on the stationary layer.
+  forget(raster, target);
+  overlay.draw(target.context, grouped([moving, still]), {...options, translations: undefined});
+  assert.deepEqual(stamped(overlay, raster), ['#ff0000', '#00ff00', '#0000ff']);
+  assert.equal(overlay.moving.key, null); assert.deepEqual([layer.width, layer.height], [1, 1]);
+});
+
+test('a zoom in progress stamps sizes rounded down to half a backing pixel, and the next pass that is not a zoom repaints them exact', () => {
+  const raster = new Surface(), target = new Surface(), overlay = new CanvasHandleOverlay(raster);
+  const sizes = [2.1, 2.4, 3.3, 3.74, 4.9, 5];
+  const handles = grouped([{uid: 1, handles: sizes.map((screenRadius, i) => ({uid: 1, point: {x: 20 + 30 * i, y: 50}, screenRadius, color: '#ff0000'}))}]);
+  const options = {width: 200, height: 100, projectionKey: 'view', matrix: [1, 0, 0, 1, 0, 0]};
+  const radii = () => raster.copies.filter(([source]) => source === overlay.sprites.atlas).map(([, x, y]) => overlay.sprites.lookAt(x, y).radius);
+  for (const dpr of [1, 1.5]) {
+    forget(raster);
+    const zooming = overlay.draw(target.context, handles, {...options, dpr, zooming: true});
+    assert.equal(zooming.full, true); assert.equal(zooming.settle, true, 'a zoom asks to settle');
+    const drawn = radii();
+    assert.deepEqual(drawn, sizes.map(radius => Math.floor(radius * dpr * 2) / (2 * dpr)));
+    assert.ok(drawn.every((radius, i) => radius <= sizes[i] && radius > sizes[i] - .5 / dpr), 'never larger than where a click finds the joint, and within half a backing pixel');
+    forget(raster);
+    const rested = overlay.draw(target.context, handles, {...options, dpr});
+    assert.equal(rested.full, true); assert.equal(rested.settle, false); assert.deepEqual(radii(), sizes);
+  }
+});

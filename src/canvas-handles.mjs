@@ -1,12 +1,12 @@
 import { CanvasHandleOverlay } from './canvas-handle-overlay.mjs';
-import { getPivotHandles, rescalePivotHandles, frameHandleCount, denseHandles } from './canvas-interactions.mjs';
+import { getPivotHandles, rescalePivotHandles, frameHandleCount, denseHandles, definitionHandleCount, selectedOriginsOnly } from './canvas-interactions.mjs';
 import { findFigureType } from './figure-types.mjs';
 import { spatialControlMode } from './spatial-controls.mjs';
 import { rigDetailsShown } from './rig-control-details.mjs';
 import { affineProjection } from './motion-path.mjs';
 import { isBuilderContext } from './builder-aids.mjs';
 
-const emptyFrame = () => ({frame: null, key: '', bound: null, dense: false, announced: false, hidden: null, locked: null});
+const emptyFrame = () => ({frame: null, key: '', bound: null, dense: false, announced: false, hidden: null, locked: null, jointsOf: null});
 
 /**
  * The joints shown on the canvas: which figures show them in the frame on show, their descriptors (shared by drawing and
@@ -31,6 +31,8 @@ export function createCanvasHandles(app) {
    * figure changes: a gesture shows a new frame each step, with the same figures. */
   let handleFigures = {key: null, bound: null, types: null, flags: new Map(), figures: new Map()};
   let handleSettleTimer = 0, handlesResting = false;
+  /** The view's scale at the last draw: a draw at another one is a zoom in progress, painted at quantised sizes until it rests. */
+  let drawnScale = null;
 
   function frameHandles(frame) {
     const key = `${editor.layerViewKey}|${[...state.hidden].join(',')}|${[...state.locked].join(',')}`, bound = app.builderMode()?.boundUids ?? null;
@@ -55,7 +57,18 @@ export function createCanvasHandles(app) {
     const count = frameHandleCount(frame, figureOf, {hiddenUids: hidden, lockedUids: locked});
     const dense = denseHandles(count, handleFrame.dense), announce = dense && !handleFrame.announced && state.settings.showUnselectedHandles;
     if (announce) app.status({messageKey: "app.denseFrameShowsOrigins", messageParams: {}});
-    handleFrame = {frame, key, bound, dense, announced: handleFrame.announced || announce, hidden, locked};
+    // The joints each figure shows whole, by its id, for the budget of a large selection (worked out when asked).
+    let joints = null;
+    const jointsOf = uid => {
+      if (!joints) {
+        joints = new Map();
+        for (const object of frame.objects)
+          if (object && !hidden.has(object.unique_id) && !locked.has(object.unique_id))
+            joints.set(object.unique_id, (object.join ? 0 : 1) + definitionHandleCount(figureOf(object)));
+      }
+      return joints.get(uid) ?? 0;
+    };
+    handleFrame = {frame, key, bound, dense, announced: handleFrame.announced || announce, hidden, locked, jointsOf};
     return handleFrame;
   }
 
@@ -82,19 +95,24 @@ export function createCanvasHandles(app) {
       settings.outlineHandles,
       frame.camera?.scale,
       builderMode?.session?.typeId ?? "none",
+      // The primary figure keeps its joints first when the selection is too large for all of theirs.
+      editor.selectedUid,
       ...app.selection(),
       ...state.hidden,
       ...state.locked,
     ].join("|"), key = `${unscaled}|${state.view.scale}`;
     const cached = selectStatic ? selectionHandleCache.get(geometry) : handleCache;
     if (cached?.key === key && (selectStatic || cached.geometry === geometry)) return cached.handles;
-    // A zoom changes the joints' sizes alone: the descriptors are resized, not built again.
+    // A zoom changes the joints' sizes alone: the descriptors are resized, not built again. Descriptors a resize made are this
+    // cache's own (the ones built are shared with the descriptor cache), so the next resize reuses them.
     if (!selectStatic && cached?.unscaled === unscaled && cached.geometry === geometry) {
-      const resized = rescalePivotHandles(cached.handles, {viewScale: state.view.scale, autoSize: settings.autoSizeHandles, minDiameter: 4, maxDiameter: settings.handleSize * 2});
-      handleCache = {geometry, key, unscaled, handles: resized};
+      const resized = rescalePivotHandles(cached.handles, {viewScale: state.view.scale, autoSize: settings.autoSizeHandles, minDiameter: 4, maxDiameter: settings.handleSize * 2, reuse: cached.resized});
+      handleCache = {geometry, key, unscaled, handles: resized, resized: true};
       return resized;
     }
     const {hidden, locked} = shown;
+    // A selection whose own joints exceed the budget shows them for the figures selected last only (docs/SCENE-EDITING.md).
+    const originsOnlyUids = shown.dense ? selectedOriginsOnly(app.selection(), editor.selectedUid, shown.jointsOf) : null;
     const built = getPivotHandles(geometry, {
       showDetailed: rigDetailsShown(editor),
       spatialMode: builderMode?.active || !['select','pose'].includes(state.tool) ? 'pose' : spatialControlMode(editor),
@@ -104,6 +122,7 @@ export function createCanvasHandles(app) {
       frame,
       selectedUid: editor.selectedUid,
       selectedUids: app.selection(),
+      originsOnlyUids,
       hiddenUids: hidden,
       lockedUids: locked,
       showUnselected,
@@ -128,12 +147,14 @@ export function createCanvasHandles(app) {
   function draw(geometry) {
     const shown = handles(geometry),
       translations = state.drag?.translations;
-    const d = window.devicePixelRatio || 1;
+    const d = window.devicePixelRatio || 1, zooming = drawnScale !== null && drawnScale !== state.view.scale;
+    drawnScale = state.view.scale;
     // The view and the camera are affine: the matrix carries the projection, and its translation alone changing is a pan.
     const drawn = overlay.draw(app.ctx, shown, {matrix: affineProjection(app.project), projectionKey: handleCache.key,
       width: app.overlay.width / d, height: app.overlay.height / d, dpr: d, translations,
-      outline: state.settings.outlineHandles, rest: handlesResting});
-    // A pan moves the joints' pixels: once the view has rested a moment, they are painted afresh (see CanvasHandleOverlay).
+      outline: state.settings.outlineHandles, rest: handlesResting, zooming});
+    // A pan or a moving selection moves the joints' pixels, and a zoom paints them at sizes near theirs: once the view has rested
+    // a moment, they are painted afresh (see CanvasHandleOverlay).
     handlesResting = false;
     clearTimeout(handleSettleTimer);
     if (drawn.settle) handleSettleTimer = setTimeout(() => { handlesResting = true; app.requestOverlayRender(); }, 150);
