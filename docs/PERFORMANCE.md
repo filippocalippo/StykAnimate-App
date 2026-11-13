@@ -95,7 +95,7 @@ the interface thread spent on it, by phase:
 
 | Phase | What |
 | --- | --- |
-| `handlers` | input handlers that ran since the frame before (a drag's pointer moves, a wheel, a key), timed where the browser calls them, so every listener is covered |
+| `handlers` | input handlers that ran during the frame (a drag's pointer moves, a wheel, a key), timed where the browser calls them, so every listener is covered |
 | `script` | animation-frame callbacks: the app's paint of the scene and its pass of interface updates |
 | `render` | the browser's own style, layout and paint after them, measured to the first task after the frame (an upper estimate) |
 

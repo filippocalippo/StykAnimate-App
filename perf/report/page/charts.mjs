@@ -115,7 +115,7 @@ export function frameChart(series, {periodMs, phases}) {
   return h('div', {class: 'chart-block'},
     legend([{label: 'Frame interval', swatch: 'frame-key'}, ...phases.map((phase, slot) => ({label: phase.title, swatch: `c${slot + 1}`}))]),
     box,
-    h('p', {class: 'chart-note'}, "A column's interval is the time since the frame before; its script and rendering run after the frame starts, so a heavy frame lengthens the next interval."
+    h('p', {class: 'chart-note'}, "A column is one frame, from one animation-frame time to the next: its interval is how long it lasted, and the stack is what the interface thread spent inside it."
       + (beyond.length ? ` ${beyond.length} point${beyond.length === 1 ? '' : 's'} go past the top of the axis (marked); the longest is ${ms(Math.max(...beyond))}.` : '')));
 }
 

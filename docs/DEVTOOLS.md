@@ -78,8 +78,8 @@ runs before the engine starts. With the tools closed it keeps only small bounded
 - **live parameters,** with the values kept in `localStorage` for this developer profile.
 
 While something watches (the overlay, the panel, a capture), and only then, it also records **every display frame**
-(2,048 in a ring): when it began, the time since the frame before, and what the interface thread spent on it by phase:
-`handlers` (input handlers since the frame before), `script` (animation-frame callbacks) and `render` (the browser's
+(2,048 in a ring): when it began, how long it lasted (to the next frame's start), and what the interface thread spent
+inside it by phase: `handlers` (input handlers that ran in it), `script` (animation-frame callbacks) and `render` (the browser's
 own style, layout and paint, measured to the first task after the frame: an upper estimate). It keeps **how long each
 input waited** for the frame that followed its handler (2,048 in a ring). `src/devtools/frames.mjs` reads both;
 [PERFORMANCE.md](PERFORMANCE.md#what-is-measured) says what each number means. With the tools closed nothing ticks and

@@ -3,11 +3,12 @@
  * interface thread spent on each by phase, and how long inputs waited for their frame. The performance panel, the
  * overlay, the control channel's captures and the profiling runner all read frames through here. Pure: no DOM.
  *
- * A frame's phases (milliseconds of the interface thread):
- *   handlers  input handlers that ran since the frame before (a drag's pointer moves, a wheel, a key);
- *   script    animation-frame callbacks: the app's paint of the scene and its pass of interface updates;
- *   render    the browser's own style, layout and paint after them, measured to the first task after the frame: an
- *             upper estimate, since a task that was already waiting lands in it;
+ * A frame runs from one animation-frame time to the next: its interval is how long it lasted, and its phases are what
+ * the interface thread spent inside it (milliseconds), so the frame whose work was heavy is the frame that lasted long:
+ *   script    animation-frame callbacks at its start: the app's paint of the scene and its pass of interface updates;
+ *   render    the browser's own style, layout and paint after them, measured to the first task after the callbacks:
+ *             an upper estimate, since a task that was already waiting lands in it;
+ *   handlers  input handlers that ran in it (a drag's pointer moves, a wheel, a key);
  *   work      their sum: what the frame cost this thread. A frame is on time while it stays under the display's period.
  */
 import {distribution, quantile, round, sorted} from './stats.mjs';
@@ -18,7 +19,7 @@ export const PHASES = ['handlers', 'script', 'render'];
 /**
  * The frames recorded since the recorder's count was `from` (frames.total then), oldest first, as parallel arrays:
  * {at, interval, handlers, script, render, dropped}. `dropped` counts frames the ring had already overwritten. The
- * newest frame is left out while its rendering is still being measured (`settled: false` keeps it).
+ * newest frame is left out while it is still running and has no length yet (`settled: false` keeps it).
  */
 export function frameWindow(frames, from = 0, {settled = true} = {}) {
   const capacity = frames.intervals.length, oldest = Math.max(0, frames.total - capacity);

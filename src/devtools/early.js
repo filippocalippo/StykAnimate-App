@@ -103,11 +103,13 @@
 
   // --- frames ------------------------------------------------------------------------------------------------------
   /**
-   * Every display frame while something watches, whatever drew in it. Per frame: when it began (`at`), the time since
-   * the frame before (`intervals`), and what the interface thread spent on it: input handlers that ran since the frame
-   * before (`handlers`), animation-frame callbacks (`script`: the app's paint and its interface updates), and the
-   * browser's own style, layout and paint after them (`render`, measured to the first task after the frame and so an
-   * upper estimate). `inputs` is how long each input event waited until the frame that followed its handler was done.
+   * Every display frame while something watches, whatever drew in it. A frame runs from one animation-frame time to the
+   * next: `at` is when it began and `intervals` how long it lasted, and the rest is what the interface thread spent
+   * inside it: animation-frame callbacks at its start (`script`: the app's paint and its interface updates), the
+   * browser's own style, layout and paint after them (`render`, measured to the first task after the callbacks and so an
+   * upper estimate), and input handlers that ran in it (`handlers`). So the frame whose work was heavy is the frame that
+   * lasted long. The newest frame is still running: its interval is 0 until the next one begins.
+   * `inputs` is how long each input event waited until the frame that followed its handler was done.
    */
   const FRAMES = 2048, INPUTS = 2048;
   const frames = {
@@ -124,11 +126,14 @@
   const afterFrame = new MessageChannel();
   /** The frame whose callbacks are running or whose rendering is not over yet: {slot, sequence, began}. */
   let open = null;
+  /** The slot of the frame that is running (the newest), or -1; and a number for each frame's own after-frame message. */
+  let running = -1, sequence = 0;
+  /** The running frame's callbacks and rendering are over at `ended`: what they took is written; it runs on until the next frame. */
   const finishFrame = (ended) => {
     const frame = open;
     open = null;
     frames.script[frame.slot] = pending.script;
-    // Handlers that ran between the callbacks and the frame's end belong to the next frame, not to this one's rendering.
+    // Handlers that ran between the callbacks and this moment are the frame's handler time, not its rendering.
     frames.render[frame.slot] = Math.max(0, ended - frame.began - pending.script - pending.handlers);
     pending.script = 0;
     const inputs = frames.inputs, waiting = pending.inputs;
@@ -146,23 +151,29 @@
   /** Counts its callers: each calls `watchFrames(false)` when it stops needing frames. With the tools closed nothing ticks. */
   const watchFrames = (on = true) => {
     frames.watching = Math.max(0, frames.watching + (on ? 1 : -1));
-    if (!on || frames.watching !== 1) return;
-    frames.last = 0; open = null; pending.handlers = 0; pending.script = 0; pending.inputs.length = 0;
+    if (!on) {
+      // Nobody watches any more: the frame that was running never gets its end, so it is not kept.
+      if (!frames.watching && running >= 0) { frames.head = running; frames.total--; running = -1; open = null; }
+      return;
+    }
+    if (frames.watching !== 1) return;
+    frames.last = 0; running = -1; open = null; pending.handlers = 0; pending.script = 0; pending.inputs.length = 0;
     const tick = (time) => {
       if (!frames.watching) return;
       const began = now();
-      // A thread too busy to run the task between two frames: the frame before ends where this one begins.
+      // A thread too busy to run the task between two frames: the callbacks and rendering of the frame before end here.
       if (open) finishFrame(began);
-      if (frames.last) {
-        const interval = time - frames.last, slot = frames.head;
-        push('display frame', threadId('display'), frames.last, interval, 0, 0, null);
-        frames.intervals[slot] = interval; frames.at[slot] = time;
-        frames.handlers[slot] = pending.handlers; frames.script[slot] = 0; frames.render[slot] = 0;
-        frames.head = (slot + 1) % FRAMES; frames.total++;
-        pending.handlers = 0; pending.script = 0;
-        open = {slot, sequence: frames.total, began};
-        afterFrame.port2.postMessage(frames.total);
+      if (running >= 0) {
+        // The frame that was running ends where this one begins: how long it lasted, and the handlers that ran in it.
+        push('display frame', threadId('display'), frames.last, time - frames.last, 0, 0, null);
+        frames.intervals[running] = time - frames.last; frames.handlers[running] = pending.handlers;
       }
+      running = frames.head;
+      frames.at[running] = time; frames.intervals[running] = 0; frames.handlers[running] = 0; frames.script[running] = 0; frames.render[running] = 0;
+      frames.head = (running + 1) % FRAMES; frames.total++;
+      pending.handlers = 0; pending.script = 0;
+      open = {slot: running, sequence: ++sequence, began};
+      afterFrame.port2.postMessage(sequence);
       frames.last = time;
       nativeFrame(tick);
     };
