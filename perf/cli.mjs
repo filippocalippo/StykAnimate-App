@@ -10,8 +10,10 @@
 //   npm run perf -- engine-compare <base engine run> [head engine run] [--all] [--fail-on-worse]
 //
 // `run` starts this checkout's app on scratch data, in a window off-screen, once per pair of environment and workload,
-// and writes artifacts/perf/runs/<label>/ (result.json, summary.txt). `show` prints a run's summary, or one scenario in
-// full: its metrics, its frames by phase, its spans and where the profiled pass found the time, thread by thread.
+// and writes artifacts/perf/runs/<label>/ (result.json, summary.txt). A suite (perf/suites.mjs) says which pairs and
+// which scenarios on each; --env, --workload and --scenario replace it with one part of their own, taking what they do
+// not name from the suite's first part. `show` prints a run's summary, or one scenario in full: its metrics, its frames
+// by phase, its spans and where the profiled pass found the time, thread by thread.
 // `compare` says what changed between two runs beyond their own noise (the head defaults to the latest run).
 // `report` writes one HTML page of one or more runs (perf/report/): the grades of every scenario on every pair, what most
 // needs work, each scenario in full, memory and startup; several runs side by side, the first named the baseline of a
@@ -37,7 +39,7 @@ import {buildBundle, measureStartup} from './lib/startup.mjs';
 import {explain, overview} from './lib/summary.mjs';
 import {buildReport} from './report/build.mjs';
 import {open, SCENARIOS, select} from './scenarios/index.mjs';
-import {SUITES, suite as suiteNamed} from './suites.mjs';
+import {launches, SUITES, suite as suiteNamed} from './suites.mjs';
 import {measure, scaled, workload, WORKLOADS} from './workloads.mjs';
 
 class Usage extends Error {}
@@ -57,33 +59,35 @@ function parse(argv, flags = []) {
   return {words, options};
 }
 const list = text => String(text).split(',').map(part => part.trim()).filter(Boolean);
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 async function run(argv) {
   const {words, options} = parse(argv, ['no-profile', 'no-startup', 'raw']);
   if (words.length > 1) throw new Usage('`run` takes one suite name; scenarios go in --scenario.');
-  const plan = suiteNamed(words[0] ?? 'quick');
-  const environments = (options.env ? list(options.env) : plan.environments).map(environment);
-  const workloads = (options.workload ? list(options.workload) : plan.workloads).map(workload);
-  const scenarios = select(options.scenario ? list(options.scenario) : plan.scenarios);
+  const name = words[0] ?? 'quick', plan = suiteNamed(name), first = plan.parts[0];
+  // Options replace the suite's parts with one: what an option does not name comes from the suite's first part.
+  const parts = options.env || options.workload || options.scenario
+    ? [{environments: options.env ? list(options.env) : first.environments, workloads: options.workload ? list(options.workload) : first.workloads, scenarios: options.scenario ? list(options.scenario) : first.scenarios}]
+    : plan.parts;
+  const planned = launches(parts).map(pair => ({environment: environment(pair.environment), workload: workload(pair.workload), scenarios: select(pair.scenarios)}));
   const passes = Number(options.passes ?? plan.passes);
   if (!Number.isInteger(passes) || passes < 1 || passes > 20) throw new Usage('--passes is 1 to 20.');
   const label = options.label ?? timeLabel(), profile = !options['no-profile'], started = performance.now();
   const log = text => console.error(`[perf] ${text}`);
-  log(`${environments.length} environment${environments.length === 1 ? '' : 's'} × ${workloads.length} workload${workloads.length === 1 ? '' : 's'} × ${scenarios.length} scenarios, ${passes} timed pass${passes === 1 ? '' : 'es'}${profile ? ' + 1 profiled' : ''}`);
-  // Startup is the launch itself: measured apart, on the bundle a packaged app starts from, when the run covers every scenario.
+  log(`${plural(planned.length, 'launch')}, ${plural(planned.reduce((total, pair) => total + pair.scenarios.length, 0), 'scenario run')}, ${passes} timed pass${passes === 1 ? '' : 'es'}${profile ? ' + 1 profiled' : ''} each`);
+  // Startup is the launch itself: measured apart, on the bundle a packaged app starts from, unless the run names its scenarios.
   const measuresStartup = !options['no-startup'] && !options.scenario;
   const bundle = measuresStartup ? await buildBundle().catch(error => { log(`The bundle did not build (${String(error.message).split(/\r?\n/)[0]}): startup is measured from the sources.`); return null; }) : null;
-  const pairs = [];
-  for (const chosen of environments) {
-    const started = measuresStartup && chosen.host === 'desktop' ? await measureStartup(chosen, {launches: Math.max(3, passes), bundle, log}) : null;
-    for (const spec of workloads) {
-      const pair = await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), log});
-      // The environment's startup is shown with its first workload.
-      if (started && spec === workloads[0]) pair.scenarios.unshift(started);
-      pairs.push(pair);
-    }
+  const pairs = [], startups = new Set();
+  for (const {environment: chosen, workload: spec, scenarios} of planned) {
+    // An environment's startup is measured once and shown with its first workload.
+    const startup = measuresStartup && chosen.host === 'desktop' && !startups.has(chosen.id) ? await measureStartup(chosen, {launches: Math.max(3, passes), bundle, log}) : null;
+    startups.add(chosen.id);
+    const pair = await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), log});
+    if (startup) pair.scenarios.unshift(startup);
+    pairs.push(pair);
   }
-  const result = {schema: SCHEMA, label, at: new Date().toISOString(), suite: words[0] ?? 'quick', passes, profile, seconds: (performance.now() - started) / 1000, build: build(), machine: machine(), pairs};
+  const result = {schema: SCHEMA, label, at: new Date().toISOString(), suite: name, passes, profile, seconds: (performance.now() - started) / 1000, build: build(), machine: machine(), pairs};
   const text = overview(result), folder = write(result, text);
   process.stdout.write(text);
   console.log(`Written to ${folder}`);

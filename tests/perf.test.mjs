@@ -12,7 +12,7 @@ import {seekLatency, shownTicks} from '../perf/lib/latency.mjs';
 import {displayName, layerOf, LAYERS, rustModule} from '../perf/lib/layers.mjs';
 import {aggregate, captureMetrics, defaultJudge, format, grade, judge, LIMITS} from '../perf/lib/metrics.mjs';
 import {SCENARIOS, select} from '../perf/scenarios/index.mjs';
-import {SUITES} from '../perf/suites.mjs';
+import {CORE, launches, SUITES} from '../perf/suites.mjs';
 import {document as build, measure, scaled, workload, WORKLOADS} from '../perf/workloads.mjs';
 
 const wasm = functionName => ({functionName, url: 'styk-app://app/src/engine/pkg/styk_engine_bg.wasm'});
@@ -179,8 +179,25 @@ test('scenarios have what the runner and the reports need, and suites name thing
   assert.deepEqual(select(['pose.drag-joint']).map(scenario => scenario.id), ['pose.drag-joint']);
   assert.throws(() => select(['nothing-like-this']), /No scenario matches/);
   for (const [id, suite] of Object.entries(SUITES)) {
-    for (const environment of suite.environments) assert.ok(ENVIRONMENTS[environment], `${id}: ${environment}`);
-    for (const name of suite.workloads) assert.ok(WORKLOADS[name], `${id}: ${name}`);
-    assert.doesNotThrow(() => select(suite.scenarios), id);
+    assert.ok(suite.description && suite.passes >= 1 && suite.parts.length, id);
+    for (const launch of launches(suite.parts)) {
+      assert.ok(ENVIRONMENTS[launch.environment], `${id}: ${launch.environment}`);
+      assert.ok(WORKLOADS[launch.workload], `${id}: ${launch.workload}`);
+      assert.ok(select(launch.scenarios).length, `${id}: ${launch.environment}/${launch.workload} runs something`);
+    }
   }
+  // The core scenarios are single scenarios, each named once.
+  assert.deepEqual(select(CORE).map(scenario => scenario.id).sort(), [...CORE].sort());
+});
+
+test('a suite\'s parts become one launch per pair of environment and workload, with every scenario a part asks of it', () => {
+  const parts = [{environments: ['gpu'], workloads: ['medium'], scenarios: ['canvas']}, {environments: ['gpu', 'software'], workloads: ['small', 'medium'], scenarios: ['pose.drag-joint']},
+    {environments: ['software'], workloads: ['small'], scenarios: []}];
+  assert.deepEqual(launches(parts), [
+    {environment: 'gpu', workload: 'medium', scenarios: ['canvas', 'pose.drag-joint']},
+    {environment: 'gpu', workload: 'small', scenarios: ['pose.drag-joint']},
+    // A pair one part runs in full runs in full, whatever the others name.
+    {environment: 'software', workload: 'small', scenarios: []},
+    {environment: 'software', workload: 'medium', scenarios: ['pose.drag-joint']},
+  ]);
 });

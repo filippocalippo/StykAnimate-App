@@ -27,14 +27,16 @@ export const SCENARIOS = Object.freeze([...files, ...playback, ...timeline, ...c
 ]);
 
 /**
- * The scenarios `words` name: an id (`canvas.pan`), an area (`canvas`) or part of an id. No words: all of them.
+ * The scenarios `words` name: an id (`canvas.pan`), an area (`canvas`) or part of an id. A word that is a scenario's
+ * whole id names that scenario alone (`drawing.brush` is not `drawing.brush-large` too). No words: all of them.
  * Throws when a word matches nothing.
  */
 export function select(words = []) {
   if (!words.length) return [...SCENARIOS];
   const chosen = new Set();
   for (const word of words) {
-    const matches = SCENARIOS.filter(scenario => scenario.id === word || scenario.area === word || scenario.id.includes(word));
+    const exact = SCENARIOS.filter(scenario => scenario.id === word);
+    const matches = exact.length ? exact : SCENARIOS.filter(scenario => scenario.area === word || scenario.id.includes(word));
     if (!matches.length) throw new Error(`No scenario matches ${JSON.stringify(word)}. Run \`npm run perf -- list\` for the list.`);
     for (const scenario of matches) chosen.add(scenario);
   }
