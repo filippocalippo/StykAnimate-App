@@ -8,6 +8,9 @@
  *                 .cpuprofile per thread (Chrome's developer tools open them).
  *
  * The folder's name is the run's label. `resolve` finds a run by label, by path, or `latest`.
+ *
+ * The engine tier (perf/engine/README.md) keeps its results the same way under artifacts/perf/engine/, with a schema of
+ * its own: `write`, `resolve` and `read` take that folder (`ENGINE_RUNS`) and schema (`ENGINE_SCHEMA`).
  */
 import {execFileSync} from 'node:child_process';
 import {existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
@@ -17,6 +20,8 @@ import {ROOT} from './app.mjs';
 
 export const SCHEMA = 'styk-perf/1';
 export const RUNS = path.join(ROOT, 'artifacts', 'perf', 'runs');
+export const ENGINE_SCHEMA = 'styk-perf-engine/1';
+export const ENGINE_RUNS = path.join(ROOT, 'artifacts', 'perf', 'engine');
 
 const git = (...args) => { try { return execFileSync('git', args, {cwd: ROOT, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore']}).trim(); } catch { return null; } };
 
@@ -52,8 +57,8 @@ export async function backgroundLoad(ms = 500) {
 /** A label for a run started now: the local date and time. */
 export const timeLabel = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}${String(date.getSeconds()).padStart(2, '0')}`;
 
-/** A file-name-safe form of a scenario or pair id. */
-const slug = text => String(text).replace(/[^\w.-]+/g, '-');
+/** A file-name-safe form of a scenario or pair id, or of a label. */
+export const slug = text => String(text).replace(/[^\w.-]+/g, '-');
 
 /**
  * Writes `result` (the run) into its folder and returns the folder. Raw recordings a scenario carries (`trace`, `raw`)
@@ -61,7 +66,7 @@ const slug = text => String(text).replace(/[^\w.-]+/g, '-');
  */
 export function write(result, summary, directory = path.join(RUNS, slug(result.label))) {
   mkdirSync(directory, {recursive: true});
-  for (const pair of result.pairs) {
+  for (const pair of result.pairs ?? []) {
     for (const scenario of pair.scenarios) {
       const name = `${slug(pair.environment.id)}_${slug(pair.workload.id)}_${slug(scenario.id)}`;
       if (!scenario.trace && !scenario.raw) continue;
@@ -78,24 +83,25 @@ export function write(result, summary, directory = path.join(RUNS, slug(result.l
   return directory;
 }
 
-/** The newest run's folder, or null when there is none. */
-export function latest() {
-  if (!existsSync(RUNS)) return null;
-  const runs = readdirSync(RUNS).map(name => path.join(RUNS, name)).filter(folder => existsSync(path.join(folder, 'result.json')));
+/** The newest run's folder under `root`, or null when there is none. */
+export function latest(root = RUNS) {
+  if (!existsSync(root)) return null;
+  const runs = readdirSync(root).map(name => path.join(root, name)).filter(folder => existsSync(path.join(folder, 'result.json')));
   return runs.sort((a, b) => statSync(path.join(b, 'result.json')).mtimeMs - statSync(path.join(a, 'result.json')).mtimeMs)[0] ?? null;
 }
 
-/** The folder of the run `name`: `latest`, a label under artifacts/perf/runs/, or a path to a folder or a result.json. */
-export function resolve(name = 'latest') {
-  const candidates = name === 'latest' ? [latest()] : [path.join(RUNS, name), path.resolve(name), path.dirname(path.resolve(name))];
+/** The folder of the run `name` under `root`: `latest`, a label, or a path to a folder or a result.json. */
+export function resolve(name = 'latest', root = RUNS) {
+  const candidates = name === 'latest' ? [latest(root)] : [path.join(root, name), path.resolve(name), path.dirname(path.resolve(name))];
   const found = candidates.find(folder => folder && existsSync(path.join(folder, 'result.json')));
-  if (!found) throw new Error(name === 'latest' ? 'No run has been recorded yet: `npm run perf -- run` records one.' : `No run named ${JSON.stringify(name)}: give a label under artifacts/perf/runs/ or a folder with a result.json.`);
+  const where = path.relative(ROOT, root).split(path.sep).join('/');
+  if (!found) throw new Error(name === 'latest' ? `No run has been recorded under ${where}/ yet: ${root === ENGINE_RUNS ? '`npm run perf -- engine`' : '`npm run perf -- run`'} records one.` : `No run named ${JSON.stringify(name)}: give a label under ${where}/ or a folder with a result.json.`);
   return found;
 }
 
-/** Reads the run `name` (see `resolve`). */
-export function read(name) {
-  const folder = resolve(name), result = JSON.parse(readFileSync(path.join(folder, 'result.json'), 'utf8'));
-  if (result.schema !== SCHEMA) throw new Error(`${folder} holds a ${result.schema ?? 'different'} result; this tool reads ${SCHEMA}.`);
+/** Reads the run `name` (see `resolve`): an app run, or with `ENGINE_RUNS` and `ENGINE_SCHEMA` an engine run. */
+export function read(name, {root = RUNS, schema = SCHEMA} = {}) {
+  const folder = resolve(name, root), result = JSON.parse(readFileSync(path.join(folder, 'result.json'), 'utf8'));
+  if (result.schema !== schema) throw new Error(`${folder} holds a ${result.schema ?? 'different'} result; this tool reads ${schema}.`);
   return {...result, folder};
 }
