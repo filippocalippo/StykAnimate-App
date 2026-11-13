@@ -25,8 +25,10 @@ await mkdir(evidenceDirectory, {recursive: true});
 const work = await realpath(await mkdtemp(path.join(os.tmpdir(), 'styk-release-install-')));
 const install = path.join(work, 'installed'), executable = path.join(install, 'StykAnimate.exe'), profile = path.join(work, 'profile');
 await mkdir(profile);
-// Statistics off (docs/STATISTICS.md): a script's runs are not counted and nothing waits to be sent.
-await writeFile(path.join(profile, 'stats-state.json'), JSON.stringify({v: 1, enabled: false, noticeSeen: true}));
+// The profile of someone who declined the old consent window: the previous public release reads this file (without
+// it, its first-run window covers the update notice), and the candidate must carry that answer over as statistics
+// off (docs/STATISTICS.md), so a script's runs are not counted and nothing waits to be sent.
+await writeFile(path.join(profile, 'telemetry-state.json'), JSON.stringify({decided: true, consent: {analytics: false, diagnostics: false, policyVersion: '2026-09-10', updatedAt: Date.now()}}));
 const env = {...electronEnvironment(), STYK_USER_DATA_DIR: profile, STYK_LIBRARY_DIR: path.join(work, 'library'), STYK_INSTALL_TEST_EXE: executable};
 const exec = promisify(execFile);
 const run = (file, args) => exec(file, args, {env, windowsHide: true, timeout: 180000, maxBuffer: 5 * 1024 * 1024});
@@ -151,8 +153,10 @@ try {
   await page.evaluate(() => window.styk.actions.open());
   await page.waitForFunction(() => window.styk.editor.report.canvas_width === 961);
   assert.equal((await page.evaluate(() => window.stykDesktop.getUpdateState())).status === 'unavailable', false);
-  assert.equal(JSON.parse(await readFile(path.join(profile, 'stats-state.json'), 'utf8')).enabled, false);
-  check('Installed candidate reopens the saved project and keeps statistics off as the profile chose');
+  const statistics = JSON.parse(await readFile(path.join(profile, 'stats-state.json'), 'utf8'));
+  assert.equal(statistics.enabled, false, 'the declined consent carries over as statistics off');
+  assert.equal(statistics.noticeSeen, true, 'someone who declined is not shown the statistics line again');
+  check('Installed candidate reopens the saved project and keeps statistics off as the declined consent chose');
   evidence.passed = true;
 } catch (error) {
   evidence.error = error.stack;
