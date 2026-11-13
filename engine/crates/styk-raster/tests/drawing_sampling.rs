@@ -148,3 +148,59 @@ fn canvas_cel_sampling_matches_the_gpu() {
         }
     }
 }
+
+/// `list` with `count` quads of a live cel's room (`styk_eval::drawlist::room_quad`) after its tiles, as the encoder pads a live cel.
+fn with_room(mut list: DrawList, count: usize) -> DrawList {
+    let at = list.prims.iter().position(|p| p.kind & 255 == K_COMPOSITE).unwrap_or(list.prims.len());
+    let room = styk_eval::drawlist::room_quad(&list.prims[0]);
+    assert!(styk_eval::drawlist::is_room_quad(&room));
+    list.prims.splice(at..at, std::iter::repeat_n(room, count));
+    for pass in &mut list.passes {
+        if pass.start as usize >= at { pass.start += count as u32; }
+        if pass.end as usize >= at { pass.end += count as u32; }
+    }
+    list
+}
+
+/// The room a live cel's block keeps for the tiles a stroke adds draws nothing: the frame with it is the frame without it, byte for
+/// byte, on the CPU and on the GPU, at every level a view shows, in Canvas sampling and direct, smooth and crisp.
+#[test]
+fn a_live_cels_room_draws_nothing() {
+    let (assets, decoded, images) = images();
+    let cases = [(1.0, false, false), (1.3, true, true), (0.71, false, true), (0.5, false, false), (0.3, true, false), (2.6, false, false)];
+    for edges in [Edges::Smooth, Edges::Crisp] {
+        for canvas in [false, true] {
+            for &(scale, rotated, tint) in &cases {
+                let (plain, padded) = (list(&assets, canvas, tint), with_room(list(&assets, canvas, tint), 59));
+                let view = view(scale, rotated);
+                let what = format!("Canvas {canvas}, scale {scale}, rotated {rotated}, tint {tint}, {edges:?}");
+                assert!(styk_raster::render(&plain, &images, &view, SIZE, edges).pixels == styk_raster::render(&padded, &images, &view, SIZE, edges).pixels, "CPU, {what}");
+            }
+        }
+    }
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+        eprintln!("skipped on the GPU: no adapter");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+    for edges in [Edges::Smooth, Edges::Crisp] {
+        let mut renderer = Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, edges);
+        renderer.prepare_sprites(&assets);
+        renderer.upload_images(&assets, &decoded);
+        for canvas in [false, true] {
+            for &(scale, rotated, tint) in &cases {
+                let view = view(scale, rotated);
+                let mut frame = |list: DrawList| {
+                    renderer.set_list(&Arc::new(list));
+                    let mut encoder = device.create_command_encoder(&Default::default());
+                    renderer.render(&mut encoder, &view, SIZE);
+                    queue.submit([encoder.finish()]);
+                    read_frame(&device, &queue, renderer.frame_texture().expect("a frame")).2
+                };
+                let (plain, padded) = (frame(list(&assets, canvas, tint)), frame(with_room(list(&assets, canvas, tint), 59)));
+                assert!(plain == padded, "GPU, Canvas {canvas}, scale {scale}, rotated {rotated}, tint {tint}, {edges:?}");
+            }
+        }
+    }
+}

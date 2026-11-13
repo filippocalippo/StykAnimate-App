@@ -33,6 +33,23 @@ pub use styk_draw::{
     K_COMPOSITE, K_DEPTH_RESET, K_DISC, K_FILL_VIEW, K_IMAGE, K_POLYLINE, K_RING, K_TRI, NO_PAINT, P_ANGULAR, P_DIAMOND, P_LINEAR, P_RADIAL, P_RADIAL_RING, K_PARTICLE, K_BEAM, F_ADD,
 };
 
+/// The quads a live drawing cel's block holds for `quads` of its own ([`Out::reserve_live_room`]): at least 64, doubling.
+pub fn live_room(quads: usize) -> usize {
+    quads.max(64).next_power_of_two()
+}
+
+/// A quad of a live cel's block beyond its tiles ([`Out::reserve_live_room`]), made of the cel's first quad `first`: a drawing tile
+/// at its corner with no size, at level 0, which no view shows (`prim.wgsl` `image_vertex` and `styk-raster` place it off the target),
+/// with no parent tile, sampling `first`'s place.
+pub fn room_quad(first: &Prim) -> Prim {
+    Prim { paint: NO_PAINT, a: [first.a[0], first.a[1], 0.0, 0.0], b: [0.0, 0.0, first.b[2], 0.0], ..*first }
+}
+
+/// Whether `prim` is a quad of a live cel's block that draws nothing ([`room_quad`]).
+pub fn is_room_quad(prim: &Prim) -> bool {
+    prim.kind & 255 == K_IMAGE && prim.kind & F_DRAWING != 0 && prim.a[2] == 0.0 && prim.a[3] == 0.0 && prim.b[0] == 0.0 && prim.b[1] == 0.0
+}
+
 /// A local primitive list with world bounds, before groups are assigned.
 #[derive(Default)]
 struct Out {
@@ -63,6 +80,20 @@ impl Out {
         self.grow(bounds[0], bounds[1], bounds[2], bounds[3]);
         self.prims.push(p);
     }
+    /// Pads the quads of a live drawing cel, `prims[first_prim..]` with their parent tiles' paint rows from `first_paint` on, to a
+    /// block of [`live_room`] quads and as many paint rows ([`Ctx::item`]). A stroke adds tiles to its cel in nearly every frame;
+    /// in a block whose length changes only when it doubles, the object keeps its length and its tables' sizes, so a list encoded
+    /// over the frame before it ([`encode_composed_shared`]) writes the cel's block alone, and a renderer holding that list uploads
+    /// that block, instead of the whole frame's primitives laid out anew behind it. A quad of the padding draws nothing
+    /// ([`room_quad`]); it samples the atlas place of the cel's first quad, so a frame waiting for pictures waits for nothing more.
+    fn reserve_live_room(&mut self, first_prim: usize, first_paint: usize) {
+        let quads = self.prims.len() - first_prim;
+        let Some(&first) = self.prims.get(first_prim) else { return };
+        let room = live_room(quads);
+        self.prims.resize(first_prim + room, room_quad(&first));
+        self.paints.resize(first_paint + room, [0.0; 4]);
+    }
+
     /// One polyline record (vertex offsets are local and fixed up when merged).
     fn polyline(&mut self, pts: &[[f64; 2]], hw: f64, closed: bool, color: u32, paint: u32) {
         if pts.len() < 2 {
@@ -401,6 +432,7 @@ impl<'a> Ctx<'a> {
         // tiles ([`crate::live`]): the same quads, levels and parents, and a floating selection
         // after it through its transform.
         if let Some((view, cel, live)) = self.live.zip(a.cel.as_ref()).and_then(|(view, cel)| view.cel(&cel.id).map(|live| (view, cel, live))) {
+            let (first_prim, first_paint) = (out.prims.len(), out.paints.len());
             for (layer, matrix) in [(&live.base, None), (&live.float, live.show_float.then_some(live.matrix))] {
                 for level in 0..=crate::drawing::MAX_LEVEL as usize {
                     let span = (crate::drawing::TILE << level) as f64;
@@ -425,6 +457,7 @@ impl<'a> Ctx<'a> {
                     }
                 }
             }
+            out.reserve_live_room(first_prim, first_paint);
             return;
         }
         if let Some(tiles) = &a.tiles {
@@ -1298,13 +1331,20 @@ fn encode_scene_span(assets: &Assets, live: Option<LiveView<'_>>, scene: &Scene,
         let first = &scene.items[a];
         let moved = moved.get(first.slot as usize).copied().flatten().is_some();
         let build = scene.built_in[first.slot as usize];
-        // A cel the interface holds live is drawn from slots that change between frames: its object is never kept.
-        let live_cel = live.is_some()
-            && scene.items[a..b].iter().any(|it| {
-                let fig = &scene.figures[it.figure as usize];
-                it.kind == ItemKind::Image && fig.image(fig.segments[it.index as usize].asset).is_some_and(|asset| asset.cel.is_some())
-            });
-        (first.chain == crate::geometry::NO_CHAIN && !moved && build != 0 && !live_cel && !hidden.get(first.slot as usize).copied().unwrap_or(false)).then_some((first.slot, build, b - a))
+        if first.chain != crate::geometry::NO_CHAIN || moved || build == 0 || hidden.get(first.slot as usize).copied().unwrap_or(false) {
+            return None;
+        }
+        // A cel the interface holds live is drawn from slots that change between frames: its object is never kept. The items of an
+        // object outside a movieclip are of its figure, so a figure without a drawing cel (a dense frame's figures) is not read item by item.
+        let live_cel = live.is_some_and(|view| {
+            let fig = &scene.figures[first.figure as usize];
+            fig.images.iter().any(|asset| asset.cel.as_ref().is_some_and(|cel| view.cel(&cel.id).is_some()))
+                && scene.items[a..b].iter().any(|it| {
+                    let fig = &scene.figures[it.figure as usize];
+                    it.kind == ItemKind::Image && fig.image(fig.segments[it.index as usize].asset).and_then(|asset| asset.cel.as_ref()).is_some_and(|cel| view.cel(&cel.id).is_some())
+                })
+        });
+        (!live_cel).then_some((first.slot, build, b - a))
     };
     let mut objects: Vec<Option<Arc<ObjectOut>>> = vec![None; runs.len()];
     let mut missing: Vec<usize> = Vec::new();
