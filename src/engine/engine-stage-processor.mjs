@@ -95,10 +95,11 @@ export function createProcessorStage({stage, engine, scene, onPicture = () => {}
       destroyed = true;
       for (const stop of untraced) stop();
       asked.clear();
+      // The scene canvas shows again, if this ever covered it.
+      if (canvas) scene.style.visibility = '';
       canvas?.remove();
       canvas = context = image = null;
       on = false;
-      scene.style.visibility = '';
     },
   };
   // What the page holds for the frames (the developer tools' memory by owner): the copy of the newest one and the canvas showing it.
