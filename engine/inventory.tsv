@@ -280,6 +280,8 @@ src/frame-draft-animation.mjs	engine	styk-edit	removed	deleted: only the editor'
 src/frame-ids.mjs	engine	styk-eval	js	
 src/frame-timing-history.mjs	engine	styk-edit	removed	deleted: replaying frame-timing entries of the editor's own history: the history is the session's (1326 bytes)
 src/gif-options.mjs	engine	styk-export	js	
+src/gif-encode-worker.mjs	engine	styk-export	js	
+src/gif-frames.mjs	engine	styk-export	js	
 src/gif-quantize.mjs	engine	styk-export	js	
 src/gpu-startup.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/gpu-timing.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame

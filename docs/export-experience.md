@@ -27,7 +27,8 @@ Invalid names, dimensions, memory plans, ranges, GIF rates and active
 quality or bitrate inputs mark their field and disable Export with an inline
 explanation. The dialog remembers the last export's type, size, quality,
 smoothing, bitrate, codecs and Lock ratio (the editor setting
-`exportPreferences`; for the session until the settings schema holds it); the
+`exportPreferences`, saved when the export ends, so that saving the settings does not
+delay its first frame; for the session until the settings schema holds it); the
 range, the name, Dither and Sound start over each time, and a remembered
 custom size of another shape opens as Original. Capability probing, the
 installed codec controls (`src/vfw-export-controls.mjs`) and the export
@@ -41,7 +42,8 @@ For a document the engine draws, the frames come from the engine's export
 renderer ([engine rendering: exports](engine/rendering.md#exports)); opening
 the dialog starts its worker and GPU device, so the export does not wait for
 them (`prewarmExportRenderer`; a worker no export takes within a minute is
-released). Progress, Cancel and Stop exporting behave as with the JavaScript
+released). The image encoder's worker (GIF, APNG, image sequences) is started with
+the dialog too (`prewarmImageExport`, given up after a minute the same way). Progress, Cancel and Stop exporting behave as with the JavaScript
 renderer.
 
 ## Quick presets

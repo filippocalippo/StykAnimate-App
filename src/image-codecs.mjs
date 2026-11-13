@@ -1,5 +1,5 @@
 import {messageError} from './localized-error.mjs';
-import { quantizeGIF, mapGIFPixels } from "./gif-quantize.mjs";
+import { quantizeGIF, mapGIFPixels, pixelWords } from "./gif-quantize.mjs";
 import { normalizeGIFDither } from "./gif-options.mjs";
 /** Small image container codecs. All compression/quantization runs in a worker.
  * PNG/APNG: https://www.w3.org/TR/png-3/
@@ -174,14 +174,23 @@ export class APNGEncoder extends BoundedOutput {
   }
 }
 
-function lzw(pixels) {
+/** The LZW dictionary of the frame being compressed: (prefix << 8 | suffix) keys and their codes, open addressing,
+ * small enough to stay in the processor's cache. At most 3,838 entries live at once (codes 258 to 4095). */
+const LZW_BITS = 13,
+  LZW_MASK = (1 << LZW_BITS) - 1,
+  lzwKeys = new Int32Array(1 << LZW_BITS),
+  lzwCodes = new Uint16Array(1 << LZW_BITS);
+/**
+ * A frame's indices as GIF image data: the minimum code size (8), then LZW codes in sub-blocks of at most 255 bytes,
+ * then the block terminator. Variable-width codes from 9 to 12 bits, a clear code when the dictionary is full.
+ */
+export function lzw(pixels) {
   const out = new Uint8Array(Math.ceil(pixels.length * 1.6) + 1024);
   let position = 0,
     accumulator = 0,
     bitCount = 0,
     bits = 9,
     nextCode = 258;
-  const dictionary = new Map();
   const write = (code) => {
     accumulator |= code << bitCount;
     bitCount += bits;
@@ -194,19 +203,24 @@ function lzw(pixels) {
     // code using the old width, including before the final end-of-information.
     if (nextCode === 1 << bits && bits < 12) bits++;
   };
+  lzwKeys.fill(-1);
   write(256);
   let prefix = pixels[0];
   for (let i = 1; i < pixels.length; i++) {
     const suffix = pixels[i],
-      key = (prefix << 8) | suffix,
-      existing = dictionary.get(key);
-    if (existing !== undefined) prefix = existing;
+      key = (prefix << 8) | suffix;
+    let slot = Math.imul(key, 0x9e3779b1) >>> (32 - LZW_BITS),
+      found;
+    while ((found = lzwKeys[slot]) !== key && found !== -1) slot = (slot + 1) & LZW_MASK;
+    if (found === key) prefix = lzwCodes[slot];
     else {
       write(prefix);
-      if (nextCode < 4096) dictionary.set(key, nextCode++);
-      else {
+      if (nextCode < 4096) {
+        lzwKeys[slot] = key;
+        lzwCodes[slot] = nextCode++;
+      } else {
         write(256);
-        dictionary.clear();
+        lzwKeys.fill(-1);
         bits = 9;
         nextCode = 258;
       }
@@ -218,13 +232,17 @@ function lzw(pixels) {
   if (bitCount) out[position++] = accumulator & 255;
   if (position > out.length)
     throw messageError(new Error(''), "errors.imageCodecs.gifCompressionExceededItsBoundedOutputBuffer", {});
-  const parts = [new Uint8Array([8])];
+  const data = new Uint8Array(1 + position + Math.ceil(position / 255) + 1);
+  let at = 0;
+  data[at++] = 8;
   for (let i = 0; i < position; i += 255) {
     const size = Math.min(255, position - i);
-    parts.push(new Uint8Array([size]), out.subarray(i, i + size));
+    data[at++] = size;
+    data.set(out.subarray(i, i + size), at);
+    at += size;
   }
-  parts.push(new Uint8Array([0]));
-  return new Blob(parts);
+  data[at] = 0;
+  return data;
 }
 
 export class GIFEncoder extends BoundedOutput {
@@ -261,10 +279,17 @@ export class GIFEncoder extends BoundedOutput {
         })
       : quantizeGIF(rgba, this.width, { dither: this.dither });
     if (this.globalPalette) {
-      this.previous ??= { data: new Uint8ClampedArray(rgba.length) };
+      if (!this.previous) {
+        const data = new Uint8ClampedArray(rgba.length);
+        this.previous = { data, words: pixelWords(data) };
+      }
       this.previous.data.set(rgba);
       this.previous.pixels = pixels;
     }
+    this.addCompressed(lzw(pixels), this.globalPalette ? null : palette);
+  }
+  /** The next frame as compressed image data (`lzw` of its indices); `palette`, a still GIF's own table. */
+  addCompressed(data, palette = null) {
     // GIF stores hundredths of a second. Cumulative rounding prevents timing
     // drift at e.g. 24 fps while respecting the format's quantization.
     const delay = Math.max(
@@ -279,10 +304,8 @@ export class GIFEncoder extends BoundedOutput {
       new Uint8Array([0x2c, 0, 0, 0, 0]),
       u16(this.width),
       u16(this.height),
-      ...(this.globalPalette
-        ? [new Uint8Array([0])]
-        : [new Uint8Array([0x87]), palette]),
-      lzw(pixels),
+      ...(palette ? [new Uint8Array([0x87]), palette] : [new Uint8Array([0])]),
+      data,
     );
     this.frames++;
   }

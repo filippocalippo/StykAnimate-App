@@ -340,3 +340,17 @@ test('a warm worker no export takes is released after a minute, and one that can
   assert.equal(workers.length, 3);
   t.mock.timers.tick(60000);
 });
+
+test('pixel frames come from the worker as RGBA the encoder owns, checked, without the interface canvas', async t => {
+  let size = 32 * 32 * 4;
+  const {workers} = environment(t, answer({render: message => message.pixels ? {ok: true, pixels: {data: new Uint8ClampedArray(size), width: 32, height: 32}} : undefined}));
+  const renderer = exporter({}, {range: [0, 3]});
+  await renderer.load(report());
+  const frame = await renderer.renderPixelsTick(2);
+  assert.deepEqual([frame.width, frame.height, frame.data.length], [32, 32, 32 * 32 * 4]);
+  assert.deepEqual(workers[0].messages.at(-1), {id: workers[0].messages.at(-1).id, operation: 'render', tick: 2, override: false, svg: false, native: false, preserveAlpha: false, pixels: true});
+  assert.equal(renderer.canvas.width, 1, 'the interface canvas is never sized for pixel frames');
+  size = 12;
+  await assert.rejects(renderer.renderPixelsTick(3), /incomplete frame/);
+  renderer.dispose();
+});

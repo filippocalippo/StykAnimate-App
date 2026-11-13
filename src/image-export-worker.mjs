@@ -3,8 +3,22 @@ import {errorMessageData, messageError} from './localized-error.mjs';
 import { GIFPaletteBuilder } from "./gif-quantize.mjs";
 import { APNGEncoder, GIFEncoder, SequenceZIP, validatePNGFrame } from "./image-codecs.mjs";
 import {exportContext, checkExportContext} from './export-canvas.mjs';
+import {GIFFrames, gifHelpers} from './gif-frames.mjs';
 
 let output, canvas, context, config, paletteBuilder;
+/** An animated GIF's first-pass frames, kept for the second (`config.retain`); each is released once encoded. */
+let retained = [];
+/** An animated GIF's helper workers (`config.helpers`), started with the export so they load during the first pass,
+ * and the second pass spread over them. */
+let helpers = [], frames = null;
+const endHelpers = () => {
+  frames?.close();
+  for (const helper of helpers) helper.terminate();
+  helpers = [];
+  frames = null;
+};
+/** Adds a frame of the second pass: to the helpers when there are some, else here. */
+const encodeFrame = (rgba) => (frames ? frames.push(rgba) : output.add(rgba));
 let busy = false;
 // In streaming mode the encoder's appended bytes are forwarded to the caller
 // with every response instead of being retained until finish.
@@ -28,7 +42,12 @@ self.addEventListener("message", async (event) => {
       config = message.config;
       if (config.encodedPNG && !["apng", "png-sequence"].includes(config.format))
         throw new Error("Encoded PNG frames require APNG or PNG sequence export.");
-      if (config.format !== "svg-sequence" && !config.encodedPNG) {
+      if (config.pixels && !["gif", "gif-sequence"].includes(config.format))
+        throw new Error("Pixel frames require GIF or GIF sequence export.");
+      retained = [];
+      endHelpers();
+      if (config.format === "gif" && config.helpers > 0) helpers = gifHelpers(config.helpers);
+      if (config.format !== "svg-sequence" && !config.encodedPNG && !config.pixels) {
         canvas = new OffscreenCanvas(config.width, config.height);
         context = exportContext(canvas);
         if (!context) throw messageError(new Error(''), "errors.imageExportWorker.aCanvasImageEncoderIsUnavailable", {});
@@ -45,8 +64,13 @@ self.addEventListener("message", async (event) => {
     } else if (message.operation === "encode") {
       if (!paletteBuilder || paletteBuilder.frames !== config.totalFrames)
         throw messageError(new Error(''), "errors.imageExportWorker.theGifPaletteAnalysisIsIncomplete", {});
-      output = new GIFEncoder({ ...config, palette: paletteBuilder.finish() });
+      const palette = paletteBuilder.finish();
+      output = new GIFEncoder({ ...config, palette });
       paletteBuilder = null;
+      if (helpers.length) {
+        frames = new GIFFrames(output, palette, { width: config.width, height: config.height, dither: config.dither, helpers });
+        helpers = [];
+      }
       respond(message.id);
     } else if (message.operation === "frame") {
       if (!output && !paletteBuilder)
@@ -58,6 +82,29 @@ self.addEventListener("message", async (event) => {
         const data = new Uint8Array(await message.png.arrayBuffer());
         if (config.format === "png-sequence") validatePNGFrame(data, config.width, config.height);
         output.add(data);
+        respond(message.id);
+        return;
+      }
+      if (config.pixels) {
+        // Pixels read from the export renderer's canvas: what drawing its bitmap here and reading it back gives.
+        let rgba;
+        if (message.retained) {
+          if (paletteBuilder || !retained.length)
+            throw messageError(new Error(''), "errors.imageExportWorker.theImageExportWasNotInitialized", {});
+          rgba = retained.shift();
+        } else {
+          rgba = message.pixels;
+          if (!(rgba instanceof Uint8ClampedArray) || rgba.length !== config.width * config.height * 4)
+            throw messageError(new Error(''), "errors.imageExportWorker.theRenderedImageFrameHasTheWrongDimensions", {});
+        }
+        if (config.format === "gif-sequence") {
+          const frame = new GIFEncoder({ ...config, totalFrames: 1, loop: false });
+          frame.add(rgba);
+          output.add(new Uint8Array(await frame.finish().arrayBuffer()));
+        } else if (paletteBuilder) {
+          paletteBuilder.add(rgba, config.width);
+          if (config.retain) retained.push(rgba);
+        } else await encodeFrame(rgba);
         respond(message.id);
         return;
       }
@@ -98,7 +145,7 @@ self.addEventListener("message", async (event) => {
           config.height,
         ).data;
         if (paletteBuilder) paletteBuilder.add(rgba, config.width);
-        else output.add(rgba);
+        else await encodeFrame(rgba);
       } else if (config.format === "gif-sequence") {
         const frame = new GIFEncoder({
           ...config,
@@ -122,8 +169,11 @@ self.addEventListener("message", async (event) => {
       respond(message.id);
     } else if (message.operation === "finish") {
       if (!output) throw messageError(new Error(''), "errors.imageExportWorker.theImageExportWasNotInitialized", {});
+      await frames?.flush();
+      endHelpers();
       if (config.stream) {
         output.finish();
+        retained = [];
         if (canvas) canvas.width = canvas.height = 1;
         respond(message.id);
         output = null;
@@ -131,6 +181,7 @@ self.addEventListener("message", async (event) => {
       }
       const blob = output.finish();
       output = null;
+      retained = [];
       if (canvas) canvas.width = canvas.height = 1;
       self.postMessage({ id: message.id, ok: true, blob });
     } else throw messageError(new Error(''), "errors.imageExportWorker.unknownImageExportOperation", {});
@@ -138,6 +189,8 @@ self.addEventListener("message", async (event) => {
     message.bitmap?.close();
     if (canvas) canvas.width = canvas.height = 1;
     output = paletteBuilder = null;
+    retained = [];
+    endHelpers();
     self.postMessage({
       id: message.id,
       ok: false,
