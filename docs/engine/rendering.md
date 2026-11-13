@@ -295,9 +295,10 @@ threads, the stage's frames are drawn by the CPU rasterizer on the engine's work
   task per band of 64 rows. Each band is the same view moved up by its first row (`styk_raster::Bands::render`, as an
   export's tiles are drawn), each layer cropped to the band, and writes its rows, straight RGBA, into the frame's buffer.
 - **The page shows the newest finished frame** (`src/engine/engine-stage-processor.mjs`): it copies the frame out of the
-  engine's memory into an `ImageData` and puts it on a 2D canvas laid over the scene canvas (`putImageData`; the
-  software compositor shows it in the next frame, sooner than `transferFromImageBitmap` after `createImageBitmap`, which
-  adds a task). It looks when the engine's progress counter moves (`whenProgress`, D7); the picture on show stays
+  engine's memory into an `ImageData` and puts it on a 2D canvas laid over the scene canvas (`putImageData`: shown with the
+  next frame. Through `createImageBitmap` and `transferFromImageBitmap` each frame reached its canvas 1.5 to 1.8 ms later at
+  the median, up to 3.3 ms at the 95th percentile, and the interface thread did a little more a frame: 6.3 against 4.9 ms
+  dragging a joint on the busy scene). It looks when the engine's progress counter moves (`whenProgress`, D7); the picture on show stays
   meanwhile. One frame is drawn at a time; a newer request replaces the one waiting for it (a gesture never piles up
   frames), and a frame let go of (the stage freed, the processor switched off) ends between its primitives.
 - **What a picture shown later means for the measurements.** The draw's span (`stage draw`, `stage draw prepared`) is the
