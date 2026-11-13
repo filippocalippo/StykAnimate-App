@@ -106,11 +106,10 @@ export function createCanvasHandles(app) {
     ].join("|"), key = `${unscaled}|${state.view.scale}`;
     const cached = selectStatic ? selectionHandleCache.get(geometry) : handleCache;
     if (cached?.key === key && (selectStatic || cached.geometry === geometry)) return cached.handles;
-    // A zoom changes the joints' sizes alone: the descriptors are resized, not built again. Descriptors a resize made are this
-    // cache's own (the ones built are shared with the descriptor cache), so the next resize reuses them.
+    // A zoom changes the joints' sizes alone: the descriptors are resized, not built again.
     if (!selectStatic && cached?.unscaled === unscaled && cached.geometry === geometry) {
-      const resized = rescalePivotHandles(cached.handles, {viewScale: state.view.scale, autoSize: settings.autoSizeHandles, minDiameter: 4, maxDiameter: settings.handleSize * 2, reuse: cached.resized});
-      handleCache = {geometry, key, unscaled, handles: resized, resized: true};
+      const resized = rescalePivotHandles(cached.handles, {viewScale: state.view.scale, autoSize: settings.autoSizeHandles, minDiameter: 4, maxDiameter: settings.handleSize * 2});
+      handleCache = {geometry, key, unscaled, handles: resized};
       return resized;
     }
     const {hidden, locked} = shown;

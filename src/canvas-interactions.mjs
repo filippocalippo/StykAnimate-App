@@ -165,11 +165,9 @@ function pinnedHandleRadius(viewScale, minDiameter, maxDiameter) {
 }
 
 /** `handles` (from `getPivotHandles`) as `getPivotHandles` gives them at another view scale, all else the same: only the
- * sizes change, so a zoom resizes the descriptors in one pass instead of building them again. New arrays; new descriptors,
- * unless `reuse`: then `handles`' own are resized in place (a zoom resizes every frame), which only a caller that alone holds
- * them may ask (descriptors `getPivotHandles` built are shared through its `descriptorCache`). `baseRadius` (the size
- * before the view's scale, see `pinnedHandleRadius`) is worked out where it was not and now matters. */
-export function rescalePivotHandles(handles, {viewScale = 1, autoSize = true, minDiameter = 4, maxDiameter = 10, reuse = false} = {}) {
+ * sizes change, so a zoom resizes the descriptors in one pass instead of building them again. New arrays and descriptors;
+ * `baseRadius` (the size before the view's scale, see `pinnedHandleRadius`) is worked out where it was not and now matters. */
+export function rescalePivotHandles(handles, {viewScale = 1, autoSize = true, minDiameter = 4, maxDiameter = 10} = {}) {
   const scale = Math.max(1e-9, Math.abs(viewScale)), result = new Array(handles.length), pinned = pinnedHandleRadius(viewScale, minDiameter, maxDiameter);
   for (let i = 0; i < handles.length; i++) {
     const handle = handles[i];
@@ -177,8 +175,7 @@ export function rescalePivotHandles(handles, {viewScale = 1, autoSize = true, mi
     if (handle.connector) screenRadius = maxDiameter / 2;
     else if (pinned !== undefined) screenRadius = pinned;
     else screenRadius = scaledHandleRadius(baseRadius ??= baseHandleRadius(handle.g, handle.id, {autoSize, minDiameter, maxDiameter}), viewScale, minDiameter, maxDiameter);
-    if (reuse) { handle.radius = screenRadius / scale; handle.screenRadius = screenRadius; handle.baseRadius = baseRadius; result[i] = handle; }
-    else result[i] = {...handle, radius: screenRadius / scale, screenRadius, baseRadius};
+    result[i] = {...handle, radius: screenRadius / scale, screenRadius, baseRadius};
   }
   const groups = (handles.groups ?? []).map(group => ({uid: group.uid, offset: group.offset, handles: result.slice(group.offset, group.offset + group.handles.length)}));
   Object.defineProperty(result, 'groups', {value: groups});

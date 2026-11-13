@@ -259,21 +259,3 @@ test('a zoom resizes the descriptors to what they would be built as at the new s
   } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
 });
 
-test('a resize of descriptors a resize made reuses them, the same sizes as copies', {skip: !engineBuilt}, async () => {
-  const {editor, owner} = await ownedEditor({demo: false}, crowd(3));
-  try {
-    editor.seek(1);
-    const options = {frame: editor.evaluatedFrame, selectedUid: 2, selectedUids: new Set([2]), viewScale: 1, maxDiameter: 12};
-    const built = getPivotHandles(editor.geometry, options), copy = rescalePivotHandles(built, {viewScale: 2.5, maxDiameter: 12});
-    const before = built.map(handle => ({...handle}));
-    let reused = copy;
-    for (const viewScale of [3, .4, 1.7]) {
-      const next = rescalePivotHandles(reused, {viewScale, maxDiameter: 12, reuse: true}), expected = rescalePivotHandles(built, {viewScale, maxDiameter: 12});
-      assert.ok(next.every((handle, i) => handle === copy[i]), 'the same descriptors');
-      assert.deepEqual(next.map(({baseRadius, ...handle}) => handle), expected.map(({baseRadius, ...handle}) => handle), `scale ${viewScale}`);
-      assert.ok(next.groups.every(group => group.handles.every((handle, i) => handle === next[group.offset + i])));
-      reused = next;
-    }
-    assert.deepEqual(built.map(handle => ({...handle})), before, 'the descriptors built are not changed');
-  } finally { owner.release(); }
-});
