@@ -111,6 +111,39 @@ fn a_newer_request_replaces_the_one_waiting_and_the_buffers_stay_bounded() {
 }
 
 #[test]
+fn a_frame_shown_carries_the_number_of_its_own_request() {
+    with_workers(2, |engine| {
+        let bytes = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../engine/crates/styk-eval/tests/fixtures/generators/explosions.json")).unwrap();
+        engine.open(&bytes, "json", "fixture").unwrap();
+        let snapshot = engine.prepared_frame_now_at(0.0).expect("a frame");
+        let size = [320, 180];
+        let view = view(&snapshot.generation.prepared.doc, snapshot.frame.camera.as_ref(), size);
+        let request = || Request { generation: snapshot.generation.clone(), list: snapshot.frame.list.clone(), view, orientation: None, size, grid: DrawingGrid::World };
+        let mut stage = StageRaster::new(engine);
+        // The first is drawn, the second waits for it; the first ends before the third is asked for, without anybody looking.
+        stage.request(request());
+        stage.request(request());
+        std::thread::sleep(Duration::from_millis(300));
+        stage.request(request());
+        assert_eq!(stage.ready().map(|shot| shot.serial), Some(1), "the first, taken when the third was asked for");
+        // The second started then, under its own number; the third waits for it.
+        let mut seen = vec![1];
+        let started = Instant::now();
+        while seen.last() != Some(&3) {
+            assert!(started.elapsed() < Duration::from_secs(20));
+            stage.poll();
+            if let Some(serial) = stage.ready().map(|shot| shot.serial)
+                && seen.last() != Some(&serial)
+            {
+                seen.push(serial);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(seen, [1, 2, 3]);
+    });
+}
+
+#[test]
 fn the_live_cels_slots_are_drawn_from_what_the_stage_hands_over() {
     use styk_eval::live::{Run, CELL};
     with_workers(2, |engine| {

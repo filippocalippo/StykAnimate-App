@@ -126,7 +126,8 @@ pub struct StageRaster {
     engine: Engine,
     serial: u64,
     drawing: Option<Arc<Shot>>,
-    queued: Option<Request>,
+    /// The request waiting for the frame being drawn, and its number.
+    queued: Option<(Request, u64)>,
     ready: Option<Arc<Shot>>,
     spare: Option<Vec<u8>>,
     painter: Arc<Mutex<Painter>>,
@@ -146,10 +147,11 @@ impl StageRaster {
 
     /// Asks for a frame: drawn now when no other is being drawn, else once it is (replacing any other waiting).
     pub fn request(&mut self, request: Request) {
-        self.serial += 1;
+        // A frame that ended meanwhile is taken first, and the one waiting for it starts under its own number.
         self.poll();
+        self.serial += 1;
         if self.drawing.is_some() {
-            if self.queued.replace(request).is_some() {
+            if self.queued.replace((request, self.serial)).is_some() {
                 self.stats.replaced += 1;
             }
         } else {
@@ -198,8 +200,8 @@ impl StageRaster {
                     self.recycle(old);
                 }
             }
-            if let Some(request) = self.queued.take() {
-                self.start(request, self.serial);
+            if let Some((request, serial)) = self.queued.take() {
+                self.start(request, serial);
             }
         }
         self.drawing.is_some()
