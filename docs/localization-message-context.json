@@ -2124,512 +2124,512 @@
   },
   "audioTimeline.addEmptyTrack": {
     "locations": [
-      "src/audio-timeline.mjs:65"
+      "src/audio-timeline.mjs:66"
     ],
     "context": "const emptyTrack = translatedElement(el('button', emptyActions, 'button small', interfaceText(\"audioTimeline.addEmptyTrack\")), \"audioTimeline.addEmptyTrack\", {}"
   },
   "audioTimeline.addMusicDialogueOrSoundEffects": {
     "locations": [
-      "src/audio-timeline.mjs:62"
+      "src/audio-timeline.mjs:63"
     ],
     "context": "const emptyText = el('div', this.empty); translatedElement(el('strong', emptyText, '', interfaceText(\"audioTimeline.addMusicDialogueOrSoundEffects\")), \"audioTim"
   },
   "audioTimeline.addTrack": {
     "locations": [
-      "src/audio-timeline.mjs:33"
+      "src/audio-timeline.mjs:34"
     ],
     "context": "this.newTrackButton = this.button(this.toolbar, interfaceText(\"audioTimeline.newAudioTrack\"), () => this.addTrack(), 'plus'); translatedElement(el('span', this."
   },
   "audioTimeline.andExtendedTheAnimation": {
     "locations": [
-      "src/audio-timeline.mjs:400"
+      "src/audio-timeline.mjs:402"
     ],
     "context": "localizedText(this.live, \"audioTimeline.importedDragToMoveDragAnEdgeTo\", {name: asset.name, value: extend?{messageKey: \"audioTimeline.andExtendedTheAnimation\"}:"
   },
   "audioTimeline.audio": {
     "locations": [
-      "src/audio-timeline.mjs:174"
+      "src/audio-timeline.mjs:176"
     ],
-    "context": "if (this.launcher) { this.launcher.dataset.hasAudio = String(state.tracks.some(track => track.clips.length)); localizedAttribute(this.launcher, 'title', state.t"
+    "context": "if (this.launcher) { setAttr(this.launcher, 'data-has-audio', String(state.tracks.some(track => track.clips.length))); localizedAttribute(this.launcher, 'title'"
   },
   "audioTimeline.audio2": {
     "locations": [
-      "src/audio-timeline.mjs:29",
-      "src/audio-timeline.mjs:190",
-      "src/audio-timeline.mjs:207"
+      "src/audio-timeline.mjs:30",
+      "src/audio-timeline.mjs:192",
+      "src/audio-timeline.mjs:209"
     ],
     "context": "this.title = translatedElement(el('strong', this.toolbar, '', interfaceText(\"audioTimeline.audio2\")), \"audioTimeline.audio2\", {});"
   },
   "audioTimeline.audioClipControls": {
     "locations": [
-      "src/audio-timeline.mjs:83",
-      "src/audio-timeline.mjs:84"
+      "src/audio-timeline.mjs:84",
+      "src/audio-timeline.mjs:85"
     ],
     "context": "this.footer.classList.add('audio-clip-popover');this.footer.setAttribute('popover','auto');this.footer.setAttribute('role','dialog');localizedAttribute(this.foo"
   },
   "audioTimeline.audioClipProperties": {
     "locations": [
-      "src/audio-timeline.mjs:82",
-      "src/audio-timeline.mjs:96",
-      "src/audio-timeline.mjs:411"
+      "src/audio-timeline.mjs:83",
+      "src/audio-timeline.mjs:97",
+      "src/audio-timeline.mjs:413"
     ],
     "context": "this.propertiesButton = this.button(this.clipControls, interfaceText(\"audioTimeline.audioClipProperties\"), () => this.properties(), 'sliders'); translatedElemen"
   },
   "audioTimeline.audioClips": {
     "locations": [
-      "src/audio-timeline.mjs:53"
+      "src/audio-timeline.mjs:54"
     ],
     "context": "this.body = el('div', this.root, 'audio-body'); this.body.tabIndex = 0; this.body.setAttribute('role', 'region'); localizedAttribute(this.body, 'aria-label', \"a"
   },
   "audioTimeline.audioClipTrack": {
     "locations": [
-      "src/audio-timeline.mjs:418"
+      "src/audio-timeline.mjs:420"
     ],
     "context": "const trackLabel = translatedElement(el('label', fields, '', interfaceText(\"audioTimeline.track\")), \"audioTimeline.track\", {}), select = el('select', trackLabel"
   },
   "audioTimeline.audioLength": {
     "locations": [
-      "src/audio-timeline.mjs:190"
+      "src/audio-timeline.mjs:192"
     ],
     "context": "localizedText(this.title, (state.tracks.length ? 'audioTimeline.audioLength' : \"audioTimeline.audio2\"), (state.tracks.length ? {length: state.tracks.length} : {"
   },
   "audioTimeline.audioMovedToSeconds": {
     "locations": [
-      "src/audio-timeline.mjs:359"
+      "src/audio-timeline.mjs:361"
     ],
     "context": "this.selected = gesture.clip.id; localizedText(this.live, \"audioTimeline.audioMovedToSeconds\", {name: this.found().track.name, value: this.found().clip.start.to"
   },
   "audioTimeline.audioOptions": {
     "locations": [
-      "src/audio-timeline.mjs:39",
-      "src/audio-timeline.mjs:41"
+      "src/audio-timeline.mjs:40",
+      "src/audio-timeline.mjs:42"
     ],
     "context": "this.optionsButton = this.button(this.toolbar, interfaceText(\"audioTimeline.audioOptions\"), () => { if (this.options.matches(':popover-open')) this.options.hide"
   },
   "audioTimeline.audioTimeline": {
     "locations": [
-      "src/audio-timeline.mjs:24"
+      "src/audio-timeline.mjs:25"
     ],
     "context": "this.root.id = 'timeline-audio-panel'; this.root.hidden = !this.open; localizedAttribute(this.root, 'aria-label', \"audioTimeline.audioTimeline\", {});"
   },
   "audioTimeline.audioTimelinePosition": {
     "locations": [
-      "src/audio-timeline.mjs:67"
+      "src/audio-timeline.mjs:68"
     ],
     "context": "this.horizontal = el('div', this.root, 'audio-horizontal'); this.horizontal.tabIndex = 0; this.horizontal.setAttribute('role', 'region'); localizedAttribute(thi"
   },
   "audioTimeline.audioTrackName": {
     "locations": [
-      "src/audio-timeline.mjs:234"
+      "src/audio-timeline.mjs:236"
     ],
     "context": "label = el('div', this.labelColumn, 'audio-track'); label.events = new AbortController(); label.dataset.track = track.id; const name = el('input', label, 'audio"
   },
   "audioTimeline.audioWithTracks": {
     "locations": [
-      "src/audio-timeline.mjs:174"
+      "src/audio-timeline.mjs:176"
     ],
-    "context": "if (this.launcher) { this.launcher.dataset.hasAudio = String(state.tracks.some(track => track.clips.length)); localizedAttribute(this.launcher, 'title', state.t"
+    "context": "if (this.launcher) { setAttr(this.launcher, 'data-has-audio', String(state.tracks.some(track => track.clips.length))); localizedAttribute(this.launcher, 'title'"
   },
   "audioTimeline.cancel": {
     "locations": [
-      "src/audio-timeline.mjs:32"
+      "src/audio-timeline.mjs:33"
     ],
     "context": "translatedElement(el('span', this.cancelImportButton, '', interfaceText(\"audioTimeline.cancel\")), \"audioTimeline.cancel\", {});"
   },
   "audioTimeline.cancelAudioImport": {
     "locations": [
-      "src/audio-timeline.mjs:31"
+      "src/audio-timeline.mjs:32"
     ],
     "context": "this.cancelImportButton=this.button(this.toolbar,interfaceText(\"audioTimeline.cancelAudioImport\"),()=>this.importController?.abort(),'close');this.cancelImportB"
   },
   "audioTimeline.chooseAudioRecording": {
     "locations": [
-      "src/audio-timeline.mjs:51"
+      "src/audio-timeline.mjs:52"
     ],
     "context": "this.file = el('input', this.root); this.file.type = 'file'; this.file.accept = '.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.aif,.aiff,audio/*'; this.file.hidden = tr"
   },
   "audioTimeline.clip": {
     "locations": [
-      "src/audio-timeline.mjs:84"
+      "src/audio-timeline.mjs:85"
     ],
     "context": "this.clipToolsButton=this.button(this.toolbar,interfaceText(\"audioTimeline.audioClipControls\"),()=>{if(this.footer.matches(':popover-open'))this.footer.hidePopo"
   },
   "audioTimeline.clipVolume": {
     "locations": [
-      "src/audio-timeline.mjs:414"
+      "src/audio-timeline.mjs:416"
     ],
     "context": "for (const [key, name, value, max] of [messageTuple(['start', interfaceText(\"audioTimeline.startSeconds\"), clip.start, 3600], {1: {key: \"audioTimeline.startSeco"
   },
   "audioTimeline.closeAudio": {
     "locations": [
-      "src/audio-timeline.mjs:49"
+      "src/audio-timeline.mjs:50"
     ],
     "context": "this.closeButton = this.button(this.toolbar, interfaceText(\"audioTimeline.closeAudio\"), () => this.setOpen(false, {focus:true}), 'close');"
   },
   "audioTimeline.closeAudioProperties": {
     "locations": [
-      "src/audio-timeline.mjs:412"
+      "src/audio-timeline.mjs:414"
     ],
     "context": "const title = el('div', popover, 'audio-properties-title'); el('strong', title, '', asset.name); this.button(title, interfaceText(\"audioTimeline.closeAudioPrope"
   },
   "audioTimeline.copyAudioClip": {
     "locations": [
-      "src/audio-timeline.mjs:97"
+      "src/audio-timeline.mjs:98"
     ],
     "context": "{label:interfaceText(\"audioTimeline.copyAudioClip\"), labelKey: \"audioTimeline.copyAudioClip\",symbol:'duplicate',action:()=>this.editor.copyAudioClip(this.select"
   },
   "audioTimeline.cutAudioClip": {
     "locations": [
-      "src/audio-timeline.mjs:98"
+      "src/audio-timeline.mjs:99"
     ],
     "context": "{label:interfaceText(\"audioTimeline.cutAudioClip\"), labelKey: \"audioTimeline.cutAudioClip\",symbol:'cut',action:()=>{this.editor.cutAudioClip(this.selected);this"
   },
   "audioTimeline.deleteAudioClip": {
     "locations": [
-      "src/audio-timeline.mjs:81",
-      "src/audio-timeline.mjs:102",
-      "src/audio-timeline.mjs:422"
+      "src/audio-timeline.mjs:82",
+      "src/audio-timeline.mjs:103",
+      "src/audio-timeline.mjs:424"
     ],
     "context": "this.deleteButton = this.button(this.clipControls, interfaceText(\"audioTimeline.deleteAudioClip\"), () => { editor.deleteAudioClip(this.selected); this.selected "
   },
   "audioTimeline.deleteAudioTrack": {
     "locations": [
-      "src/audio-timeline.mjs:242"
+      "src/audio-timeline.mjs:244"
     ],
     "context": "const menu = event => { event.preventDefault(); this.trackId = track.id; showTimelineMenu(this, event, [[{label: interfaceText(\"audioTimeline.importAudioHere\"),"
   },
   "audioTimeline.details": {
     "locations": [
-      "src/audio-timeline.mjs:82"
+      "src/audio-timeline.mjs:83"
     ],
     "context": "this.propertiesButton = this.button(this.clipControls, interfaceText(\"audioTimeline.audioClipProperties\"), () => this.properties(), 'sliders'); translatedElemen"
   },
   "audioTimeline.dragBetweenTracksToMoveShiftKeepsTiming": {
     "locations": [
-      "src/audio-timeline.mjs:423"
+      "src/audio-timeline.mjs:425"
     ],
     "context": "translatedElement(el('p', popover, '', interfaceText(\"audioTimeline.dragBetweenTracksToMoveShiftKeepsTiming\")), \"audioTimeline.dragBetweenTracksToMoveShiftKeeps"
   },
   "audioTimeline.dragClipsBetweenTracks": {
     "locations": [
-      "src/audio-timeline.mjs:185"
+      "src/audio-timeline.mjs:187"
     ],
     "context": "this.selectionName.textContent = asset?.name ?? interfaceText(\"audioTimeline.dragClipsBetweenTracks\");"
   },
   "audioTimeline.dragEdgesToTrimDoubleClickForDetails": {
     "locations": [
-      "src/audio-timeline.mjs:186"
+      "src/audio-timeline.mjs:188"
     ],
     "context": "this.selectionTime.textContent = preview ? `${preview.start.toFixed(2)}s – ${(preview.start + preview.duration).toFixed(2)}s · ${preview.duration.toFixed(2)}s${"
   },
   "audioTimeline.dragToFadeIn": {
     "locations": [
-      "src/audio-timeline.mjs:266"
+      "src/audio-timeline.mjs:268"
     ],
     "context": "for (const key of ['fadeIn', 'fadeOut']) { const handle = el('span', node, `audio-fade audio-${key}`); handle.dataset.edge = key; localizedAttribute(handle, \"ti"
   },
   "audioTimeline.dragToFadeOut": {
     "locations": [
-      "src/audio-timeline.mjs:266"
+      "src/audio-timeline.mjs:268"
     ],
     "context": "for (const key of ['fadeIn', 'fadeOut']) { const handle = el('span', node, `audio-fade audio-${key}`); handle.dataset.edge = key; localizedAttribute(handle, \"ti"
   },
   "audioTimeline.dragToMoveBetweenTracksEdgesTrimTop": {
     "locations": [
-      "src/audio-timeline.mjs:269"
+      "src/audio-timeline.mjs:271"
     ],
     "context": "node.dataset.dragging = String(this.gesture?.clip?.id === value.id && this.gesture.moved); localizedAttribute(node, \"title\", \"audioTimeline.dragToMoveBetweenTra"
   },
   "audioTimeline.dropAClipHereToCreateATrack": {
     "locations": [
-      "src/audio-timeline.mjs:59",
-      "src/audio-timeline.mjs:207"
+      "src/audio-timeline.mjs:60",
+      "src/audio-timeline.mjs:209"
     ],
     "context": "this.dropRow = translatedElement(el('div', this.lanes, 'audio-new-lane', interfaceText(\"audioTimeline.dropAClipHereToCreateATrack\")), \"audioTimeline.dropAClipHe"
   },
   "audioTimeline.dropAnAudioFileHereOrImportOne": {
     "locations": [
-      "src/audio-timeline.mjs:62"
+      "src/audio-timeline.mjs:63"
     ],
     "context": "const emptyText = el('div', this.empty); translatedElement(el('strong', emptyText, '', interfaceText(\"audioTimeline.addMusicDialogueOrSoundEffects\")), \"audioTim"
   },
   "audioTimeline.dropAudioHere": {
     "locations": [
-      "src/audio-timeline.mjs:256"
+      "src/audio-timeline.mjs:258"
     ],
     "context": "if (!clips.length) { ctx.fillStyle = css.color; ctx.globalAlpha = .4; ctx.fillText(interfaceText(\"audioTimeline.dropAudioHere\"), 14, top + 36 - sy); ctx.globalA"
   },
   "audioTimeline.dropMusicDialogueOrSoundEffects": {
     "locations": [
-      "src/audio-timeline.mjs:36",
-      "src/audio-timeline.mjs:402"
+      "src/audio-timeline.mjs:37",
+      "src/audio-timeline.mjs:404"
     ],
     "context": "this.hint = translatedElement(el('span', this.toolbar, 'audio-hint', interfaceText(\"audioTimeline.dropMusicDialogueOrSoundEffects\")), \"audioTimeline.dropMusicDi"
   },
   "audioTimeline.duplicate": {
     "locations": [
-      "src/audio-timeline.mjs:80"
+      "src/audio-timeline.mjs:81"
     ],
     "context": "this.duplicateButton = this.button(this.clipControls, interfaceText(\"audioTimeline.duplicateAudioClip\"), () => { this.selected = editor.duplicateAudioClip(this."
   },
   "audioTimeline.duplicateAudioClip": {
     "locations": [
-      "src/audio-timeline.mjs:80",
-      "src/audio-timeline.mjs:101",
-      "src/audio-timeline.mjs:422"
+      "src/audio-timeline.mjs:81",
+      "src/audio-timeline.mjs:102",
+      "src/audio-timeline.mjs:424"
     ],
     "context": "this.duplicateButton = this.button(this.clipControls, interfaceText(\"audioTimeline.duplicateAudioClip\"), () => { this.selected = editor.duplicateAudioClip(this."
   },
   "audioTimeline.durationSeconds": {
     "locations": [
-      "src/audio-timeline.mjs:414"
+      "src/audio-timeline.mjs:416"
     ],
     "context": "for (const [key, name, value, max] of [messageTuple(['start', interfaceText(\"audioTimeline.startSeconds\"), clip.start, 3600], {1: {key: \"audioTimeline.startSeco"
   },
   "audioTimeline.extendAnimationToAudio": {
     "locations": [
-      "src/audio-timeline.mjs:34"
+      "src/audio-timeline.mjs:35"
     ],
     "context": "this.extendButton = this.button(this.toolbar, interfaceText(\"audioTimeline.extendAnimationToAudio\"), () => this.extend(), 'chevron-right');"
   },
   "audioTimeline.fadeInSeconds": {
     "locations": [
-      "src/audio-timeline.mjs:414"
+      "src/audio-timeline.mjs:416"
     ],
     "context": "for (const [key, name, value, max] of [messageTuple(['start', interfaceText(\"audioTimeline.startSeconds\"), clip.start, 3600], {1: {key: \"audioTimeline.startSeco"
   },
   "audioTimeline.fadeOutSeconds": {
     "locations": [
-      "src/audio-timeline.mjs:414"
+      "src/audio-timeline.mjs:416"
     ],
     "context": "for (const [key, name, value, max] of [messageTuple(['start', interfaceText(\"audioTimeline.startSeconds\"), clip.start, 3600], {1: {key: \"audioTimeline.startSeco"
   },
   "audioTimeline.fitAnimation": {
     "locations": [
-      "src/audio-timeline.mjs:35"
+      "src/audio-timeline.mjs:36"
     ],
     "context": "translatedElement(el('span',this.extendButton,'',interfaceText(\"audioTimeline.fitAnimation\")), \"audioTimeline.fitAnimation\", {});"
   },
   "audioTimeline.hearAudioWhileScrubbing": {
     "locations": [
-      "src/audio-timeline.mjs:43"
+      "src/audio-timeline.mjs:44"
     ],
     "context": "this.scrub = option(interfaceText(\"audioTimeline.hearAudioWhileScrubbing\"), interfaceText(\"audioTimeline.playShortSnippetsAsYouDragThePlayhead\"), interfaceText("
   },
   "audioTimeline.hide": {
     "locations": [
-      "src/audio-timeline.mjs:174"
+      "src/audio-timeline.mjs:176"
     ],
-    "context": "if (this.launcher) { this.launcher.dataset.hasAudio = String(state.tracks.some(track => track.clips.length)); localizedAttribute(this.launcher, 'title', state.t"
+    "context": "if (this.launcher) { setAttr(this.launcher, 'data-has-audio', String(state.tracks.some(track => track.clips.length))); localizedAttribute(this.launcher, 'title'"
   },
   "audioTimeline.importAudio": {
     "locations": [
-      "src/audio-timeline.mjs:30",
-      "src/audio-timeline.mjs:402"
+      "src/audio-timeline.mjs:31",
+      "src/audio-timeline.mjs:404"
     ],
     "context": "this.importButton = this.button(this.toolbar, interfaceText(\"audioTimeline.importAudio\"), () => this.file.click(), 'plus'); translatedElement(el('span', this.im"
   },
   "audioTimeline.importAudio2": {
     "locations": [
-      "src/audio-timeline.mjs:64"
+      "src/audio-timeline.mjs:65"
     ],
     "context": "const emptyImport = translatedElement(el('button', emptyActions, 'button primary small', interfaceText(\"audioTimeline.importAudio2\")), \"audioTimeline.importAudi"
   },
   "audioTimeline.importAudioAndExtendAnimation": {
     "locations": [
-      "src/audio-timeline.mjs:397"
+      "src/audio-timeline.mjs:399"
     ],
     "context": "if(extend)this.editor.movieclipBatch(interfaceText(\"audioTimeline.importAudioAndExtendAnimation\"),commit);else commit();"
   },
   "audioTimeline.importAudioHere": {
     "locations": [
-      "src/audio-timeline.mjs:242"
+      "src/audio-timeline.mjs:244"
     ],
     "context": "const menu = event => { event.preventDefault(); this.trackId = track.id; showTimelineMenu(this, event, [[{label: interfaceText(\"audioTimeline.importAudioHere\"),"
   },
   "audioTimeline.importedDragToMoveDragAnEdgeTo": {
     "locations": [
-      "src/audio-timeline.mjs:400"
+      "src/audio-timeline.mjs:402"
     ],
     "context": "localizedText(this.live, \"audioTimeline.importedDragToMoveDragAnEdgeTo\", {name: asset.name, value: extend?{messageKey: \"audioTimeline.andExtendedTheAnimation\"}:"
   },
   "audioTimeline.importing": {
     "locations": [
-      "src/audio-timeline.mjs:391"
+      "src/audio-timeline.mjs:393"
     ],
     "context": "this.onSeek?.(); const report = this.editor.report, start = placement.start, controller = this.importController = new AbortController(); this.importButton.disab"
   },
   "audioTimeline.keepAudioInSyncWithFrameEdits": {
     "locations": [
-      "src/audio-timeline.mjs:45"
+      "src/audio-timeline.mjs:46"
     ],
     "context": "this.ripple = option(interfaceText(\"audioTimeline.keepAudioInSyncWithFrameEdits\"), interfaceText(\"audioTimeline.whenFramesAreInsertedOrRemovedOnEvery\"), interfa"
   },
   "audioTimeline.m": {
     "locations": [
-      "src/audio-timeline.mjs:237"
+      "src/audio-timeline.mjs:239"
     ],
     "context": "label.mute = this.button(label, `Mute ${track.name}`, () => this.editor.setAudioTrack(track.id, {mute: !audioState(this.editor.report).tracks.find(row => row.id"
   },
   "audioTimeline.moveAudioToNewTrack": {
     "locations": [
-      "src/audio-timeline.mjs:358"
+      "src/audio-timeline.mjs:360"
     ],
     "context": "if (gesture.target === 'new') this.editor.movieclipBatch(interfaceText(\"audioTimeline.moveAudioToNewTrack\"), commit); else commit();"
   },
   "audioTimeline.mute": {
     "locations": [
-      "src/audio-timeline.mjs:250"
+      "src/audio-timeline.mjs:252"
     ],
     "context": "for (const key of ['mute', 'solo']) { label[key].setAttribute('aria-pressed', String(track[key])); label[key].setAttribute('aria-label', `${key === 'mute' ? int"
   },
   "audioTimeline.newAudioTrack": {
     "locations": [
-      "src/audio-timeline.mjs:33"
+      "src/audio-timeline.mjs:34"
     ],
     "context": "this.newTrackButton = this.button(this.toolbar, interfaceText(\"audioTimeline.newAudioTrack\"), () => this.addTrack(), 'plus'); translatedElement(el('span', this."
   },
   "audioTimeline.newTrack": {
     "locations": [
-      "src/audio-timeline.mjs:186"
+      "src/audio-timeline.mjs:188"
     ],
     "context": "this.selectionTime.textContent = preview ? `${preview.start.toFixed(2)}s – ${(preview.start + preview.duration).toFixed(2)}s · ${preview.duration.toFixed(2)}s${"
   },
   "audioTimeline.options": {
     "locations": [
-      "src/audio-timeline.mjs:40"
+      "src/audio-timeline.mjs:41"
     ],
     "context": "this.optionsButton.viewAction = true; translatedElement(el('span', this.optionsButton, '', interfaceText(\"audioTimeline.options\")), \"audioTimeline.options\", {})"
   },
   "audioTimeline.optionsFor": {
     "locations": [
-      "src/audio-timeline.mjs:248"
+      "src/audio-timeline.mjs:250"
     ],
     "context": "localizedAttribute(label.gain, 'aria-label', \"audioTimeline.volumeFor\", {name: track.name}); localizedAttribute(label.menu, 'aria-label', \"audioTimeline.options"
   },
   "audioTimeline.pasteAudioAtPlayhead": {
     "locations": [
-      "src/audio-timeline.mjs:99"
+      "src/audio-timeline.mjs:100"
     ],
     "context": "this.editor._audioClipboard&&{label:interfaceText(\"audioTimeline.pasteAudioAtPlayhead\"), labelKey: \"audioTimeline.pasteAudioAtPlayhead\",symbol:'clipboard',actio"
   },
   "audioTimeline.playShortSnippetsAsYouDragThePlayhead": {
     "locations": [
-      "src/audio-timeline.mjs:43"
+      "src/audio-timeline.mjs:44"
     ],
     "context": "this.scrub = option(interfaceText(\"audioTimeline.hearAudioWhileScrubbing\"), interfaceText(\"audioTimeline.playShortSnippetsAsYouDragThePlayhead\"), interfaceText("
   },
   "audioTimeline.releaseToCreateATrackValue": {
     "locations": [
-      "src/audio-timeline.mjs:207"
+      "src/audio-timeline.mjs:209"
     ],
     "context": "localizedText(this.dropRow, (this.gesture?.target === 'new' ? 'audioTimeline.releaseToCreateATrackValue' : \"audioTimeline.dropAClipHereToCreateATrack\"), (this.g"
   },
   "audioTimeline.rippleAudioWithSceneFrames": {
     "locations": [
-      "src/audio-timeline.mjs:45"
+      "src/audio-timeline.mjs:46"
     ],
     "context": "this.ripple = option(interfaceText(\"audioTimeline.keepAudioInSyncWithFrameEdits\"), interfaceText(\"audioTimeline.whenFramesAreInsertedOrRemovedOnEvery\"), interfa"
   },
   "audioTimeline.s": {
     "locations": [
-      "src/audio-timeline.mjs:238"
+      "src/audio-timeline.mjs:240"
     ],
     "context": "label.solo = this.button(label, `Solo ${track.name}`, () => this.editor.setAudioTrack(track.id, {solo: !audioState(this.editor.report).tracks.find(row => row.id"
   },
   "audioTimeline.secondsDurationSeconds": {
     "locations": [
-      "src/audio-timeline.mjs:268"
+      "src/audio-timeline.mjs:270"
     ],
     "context": "node.style.left = `${a}px`; node.style.width = `${Math.max(2, b - a)}px`; node.style.top = `${top + 3}px`; node.dataset.selected = String(value.id === this.sele"
   },
   "audioTimeline.selectedClipVolume": {
     "locations": [
-      "src/audio-timeline.mjs:76"
+      "src/audio-timeline.mjs:77"
     ],
     "context": "const volume = translatedElement(el('label', this.clipControls, 'audio-volume', interfaceText(\"audioTimeline.volume\")), \"audioTimeline.volume\", {}); this.clipVo"
   },
   "audioTimeline.selectedClipVolumeSplitDuplicateAndDetails": {
     "locations": [
-      "src/audio-timeline.mjs:84"
+      "src/audio-timeline.mjs:85"
     ],
     "context": "this.clipToolsButton=this.button(this.toolbar,interfaceText(\"audioTimeline.audioClipControls\"),()=>{if(this.footer.matches(':popover-open'))this.footer.hidePopo"
   },
   "audioTimeline.show": {
     "locations": [
-      "src/audio-timeline.mjs:174"
+      "src/audio-timeline.mjs:176"
     ],
-    "context": "if (this.launcher) { this.launcher.dataset.hasAudio = String(state.tracks.some(track => track.clips.length)); localizedAttribute(this.launcher, 'title', state.t"
+    "context": "if (this.launcher) { setAttr(this.launcher, 'data-has-audio', String(state.tracks.some(track => track.clips.length))); localizedAttribute(this.launcher, 'title'"
   },
   "audioTimeline.solo": {
     "locations": [
-      "src/audio-timeline.mjs:250"
+      "src/audio-timeline.mjs:252"
     ],
     "context": "for (const key of ['mute', 'solo']) { label[key].setAttribute('aria-pressed', String(track[key])); label[key].setAttribute('aria-label', `${key === 'mute' ? int"
   },
   "audioTimeline.sourceInSeconds": {
     "locations": [
-      "src/audio-timeline.mjs:414"
+      "src/audio-timeline.mjs:416"
     ],
     "context": "for (const [key, name, value, max] of [messageTuple(['start', interfaceText(\"audioTimeline.startSeconds\"), clip.start, 3600], {1: {key: \"audioTimeline.startSeco"
   },
   "audioTimeline.split": {
     "locations": [
-      "src/audio-timeline.mjs:79"
+      "src/audio-timeline.mjs:80"
     ],
     "context": "this.splitButton = this.button(this.clipControls, interfaceText(\"audioTimeline.splitAudioAtPlayheadS\"), () => { this.selected = editor.splitAudioClip(this.selec"
   },
   "audioTimeline.splitAtPlayhead": {
     "locations": [
-      "src/audio-timeline.mjs:100"
+      "src/audio-timeline.mjs:101"
     ],
     "context": "{label:interfaceText(\"audioTimeline.splitAtPlayhead\"), labelKey: \"audioTimeline.splitAtPlayhead\",symbol:'cut',action:()=>{this.selected=this.editor.splitAudioCl"
   },
   "audioTimeline.splitAudioAtPlayheadS": {
     "locations": [
-      "src/audio-timeline.mjs:79"
+      "src/audio-timeline.mjs:80"
     ],
     "context": "this.splitButton = this.button(this.clipControls, interfaceText(\"audioTimeline.splitAudioAtPlayheadS\"), () => { this.selected = editor.splitAudioClip(this.selec"
   },
   "audioTimeline.startSeconds": {
     "locations": [
-      "src/audio-timeline.mjs:414"
+      "src/audio-timeline.mjs:416"
     ],
     "context": "for (const [key, name, value, max] of [messageTuple(['start', interfaceText(\"audioTimeline.startSeconds\"), clip.start, 3600], {1: {key: \"audioTimeline.startSeco"
   },
   "audioTimeline.track": {
     "locations": [
-      "src/audio-timeline.mjs:418"
+      "src/audio-timeline.mjs:420"
     ],
     "context": "const trackLabel = translatedElement(el('label', fields, '', interfaceText(\"audioTimeline.track\")), \"audioTimeline.track\", {}), select = el('select', trackLabel"
   },
   "audioTimeline.trackVolume": {
     "locations": [
-      "src/audio-timeline.mjs:421"
+      "src/audio-timeline.mjs:423"
     ],
     "context": "const gainLabel = translatedElement(el('label', fields, '', interfaceText(\"audioTimeline.trackVolume\")), \"audioTimeline.trackVolume\", {}), gain = el('input', ga"
   },
   "audioTimeline.trackVolume2": {
     "locations": [
-      "src/audio-timeline.mjs:54"
+      "src/audio-timeline.mjs:55"
     ],
     "context": "this.ruler = el('div', this.body, 'audio-ruler'); translatedElement(el('span', this.ruler, '', interfaceText(\"audioTimeline.trackVolume2\")), \"audioTimeline.trac"
   },
   "audioTimeline.volume": {
     "locations": [
-      "src/audio-timeline.mjs:76"
+      "src/audio-timeline.mjs:77"
     ],
     "context": "const volume = translatedElement(el('label', this.clipControls, 'audio-volume', interfaceText(\"audioTimeline.volume\")), \"audioTimeline.volume\", {}); this.clipVo"
   },
   "audioTimeline.volumeFor": {
     "locations": [
-      "src/audio-timeline.mjs:248"
+      "src/audio-timeline.mjs:250"
     ],
     "context": "localizedAttribute(label.gain, 'aria-label', \"audioTimeline.volumeFor\", {name: track.name}); localizedAttribute(label.menu, 'aria-label', \"audioTimeline.options"
   },
   "audioTimeline.whenFramesAreInsertedOrRemovedOnEvery": {
     "locations": [
-      "src/audio-timeline.mjs:45"
+      "src/audio-timeline.mjs:46"
     ],
     "context": "this.ripple = option(interfaceText(\"audioTimeline.keepAudioInSyncWithFrameEdits\"), interfaceText(\"audioTimeline.whenFramesAreInsertedOrRemovedOnEvery\"), interfa"
   },
@@ -4471,7 +4471,7 @@
   },
   "chrome.assets": {
     "locations": [
-      "src/localization-bindings.mjs:188"
+      "src/localization-bindings.mjs:189"
     ],
     "context": "['.left-panel .panel-tabs [data-tab=\"assets\"]', { text: 'chrome.assets' }],"
   },
@@ -4538,7 +4538,7 @@
   "chrome.canvasZoom": {
     "locations": [
       "index.html:192",
-      "src/localization-bindings.mjs:196"
+      "src/localization-bindings.mjs:197"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-zoom\" id=\"zoom-label\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"zoom-menu\" aria-haspopup=\"menu\" aria-label=\""
   },
@@ -4563,7 +4563,7 @@
   "chrome.close": {
     "locations": [
       "index.html:115",
-      "src/localization-bindings.mjs:186"
+      "src/localization-bindings.mjs:187"
     ],
     "context": "data-i18n-aria-label=\"chrome.close\"></button>"
   },
@@ -4705,7 +4705,7 @@
   "chrome.export": {
     "locations": [
       "index.html:89",
-      "src/localization-bindings.mjs:182"
+      "src/localization-bindings.mjs:183"
     ],
     "context": "data-i18n-title=\"chrome.export\"><span class=\"band-label\" data-i18n-slot data-i18n=\"chrome.export\">Export</span></button>"
   },
@@ -4735,7 +4735,7 @@
   },
   "chrome.findLayer": {
     "locations": [
-      "src/localization-bindings.mjs:192"
+      "src/localization-bindings.mjs:193"
     ],
     "context": "['#layer-search', { placeholder: 'chrome.searchLayers', 'aria-label': 'chrome.findLayer' }],"
   },
@@ -4874,7 +4874,7 @@
   },
   "chrome.importFigures": {
     "locations": [
-      "src/localization-bindings.mjs:189"
+      "src/localization-bindings.mjs:190"
     ],
     "context": "['.panel-bottom [data-action=\"import\"]', { text: 'chrome.importFigures' }],"
   },
@@ -4929,21 +4929,21 @@
   "chrome.mainMenu": {
     "locations": [
       "index.html:33",
-      "src/localization-bindings.mjs:183"
+      "src/localization-bindings.mjs:184"
     ],
     "context": "<button class=\"brand shell-mark\" data-action=\"menu\" aria-label=\"Main menu\" aria-haspopup=\"menu\" aria-expanded=\"false\" data-i18n-aria-label=\"chrome.mainMenu\">"
   },
   "chrome.maximize": {
     "locations": [
       "index.html:110",
-      "src/localization-bindings.mjs:185"
+      "src/localization-bindings.mjs:186"
     ],
     "context": "data-i18n-aria-label=\"chrome.maximize\"></button"
   },
   "chrome.minimize": {
     "locations": [
       "index.html:105",
-      "src/localization-bindings.mjs:184"
+      "src/localization-bindings.mjs:185"
     ],
     "context": "data-i18n-aria-label=\"chrome.minimize\"></button"
   },
@@ -4985,7 +4985,7 @@
   },
   "chrome.open": {
     "locations": [
-      "src/localization-bindings.mjs:180"
+      "src/localization-bindings.mjs:181"
     ],
     "context": "['.titlebar [data-action=\"open\"]', { text: 'chrome.open', title: 'chrome.openHint' }],"
   },
@@ -4997,7 +4997,7 @@
   },
   "chrome.openHint": {
     "locations": [
-      "src/localization-bindings.mjs:180"
+      "src/localization-bindings.mjs:181"
     ],
     "context": "['.titlebar [data-action=\"open\"]', { text: 'chrome.open', title: 'chrome.openHint' }],"
   },
@@ -5126,7 +5126,7 @@
   },
   "chrome.saveHint": {
     "locations": [
-      "src/localization-bindings.mjs:181"
+      "src/localization-bindings.mjs:182"
     ],
     "context": "['.titlebar [data-action=\"save\"]', { 'aria-label': 'common.save', title: 'chrome.saveHint' }],"
   },
@@ -5150,7 +5150,7 @@
   },
   "chrome.sceneLayers": {
     "locations": [
-      "src/localization-bindings.mjs:193"
+      "src/localization-bindings.mjs:194"
     ],
     "context": "['#layer-list', { 'aria-label': 'chrome.sceneLayers' }],"
   },
@@ -5162,7 +5162,7 @@
   },
   "chrome.searchLayers": {
     "locations": [
-      "src/localization-bindings.mjs:192"
+      "src/localization-bindings.mjs:193"
     ],
     "context": "['#layer-search', { placeholder: 'chrome.searchLayers', 'aria-label': 'chrome.findLayer' }],"
   },
@@ -5292,7 +5292,7 @@
   "chrome.timelineZoom": {
     "locations": [
       "index.html:288",
-      "src/localization-bindings.mjs:195"
+      "src/localization-bindings.mjs:196"
     ],
     "context": "data-i18n-aria-label=\"chrome.timelineZoom\" />"
   },
@@ -5372,7 +5372,7 @@
   "chrome.zoomOptions": {
     "locations": [
       "index.html:192",
-      "src/localization-bindings.mjs:196"
+      "src/localization-bindings.mjs:197"
     ],
     "context": "<button type=\"button\" class=\"ui-button stage-zoom\" id=\"zoom-label\" data-variant=\"ghost\" data-size=\"sm\" data-action=\"zoom-menu\" aria-haspopup=\"menu\" aria-label=\""
   },
@@ -7236,17 +7236,17 @@
       "desktop/main.cjs:199",
       "src/application-menu.mjs:35",
       "src/canvas-context-menu.mjs:57",
-      "src/localization-bindings.mjs:207",
+      "src/localization-bindings.mjs:208",
       "src/touch/timeline-scrubber.mjs:52",
       "src/ui/command-catalog.mjs:104",
-      "src/ui/quick-actions.mjs:92"
+      "src/ui/quick-actions.mjs:93"
     ],
     "context": "item(t('common.cut'), 'cut'), item(t('common.copy'), 'copy'), item(t('common.paste'), 'paste'),"
   },
   "common.cut": {
     "locations": [
       "desktop/main.cjs:199",
-      "src/localization-bindings.mjs:207",
+      "src/localization-bindings.mjs:208",
       "src/touch/timeline-scrubber.mjs:53",
       "src/ui/command-catalog.mjs:103"
     ],
@@ -7257,12 +7257,12 @@
       "desktop/main.cjs:200",
       "src/camera-motion-ui.mjs:78",
       "src/color-picker.mjs:157",
-      "src/localization-bindings.mjs:208",
+      "src/localization-bindings.mjs:209",
       "src/shell/layout-popover.mjs:195",
       "src/studio-shell.mjs:126",
       "src/touch/timeline-scrubber.mjs:55",
       "src/ui/command-catalog.mjs:110",
-      "src/ui/quick-actions.mjs:92",
+      "src/ui/quick-actions.mjs:93",
       "src/user-library.mjs:130",
       "src/vfx-clip-inspector.mjs:128"
     ],
@@ -7288,10 +7288,10 @@
       "desktop/main.cjs:200",
       "src/application-menu.mjs:59",
       "src/canvas-context-menu.mjs:59",
-      "src/localization-bindings.mjs:208",
+      "src/localization-bindings.mjs:209",
       "src/studio-shell.mjs:107",
       "src/ui/command-catalog.mjs:109",
-      "src/ui/quick-actions.mjs:92",
+      "src/ui/quick-actions.mjs:93",
       "src/vfx-clip-inspector.mjs:127",
       "src/vfx-inspector.mjs:176"
     ],
@@ -7301,7 +7301,7 @@
     "locations": [
       "desktop/main.cjs:192",
       "src/application-menu.mjs:31",
-      "src/localization-bindings.mjs:206",
+      "src/localization-bindings.mjs:207",
       "src/ui/command-catalog.mjs:81"
     ],
     "context": "item(t('common.export'), 'export'),"
@@ -7348,10 +7348,10 @@
       "src/canvas-context-menu.mjs:47",
       "src/canvas-context-menu.mjs:58",
       "src/canvas-context-menu.mjs:69",
-      "src/localization-bindings.mjs:208",
+      "src/localization-bindings.mjs:209",
       "src/touch/timeline-scrubber.mjs:54",
       "src/ui/command-catalog.mjs:105",
-      "src/ui/quick-actions.mjs:92"
+      "src/ui/quick-actions.mjs:93"
     ],
     "context": "item(t('common.cut'), 'cut'), item(t('common.copy'), 'copy'), item(t('common.paste'), 'paste'),"
   },
@@ -7360,7 +7360,7 @@
       "desktop/main.cjs:197",
       "src/application-menu.mjs:34",
       "src/hotkey-labels.mjs:49",
-      "src/localization-bindings.mjs:203",
+      "src/localization-bindings.mjs:204",
       "src/ui/command-catalog.mjs:102"
     ],
     "context": "item(t('common.undo'), 'undo'), item(t('common.redo'), 'redo'),"
@@ -7383,7 +7383,7 @@
     "locations": [
       "src/rig-test-ui.mjs:48",
       "src/shell/layout-popover.mjs:87",
-      "src/ui/quick-actions.mjs:92",
+      "src/ui/quick-actions.mjs:93",
       "src/vfx-inspector.mjs:177"
     ],
     "context": "</div><div class=\"rig-test-utilities\"><button class=\"button\" id=\"rig-test-fit\">${icon('fit')}${messageHTML(\"rigTestUi.fit\", {})}</button><button class=\"button\" "
@@ -7401,8 +7401,8 @@
       "src/app-dialogs.mjs:100",
       "src/app.mjs:4019",
       "src/application-menu.mjs:20",
-      "src/localization-bindings.mjs:181",
-      "src/localization-bindings.mjs:203",
+      "src/localization-bindings.mjs:182",
+      "src/localization-bindings.mjs:204",
       "src/ui/command-catalog.mjs:65"
     ],
     "context": "item(t('common.save'), 'save'),"
@@ -7413,7 +7413,7 @@
       "desktop/main.cjs:551",
       "src/app.mjs:4020",
       "src/application-menu.mjs:21",
-      "src/localization-bindings.mjs:203",
+      "src/localization-bindings.mjs:204",
       "src/ui/command-catalog.mjs:66"
     ],
     "context": "item(t('common.saveAs'), 'save-as'),"
@@ -7436,7 +7436,7 @@
       "desktop/main.cjs:197",
       "src/application-menu.mjs:34",
       "src/hotkey-labels.mjs:46",
-      "src/localization-bindings.mjs:203",
+      "src/localization-bindings.mjs:204",
       "src/ui/command-catalog.mjs:101"
     ],
     "context": "item(t('common.undo'), 'undo'), item(t('common.redo'), 'redo'),"
@@ -7477,7 +7477,7 @@
       "src/movieclip-ui.mjs:57",
       "src/onion-timeline-range.mjs:95",
       "src/onion-timeline-range.mjs:96",
-      "src/vfx-clip-timeline.mjs:115"
+      "src/vfx-clip-timeline.mjs:116"
     ],
     "context": "{kind:'meta',parts:[{text:interfaceText('movieclipUi.durationSummary',{frames:{messageKey:'counts.frames',messageParams:{count:asset.duration}},seconds:seconds("
   },
@@ -9583,31 +9583,31 @@
   },
   "dockHost.dragToMovePanelRightClickForLayout": {
     "locations": [
-      "src/shell/dock-host.mjs:305"
+      "src/shell/dock-host.mjs:304"
     ],
     "context": "localizedAttribute(tab, 'title', 'dockHost.dragToMovePanelRightClickForLayout', {});"
   },
   "dockHost.expandTimeline": {
     "locations": [
-      "src/shell/dock-host.mjs:613"
+      "src/shell/dock-host.mjs:609"
     ],
     "context": "localizedAttribute(expandButton, 'aria-label', tall ? 'dockHost.restoreTimelineHeight' : 'dockHost.expandTimeline', {});"
   },
   "dockHost.folded": {
     "locations": [
-      "src/shell/dock-host.mjs:468"
+      "src/shell/dock-host.mjs:464"
     ],
     "context": "localizedAttribute(strip, 'aria-label', 'dockHost.folded', {value: group.tabs.map(title).join(', ')});"
   },
   "dockHost.inspector": {
     "locations": [
-      "src/shell/dock-host.mjs:418"
+      "src/shell/dock-host.mjs:414"
     ],
     "context": "localizedAttribute(element, 'aria-label', 'dockHost.inspector', {});"
   },
   "dockHost.layoutFileUnreadable": {
     "locations": [
-      "src/shell/dock-host.mjs:1260",
+      "src/shell/dock-host.mjs:1256",
       "src/shell/layout-popover.mjs:245",
       "src/shell/layout-popover.mjs:247"
     ],
@@ -9615,14 +9615,14 @@
   },
   "dockHost.layoutFromNewerVersion": {
     "locations": [
-      "src/shell/dock-host.mjs:1260"
+      "src/shell/dock-host.mjs:1256"
     ],
     "context": "if (result?.error) throw messageError(new Error(''), result.error === 'newer' ? 'dockHost.layoutFromNewerVersion' : result.error === 'limit' ? 'dockHost.layoutL"
   },
   "dockHost.layoutLimitReached": {
     "locations": [
-      "src/shell/dock-host.mjs:1240",
-      "src/shell/dock-host.mjs:1260",
+      "src/shell/dock-host.mjs:1236",
+      "src/shell/dock-host.mjs:1256",
       "src/shell/layout-popover.mjs:220",
       "src/shell/layout-popover.mjs:283"
     ],
@@ -9630,57 +9630,57 @@
   },
   "dockHost.nameThePresetFirst": {
     "locations": [
-      "src/shell/dock-host.mjs:1240",
-      "src/shell/dock-host.mjs:1248"
+      "src/shell/dock-host.mjs:1236",
+      "src/shell/dock-host.mjs:1244"
     ],
     "context": "if (result?.error) throw messageError(new Error(''), result.error === 'limit' ? 'dockHost.layoutLimitReached' : 'dockHost.nameThePresetFirst', {count: MAX_SAVED"
   },
   "dockHost.resizeFigureStructure": {
     "locations": [
-      "src/shell/dock-host.mjs:663"
+      "src/shell/dock-host.mjs:659"
     ],
     "context": "const labelKey = resized.length === 1 && resized[0] === 'timeline' ? 'dockHost.resizeTimeline' : resized.includes('structure') ? 'dockHost.resizeFigureStructure"
   },
   "dockHost.resizePanels": {
     "locations": [
-      "src/shell/dock-host.mjs:664",
-      "src/shell/dock-host.mjs:666"
+      "src/shell/dock-host.mjs:660",
+      "src/shell/dock-host.mjs:662"
     ],
     "context": ": resized.includes('properties') ? 'dockHost.resizePropertiesPanel' : 'dockHost.resizePanels';"
   },
   "dockHost.resizePropertiesPanel": {
     "locations": [
-      "src/shell/dock-host.mjs:664"
+      "src/shell/dock-host.mjs:660"
     ],
     "context": ": resized.includes('properties') ? 'dockHost.resizePropertiesPanel' : 'dockHost.resizePanels';"
   },
   "dockHost.resizeTimeline": {
     "locations": [
-      "src/shell/dock-host.mjs:663"
+      "src/shell/dock-host.mjs:659"
     ],
     "context": "const labelKey = resized.length === 1 && resized[0] === 'timeline' ? 'dockHost.resizeTimeline' : resized.includes('structure') ? 'dockHost.resizeFigureStructure"
   },
   "dockHost.restoreTimelineHeight": {
     "locations": [
-      "src/shell/dock-host.mjs:613"
+      "src/shell/dock-host.mjs:609"
     ],
     "context": "localizedAttribute(expandButton, 'aria-label', tall ? 'dockHost.restoreTimelineHeight' : 'dockHost.expandTimeline', {});"
   },
   "dockHost.sizePixels": {
     "locations": [
-      "src/shell/dock-host.mjs:660"
+      "src/shell/dock-host.mjs:656"
     ],
     "context": "localizedAttribute(el, 'aria-valuetext', 'dockHost.sizePixels', {count: divider.now});"
   },
   "dockHost.stage": {
     "locations": [
-      "src/shell/dock-host.mjs:666"
+      "src/shell/dock-host.mjs:662"
     ],
     "context": "localizedAttribute(el, 'aria-label', labelKey, labelKey === 'dockHost.resizePanels' ? {panels: {format: 'list', value: names.length ? names : [{messageKey: 'doc"
   },
   "dockHost.thisPresetNoLongerExists": {
     "locations": [
-      "src/shell/dock-host.mjs:1248"
+      "src/shell/dock-host.mjs:1244"
     ],
     "context": "if (result?.error) throw messageError(new Error(''), result.error === 'name' ? 'dockHost.nameThePresetFirst' : 'dockHost.thisPresetNoLongerExists');"
   },
@@ -13874,9 +13874,9 @@
   },
   "errors.engineStage.theDrawingEngineCouldNotStart": {
     "locations": [
-      "src/engine/engine-stage.mjs:188",
-      "src/engine/engine-stage.mjs:191",
-      "src/engine/engine-stage.mjs:195"
+      "src/engine/engine-stage.mjs:189",
+      "src/engine/engine-stage.mjs:192",
+      "src/engine/engine-stage.mjs:196"
     ],
     "context": "catch (error) { throw messageError(error, 'errors.engineStage.theDrawingEngineCouldNotStart', {reason: error?.message ?? error}); }"
   },
@@ -22932,7 +22932,7 @@
       "src/timeline-layer-folders.mjs:37",
       "src/timeline-layers-popover.mjs:132"
     ],
-    "context": "node._disclosure.setAttribute('aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, "
+    "context": "setAttr(node._disclosure,'aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, \"titl"
   },
   "layerFolders.expand": {
     "locations": [
@@ -22940,7 +22940,7 @@
       "src/timeline-layer-folders.mjs:37",
       "src/timeline-layers-popover.mjs:132"
     ],
-    "context": "node._disclosure.setAttribute('aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, "
+    "context": "setAttr(node._disclosure,'aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, \"titl"
   },
   "layerFolders.group": {
     "locations": [
@@ -23041,7 +23041,7 @@
   },
   "layers.title": {
     "locations": [
-      "src/localization-bindings.mjs:187",
+      "src/localization-bindings.mjs:188",
       "src/timeline-layers-popover.mjs:82"
     ],
     "context": "['.left-panel .panel-tabs [data-tab=\"layers\"]', { text: 'layers.title' }],"
@@ -23080,7 +23080,7 @@
     "locations": [
       "src/layer-timeline.mjs:515"
     ],
-    "context": "node._disclosure.setAttribute('aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, "
+    "context": "setAttr(node._disclosure,'aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, \"titl"
   },
   "layerTimeline.changeEasing": {
     "locations": [
@@ -23098,7 +23098,7 @@
     "locations": [
       "src/layer-timeline.mjs:515"
     ],
-    "context": "node._disclosure.setAttribute('aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, "
+    "context": "setAttr(node._disclosure,'aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, \"titl"
   },
   "layerTimeline.color.blue": {
     "locations": [
@@ -23201,7 +23201,7 @@
     "locations": [
       "src/layer-timeline.mjs:515"
     ],
-    "context": "node._disclosure.setAttribute('aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, "
+    "context": "setAttr(node._disclosure,'aria-expanded',String(layer.kind==='folder'?!layer.collapsed:!this.cameraMotionsCollapsed));localizedAttribute(node._disclosure, \"titl"
   },
   "layerTimeline.extendExposure": {
     "locations": [
@@ -23527,7 +23527,7 @@
     "locations": [
       "src/layer-timeline.mjs:513"
     ],
-    "context": "const clip=layer.kind==='vfx'&&layer.clips.find(c=>c.id===this.editor._selectedVfxClip);node._channels.hidden=!clip||!Object.values(clip.keys).some(keys=>keys.l"
+    "context": "const clip=layer.kind==='vfx'&&layer.clips.find(c=>c.id===this.editor._selectedVfxClip);setHidden(node._channels,!clip||!Object.values(clip.keys).some(keys=>key"
   },
   "layoutPopover.closeLayout": {
     "locations": [
@@ -23691,7 +23691,7 @@
   },
   "menu.createText": {
     "locations": [
-      "src/localization-bindings.mjs:205",
+      "src/localization-bindings.mjs:206",
       "src/ui/command-catalog.mjs:193"
     ],
     "context": "'import-background': 'menu.importBackground', 'add-text': 'menu.createText',"
@@ -23716,21 +23716,21 @@
   },
   "menu.importBackground": {
     "locations": [
-      "src/localization-bindings.mjs:205",
+      "src/localization-bindings.mjs:206",
       "src/ui/command-catalog.mjs:76"
     ],
     "context": "'import-background': 'menu.importBackground', 'add-text': 'menu.createText',"
   },
   "menu.importFigures": {
     "locations": [
-      "src/localization-bindings.mjs:204",
+      "src/localization-bindings.mjs:205",
       "src/ui/command-catalog.mjs:74"
     ],
     "context": "import: 'menu.importFigures', 'import-sprite': 'menu.importSprite',"
   },
   "menu.importSprite": {
     "locations": [
-      "src/localization-bindings.mjs:204",
+      "src/localization-bindings.mjs:205",
       "src/ui/command-catalog.mjs:75"
     ],
     "context": "import: 'menu.importFigures', 'import-sprite': 'menu.importSprite',"
@@ -23739,7 +23739,7 @@
     "locations": [
       "desktop/main.cjs:185",
       "src/hotkey-labels.mjs:4",
-      "src/localization-bindings.mjs:202",
+      "src/localization-bindings.mjs:203",
       "src/ui/command-catalog.mjs:61"
     ],
     "context": "item(t('menu.newAnimation'), 'new'),"
@@ -23747,28 +23747,28 @@
   "menu.openProject": {
     "locations": [
       "desktop/main.cjs:187",
-      "src/localization-bindings.mjs:202",
+      "src/localization-bindings.mjs:203",
       "src/ui/command-catalog.mjs:63"
     ],
     "context": "item(t('menu.openProject'), 'open'),"
   },
   "menu.openRecent": {
     "locations": [
-      "src/localization-bindings.mjs:202",
+      "src/localization-bindings.mjs:203",
       "src/ui/command-catalog.mjs:64"
     ],
     "context": "new: 'menu.newAnimation', open: 'menu.openProject', 'open-recent': 'menu.openRecent',"
   },
   "menu.performance": {
     "locations": [
-      "src/localization-bindings.mjs:207",
+      "src/localization-bindings.mjs:208",
       "src/ui/command-catalog.mjs:333"
     ],
     "context": "performance: 'menu.performance', copy: 'common.copy', cut: 'common.cut',"
   },
   "menu.settings": {
     "locations": [
-      "src/localization-bindings.mjs:206",
+      "src/localization-bindings.mjs:207",
       "src/ui/command-catalog.mjs:342"
     ],
     "context": "export: 'common.export', settings: 'menu.settings', help: 'menu.shortcuts',"
@@ -23777,8 +23777,8 @@
     "locations": [
       "desktop/main.cjs:213",
       "src/hotkey-labels.mjs:40",
-      "src/localization-bindings.mjs:190",
-      "src/localization-bindings.mjs:206",
+      "src/localization-bindings.mjs:191",
+      "src/localization-bindings.mjs:207",
       "src/ui/command-catalog.mjs:325"
     ],
     "context": "{ label: t('desktop.main.help'), submenu: [item(t('menu.shortcuts'), 'help'), item(t('desktop.main.checkForUpdates'), 'check-updates'), item(t('desktop.main.wha"
@@ -23791,147 +23791,147 @@
   },
   "modifierDock.add": {
     "locations": [
-      "src/touch/modifier-dock.mjs:31"
+      "src/touch/modifier-dock.mjs:32"
     ],
     "context": "add: {shift: true, label: interfaceText(\"modifierDock.add\"), labelKey: \"modifierDock.add\", icon: 'plus', hint: interfaceText(\"modifierDock.tapFiguresToAddThemTo"
   },
   "modifierDock.aStraightLineFromTheLastStrokeShift": {
     "locations": [
-      "src/touch/modifier-dock.mjs:35"
+      "src/touch/modifier-dock.mjs:36"
     ],
     "context": "line: {shift: true, label: interfaceText(\"modifierDock.line\"), labelKey: \"modifierDock.line\", icon: 'line', hint: interfaceText(\"modifierDock.aStraightLineFromT"
   },
   "modifierDock.bend": {
     "locations": [
-      "src/touch/modifier-dock.mjs:29"
+      "src/touch/modifier-dock.mjs:30"
     ],
     "context": "bend: {secondary: true, label: interfaceText(\"modifierDock.bend\"), labelKey: \"modifierDock.bend\", icon: 'bend', hint: interfaceText(\"modifierDock.dragAJointToBe"
   },
   "modifierDock.depth": {
     "locations": [
-      "src/touch/modifier-dock.mjs:34"
+      "src/touch/modifier-dock.mjs:35"
     ],
     "context": "depth: {held: 'depth-hold', label: interfaceText(\"modifierDock.depth\"), labelKey: \"modifierDock.depth\", icon: 'depth', hint: interfaceText(\"modifierDock.dragA3d"
   },
   "modifierDock.dragA3dPartTowardOrAwayFrom": {
     "locations": [
-      "src/touch/modifier-dock.mjs:34"
+      "src/touch/modifier-dock.mjs:35"
     ],
     "context": "depth: {held: 'depth-hold', label: interfaceText(\"modifierDock.depth\"), labelKey: \"modifierDock.depth\", icon: 'depth', hint: interfaceText(\"modifierDock.dragA3d"
   },
   "modifierDock.dragAJointToBendItTheRight": {
     "locations": [
-      "src/touch/modifier-dock.mjs:29"
+      "src/touch/modifier-dock.mjs:30"
     ],
     "context": "bend: {secondary: true, label: interfaceText(\"modifierDock.bend\"), labelKey: \"modifierDock.bend\", icon: 'bend', hint: interfaceText(\"modifierDock.dragAJointToBe"
   },
   "modifierDock.dragAJointToChangeItsLengthCtrl": {
     "locations": [
-      "src/touch/modifier-dock.mjs:30"
+      "src/touch/modifier-dock.mjs:31"
     ],
     "context": "stretch: {ctrl: true, label: interfaceText(\"modifierDock.stretch\"), labelKey: \"modifierDock.stretch\", icon: 'stretch-horizontal', hint: interfaceText(\"modifierD"
   },
   "modifierDock.dragAJointToRotateAndScaleThe": {
     "locations": [
-      "src/touch/modifier-dock.mjs:32"
+      "src/touch/modifier-dock.mjs:33"
     ],
     "context": "transform: {alt: true, label: interfaceText(\"modifierDock.transform\"), labelKey: \"modifierDock.transform\", icon: 'transform', hint: interfaceText(\"modifierDock."
   },
   "modifierDock.dragJointsToMoveTheirHandlesHoldR": {
     "locations": [
-      "src/touch/modifier-dock.mjs:33"
+      "src/touch/modifier-dock.mjs:34"
     ],
     "context": "handles: {held: 'handle-edit-hold', label: interfaceText(\"modifierDock.handles\"), labelKey: \"modifierDock.handles\", icon: 'nodes', hint: interfaceText(\"modifier"
   },
   "modifierDock.dragToResizeTheBrushCtrl": {
     "locations": [
-      "src/touch/modifier-dock.mjs:37"
+      "src/touch/modifier-dock.mjs:38"
     ],
     "context": "size: {ctrl: true, label: interfaceText(\"modifierDock.size\"), labelKey: \"modifierDock.size\", icon: 'maximize', hint: interfaceText(\"modifierDock.dragToResizeThe"
   },
   "modifierDock.handles": {
     "locations": [
-      "src/touch/modifier-dock.mjs:33"
+      "src/touch/modifier-dock.mjs:34"
     ],
     "context": "handles: {held: 'handle-edit-hold', label: interfaceText(\"modifierDock.handles\"), labelKey: \"modifierDock.handles\", icon: 'nodes', hint: interfaceText(\"modifier"
   },
   "modifierDock.line": {
     "locations": [
-      "src/touch/modifier-dock.mjs:35"
+      "src/touch/modifier-dock.mjs:36"
     ],
     "context": "line: {shift: true, label: interfaceText(\"modifierDock.line\"), labelKey: \"modifierDock.line\", icon: 'line', hint: interfaceText(\"modifierDock.aStraightLineFromT"
   },
   "modifierDock.modifiers": {
     "locations": [
-      "src/touch/modifier-dock.mjs:121",
-      "src/touch/modifier-dock.mjs:130",
-      "src/touch/modifier-dock.mjs:188"
+      "src/touch/modifier-dock.mjs:122",
+      "src/touch/modifier-dock.mjs:131",
+      "src/touch/modifier-dock.mjs:189"
     ],
     "context": "localizedAttribute(dock, 'aria-label', \"modifierDock.modifiers\", {});"
   },
   "modifierDock.modifiersValue": {
     "locations": [
-      "src/touch/modifier-dock.mjs:188"
+      "src/touch/modifier-dock.mjs:189"
     ],
     "context": "localizedAttribute(toggle, 'aria-label', (names.length ? 'modifierDock.modifiersValue' : \"modifierDock.modifiers\"), (names.length ? {value: names.join(', ')} : "
   },
   "modifierDock.pick": {
     "locations": [
-      "src/touch/modifier-dock.mjs:36"
+      "src/touch/modifier-dock.mjs:37"
     ],
     "context": "pick: {alt: true, label: interfaceText(\"modifierDock.pick\"), labelKey: \"modifierDock.pick\", icon: 'eyedropper', hint: interfaceText(\"modifierDock.pickAColourFro"
   },
   "modifierDock.pickAColourFromTheCanvasAlt": {
     "locations": [
-      "src/touch/modifier-dock.mjs:36"
+      "src/touch/modifier-dock.mjs:37"
     ],
     "context": "pick: {alt: true, label: interfaceText(\"modifierDock.pick\"), labelKey: \"modifierDock.pick\", icon: 'eyedropper', hint: interfaceText(\"modifierDock.pickAColourFro"
   },
   "modifierDock.removeFromTheSelectionAlt": {
     "locations": [
-      "src/touch/modifier-dock.mjs:38"
+      "src/touch/modifier-dock.mjs:39"
     ],
     "context": "subtract: {alt: true, label: interfaceText(\"modifierDock.subtract\"), labelKey: \"modifierDock.subtract\", icon: 'minus', hint: interfaceText(\"modifierDock.removeF"
   },
   "modifierDock.size": {
     "locations": [
-      "src/touch/modifier-dock.mjs:37"
+      "src/touch/modifier-dock.mjs:38"
     ],
     "context": "size: {ctrl: true, label: interfaceText(\"modifierDock.size\"), labelKey: \"modifierDock.size\", icon: 'maximize', hint: interfaceText(\"modifierDock.dragToResizeThe"
   },
   "modifierDock.snap": {
     "locations": [
-      "src/touch/modifier-dock.mjs:39"
+      "src/touch/modifier-dock.mjs:40"
     ],
     "context": "snap: {shift: true, label: interfaceText(\"modifierDock.snap\"), labelKey: \"modifierDock.snap\", icon: 'magnet', hint: interfaceText(\"modifierDock.snapAnglesTo15Sh"
   },
   "modifierDock.snapAnglesTo15Shift": {
     "locations": [
-      "src/touch/modifier-dock.mjs:39"
+      "src/touch/modifier-dock.mjs:40"
     ],
     "context": "snap: {shift: true, label: interfaceText(\"modifierDock.snap\"), labelKey: \"modifierDock.snap\", icon: 'magnet', hint: interfaceText(\"modifierDock.snapAnglesTo15Sh"
   },
   "modifierDock.stretch": {
     "locations": [
-      "src/touch/modifier-dock.mjs:30"
+      "src/touch/modifier-dock.mjs:31"
     ],
     "context": "stretch: {ctrl: true, label: interfaceText(\"modifierDock.stretch\"), labelKey: \"modifierDock.stretch\", icon: 'stretch-horizontal', hint: interfaceText(\"modifierD"
   },
   "modifierDock.subtract": {
     "locations": [
-      "src/touch/modifier-dock.mjs:38"
+      "src/touch/modifier-dock.mjs:39"
     ],
     "context": "subtract: {alt: true, label: interfaceText(\"modifierDock.subtract\"), labelKey: \"modifierDock.subtract\", icon: 'minus', hint: interfaceText(\"modifierDock.removeF"
   },
   "modifierDock.tapFiguresToAddThemToTheSelection": {
     "locations": [
-      "src/touch/modifier-dock.mjs:31"
+      "src/touch/modifier-dock.mjs:32"
     ],
     "context": "add: {shift: true, label: interfaceText(\"modifierDock.add\"), labelKey: \"modifierDock.add\", icon: 'plus', hint: interfaceText(\"modifierDock.tapFiguresToAddThemTo"
   },
   "modifierDock.transform": {
     "locations": [
-      "src/touch/modifier-dock.mjs:32"
+      "src/touch/modifier-dock.mjs:33"
     ],
     "context": "transform: {alt: true, label: interfaceText(\"modifierDock.transform\"), labelKey: \"modifierDock.transform\", icon: 'transform', hint: interfaceText(\"modifierDock."
   },
@@ -25008,37 +25008,37 @@
   },
   "playback.frameRate": {
     "locations": [
-      "src/localization-bindings.mjs:194"
+      "src/localization-bindings.mjs:195"
     ],
     "context": "['#fps', { 'aria-label': 'playback.frameRate' }],"
   },
   "playback.loop": {
     "locations": [
-      "src/localization-bindings.mjs:198"
+      "src/localization-bindings.mjs:199"
     ],
     "context": "['#loop-button', { title: 'playback.loop' }],"
   },
   "playback.pause": {
     "locations": [
-      "src/localization-bindings.mjs:304"
+      "src/localization-bindings.mjs:305"
     ],
     "context": "const key = previewing ? 'playback.stop' : playing ? 'playback.pause' : 'playback.play';"
   },
   "playback.play": {
     "locations": [
-      "src/localization-bindings.mjs:304"
+      "src/localization-bindings.mjs:305"
     ],
     "context": "const key = previewing ? 'playback.stop' : playing ? 'playback.pause' : 'playback.play';"
   },
   "playback.playPauseHint": {
     "locations": [
-      "src/localization-bindings.mjs:197"
+      "src/localization-bindings.mjs:198"
     ],
     "context": "['#play-button', { title: 'playback.playPauseHint' }],"
   },
   "playback.stop": {
     "locations": [
-      "src/localization-bindings.mjs:304"
+      "src/localization-bindings.mjs:305"
     ],
     "context": "const key = previewing ? 'playback.stop' : playing ? 'playback.pause' : 'playback.play';"
   },
@@ -25420,336 +25420,336 @@
   },
   "quick.back": {
     "locations": [
-      "src/ui/quick-actions.mjs:99",
-      "src/ui/quick-actions.mjs:106"
+      "src/ui/quick-actions.mjs:100",
+      "src/ui/quick-actions.mjs:107"
     ],
     "context": "entry('layer-back', place(FIGURES, {group: 'order', word: interfaceText(\"quickActions.back\"), wordKey: 'quick.back', shift: 'layer-down', shiftHint: 'one step',"
   },
   "quick.build": {
     "locations": [
-      "src/ui/quick-actions.mjs:62"
+      "src/ui/quick-actions.mjs:63"
     ],
     "context": "build: Object.freeze({labelKey: 'quick.build', groups: Object.freeze(['add', 'rig', 'view'])}),"
   },
   "quick.camera": {
     "locations": [
-      "src/ui/quick-actions.mjs:64"
+      "src/ui/quick-actions.mjs:65"
     ],
     "context": "camera: Object.freeze({labelKey: 'quick.camera', groups: Object.freeze(['frame', 'reset', 'motion'])}),"
   },
   "quick.center": {
     "locations": [
-      "src/ui/quick-actions.mjs:119"
+      "src/ui/quick-actions.mjs:120"
     ],
     "context": "entry('camera-center', {context: 'camera', group: 'frame', word: interfaceText(\"quickActions.center\"), wordKey: 'quick.center'}),"
   },
   "quick.connect": {
     "locations": [
-      "src/ui/quick-actions.mjs:115"
+      "src/ui/quick-actions.mjs:116"
     ],
     "context": "entry('rig-connect', {context: 'build', group: 'rig', word: interfaceText(\"quickActions.connect\"), wordKey: 'quick.connect'}),"
   },
   "quick.copyFrames": {
     "locations": [
-      "src/ui/quick-actions.mjs:121"
+      "src/ui/quick-actions.mjs:122"
     ],
     "context": "entry('copy', {context: 'range', group: 'clipboard', label: interfaceText(\"quickActions.copyFrames\"), labelKey: 'quick.copyFrames'}),"
   },
   "quick.duplicatePart": {
     "locations": [
-      "src/ui/quick-actions.mjs:109"
+      "src/ui/quick-actions.mjs:110"
     ],
     "context": "entry('duplicate-segment', {context: 'part', group: 'make', word: interfaceText(\"quickActions.duplicate\"), wordKey: 'quick.duplicatePart',"
   },
   "quick.editClip": {
     "locations": [
-      "src/ui/quick-actions.mjs:100"
+      "src/ui/quick-actions.mjs:101"
     ],
     "context": "entry('movieclip-edit', {context: 'movieclip', group: 'clip', word: interfaceText(\"quickActions.editClip\"), wordKey: 'quick.editClip'}),"
   },
   "quick.examples": {
     "locations": [
-      "src/ui/quick-actions.mjs:116"
+      "src/ui/quick-actions.mjs:117"
     ],
     "context": "entry('rig-examples', {context: 'build', group: 'add', word: interfaceText(\"quickActions.examples\"), wordKey: 'quick.examples'}),"
   },
   "quick.figure": {
     "locations": [
-      "src/ui/quick-actions.mjs:54",
-      "src/ui/quick-actions.mjs:55"
+      "src/ui/quick-actions.mjs:55",
+      "src/ui/quick-actions.mjs:56"
     ],
     "context": "figure: Object.freeze({labelKey: 'quick.figure', groups: Object.freeze(['flip', 'order', 'edit'])}),"
   },
   "quick.fit": {
     "locations": [
-      "src/ui/quick-actions.mjs:117"
+      "src/ui/quick-actions.mjs:118"
     ],
     "context": "entry('zoom-selection', {context: 'build', group: 'view', word: interfaceText(\"quickActions.fit\"), wordKey: 'quick.fit'}),"
   },
   "quick.flipLimb": {
     "locations": [
-      "src/ui/quick-actions.mjs:97"
+      "src/ui/quick-actions.mjs:98"
     ],
     "context": "entry('mirror', [...place(FIGURES, {group: 'flip'}), Object.freeze({context: 'joint', group: 'flip', label: interfaceText(\"quickActions.flipLimb\"), labelKey: 'q"
   },
   "quick.front": {
     "locations": [
-      "src/ui/quick-actions.mjs:98",
-      "src/ui/quick-actions.mjs:104"
+      "src/ui/quick-actions.mjs:99",
+      "src/ui/quick-actions.mjs:105"
     ],
     "context": "entry('layer-front', place(FIGURES, {group: 'order', word: interfaceText(\"quickActions.front\"), wordKey: 'quick.front', shift: 'layer-up', shiftHint: 'one step'"
   },
   "quick.image": {
     "locations": [
-      "src/ui/quick-actions.mjs:57"
+      "src/ui/quick-actions.mjs:58"
     ],
     "context": "image: Object.freeze({labelKey: 'quick.image', groups: Object.freeze(['flip', 'order', 'edit'])}),"
   },
   "quick.imagePart": {
     "locations": [
-      "src/ui/quick-actions.mjs:114"
+      "src/ui/quick-actions.mjs:115"
     ],
     "context": "entry('add-sprite-segment', {context: 'build', group: 'add', word: interfaceText(\"quickActions.image\"), wordKey: 'quick.imagePart'}),"
   },
   "quick.joint": {
     "locations": [
-      "src/ui/quick-actions.mjs:58"
+      "src/ui/quick-actions.mjs:59"
     ],
     "context": "joint: Object.freeze({labelKey: 'quick.joint', groups: Object.freeze(['order', 'flip'])}),"
   },
   "quick.level": {
     "locations": [
-      "src/ui/quick-actions.mjs:118"
+      "src/ui/quick-actions.mjs:119"
     ],
     "context": "entry('camera-level', {context: 'camera', group: 'frame', word: interfaceText(\"quickActions.level\"), wordKey: 'quick.level'}),"
   },
   "quick.makeUnique": {
     "locations": [
-      "src/ui/quick-actions.mjs:101"
+      "src/ui/quick-actions.mjs:102"
     ],
     "context": "entry('movieclip-unique', {context: 'movieclip', group: 'clip', word: interfaceText(\"quickActions.makeUnique\"), wordKey: 'quick.makeUnique'}),"
   },
   "quick.movieclip": {
     "locations": [
-      "src/ui/quick-actions.mjs:59"
+      "src/ui/quick-actions.mjs:60"
     ],
     "context": "movieclip: Object.freeze({labelKey: 'quick.movieclip', groups: Object.freeze(['clip', 'edit'])}),"
   },
   "quick.oneStep": {
     "locations": [
-      "src/ui/quick-actions.mjs:98",
       "src/ui/quick-actions.mjs:99",
-      "src/ui/quick-actions.mjs:105",
-      "src/ui/quick-actions.mjs:107"
+      "src/ui/quick-actions.mjs:100",
+      "src/ui/quick-actions.mjs:106",
+      "src/ui/quick-actions.mjs:108"
     ],
     "context": "entry('layer-front', place(FIGURES, {group: 'order', word: interfaceText(\"quickActions.front\"), wordKey: 'quick.front', shift: 'layer-up', shiftHint: 'one step'"
   },
   "quick.part": {
     "locations": [
-      "src/ui/quick-actions.mjs:60"
+      "src/ui/quick-actions.mjs:61"
     ],
     "context": "part: Object.freeze({labelKey: 'quick.part', groups: Object.freeze(['make', 'flip', 'delete'])}),"
   },
   "quick.pasteFrames": {
     "locations": [
-      "src/ui/quick-actions.mjs:122"
+      "src/ui/quick-actions.mjs:123"
     ],
     "context": "entry('paste', {context: 'range', group: 'clipboard', label: interfaceText(\"quickActions.pasteFrames\"), labelKey: 'quick.pasteFrames'}),"
   },
   "quick.range": {
     "locations": [
-      "src/ui/quick-actions.mjs:66"
+      "src/ui/quick-actions.mjs:67"
     ],
     "context": "range: Object.freeze({labelKey: 'quick.range', groups: Object.freeze(['clipboard', 'remove'])}),"
   },
   "quick.removeKeys": {
     "locations": [
-      "src/ui/quick-actions.mjs:124"
+      "src/ui/quick-actions.mjs:125"
     ],
     "context": "entry('clear-keys', {context: 'range', group: 'remove', word: interfaceText(\"quickActions.removeKeys\"), wordKey: 'quick.removeKeys'}),"
   },
   "quick.shift": {
     "locations": [
-      "src/ui/quick-actions.mjs:370"
+      "src/ui/quick-actions.mjs:372"
     ],
     "context": "setAttribute(control, 'data-shift-hint', item.shift ? quickText(t, 'quick.shift', null, {action: item.shiftHint}) : null);"
   },
   "quick.split": {
     "locations": [
-      "src/ui/quick-actions.mjs:108"
+      "src/ui/quick-actions.mjs:109"
     ],
     "context": "entry('split-segment', {context: 'part', group: 'make', word: interfaceText(\"quickActions.split\"), wordKey: 'quick.split'}),"
   },
   "quick.text": {
     "locations": [
-      "src/ui/quick-actions.mjs:56"
+      "src/ui/quick-actions.mjs:57"
     ],
     "context": "text: Object.freeze({labelKey: 'quick.text', groups: Object.freeze(['flip', 'order', 'edit'])}),"
   },
   "quick.theBranch": {
     "locations": [
-      "src/ui/quick-actions.mjs:110",
       "src/ui/quick-actions.mjs:111",
       "src/ui/quick-actions.mjs:112",
-      "src/ui/quick-actions.mjs:113"
+      "src/ui/quick-actions.mjs:113",
+      "src/ui/quick-actions.mjs:114"
     ],
     "context": "shift: 'duplicate-branch', shiftHint: 'the branch', shiftHintKey: 'quick.theBranch'}),"
   },
   "quick.unavailable": {
     "locations": [
-      "src/ui/quick-actions.mjs:376",
-      "src/ui/quick-actions.mjs:379"
+      "src/ui/quick-actions.mjs:378",
+      "src/ui/quick-actions.mjs:381"
     ],
     "context": "const tip = disabled && item.reason ? quickText(t, 'quick.unavailable', null, {label: item.label, reason: item.reason})"
   },
   "quickActions.actions": {
     "locations": [
-      "src/ui/quick-actions.mjs:236"
+      "src/ui/quick-actions.mjs:237"
     ],
     "context": "return meta ? quickText(t, meta.labelKey, meta.label) : quickText(t, null, interfaceText(\"quickActions.actions\"));"
   },
   "quickActions.back": {
     "locations": [
-      "src/ui/quick-actions.mjs:99",
-      "src/ui/quick-actions.mjs:106"
+      "src/ui/quick-actions.mjs:100",
+      "src/ui/quick-actions.mjs:107"
     ],
     "context": "entry('layer-back', place(FIGURES, {group: 'order', word: interfaceText(\"quickActions.back\"), wordKey: 'quick.back', shift: 'layer-down', shiftHint: 'one step',"
   },
   "quickActions.center": {
     "locations": [
-      "src/ui/quick-actions.mjs:119"
+      "src/ui/quick-actions.mjs:120"
     ],
     "context": "entry('camera-center', {context: 'camera', group: 'frame', word: interfaceText(\"quickActions.center\"), wordKey: 'quick.center'}),"
   },
   "quickActions.connect": {
     "locations": [
-      "src/ui/quick-actions.mjs:115"
+      "src/ui/quick-actions.mjs:116"
     ],
     "context": "entry('rig-connect', {context: 'build', group: 'rig', word: interfaceText(\"quickActions.connect\"), wordKey: 'quick.connect'}),"
   },
   "quickActions.copy": {
     "locations": [
-      "src/ui/quick-actions.mjs:88"
+      "src/ui/quick-actions.mjs:89"
     ],
     "context": "'mirror-segment-vertical': interfaceText(\"quickActions.flipV\"), 'delete-single-segment': \"Delete\", 'camera-reset': interfaceText(\"quickActions.reset\"), copy: in"
   },
   "quickActions.copyFrames": {
     "locations": [
-      "src/ui/quick-actions.mjs:121"
+      "src/ui/quick-actions.mjs:122"
     ],
     "context": "entry('copy', {context: 'range', group: 'clipboard', label: interfaceText(\"quickActions.copyFrames\"), labelKey: 'quick.copyFrames'}),"
   },
   "quickActions.duplicate": {
     "locations": [
-      "src/ui/quick-actions.mjs:87",
-      "src/ui/quick-actions.mjs:109"
+      "src/ui/quick-actions.mjs:88",
+      "src/ui/quick-actions.mjs:110"
     ],
     "context": "mirror: interfaceText(\"quickActions.flip\"), duplicate: interfaceText(\"quickActions.duplicate\"), delete: \"Delete\", 'segment-values': interfaceText(\"quickActions."
   },
   "quickActions.editClip": {
     "locations": [
-      "src/ui/quick-actions.mjs:100"
+      "src/ui/quick-actions.mjs:101"
     ],
     "context": "entry('movieclip-edit', {context: 'movieclip', group: 'clip', word: interfaceText(\"quickActions.editClip\"), wordKey: 'quick.editClip'}),"
   },
   "quickActions.examples": {
     "locations": [
-      "src/ui/quick-actions.mjs:116"
+      "src/ui/quick-actions.mjs:117"
     ],
     "context": "entry('rig-examples', {context: 'build', group: 'add', word: interfaceText(\"quickActions.examples\"), wordKey: 'quick.examples'}),"
   },
   "quickActions.fit": {
     "locations": [
-      "src/ui/quick-actions.mjs:117"
+      "src/ui/quick-actions.mjs:118"
     ],
     "context": "entry('zoom-selection', {context: 'build', group: 'view', word: interfaceText(\"quickActions.fit\"), wordKey: 'quick.fit'}),"
   },
   "quickActions.flip": {
     "locations": [
-      "src/ui/quick-actions.mjs:87",
-      "src/ui/quick-actions.mjs:92"
+      "src/ui/quick-actions.mjs:88",
+      "src/ui/quick-actions.mjs:93"
     ],
     "context": "mirror: interfaceText(\"quickActions.flip\"), duplicate: interfaceText(\"quickActions.duplicate\"), delete: \"Delete\", 'segment-values': interfaceText(\"quickActions."
   },
   "quickActions.flipH": {
     "locations": [
-      "src/ui/quick-actions.mjs:87",
-      "src/ui/quick-actions.mjs:92"
+      "src/ui/quick-actions.mjs:88",
+      "src/ui/quick-actions.mjs:93"
     ],
     "context": "mirror: interfaceText(\"quickActions.flip\"), duplicate: interfaceText(\"quickActions.duplicate\"), delete: \"Delete\", 'segment-values': interfaceText(\"quickActions."
   },
   "quickActions.flipLimb": {
     "locations": [
-      "src/ui/quick-actions.mjs:97"
+      "src/ui/quick-actions.mjs:98"
     ],
     "context": "entry('mirror', [...place(FIGURES, {group: 'flip'}), Object.freeze({context: 'joint', group: 'flip', label: interfaceText(\"quickActions.flipLimb\"), labelKey: 'q"
   },
   "quickActions.flipV": {
     "locations": [
-      "src/ui/quick-actions.mjs:88",
-      "src/ui/quick-actions.mjs:92"
+      "src/ui/quick-actions.mjs:89",
+      "src/ui/quick-actions.mjs:93"
     ],
     "context": "'mirror-segment-vertical': interfaceText(\"quickActions.flipV\"), 'delete-single-segment': \"Delete\", 'camera-reset': interfaceText(\"quickActions.reset\"), copy: in"
   },
   "quickActions.front": {
     "locations": [
-      "src/ui/quick-actions.mjs:98",
-      "src/ui/quick-actions.mjs:104"
+      "src/ui/quick-actions.mjs:99",
+      "src/ui/quick-actions.mjs:105"
     ],
     "context": "entry('layer-front', place(FIGURES, {group: 'order', word: interfaceText(\"quickActions.front\"), wordKey: 'quick.front', shift: 'layer-up', shiftHint: 'one step'"
   },
   "quickActions.image": {
     "locations": [
-      "src/ui/quick-actions.mjs:114"
+      "src/ui/quick-actions.mjs:115"
     ],
     "context": "entry('add-sprite-segment', {context: 'build', group: 'add', word: interfaceText(\"quickActions.image\"), wordKey: 'quick.imagePart'}),"
   },
   "quickActions.level": {
     "locations": [
-      "src/ui/quick-actions.mjs:118"
+      "src/ui/quick-actions.mjs:119"
     ],
     "context": "entry('camera-level', {context: 'camera', group: 'frame', word: interfaceText(\"quickActions.level\"), wordKey: 'quick.level'}),"
   },
   "quickActions.makeUnique": {
     "locations": [
-      "src/ui/quick-actions.mjs:101"
+      "src/ui/quick-actions.mjs:102"
     ],
     "context": "entry('movieclip-unique', {context: 'movieclip', group: 'clip', word: interfaceText(\"quickActions.makeUnique\"), wordKey: 'quick.makeUnique'}),"
   },
   "quickActions.paste": {
     "locations": [
-      "src/ui/quick-actions.mjs:88"
+      "src/ui/quick-actions.mjs:89"
     ],
     "context": "'mirror-segment-vertical': interfaceText(\"quickActions.flipV\"), 'delete-single-segment': \"Delete\", 'camera-reset': interfaceText(\"quickActions.reset\"), copy: in"
   },
   "quickActions.pasteFrames": {
     "locations": [
-      "src/ui/quick-actions.mjs:122"
+      "src/ui/quick-actions.mjs:123"
     ],
     "context": "entry('paste', {context: 'range', group: 'clipboard', label: interfaceText(\"quickActions.pasteFrames\"), labelKey: 'quick.pasteFrames'}),"
   },
   "quickActions.removeKeys": {
     "locations": [
-      "src/ui/quick-actions.mjs:124"
+      "src/ui/quick-actions.mjs:125"
     ],
     "context": "entry('clear-keys', {context: 'range', group: 'remove', word: interfaceText(\"quickActions.removeKeys\"), wordKey: 'quick.removeKeys'}),"
   },
   "quickActions.reset": {
     "locations": [
-      "src/ui/quick-actions.mjs:88"
+      "src/ui/quick-actions.mjs:89"
     ],
     "context": "'mirror-segment-vertical': interfaceText(\"quickActions.flipV\"), 'delete-single-segment': \"Delete\", 'camera-reset': interfaceText(\"quickActions.reset\"), copy: in"
   },
   "quickActions.split": {
     "locations": [
-      "src/ui/quick-actions.mjs:108"
+      "src/ui/quick-actions.mjs:109"
     ],
     "context": "entry('split-segment', {context: 'part', group: 'make', word: interfaceText(\"quickActions.split\"), wordKey: 'quick.split'}),"
   },
   "quickActions.values": {
     "locations": [
-      "src/ui/quick-actions.mjs:87",
-      "src/ui/quick-actions.mjs:92"
+      "src/ui/quick-actions.mjs:88",
+      "src/ui/quick-actions.mjs:93"
     ],
     "context": "mirror: interfaceText(\"quickActions.flip\"), duplicate: interfaceText(\"quickActions.duplicate\"), delete: \"Delete\", 'segment-values': interfaceText(\"quickActions."
   },
@@ -25810,7 +25810,7 @@
   },
   "rendererStatus.deviceDisconnected": {
     "locations": [
-      "src/engine/engine-stage.mjs:237"
+      "src/engine/engine-stage.mjs:238"
     ],
     "context": "messageKey: 'rendererStatus.deviceDisconnected', messageParams: {detail: reason}}));"
   },
@@ -30884,7 +30884,7 @@
   },
   "timeline.navigationHint": {
     "locations": [
-      "src/timeline-navigation.mjs:21"
+      "src/timeline-navigation.mjs:22"
     ],
     "context": "localizedAttribute(surface,'title','timeline.navigationHint',{zoomModifier:'Ctrl/Cmd'});"
   },
@@ -31044,7 +31044,7 @@
   },
   "timeline.title": {
     "locations": [
-      "src/localization-bindings.mjs:191",
+      "src/localization-bindings.mjs:192",
       "src/settings.mjs:633"
     ],
     "context": "['.timeline-title', { text: 'timeline.title' }],"
@@ -35668,7 +35668,7 @@
   },
   "vfxChannels.allKeys": {
     "locations": [
-      "src/vfx-clip-timeline.mjs:72",
+      "src/vfx-clip-timeline.mjs:73",
       "src/vfx-key-channels.mjs:39"
     ],
     "context": "if(width>34){ctx.save();ctx.beginPath();ctx.rect(Math.max(left+10,6),top+2,Math.max(1,width-20),15);ctx.clip();ctx.fillText(name(clip),Math.max(left+10,6),textY"
@@ -35704,7 +35704,7 @@
   },
   "vfxChannels.lane": {
     "locations": [
-      "src/vfx-clip-timeline.mjs:44"
+      "src/vfx-clip-timeline.mjs:45"
     ],
     "context": "return [row,...lanes.map((lane,i)=>({id:`vfx/${row.id}/${i}`,kind:'vfx',name:i?interfaceText('vfxChannels.lane',{count:i+1}):interfaceText(\"vfxClipTimeline.effe"
   },
@@ -36115,34 +36115,34 @@
   },
   "vfxClipTimeline.effects": {
     "locations": [
-      "src/vfx-clip-timeline.mjs:14",
-      "src/vfx-clip-timeline.mjs:44"
+      "src/vfx-clip-timeline.mjs:15",
+      "src/vfx-clip-timeline.mjs:45"
     ],
     "context": "const name=c=>c.name||(effectMessages[c.effects[0]?.type]?interfaceText(effectMessages[c.effects[0].type].nameKey):interfaceText(\"vfxClipTimeline.effects\"));"
   },
   "vfxClipTimeline.fadeIn": {
     "locations": [
-      "src/vfx-clip-timeline.mjs:99",
-      "src/vfx-clip-timeline.mjs:115"
+      "src/vfx-clip-timeline.mjs:100",
+      "src/vfx-clip-timeline.mjs:116"
     ],
     "context": "const node=document.createElement('button');node.type='button';node.className='vfx-fade-handle';node.dataset.vfxFade=edge;node.setAttribute('role','slider');nod"
   },
   "vfxClipTimeline.fadeOut": {
     "locations": [
-      "src/vfx-clip-timeline.mjs:99",
-      "src/vfx-clip-timeline.mjs:115"
+      "src/vfx-clip-timeline.mjs:100",
+      "src/vfx-clip-timeline.mjs:116"
     ],
     "context": "const node=document.createElement('button');node.type='button';node.className='vfx-fade-handle';node.dataset.vfxFade=edge;node.setAttribute('role','slider');nod"
   },
   "vfxClipTimeline.frameValueValue1": {
     "locations": [
-      "src/vfx-clip-timeline.mjs:152"
+      "src/vfx-clip-timeline.mjs:153"
     ],
-    "context": "this.scroll.title=clip?(tick!==undefined?interfaceText('vfxClipTimeline.frameValueValue1', {value: tick+clip.start-clip.offset+1, value1: Object.entries(vfxVisi"
+    "context": "setProp(this.scroll,'title',clip?(tick!==undefined?interfaceText('vfxClipTimeline.frameValueValue1', {value: tick+clip.start-clip.offset+1, value1: Object.entri"
   },
   "vfxClipTimeline.valueValue1Frames": {
     "locations": [
-      "src/vfx-clip-timeline.mjs:115"
+      "src/vfx-clip-timeline.mjs:116"
     ],
     "context": "for(const node of host.vfxHandles.children){const edge=node.dataset.vfxFade,x=clamp(fadeX(host,clip,edge),left+7,right-7);node.hidden=x<5||x>host.width-5||right"
   },

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createTypeahead, findTypeahead, menuKeyAction, normalizeMenu} from '../src/ui/ui-menu.mjs';
-import {nextRovingIndex} from '../src/ui/roving-focus.mjs';
+import {installRovingFocus, nextRovingIndex} from '../src/ui/roving-focus.mjs';
 import {CommandRegistry} from '../src/ui/command-registry.mjs';
 import {kitText, translator} from '../src/ui/ui-strings.mjs';
 
@@ -119,6 +119,31 @@ test('roving focus: arrows by orientation, skipping disabled items, looping or n
   assert.equal(nextRovingIndex('End', 0, 4, {skip: index => index === 3}), 2);
   assert.equal(nextRovingIndex('ArrowRight', 0, 1), 0, 'a single item keeps focus');
   assert.equal(nextRovingIndex('ArrowRight', 0, 0), null);
+});
+
+test('roving focus keeps one tab stop and writes tabindex only where it changes', () => {
+  const writes = [];
+  const item = name => {
+    const attributes = new Map();
+    return {name, disabled: false, hidden: false, closest: () => null, focus() {}, contains(other) { return other === this; },
+      getAttribute: key => attributes.get(key) ?? null, hasAttribute: key => attributes.has(key),
+      setAttribute(key, value) { writes.push(`${name} ${key}=${value}`); attributes.set(key, String(value)); }, removeAttribute: key => attributes.delete(key)};
+  };
+  const items = [item('a'), item('b'), item('c')];
+  const listeners = {};
+  const container = {querySelectorAll: () => items, addEventListener: (type, listener) => { listeners[type] = listener; }};
+  const focus = installRovingFocus(container);
+  assert.deepEqual(items.map(node => node.getAttribute('tabindex')), ['0', '-1', '-1'], 'the first item is the tab stop');
+  writes.length = 0;
+  // The chrome refreshes its toolbars on every update: nothing changed, nothing is written.
+  focus.refresh(); focus.refresh();
+  assert.deepEqual(writes, []);
+  listeners.focusin({target: items[2]});
+  assert.deepEqual(writes, ['a tabindex=-1', 'c tabindex=0'], 'focus moving writes the two items that changed');
+  items[2].disabled = true;
+  writes.length = 0;
+  focus.refresh();
+  assert.deepEqual(writes, ['a tabindex=0', 'c tabindex=-1'], 'a disabled tab stop hands over to the first usable item');
 });
 
 test('labelKeys translate items, submenus and group labels; shortcuts carry aria-keyshortcuts', () => {

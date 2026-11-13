@@ -93,6 +93,27 @@ export function measureBand(band, {steps = BAND_FOLDS, docked = true, folded = t
   }
 }
 
+/**
+ * Whether a font face's `unicode-range` (`U+0000-00FF, U+0131, U+4??`) covers a character of `text`; a range that
+ * cannot be read covers everything. The interface fonts come in subsets per script (base/fonts.css) that load as text
+ * needs them: a subset that covers none of the band's characters cannot change the band's width.
+ */
+export function rangeCoversText(range, text) {
+  const spans = [];
+  for (const part of String(range ?? '').split(',')) {
+    const match = /^\s*U\+([0-9a-f?]+)(?:-([0-9a-f]+))?\s*$/i.exec(part);
+    if (!match) return true;
+    const [, first, last] = match;
+    spans.push(last ? [parseInt(first, 16), parseInt(last, 16)] : [parseInt(first.replace(/\?/g, '0'), 16), parseInt(first.replace(/\?/g, 'f'), 16)]);
+  }
+  if (!spans.length) return true;
+  for (const character of String(text ?? '')) {
+    const code = character.codePointAt(0);
+    if (spans.some(([low, high]) => code >= low && code <= high)) return true;
+  }
+  return false;
+}
+
 /** A cheap fingerprint of what can change the band's width: its text and which parts show. */
 function signature(band) {
   let text = '';
@@ -125,6 +146,9 @@ function hash(text) {
 export function watchBand(band, {window: win = globalThis.window, document: doc = band.ownerDocument, onChange = () => {},
   storage = null, start = null, margin = 24, minimalWidth = TIER_THRESHOLDS.width.minimal} = {}) {
   let current = null, key = '', printed = '', frame = 0, idle = 0, stopped = false;
+  // The font faces that were loaded when the band was last measured.
+  let measuredWith = new Set();
+  const loadedFaces = () => new Set([...(doc.fonts ?? [])].filter(face => face.status === 'loaded'));
   // The touch interface sizes the band's controls for a finger: its widths are its own.
   const cacheId = print => hash(`${print}|${doc.documentElement.lang}|${win.devicePixelRatio ?? 1}|${doc.documentElement.dataset.input ?? ''}`);
   const readCache = id => {
@@ -148,6 +172,7 @@ export function watchBand(band, {window: win = globalThis.window, document: doc 
     frame = 0;
     if (stopped || !band.isConnected) return;
     printed = signature(band);
+    measuredWith = loadedFaces();
     const next = measureBand(band, {folded: false});
     if (folded || needsFolded(win.innerWidth, next)) next.minimal = measureBand(band, {docked: false}).minimal;
     writeCache(cacheId(printed), next);
@@ -159,8 +184,16 @@ export function watchBand(band, {window: win = globalThis.window, document: doc 
   const observer = new win.MutationObserver(() => { if (!deferred && signature(band) !== printed) schedule(); });
   observer.observe(band, {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'class', 'data-band-reserve']});
   const fonts = doc.fonts;
-  // Fonts that load after the band was measured refit it (a deferred first measurement waits for them instead).
-  const refit = () => { printed = ''; schedule(); };
+  // Fonts that load after the band was measured refit it (a deferred first measurement waits for them instead). Not a
+  // face that was already loaded when the band was measured, nor one that covers no character the band shows (another
+  // script's subset, loaded for text elsewhere): the browser reports such loads while a window resize lays out text, and
+  // each one made the band measure all its fold steps again.
+  const refit = event => {
+    const faces = event?.fontfaces ? [...event.fontfaces] : [];
+    if (faces.length && !faces.some(face => !measuredWith.has(face) && rangeCoversText(face.unicodeRange, band.textContent))) return;
+    printed = '';
+    schedule();
+  };
   fonts?.addEventListener?.('loadingdone', refit);
 
   // The first commit: the stored widths, or nothing to fold on a wide window, else a measurement now.

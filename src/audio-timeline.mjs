@@ -7,6 +7,7 @@ import {audioState, audioFps, audioEnd} from './audio-model.mjs';
 import {icon} from './icons.mjs';
 import {showTimelineMenu} from './timeline-menu.mjs';
 import {onFontsReady} from './ui/font-loading.mjs';
+import {setAttr, setHidden, setProp} from './ui/dom-write.mjs';
 const ROW = 64, RULER = 22, DROP = 38, TOOLBAR = 36;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const afterTime = (times, time) => { let low = 0, high = times.length; while (low < high) { const mid = (low + high) >>> 1; if (times[mid] <= time) low = mid + 1; else high = mid; } return low; };
@@ -166,21 +167,22 @@ export class AudioTimeline {
   positionPopover(panel,anchor){const rect=anchor.getBoundingClientRect();panel.style.left=`${Math.max(8,Math.min(innerWidth-panel.offsetWidth-8,rect.right-panel.offsetWidth))}px`;panel.style.top=`${Math.max(8,Math.min(innerHeight-panel.offsetHeight-8,rect.top-panel.offsetHeight-6))}px`;}
   positionClipTools(){const rect=this.clipToolsButton.getBoundingClientRect(),panel=this.footer;panel.style.left=`${Math.max(8,Math.min(innerWidth-panel.offsetWidth-8,rect.right-panel.offsetWidth))}px`;panel.style.top=`${Math.max(8,Math.min(innerHeight-panel.offsetHeight-8,rect.top-panel.offsetHeight-6))}px`;}
   found() { const state = audioState(this.editor.report); for (const track of state.tracks) { const clip = track.clips.find(clip => clip.id === this.selected); if (clip) return {track, clip, asset: state.assets[clip.assetId]}; } return {}; }
-  update(dirty = true) { this.dirty ||= dirty; if (this.disposed || this.raf || !this.open && !this.dirty) return; this.raf = requestAnimationFrame(() => { this.raf = null; if (this.dirty) { this.dirty = false; this.paint(); } if (!this.open) return; if (!this.integrated) this.playhead.style.transform = `translateX(${this.tickX(this.editor.tick)}px)`; const {clip} = this.found(), time = this.editor.tick / this.fps; this.splitButton.disabled = !clip || time <= clip.start || time >= clip.start + clip.duration; }); }
+  update(dirty = true) { this.dirty ||= dirty; if (this.disposed || this.raf || !this.open && !this.dirty) return; this.raf = requestAnimationFrame(() => { this.raf = null; if (this.dirty) { this.dirty = false; this.paint(); } if (!this.open) return; if (!this.integrated) this.playhead.style.transform = `translateX(${this.tickX(this.editor.tick)}px)`; const {clip} = this.found(), time = this.editor.tick / this.fps; setProp(this.splitButton, 'disabled', !clip || time <= clip.start || time >= clip.start + clip.duration); }); }
   paint() {
     const state = audioState(this.editor.report), {clip, asset, track: owner} = this.found(), time = this.editor.tick / this.fps;
-    this.root.hidden = !this.open;
-    this.launcher?.setAttribute('aria-expanded', String(this.open)); this.launcher?.setAttribute('aria-pressed', String(this.open));
-    if (this.launcher) { this.launcher.dataset.hasAudio = String(state.tracks.some(track => track.clips.length)); localizedAttribute(this.launcher, 'title', state.tracks.length?'audioTimeline.audioWithTracks':'audioTimeline.audio', {value:this.open?{messageKey:'audioTimeline.hide'}:{messageKey:'audioTimeline.show'},count:state.tracks.length,value2:''}); }
+    // Painted after every timeline update, open or not: each write compares first.
+    setHidden(this.root, !this.open);
+    setAttr(this.launcher, 'aria-expanded', String(this.open)); setAttr(this.launcher, 'aria-pressed', String(this.open));
+    if (this.launcher) { setAttr(this.launcher, 'data-has-audio', String(state.tracks.some(track => track.clips.length))); localizedAttribute(this.launcher, 'title', state.tracks.length?'audioTimeline.audioWithTracks':'audioTimeline.audio', {value:this.open?{messageKey:'audioTimeline.hide'}:{messageKey:'audioTimeline.show'},count:state.tracks.length,value2:''}); }
     this.container.classList.toggle('audio-tab-open', this.open && !this.integrated);
     if (this.integrated) { this.host.headerTools.classList.toggle('audio-selection', this.open && Boolean(clip)); this.host.root.classList.toggle('audio-visible', this.open); }
-    this.clipToolsButton.disabled=!clip;
+    setProp(this.clipToolsButton, 'disabled', !clip);
     if((!this.open||!clip)&&this.footer.matches(':popover-open'))this.footer.hidePopover();
     if (this.focusPending) { this.focusPending = false; (this.open ? this.importButton : this.launcher)?.focus({preventScroll:true}); }
     if (!this.open) return;
-    this.splitButton.disabled = !clip || time <= clip.start || time >= clip.start + clip.duration;
-    this.propertiesButton.disabled = this.duplicateButton.disabled = this.deleteButton.disabled = !clip;
-    this.clipControls.hidden = !clip;
+    setProp(this.splitButton, 'disabled', !clip || time <= clip.start || time >= clip.start + clip.duration);
+    for (const button of [this.propertiesButton, this.duplicateButton, this.deleteButton]) setProp(button, 'disabled', !clip);
+    setHidden(this.clipControls, !clip);
     const preview = clip && this.gesture?.clip?.id === clip.id ? {...clip, ...this.gesture.patch} : clip;
     this.selectionName.textContent = asset?.name ?? interfaceText("audioTimeline.dragClipsBetweenTracks");
     this.selectionTime.textContent = preview ? `${preview.start.toFixed(2)}s – ${(preview.start + preview.duration).toFixed(2)}s · ${preview.duration.toFixed(2)}s${this.gesture?.moved ? ` · ${state.tracks.find(row => row.id === this.gesture.target)?.name ?? interfaceText("audioTimeline.newTrack")}` : ` · ${owner.name}`}` : interfaceText("audioTimeline.dragEdgesToTrimDoubleClickForDetails");

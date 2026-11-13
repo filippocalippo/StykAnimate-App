@@ -3,6 +3,8 @@
  * arrow keys move inside it. nextRovingIndex() is the pure key model;
  * installRovingFocus() keeps tabindex in step with the focused item.
  */
+import {setAttr} from './dom-write.mjs';
+
 const KEYS = Object.freeze({
   horizontal: {ArrowRight: 1, ArrowLeft: -1},
   vertical: {ArrowDown: 1, ArrowUp: -1},
@@ -45,7 +47,8 @@ export function installRovingFocus(container, {items = 'button', orientation = '
     const all = list();
     if (!all.includes(element)) return;
     current = element;
-    for (const item of all) item.tabIndex = item === element ? 0 : -1;
+    // Refreshed on every chrome update: an item that already has its tabindex is not written again.
+    for (const item of all) setAttr(item, 'tabindex', item === element ? '0' : '-1');
     if (focus) element.focus({preventScroll: true});
   };
   const refresh = () => {
