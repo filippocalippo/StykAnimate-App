@@ -1,5 +1,6 @@
 /**
- * Files: opening a document. (Saving and exporting are in save.mjs and export.mjs.)
+ * Files: opening a document. (Saving and the recovery copy are in save.mjs, exports and the Pivot import in export.mjs,
+ * project tabs in projects.mjs.)
  */
 import {file} from '../workloads.mjs';
 
@@ -15,7 +16,7 @@ export const open = {
     'open.decode': {title: 'Engine: decode and prepare', unit: 'ms', better: 'lower', digits: 0},
     'open.fileMB': {title: 'File size', unit: 'MB', better: 'lower', digits: 1},
   },
-  // The first open is cold; opening again replaces the document, which is the warm case the profiled pass explains.
+  // The first open is cold; the profiled pass opens the file again, the warm case, in a project tab of its own.
   passes: 1,
   async run(context) {
     const written = file(context.workload);
@@ -23,6 +24,14 @@ export const open = {
     await context.app.quiet();
     const timings = await context.evaluate(() => globalThis.styk.performance().import ?? null);
     return {metrics: {duration: opened.ms, 'open.fileMB': written.bytes / 1048576, ...(Number.isFinite(timings?.decode_ms) ? {'open.decode': timings.decode_ms} : {})}};
+  },
+  // Each open after the first adds a tab beside the first (docs/PROJECT-TABS.md): it is closed, so the scenarios that
+  // follow run with the one project open, not beside resting copies of it. The first project's tab comes forward.
+  async reset(context) {
+    if (await context.evaluate(() => globalThis.styk.projects.tabs.size) < 2) return;
+    await context.evaluate(() => globalThis.styk.projects.close());
+    await context.app.quiet();
+    await context.settle();
   },
 };
 
