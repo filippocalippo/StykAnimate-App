@@ -6,6 +6,8 @@ import { rigDetailsShown } from './rig-control-details.mjs';
 import { affineProjection } from './motion-path.mjs';
 import { isBuilderContext } from './builder-aids.mjs';
 
+/** How long the view's scale stays still before a zoom has rested and the joints are painted at their exact sizes. */
+const ZOOM_REST_MS = 150;
 const emptyFrame = () => ({frame: null, key: '', bound: null, dense: false, announced: false, hidden: null, locked: null, jointsOf: null});
 
 /**
@@ -31,8 +33,9 @@ export function createCanvasHandles(app) {
    * figure changes: a gesture shows a new frame each step, with the same figures. */
   let handleFigures = {key: null, bound: null, types: null, flags: new Map(), figures: new Map()};
   let handleSettleTimer = 0, handlesResting = false;
-  /** The view's scale at the last draw: a draw at another one is a zoom in progress, painted at quantised sizes until it rests. */
-  let drawnScale = null;
+  /** The view's scale at the last draw and when it last changed: a zoom is in progress, and the joints are painted at quantised
+   * sizes, until the scale has not changed for `ZOOM_REST_MS` (a frame between two notches of a wheel is still the zoom). */
+  let drawnScale = null, scaleChanged = -Infinity;
 
   function frameHandles(frame) {
     const key = `${editor.layerViewKey}|${[...state.hidden].join(',')}|${[...state.locked].join(',')}`, bound = app.builderMode()?.boundUids ?? null;
@@ -147,8 +150,10 @@ export function createCanvasHandles(app) {
   function draw(geometry) {
     const shown = handles(geometry),
       translations = state.drag?.translations;
-    const d = window.devicePixelRatio || 1, zooming = drawnScale !== null && drawnScale !== state.view.scale;
+    const d = window.devicePixelRatio || 1, now = performance.now();
+    if (drawnScale !== null && drawnScale !== state.view.scale) scaleChanged = now;
     drawnScale = state.view.scale;
+    const zooming = now - scaleChanged < ZOOM_REST_MS;
     // The view and the camera are affine: the matrix carries the projection, and its translation alone changing is a pan.
     const drawn = overlay.draw(app.ctx, shown, {matrix: affineProjection(app.project), projectionKey: handleCache.key,
       width: app.overlay.width / d, height: app.overlay.height / d, dpr: d, translations,
@@ -157,7 +162,7 @@ export function createCanvasHandles(app) {
     // a moment, they are painted afresh (see CanvasHandleOverlay).
     handlesResting = false;
     clearTimeout(handleSettleTimer);
-    if (drawn.settle) handleSettleTimer = setTimeout(() => { handlesResting = true; app.requestOverlayRender(); }, 150);
+    if (drawn.settle) handleSettleTimer = setTimeout(() => { handlesResting = true; app.requestOverlayRender(); }, zooming ? Math.max(0, ZOOM_REST_MS - (now - scaleChanged)) + 1 : 150);
   }
 
   return {
