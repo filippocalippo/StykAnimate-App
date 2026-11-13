@@ -28,6 +28,7 @@ pub mod document_export;
 pub mod edit;
 pub mod export;
 pub mod save;
+pub mod stage_raster;
 mod together;
 mod frames;
 mod images;

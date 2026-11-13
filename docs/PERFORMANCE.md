@@ -167,6 +167,15 @@ pan that is the whole wait. Where the picture is made off the interface thread a
 dense scene), a scenario reads the capture's `shown` series instead: when the stage drew which tick, against when
 each input happened (`perf/lib/latency.mjs`).
 
+**Pictures shown after their frame** (`picture.felt`, `picture.input.p95`). Where the stage draws on the engine's workers (no
+graphics card, [rendering.md](engine/rendering.md#the-stage-on-the-processor)), the frame that asks for a picture ends before the
+picture is there, so the frame time and the input delay say how free the interface thread was, not what the person saw. A picture
+shown later has a span of its own (`stage picture`, from the draw that asked for it to its showing), and the capture says, for the
+inputs whose frame asked for a picture: how long each picture stood still while the hand had moved, weighted as `frame.felt` is
+(`picture.felt`), and how long each input waited for the first picture asked for after it (`picture.input.p95`)
+(`src/devtools/capture.mjs` `pictureTimes`). A gesture is judged on them too, with the frame's limits; a capture whose pictures are
+drawn in their frame has neither, so its grade is what it was.
+
 **Spans**: named stretches of the interface thread, nested: every input handler (`on pointermove (canvas)`), every
 animation-frame callback, the `paint`, the `stage draw`, every `interface update` by surface, every
 `edit session call` by method, the app's start as phases. [DEVTOOLS.md](DEVTOOLS.md) lists where each is recorded.

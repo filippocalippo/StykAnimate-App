@@ -62,6 +62,7 @@ type Key = (u32, u32, u32);
 pub struct Place(bool, Key);
 
 /// A decoded picture and when it was last asked for.
+#[derive(Clone)]
 struct Held {
     image: Arc<DecodedImage>,
     used: u64,
@@ -75,6 +76,10 @@ struct Held {
 /// [`Images::MEMORY_SHARE`]) the least recently used are dropped, and [`Images::ensure`] decodes
 /// again, from the document's encoded pictures, what a frame needs and is not held. A frame is never
 /// drawn short of a picture because of the budget: what it samples is kept while it is drawn.
+///
+/// A clone shares the decoded pixels (it copies the tables of which picture is where), so a set the threads drawing
+/// a frame read can be taken further for the next frame without waiting for them.
+#[derive(Clone)]
 pub struct Images {
     /// Premultiplied sprites with their one-texel gutter repeating their edges.
     sprites: HashMap<Key, Held>,
@@ -130,6 +135,32 @@ impl Images {
         if let Some(old) = replaced {
             self.bytes -= old.image.rgba.len();
         }
+    }
+
+    /// Puts the drawing tile `image` (straight alpha with its two-texel border, `styk_eval::live::CELL` texels a side) at
+    /// atlas place `(layer, x, y)` (its first texel inside the border): the slots of the drawing cels the editor holds live,
+    /// which the document's atlas does not lay out. Over the budget, the least recently used pictures are dropped.
+    pub fn put_tile(&mut self, place: (u32, u32, u32), image: Arc<DecodedImage>) {
+        self.clock += 1;
+        let len = image.rgba.len();
+        if let Some(old) = self.tiles.insert(place, Held { used: self.clock, image }) {
+            self.bytes -= old.image.rgba.len();
+        }
+        self.bytes += len;
+        self.trim(&HashSet::new());
+    }
+
+    /// Lets go of the drawing tiles on atlas layers `layer` and above (the live cels' pages, when they move).
+    pub fn drop_tiles_from(&mut self, layer: u32) {
+        let mut freed = 0;
+        self.tiles.retain(|key, held| {
+            let keep = key.0 < layer;
+            if !keep {
+                freed += held.image.rgba.len();
+            }
+            keep
+        });
+        self.bytes -= freed;
     }
 
     pub fn len(&self) -> usize {
@@ -365,13 +396,57 @@ pub struct Raster {
     edges: Edges,
     drawing_grid: DrawingGrid,
     paint_context: PaintContext,
+    orientation: Option<[f64; 6]>,
     glyphs: glyphs::Masks,
     pub stats: Stats,
 }
 
+/// What the threads drawing one frame in bands of rows share ([`Raster::bands`]): the renderer's settings and each lone
+/// glyph's mask for the frame's view, filled once. Each band is drawn as the whole frame draws those rows.
+#[derive(Clone)]
+pub struct Bands {
+    edges: Edges,
+    drawing_grid: DrawingGrid,
+    paint_context: PaintContext,
+    orientation: Option<[f64; 6]>,
+    glyphs: Arc<[Option<glyphs::Placed>]>,
+    glyph_stats: (u32, u32, usize),
+}
+
+impl Bands {
+    /// Rows `y0 .. y0 + rows` of the frame of `list` seen through `view` at `size`: the same view moved up by `y0` pixels
+    /// at the band's height (an export's tiles are drawn so too), each layer cropped to what reaches the band. `None` when
+    /// `cancelled` says so on the way.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render(&self, list: &DrawList, images: &Images, view: &ViewParams, size: [u32; 2], y0: u32, rows: u32, cancelled: &dyn Fn() -> bool) -> Option<(Frame, Stats)> {
+        if cancelled() { return None; }
+        let size = [size[0].max(1), rows.max(1)];
+        let (view, orientation) = if y0 == 0 { (*view, self.orientation) } else { band_view(view, self.orientation, y0 as f64) };
+        let crisp = self.edges == Edges::Crisp;
+        let mut frame = frame::Frame::new(list, images, &view, size, crisp, &self.glyphs, self.drawing_grid, self.paint_context, orientation);
+        frame.cancelled = cancelled;
+        if cancelled() { return None; }
+        let pixels = frame.draw();
+        if cancelled() { return None; }
+        let (glyph_masks, glyph_masks_filled, glyph_bytes) = self.glyph_stats;
+        let stats = frame::Stats { glyph_masks, glyph_masks_filled, glyph_bytes, ..frame.stats };
+        Some((Frame { width: size[0], height: size[1], pixels: pixels.into_flattened() }, stats))
+    }
+}
+
+/// `view` (and the turned view's `orientation`) for the pixels from row `dy` on: everything on screen moved up by `dy`.
+fn band_view(view: &ViewParams, orientation: Option<[f64; 6]>, dy: f64) -> (ViewParams, Option<[f64; 6]>) {
+    let up = [1.0, 0.0, 0.0, 1.0, 0.0, -dy];
+    let a = view.artboard;
+    let moved = ViewParams { matrix: styk_eval::view::compose(up, view.matrix), artboard: [a[0], a[1] - dy, a[2], a[3] - dy], pan: [view.pan[0], view.pan[1] - dy], ..*view };
+    // The turning happens on the frame's screen: on the band's, it is the frame's moved down, turned, and moved back up.
+    let turned = orientation.map(|o| styk_eval::view::compose(up, styk_eval::view::compose(o, [1.0, 0.0, 0.0, 1.0, 0.0, dy])));
+    (moved, turned)
+}
+
 impl Raster {
     pub fn new(edges: Edges) -> Raster {
-        Raster { edges, drawing_grid: DrawingGrid::World, paint_context: PaintContext::Native, glyphs: glyphs::Masks::default(), stats: Stats::default() }
+        Raster { edges, drawing_grid: DrawingGrid::World, paint_context: PaintContext::Native, orientation: None, glyphs: glyphs::Masks::default(), stats: Stats::default() }
     }
 
     /// How this renderer covers edges.
@@ -391,6 +466,23 @@ impl Raster {
     /// not change isolated child rasterization or allocate another cache.
     pub fn set_paint_context(&mut self, context: PaintContext) { self.paint_context = context; }
 
+    /// Turns and mirrors the workspace view as styk-render's `Renderer::set_orientation` does: `orientation` maps the
+    /// upright view's screen pixels to the turned one's (`view.matrix` includes it already); the artboard, the root's
+    /// fills and its clip follow the turned quad. `None` for the upright view.
+    pub fn set_orientation(&mut self, orientation: Option<[f64; 6]>) { self.orientation = orientation; }
+
+    /// What the bands of a frame of `list` seen through `view` share: the lone glyphs' masks for the view, filled now
+    /// where no frame has yet (on the thread that asks: call it where the frame's work is done, not where it is shown).
+    pub fn bands(&mut self, list: &DrawList, view: &ViewParams, cancelled: &dyn Fn() -> bool) -> Option<Bands> {
+        let crisp = self.edges == Edges::Crisp;
+        // Lone glyphs: the masks this view calls for (filled now when no frame has yet).
+        let resolution = styk_render::effects::plan::raster_resolution(view.matrix[0].hypot(view.matrix[1]));
+        let glyphs: Arc<[Option<glyphs::Placed>]> = if list.glyphs.is_empty() { Arc::from(Vec::new()) } else { Arc::from(self.glyphs.prepare(list, resolution, !crisp, cancelled)) };
+        if cancelled() { return None; }
+        Some(Bands { edges: self.edges, drawing_grid: self.drawing_grid, paint_context: self.paint_context, orientation: self.orientation, glyphs,
+            glyph_stats: (self.glyphs.count() as u32, self.glyphs.filled, self.glyphs.bytes()) })
+    }
+
     /// Draws `list` seen through `view` at `size`, with `images`.
     pub fn render(&mut self, list: &DrawList, images: &Images, view: &ViewParams, size: [u32; 2]) -> Frame {
         self.render_cancellable(list, images, view, size, &|| false).expect("uncancelled raster")
@@ -398,21 +490,10 @@ impl Raster {
     pub fn render_cancellable(&mut self, list: &DrawList, images: &Images, view: &ViewParams, size: [u32; 2], cancelled: &dyn Fn() -> bool) -> Option<Frame> {
         if cancelled() { return None; }
         let size = [size[0].max(1), size[1].max(1)];
-        let crisp = self.edges == Edges::Crisp;
-        // Lone glyphs: the masks this view calls for (filled now when no frame has yet).
-        let resolution = styk_render::effects::plan::raster_resolution(view.matrix[0].hypot(view.matrix[1]));
-        let glyphs = if list.glyphs.is_empty() { Vec::new() } else { self.glyphs.prepare(list, resolution, !crisp, cancelled) };
-        let mut frame = frame::Frame::new(list, images, view, size, crisp, glyphs, self.drawing_grid, self.paint_context);
-        frame.cancelled = cancelled;
-        if cancelled() { return None; }
-        let pixels = frame.draw();
-        if cancelled() { return None; }
-        self.stats = frame::Stats { glyph_masks: self.glyphs.count() as u32, glyph_masks_filled: self.glyphs.filled, glyph_bytes: self.glyphs.bytes(), ..frame.stats };
-        let mut bytes = Vec::with_capacity(pixels.len() * 4);
-        for p in pixels {
-            bytes.extend_from_slice(&p);
-        }
-        Some(Frame { width: size[0], height: size[1], pixels: bytes })
+        // The whole frame is the one band of all its rows.
+        let (frame, stats) = self.bands(list, view, cancelled)?.render(list, images, view, size, 0, size[1], cancelled)?;
+        self.stats = stats;
+        Some(frame)
     }
 
     /// Lets go of the glyph masks kept between frames.

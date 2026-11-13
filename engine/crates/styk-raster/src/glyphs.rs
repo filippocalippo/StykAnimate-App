@@ -38,6 +38,7 @@ pub(crate) struct Masks {
 }
 
 /// One instance's mask for a frame: its layout and pixels.
+#[derive(Clone)]
 pub(crate) struct Placed {
     pub layout: GlyphMaskLayout,
     pub mask: Arc<Mask>,

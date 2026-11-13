@@ -22,3 +22,4 @@ Architecture decision records of the Rust engine port. Each states the context, 
 - [D18: What the editor draws at random is handed to the engine](0018-editor-draws.md)
 - [D19: The engine owns the document; the editor keeps a read view patched from it](0019-engine-owns-the-document.md)
 - [D20: A software rasterizer draws runs of primitives with the simplest shader that holds them](0020-software-rasterizer-shading-runs.md)
+- [D21: Without a graphics card, the stage is drawn by the CPU rasterizer on the engine's workers](0021-processor-stage.md)

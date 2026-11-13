@@ -150,3 +150,69 @@ test('actual nonthreaded monitor presentation records success before a threaded 
   side.engine.threaded=false;target.drawImage=()=>{throw Error('surface lost');};
   assert.throws(()=>draw(target,view,()=>assert.fail('no completed paint')),/surface lost/);
 });
+
+// Frames drawn on the engine's workers (src/engine/engine-stage-processor.mjs): shown when the workers finish them, the
+// newest one only, copied out of the engine's memory; the device draws again when the workers cannot.
+function processorStage() {
+  const memory = new ArrayBuffer(64);
+  new Uint8Array(memory).set([1, 2, 3, 4, 5, 6, 7, 8], 16);
+  let progress = 0, wake = null, serial = 0, ready = null, pending = false, failed = false;
+  const calls = [], waits = [], put = [], pictures = [];
+  const style = () => ({visibility: '', cssText: ''});
+  const scene = {style: style(), after(canvas) { calls.push('placed'); this.next = canvas; }};
+  const document = {createElement: () => ({style: style(), width: 0, height: 0, setAttribute() {}, remove() { calls.push('removed'); },
+    getContext: () => ({putImageData: image => put.push([...image.data])})})};
+  const stage = {
+    set_processor: on => calls.push(`processor ${on}`), processor_serial: () => serial,
+    processor_frame: () => ready ? [16, 2, 1, ready] : [], processor_shown: shown => { calls.push(`shown ${shown}`); if (ready === shown) ready = null; },
+    processor_pending: () => pending, processor_failed: () => failed,
+  };
+  const engine = {progressSeen: () => progress, join: {memory: {buffer: memory}},
+    whenProgress(seen) { waits.push(seen); return progress !== seen ? Promise.resolve() : new Promise(resolve => { wake = resolve; }); }};
+  return {stage, engine, scene, document, calls, waits, put, pictures,
+    ask() { serial++; pending = true; },
+    finish(number) { ready = number; pending = false; progress++; wake?.(); wake = null; },
+    fail() { failed = true; pending = false; progress++; wake?.(); wake = null; }};
+}
+
+test('a frame drawn on the workers is shown when they finish it, and only the newest of those asked for', async () => {
+  globalThis.ImageData ??= class { constructor(width, height) { Object.assign(this, {width, height, data: new Uint8ClampedArray(width * height * 4)}); } };
+  const {createProcessorStage} = await import('../src/engine/engine-stage-processor.mjs');
+  const s = processorStage();
+  const presenter = createProcessorStage({stage: s.stage, engine: s.engine, scene: s.scene, document: s.document, onPicture: (prepared, at, frame) => s.pictures.push([prepared, frame.tick, frame.revision])});
+  presenter.asked(0, {tick: 1});
+  assert.deepEqual(s.calls, [], 'off: the device draws and nothing waits');
+  presenter.set(true);
+  assert.deepEqual(s.calls, ['processor true', 'placed']);
+  assert.equal(s.scene.style.visibility, 'hidden', 'the scene canvas is covered by the frames\' own');
+  s.ask(); presenter.asked(10, {tick: 3, revision: 7});
+  s.ask(); presenter.asked(12, {tick: 4, revision: 8});
+  assert.deepEqual(s.waits, [0], 'one wait on the engine at a time');
+  assert.deepEqual(s.pictures, [], 'nothing is shown before the workers finish');
+  // The workers finished the second frame (the first was replaced): its pixels are copied out, and it alone is shown.
+  s.finish(2);
+  await settle();
+  assert.deepEqual(s.put, [[1, 2, 3, 4, 5, 6, 7, 8]]);
+  assert.deepEqual(s.pictures, [[false, 4, 8]]);
+  assert.ok(s.calls.includes('shown 2'), 'the frame\'s buffer goes back to the engine');
+  presenter.set(false);
+  assert.equal(s.scene.style.visibility, '');
+  presenter.destroy();
+  assert.ok(s.calls.includes('removed'));
+});
+
+test('a frame the workers could not draw hands the stage back to the device', async () => {
+  globalThis.ImageData ??= class { constructor(width, height) { Object.assign(this, {width, height, data: new Uint8ClampedArray(width * height * 4)}); } };
+  const {createProcessorStage} = await import('../src/engine/engine-stage-processor.mjs');
+  const s = processorStage();
+  let failed = 0;
+  const presenter = createProcessorStage({stage: s.stage, engine: s.engine, scene: s.scene, document: s.document, onFailed: () => failed++});
+  presenter.set(true);
+  s.ask(); presenter.asked(0, {tick: 1, prepared: true});
+  s.fail();
+  await settle();
+  assert.equal(failed, 1);
+  assert.equal(presenter.on, false);
+  assert.deepEqual(s.calls.slice(-1), ['processor false']);
+  assert.equal(s.scene.style.visibility, '', 'the scene canvas shows again');
+});

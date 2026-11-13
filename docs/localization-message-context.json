@@ -939,7 +939,7 @@
   },
   "app.reconnectCanvas": {
     "locations": [
-      "src/app.mjs:6260"
+      "src/app.mjs:6263"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
@@ -1265,7 +1265,7 @@
   },
   "app.theGraphicsDeviceWasResetReconnectingYourCanvas": {
     "locations": [
-      "src/app.mjs:6260"
+      "src/app.mjs:6263"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
@@ -11803,14 +11803,14 @@
   },
   "errors.app.selectionChangedReopenTheColorPicker": {
     "locations": [
-      "src/app.mjs:6290",
-      "src/app.mjs:6297"
+      "src/app.mjs:6293",
+      "src/app.mjs:6300"
     ],
     "context": "if(editor.report!==report||editor.tick!==tick||[...editor.selectedUids].join(',')!==uids)throw messageError(new Error(''), \"errors.app.selectionChangedReopenThe"
   },
   "errors.app.selectionChangedReopenThePalette": {
     "locations": [
-      "src/app.mjs:6283"
+      "src/app.mjs:6286"
     ],
     "context": "if(editor.report!==report||editor.selectedUid!==uid||editor.figure!==figure||editor.tick!==tick)throw messageError(new Error(''), \"errors.app.selectionChangedRe"
   },
@@ -11834,7 +11834,7 @@
   },
   "errors.app.theGraphicsDeviceWasLost": {
     "locations": [
-      "src/app.mjs:6243"
+      "src/app.mjs:6246"
     ],
     "context": "stats.problem(Object.assign(messageError(new Error(''), \"errors.app.theGraphicsDeviceWasLost\", {}), {name: 'GPUError'}), {type: 'graphics-lost', recovered: fals"
   },
@@ -13801,9 +13801,9 @@
   },
   "errors.engineStage.theDrawingEngineCouldNotStart": {
     "locations": [
-      "src/engine/engine-stage.mjs:198",
       "src/engine/engine-stage.mjs:201",
-      "src/engine/engine-stage.mjs:205"
+      "src/engine/engine-stage.mjs:204",
+      "src/engine/engine-stage.mjs:208"
     ],
     "context": "catch (error) { throw messageError(error, 'errors.engineStage.theDrawingEngineCouldNotStart', {reason: error?.message ?? error}); }"
   },
@@ -25534,14 +25534,14 @@
   },
   "rendererStatus.deviceDisconnected": {
     "locations": [
-      "src/engine/engine-stage.mjs:258"
+      "src/engine/engine-stage.mjs:278"
     ],
     "context": "messageKey: 'rendererStatus.deviceDisconnected', messageParams: {detail: reason}}));"
   },
   "rendererStatus.deviceLost": {
     "locations": [
       "src/app.mjs:1714",
-      "src/app.mjs:6240"
+      "src/app.mjs:6243"
     ],
     "context": "if (state.renderer.stats?.backend === \"WebGPU device lost\") localizedText($(\"renderer-label\"), \"rendererStatus.deviceLost\");"
   },
