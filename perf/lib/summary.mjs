@@ -124,3 +124,37 @@ export function explain(pair, scenario) {
   if (scenario.notes.length) lines.push('', 'Notes:', ...scenario.notes.map(note => `  ${note}`));
   return `${lines.join('\n')}\n`;
 }
+
+/** The columns of the memory table: a checkpoint's own numbers, then the page split by owner (`owners`, src/devtools/memory.mjs). */
+const MEMORY_COLUMNS = [['total', 'all'], ['page', 'page'], ['graphics', 'graphics'], ['engineReserved', 'eng.res'], ['engine', 'eng.use'], ['jsHeap', 'js']];
+const OWNER_PARTS = [['engine memory', 'engine'], ['JavaScript heap', 'heap'], ['array buffers', 'buffers'], ['pictures', 'pictures'], ['workers', 'workers'], ['unexplained', 'unexpl.']];
+
+/**
+ * A run's memory checkpoints as text (`npm run perf -- memory`): per pair, the memory after every scenario in megabytes,
+ * the page split by owner beside it, and with `detail` what each part of the last checkpoint (or of `after`) holds.
+ */
+export function memoryText(result, {env = null, workload = null, after = null, detail = false} = {}) {
+  const lines = [`Memory of ${result.label} (megabytes; the page split by owner: docs/DEVTOOLS.md "Memory by owner")`, ''];
+  const cell = value => pad(Number.isFinite(value) ? Math.round(value) : '–', 8);
+  for (const pair of result.pairs) {
+    if ((env && pair.environment.id !== env) || (workload && pair.workload.id !== workload) || !pair.memory?.length) continue;
+    lines.push(`${pair.environment.id} / ${pair.workload.id}`,
+      `  ${pad('after', 26)} ${MEMORY_COLUMNS.map(([, name]) => pad(name, 8)).join(' ')} | ${OWNER_PARTS.map(([, name]) => pad(name, 8)).join(' ')}`);
+    for (const point of pair.memory) {
+      lines.push(`  ${pad(point.after.slice(0, 26), 26)} ${MEMORY_COLUMNS.map(([key]) => cell(point[key])).join(' ')} | ${OWNER_PARTS.map(([key]) => cell(point.owners?.[key])).join(' ')}`);
+    }
+    const chosen = after ? pair.memory.find(point => point.after === after) : pair.memory.at(-1);
+    if (detail && chosen?.owners) {
+      lines.push('', `  After ${chosen.after}, by owner:`);
+      for (const [part] of OWNER_PARTS) {
+        const rows = chosen.owners.rows?.[part];
+        if (chosen.owners[part] === undefined) continue;
+        lines.push(`    ${pad(part, 24)} ${cell(chosen.owners[part])}`);
+        for (const row of rows ?? []) lines.push(`      ${pad(`${row.name}${row.count ? ` (${row.count})` : ''}`.slice(0, 48), 48)} ${Number.isFinite(row.mb) ? row.mb.toFixed(1) : '–'}`);
+      }
+      if (chosen.owners.graphics?.length) lines.push(`    in the graphics process: ${chosen.owners.graphics.map(row => `${row.name} ${row.mb} (${row.count})`).join(', ')}`);
+    }
+    lines.push('');
+  }
+  return `${lines.join('\n')}\n`;
+}

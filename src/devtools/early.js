@@ -365,7 +365,7 @@
   const nativeOffscreenContext = globalThis.OffscreenCanvas?.prototype?.getContext;
   if (typeof nativeOffscreenContext === 'function') OffscreenCanvas.prototype.getContext = function (type, ...rest) { return memory.canvas(this, type, nativeOffscreenContext.call(this, type, ...rest)); };
   const nativeBitmap = globalThis.createImageBitmap;
-  if (typeof nativeBitmap === 'function') globalThis.createImageBitmap = function createImageBitmap(...args) { return nativeBitmap.apply(this, args).then(memory.bitmap); };
+  if (typeof nativeBitmap === 'function') globalThis.createImageBitmap = function createImageBitmap(...args) { return nativeBitmap.apply(this ?? window, args).then(memory.bitmap); };
 
   // --- logs --------------------------------------------------------------------------------------------------------
   const LOGS = 4096;

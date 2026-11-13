@@ -187,7 +187,11 @@ method: how often, how long in all, the worst. It answers "what did the interfac
 
 **Memory**: after every scenario, the memory of the page, the graphics process and the browser process, the engine's
 memory in use, its peak and what it has reserved, the JavaScript heap and the GPU memory the stage holds (its
-buffers, render targets and picture pages).
+buffers, render targets and picture pages). Each checkpoint also holds `owners`, the page's process by owner
+([DEVTOOLS.md](DEVTOOLS.md#memory-by-owner)), in megabytes: the engine memory, the interface thread's heap and array
+buffers (by the owners that registered them, and the rest), the canvases and bitmaps kept in the page, every worker's heap
+and array buffers grouped by name (the runner reads each thread through the inspector, `threadHeaps` in `perf/lib/run.mjs`),
+and what is left `unexplained`. `npm run perf -- memory <run>` prints the checkpoints with that split.
 
 ### Layers
 

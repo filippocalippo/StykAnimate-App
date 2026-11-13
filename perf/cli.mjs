@@ -5,6 +5,7 @@
 //                       [--param engine.workers=2] [--experiment <file.js>]
 //   npm run perf -- list                       scenarios, workloads, environments, suites and engine benchmarks
 //   npm run perf -- show [run] [scenario] [--env <id>] [--workload <id>]
+//   npm run perf -- memory [run] [--env <id>] [--workload <id>] [--detail] [--after <scenario>]
 //   npm run perf -- compare <base run> [head run] [--all] [--fail-on-worse]
 //   npm run perf -- report [run …] [--engine <engine run>] [--notes <file.md>] [--out <file.html>]
 //   npm run perf -- engine [--workload small,medium,large,stress] [--scale] [--benchmark open,frame] [--rounds 5] [--label <name>]
@@ -39,7 +40,7 @@ import {parseParameters, readExperiment, withParameters} from './lib/experiment.
 import {build, ENGINE_RUNS, ENGINE_SCHEMA, machine, read, SCHEMA, slug, timeLabel, write} from './lib/result.mjs';
 import {runPair} from './lib/run.mjs';
 import {buildBundle, measureStartup} from './lib/startup.mjs';
-import {explain, overview} from './lib/summary.mjs';
+import {explain, memoryText, overview} from './lib/summary.mjs';
 import {buildReport} from './report/build.mjs';
 import {open, SCENARIOS, select} from './scenarios/index.mjs';
 import {launches, SUITES, suite as suiteNamed} from './suites.mjs';
@@ -208,7 +209,17 @@ function engineCompared(argv) {
   return options['fail-on-worse'] && result.counts.worse ? 1 : 0;
 }
 
-const COMMANDS = {run, show, compare: compared, report, engine, 'engine-compare': engineCompared, list: catalogue};
+/**
+ * A run's memory checkpoints, the page split by owner (docs/PERFORMANCE.md "What is measured"): `--detail` lists what every
+ * part of the last checkpoint holds, `--after <scenario>` of the checkpoint after that scenario.
+ */
+function memory(argv) {
+  const {words, options} = parse(argv, ['detail']);
+  process.stdout.write(memoryText(read(words[0] ?? 'latest'), {env: options.env ?? null, workload: options.workload ?? null, after: options.after ?? null, detail: Boolean(options.detail || options.after)}));
+  return 0;
+}
+
+const COMMANDS = {run, show, memory, compare: compared, report, engine, 'engine-compare': engineCompared, list: catalogue};
 
 async function main(argv) {
   const [command, ...rest] = argv;

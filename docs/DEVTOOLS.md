@@ -132,7 +132,9 @@ Six tabs; the first opens by default:
     want of a ready one, pictures pending, playback's ready frames, the frame cache, the threads.
   - *Memory*: the JavaScript heap, the engine's memory in use and reserved (its linear memory, which never shrinks),
     the stage's GPU memory, each with its last minute as a line. The GPU figure is all the stage reports; the stage's
-    own `gpuBytes` (the app's count, shown beside it) leaves out its render targets and sprite pages.
+    own `gpuBytes` (the app's count, shown beside it) leaves out its render targets and sprite pages. Under them, *By
+    owner*: the page's memory by owner ([below](#memory-by-owner)), read once a second, with what the page's process
+    holds that no part names.
 
   **Record** starts a capture (the control channel's and the runner's kind) and **Stop** ends it; the tab then shows
   exactly that stretch, frozen, with its grade against the limits (the frame time seen against 16.7 / 33.3 / 100 ms
@@ -188,6 +190,40 @@ command with undo. The tools load beside the app's bundle and never import an ap
 copy. The app hands over what they read (`startDevtools(window.styk, {loadEngine, tableOf})`). The exceptions are
 `src/canvas-interactions.mjs` and `src/renderer-geometry.mjs`, which the bundle keeps as page entries.
 
+## Memory by owner
+
+Who holds the page's memory (`src/devtools/memory.mjs` `breakdown`). The page's process (the renderer, as the system
+counts its private bytes) is split into parts:
+
+| Part | What | Read from |
+| --- | --- | --- |
+| engine memory | the engine's WebAssembly memory, all of it: in use, the frame cache and pictures waiting among it, and the free space it grew to and keeps ([memory.md](engine/memory.md#the-high-water-mark)) | `engine.memory()` |
+| JavaScript heap | the interface thread's V8 heap, committed (in use under it) | the inspector's `Runtime.getHeapUsage`, else `performance.memory` |
+| array buffers | typed arrays the interface thread holds outside its heap, by owner, and the rest when the thread's total is known | the owners; the thread's `backingStorageSize` |
+| pictures | canvases read often by script and image bitmaps, kept in this process | the early script |
+| workers | each worker's heap and array buffers (the codec's and the drawing workers' own WebAssembly memory among them), grouped by name; the engine's threads share the engine memory, which is counted once | the inspector, per thread |
+| unexplained | the process less all of the above: the browser's own (style, layout, fonts, compiled code, its allocators) and whatever no owner names | |
+
+Canvases the graphics process keeps (WebGPU, WebGL and accelerated 2D canvases: width × height × 4 each) are listed
+apart and not subtracted.
+
+**An owner registers once, where it is made:** `traceMemory(owner, target, read, kind)` in `src/trace.mjs`. `read(target)`
+returns the bytes it holds now (or `{bytes, count}`), from a count it keeps or a short walk; `kind` is `buffers`, `pixels`
+or `graphics`. The target is held by a weak reference, so an owner nothing else holds drops out and the tools never keep
+one alive; `read` takes the target as its argument and captures nothing. The returned function removes the registration
+(the owner's `dispose`). The tools call the reads only when they take a checkpoint (the panel once a second while it shows,
+the runner after each scenario), never on the app's paths; nothing is measured by walking the heap. The shipping build
+registers nothing (the call returns the same no-op). Registered today: the drawing layers' cel tiles, the undo pixels kept
+in memory, the tile levels and the previews (`src/drawing-resources.mjs`). The early script itself records every canvas that
+was given a context (the page's and offscreen ones) and the image bitmaps the page made, through weak references (8,192 of
+each at most, the collected ones dropped first), and reads their sizes at the checkpoint.
+
+The control channel's `memory {owners: true}` adds the owners to the page's memory, and `memory.breakdown {threads,
+processBytes}` returns the split (`threads` as the runner reads them from the inspector). In the desktop's developer launch the
+page reads its own process's count through the preload bridge (`processMemory`: `process.getProcessMemoryInfo()`); in a browser
+the count is unknown in the page and `unexplained` is null there. Without an inspector the workers are not measured and stay
+inside `unexplained` (`missing` says so).
+
 ## Control channel
 
 For agents: drive and inspect the running app without the interface. The developer launch (`desktop/devtools.cjs`) serves
@@ -211,7 +247,8 @@ A request is `{id, op, args?, detail?: "short" | "full"}`. The answer is `{id, o
 |---|---|
 | `hello` | protocol version (1), build, operations |
 | `state` | document summary, playback, view, focus, open dialogs, window, cross-origin isolation, WebGPU |
-| `metrics`, `threads`, `memory` | the frames, inputs, paint, queues and memory now; the page's workers; the page's, the engine's and the GPU's memory |
+| `metrics`, `threads`, `memory` | the frames, inputs, paint, queues and memory now; the page's workers; the page's, the engine's and the GPU's memory (`{owners: true}` adds the memory owners) |
+| `memory.breakdown` | `{threads, processBytes}`: the page's memory by owner ([Memory by owner](#memory-by-owner)) |
 | `boundary` | `{limit, reset}`: the calls the interface made into the engine since the last capture began, heaviest first |
 | `environment` | what a profiling run asked the page to pretend, and what the page, the engine and the stage report |
 | `startup` | the launch's milestones, the app's start as phases, and the spans until ready (the engine's start, the graphics calls, the long tasks), in ms from the page's start |
