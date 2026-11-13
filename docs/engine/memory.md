@@ -295,7 +295,21 @@ pictures arrive. Not done.
   save's helpers, pictures, idle tasks), and once it has waited eight times in a row with nothing to do (at most 50 ms each). While
   workers prepare frames each holds about one scene at once either way; the spares keep that memory between two of its frames, which
   raised the engine's peak during the open of the dense document (whose first frames the workers prepare meanwhile) by about
-  150 MB in one measurement on 2026-11-13.
+  150 MB in one measurement on 2026-11-13. What made that peak was the number of frames made at once, now bounded (*Frames being
+  made*, below): a worker that finds no room lets its spares go, so the spares of idle workers never sit beside the frames the others make.
+- **Frames being made** (`styk_engine::frames::Making`, `Storage::take_admitted` in `frames/cache.rs`): a frame holds its scene until
+  its draw list is made, about 60 MB at 200,000 segments, and every worker used to start one as soon as a frame was wanted. Opening the
+  dense document (the open itself peaks 73 MB over what was held: tree, normalization and typed views) was followed by eight workers
+  making its first 48 frames at once, of which the cache (a sixteenth of the memory, nine such frames) kept nine: the engine's memory
+  went from 59 MB in use to 729 MB in the two seconds after the open, and the linear memory kept 751 to 1,009 MB for the session against
+  about 280 in use once the frames were made (2026-11-13, the developer tools' memory by owner and `engine.memory()` read every 4 ms).
+  Now two things wait: a frame the cache would drop as soon as it was made (the frames kept and those on their way are at the budget and
+  this one is farther ahead of the playhead than every frame kept: it waits for a request that moves the playhead), and a frame while
+  the frames being made, at the size the last frame of the document took (its scene's buffers and its draw list), would hold more than an
+  eighth of the memory (`Making::most_bytes`, 240 MiB of 2 GiB: four such frames). One frame is always made, and the first frame of a
+  document is made alone (what one holds is not known until one was made). A worker refused for want of room lets its spares go and
+  waits; the next frame done wakes it. The count is the engine's, across the cache's publications, so frames still being made for a
+  replaced revision count until they are done.
 - **History** keeps its byte limit (`HistoryLimits`, 48 MiB by default): an entry larger than the limit
   retires the older ones (testingupload's movieclip edit weighs 100 MiB by the history's accounting and
   holds 3 MiB of memory).
