@@ -5,10 +5,16 @@
  * A difference counts only when it is larger than what repeating a run moves by itself: twice the wider of the two
  * runs' spreads between passes, and never less than five percent of the value or the metric's smallest step that
  * matters. So a comparison of a run with itself says "same" everywhere, and a claim of "faster" has that behind it.
+ *
+ * `compareEngine` applies the same rule to two engine runs (perf/engine/README.md): every metric of every benchmark both
+ * measured on the same workload, and the capacity figures of their scaling runs.
  */
 import {format, METRICS} from './metrics.mjs';
 
-/** The least difference that counts for a unit, whatever the spread: timers and frames do not resolve less. */
+/**
+ * The least difference that counts for a unit, whatever the spread: timers and frames do not resolve less. A metric's
+ * definition may name its own `floor` where it resolves finer (the engine tier times calls in Node to the microsecond).
+ */
 const FLOOR = {ms: .3, '%': 1, fps: 1, '/s': 1, MB: 5, '': 0};
 /** The metrics a comparison prints unless asked for all: what a person feels, and what explains it. */
 const HEADLINE = ['duration', 'frame.felt', 'work.p95', 'input.p95'];
@@ -18,7 +24,7 @@ export function change(base, head, definition = {unit: '', better: 'lower'}) {
   if (!Number.isFinite(base?.median) || !Number.isFinite(head?.median)) return null;
   const difference = head.median - base.median;
   const noise = Math.max((base.max - base.min) / 2, (head.max - head.min) / 2, base.mad ?? 0, head.mad ?? 0);
-  const threshold = Math.max(2 * noise, Math.abs(base.median) * .05, FLOOR[definition.unit] ?? 0);
+  const threshold = Math.max(2 * noise, Math.abs(base.median) * .05, definition.floor ?? FLOOR[definition.unit] ?? 0);
   const better = definition.better === 'higher' ? difference > 0 : difference < 0;
   return {base: base.median, head: head.median, difference, ratio: base.median ? difference / Math.abs(base.median) : null, threshold,
     verdict: Math.abs(difference) <= threshold ? 'same' : better ? 'better' : 'worse'};
@@ -49,9 +55,50 @@ export function compare(base, head, {all = false} = {}) {
     }
   }
   for (const id of before.keys()) if (!seen.has(id)) missing.push(`${id}: only in ${base.label}`);
+  return {base: base.label, head: head.label, rows, counts: tally(rows), missing};
+}
+
+/** How many rows got better, worse, or stayed within noise. */
+function tally(rows) {
   const counts = {better: 0, worse: 0, same: 0};
   for (const row of rows) counts[row.verdict]++;
-  return {base: base.label, head: head.label, rows, counts, missing};
+  return counts;
+}
+
+/**
+ * Two engine runs (schema styk-perf-engine/1): every metric of every benchmark both measured on the same workload, then
+ * the capacity figures of both scaling runs. The rows and the text are those of `compare`, the environment being the one
+ * thread the engine tier runs on. A benchmark that failed in either run is listed, not compared.
+ */
+export function compareEngine(base, head) {
+  const key = (workload, benchmark) => `${workload.id}/${benchmark.id}`;
+  const before = new Map();
+  for (const workload of base.workloads) for (const benchmark of workload.benchmarks) before.set(key(workload, benchmark), benchmark);
+  const rows = [], missing = [], seen = new Set();
+  const add = (workload, benchmark, title, metric, was, now, definitions) => {
+    const changed = change(was, now, definitions[metric]);
+    if (changed) rows.push({environment: 'engine', workload, scenario: benchmark, title, metric, judged: false, definitions, ...changed});
+  };
+  for (const workload of head.workloads) {
+    for (const benchmark of workload.benchmarks) {
+      const id = key(workload, benchmark), was = before.get(id);
+      seen.add(id);
+      if (!was) { missing.push(`${id}: only in ${head.label}`); continue; }
+      if (benchmark.error || was.error) { missing.push(`${id}: failed in ${benchmark.error ? head.label : base.label}`); continue; }
+      const definitions = {...was.definitions, ...benchmark.definitions};
+      for (const metric of Object.keys(benchmark.metrics)) add(workload.id, benchmark.id, benchmark.title, metric, was.metrics[metric], benchmark.metrics[metric], definitions);
+    }
+  }
+  for (const id of before.keys()) if (!seen.has(id)) missing.push(`${id}: only in ${base.label}`);
+  // A capacity is compared where both runs found it inside the sizes they measured.
+  const capacities = new Map((base.scaling?.capacity ?? []).map(row => [row.id, row]));
+  for (const row of head.scaling?.capacity ?? []) {
+    const was = capacities.get(row.id);
+    if (!was) continue;
+    if (!was.segments || !row.segments) { missing.push(`capacity ${row.id}: outside the sizes measured in ${was.segments ? head.label : base.label}`); continue; }
+    add('scaling', 'capacity', row.title, row.id, was.segments, row.segments, {[row.id]: {title: row.title, unit: 'segments', better: 'higher', digits: 0}});
+  }
+  return {base: base.label, head: head.label, rows, counts: tally(rows), missing};
 }
 
 /** A comparison as text: what changed first, then a line for everything that did not. */

@@ -5,11 +5,15 @@
 //   npm run perf -- list                       scenarios, workloads, environments and suites
 //   npm run perf -- show [run] [scenario] [--env <id>] [--workload <id>]
 //   npm run perf -- compare <base run> [head run] [--all] [--fail-on-worse]
+//   npm run perf -- engine [--workload small,medium,large,stress] [--scale] [--benchmark open,frame] [--rounds 5] [--label <name>]
+//   npm run perf -- engine-compare <base engine run> [head engine run] [--all] [--fail-on-worse]
 //
 // `run` starts this checkout's app on scratch data, in a window off-screen, once per pair of environment and workload,
 // and writes artifacts/perf/runs/<label>/ (result.json, summary.txt). `show` prints a run's summary, or one scenario in
 // full: its metrics, its frames by phase, its spans and where the profiled pass found the time, thread by thread.
 // `compare` says what changed between two runs beyond their own noise (the head defaults to the latest run).
+// `engine` is the engine tier (perf/engine/README.md): the engine by itself in Node on one thread, no window, an answer in
+// seconds; it writes artifacts/perf/engine/<label>/. `engine-compare` is `compare` for two of those.
 // A run is `latest`, a label, or a folder. Exit codes: 0 done, 1 a scenario failed, a pair did not complete, or
 // `--fail-on-worse` found something worse; 2 usage.
 import {performance} from 'node:perf_hooks';
@@ -17,13 +21,19 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ENVIRONMENTS, environment} from './environments.mjs';
 import {compare, comparisonText} from './lib/compare.mjs';
+import {compareEngine} from './lib/compare.mjs';
 import {build, machine, read, SCHEMA, timeLabel, write} from './lib/result.mjs';
+import {ENGINE_RUNS, ENGINE_SCHEMA, slug} from './lib/result.mjs';
+import {BENCHMARKS, SCALING_BENCHMARKS, select as selectBenchmarks} from './engine/benchmarks.mjs';
+import {SIZES} from './engine/scaling.mjs';
+import {engineOverview} from './engine/summary.mjs';
 import {runPair} from './lib/run.mjs';
 import {buildBundle, measureStartup} from './lib/startup.mjs';
 import {explain, overview} from './lib/summary.mjs';
 import {open, SCENARIOS, select} from './scenarios/index.mjs';
 import {SUITES, suite as suiteNamed} from './suites.mjs';
 import {measure, workload, WORKLOADS} from './workloads.mjs';
+import {scaled} from './workloads.mjs';
 
 class Usage extends Error {}
 
@@ -99,6 +109,8 @@ function catalogue() {
   lines.push('', 'Workloads (--workload):', ...Object.values(WORKLOADS).map(spec => `  ${spec.id.padEnd(24)} ${spec.description}`));
   lines.push('', 'Environments (--env):', ...Object.values(ENVIRONMENTS).map(spec => `  ${spec.id.padEnd(24)} ${spec.description}`));
   lines.push('', 'Suites (npm run perf -- run <suite>):', ...Object.entries(SUITES).map(([id, plan]) => `  ${id.padEnd(24)} ${plan.description}`));
+  lines.push('', 'Engine benchmarks (npm run perf -- engine --benchmark <id or layer>; one thread in Node, no window):',
+    ...BENCHMARKS.map(benchmark => `  ${benchmark.id.padEnd(24)} ${`[${benchmark.layer}]`.padEnd(26)} ${benchmark.title}${SCALING_BENCHMARKS.includes(benchmark) ? ' (also in --scale)' : ''}`));
   console.log(lines.join('\n'));
   return 0;
 }
@@ -111,11 +123,42 @@ function compared(argv) {
   return options['fail-on-worse'] && result.counts.worse ? 1 : 0;
 }
 
+/** The engine tier: the default workloads (or --workload), with --scale the scaling sizes too (alone, unless --workload is given). */
+async function engine(argv) {
+  const {words, options} = parse(argv, ['scale']);
+  if (words.length) throw new Usage('`engine` takes no words: workloads go in --workload, benchmarks in --benchmark.');
+  const rounds = Number(options.rounds ?? 5);
+  if (!Number.isInteger(rounds) || rounds < 1 || rounds > 20) throw new Usage('--rounds is 1 to 20.');
+  const benchmarks = selectBenchmarks(options.benchmark ? list(options.benchmark) : []);
+  const workloads = options.workload || !options.scale ? list(options.workload ?? 'small,medium,large,stress').map(workload) : [];
+  if (workloads.some(spec => spec.builtin)) throw new Usage('The engine tier measures generated documents: --workload is small, medium, large or stress.');
+  const scaleBenchmarks = options.scale ? SCALING_BENCHMARKS.filter(benchmark => benchmarks.includes(benchmark)) : [];
+  if (options.scale && !scaleBenchmarks.length) throw new Usage(`--scale measures ${SCALING_BENCHMARKS.map(benchmark => benchmark.id).join(', ')}: --benchmark names none of them.`);
+  const label = options.label ?? timeLabel(), log = text => console.error(`[perf engine] ${text}`);
+  // Loaded here: the runner brings the editor and the engine, which the other commands do not need.
+  const {runEngine} = await import('./engine/run.mjs');
+  const result = await runEngine({label, workloads, benchmarks, scaled: scaleBenchmarks.length ? SIZES.map(scaled) : [], scaleBenchmarks, rounds, log});
+  const text = engineOverview(result), folder = write(result, text, path.join(ENGINE_RUNS, slug(label)));
+  process.stdout.write(text);
+  console.log(`Written to ${folder}`);
+  return result.workloads.some(row => row.benchmarks.some(benchmark => benchmark.error)) ? 1 : 0;
+}
+
+function engineCompared(argv) {
+  const {words, options} = parse(argv, ['all', 'fail-on-worse']);
+  if (!words.length) throw new Usage('`engine-compare` needs the engine run to compare against: npm run perf -- engine-compare <base> [head].');
+  const from = {root: ENGINE_RUNS, schema: ENGINE_SCHEMA}, result = compareEngine(read(words[0], from), read(words[1] ?? 'latest', from));
+  process.stdout.write(comparisonText(result, {all: Boolean(options.all)}));
+  return options['fail-on-worse'] && result.counts.worse ? 1 : 0;
+}
+
 const COMMANDS = {run, show, compare: compared, list: catalogue};
+COMMANDS.engine = engine;
+COMMANDS['engine-compare'] = engineCompared;
 
 async function main(argv) {
   const [command, ...rest] = argv;
-  if (!command || command === 'help' || command === '--help') { console.log('Usage: npm run perf -- <run|list|show|compare> …  (docs/PERFORMANCE.md)'); return command ? 0 : 2; }
+  if (!command || command === 'help' || command === '--help') { console.log('Usage: npm run perf -- <run|list|show|compare|engine|engine-compare> …  (docs/PERFORMANCE.md; the engine tier: perf/engine/README.md)'); return command ? 0 : 2; }
   if (!COMMANDS[command]) throw new Usage(`Unknown command ${JSON.stringify(command)}: one of ${Object.keys(COMMANDS).join(', ')}.`);
   return COMMANDS[command](rest);
 }
