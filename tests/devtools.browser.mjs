@@ -154,6 +154,7 @@ try {
   assert.ok(live.watching > 0 && live.frames > 30, `the panel and the overlay watch the frames: ${JSON.stringify(live)}`);
   assert.notEqual(live.tiles[0], '–', `frames per second is shown: ${JSON.stringify(live.tiles)}`);
   assert.ok(live.spans.includes('paint'), `the live list names where the interface's time went: ${JSON.stringify(live.spans)}`);
+  assert.ok(live.spans.includes('engine memory') && live.spans.includes('JavaScript heap'), `the memory part lists who holds the page: ${JSON.stringify(live.spans)}`);
   console.log('PASS performance tab live', JSON.stringify(live.tiles), live.spans.slice(0, 5).join(', '));
   // Record, a drag, Stop: the tab holds exactly that stretch, with its frames, its inputs and its grade.
   const bar = name => panel.locator('.dt-button', {hasText: new RegExp(`^${name}$`)}).first();
