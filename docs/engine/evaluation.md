@@ -342,7 +342,8 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   `segmentZ(n)`). So above the same limit (the read asks with `lightAbove`) the session sends a figure that is not joined to another
   *light* (`interface::LIGHT`): its flags, root and bounds and, a row each, the index, length and depth of its segments as the full
   rows hold them, about a fifth of the words; a group built from it asks the session for the rest (`geometryGroups`, one call for
-  every group a read of the geometry's `drawables` builds) and is the group the full read would have sent. The session answers from
+  every group a read of the geometry's `drawables` builds, and one for all the groups whose joints the handles read, `geometry.build(groups)`:
+  a selection of thousands on a dense frame) and is the group the full read would have sent. The session answers from
   its latest read, the frame on show once the interface has read it: a group a read sent is its figure's in every later read that did
   not send it again, so the groups the interface holds build as they were sent, and only a group of an earlier geometry whose figure
   a later read sent again would build as that figure is now (`tests/dense-handles.test.mjs`,

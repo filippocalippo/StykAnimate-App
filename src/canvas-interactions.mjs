@@ -249,6 +249,13 @@ export function getPivotHandles(geometry, {
   Object.defineProperty(result,'groups',{value:groups});
   const options = { viewScale, autoSize, minDiameter, maxDiameter }, scale = Math.max(1e-9, Math.abs(viewScale));
   const pinned = pinnedHandleRadius(viewScale, minDiameter, maxDiameter);
+  // The figures whose every joint is read below are built at once, with one request of the engine for all of them (a selection of
+  // thousands on a dense frame asked for each figure alone).
+  geometry.build?.(objects.filter(g => {
+    const uid = g?.obj.unique_id;
+    if (!g || hiddenUids?.has(uid) || lockedUids?.has(uid) || (attaching && joinTargetUids && !joinTargetUids.has(uid))) return false;
+    return uid === selectedUid || Boolean(selectedUids?.has(uid)) || showUnselected || Boolean(g.obj.join) || attaching || selectStatic || Boolean(targets.get(g.slot ?? g.obj.object_slot)?.size);
+  }));
   const settingsKey = [topologyEpoch,spatialMode,showUnselected,showStatic,showDetailed,attaching,allowStaticManipulation,selectStatic,viewScale,autoSize,minDiameter,maxDiameter,builder,selectedJoint,selectedBranch,[...(selectedHandleIds??[])].join(',')].join('|');
   if(descriptorCache && descriptorCache.key!==settingsKey){descriptorCache.key=settingsKey;descriptorCache.objects=new WeakMap();}
   for (const g of objects) {
