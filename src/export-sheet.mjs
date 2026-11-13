@@ -413,7 +413,7 @@ export function openExportSheet({context, preferences = null, defaultDither = fa
     submit.textContent = exportPrimaryLabel(request, {movieclip});
     submit.disabled = !validity.canExport;
     if (!copyOnly) scheduleStage();
-    updateFade();
+    scheduleFade();
   }
   function renderPresets() {
     if (preset && !exportPresetHeld(preset.id, preset.applied, request)) preset = null;
@@ -479,8 +479,15 @@ export function openExportSheet({context, preferences = null, defaultDither = fa
   }
   /** The form column fades at its foot while rows wait below. */
   function updateFade() {
-    body.toggleAttribute('data-more-below', body.scrollHeight - body.scrollTop - body.clientHeight > 1);
+    const more = body.scrollHeight - body.scrollTop - body.clientHeight > 1;
+    if (body.hasAttribute('data-more-below') !== more) body.toggleAttribute('data-more-below', more);
   }
+  /**
+   * After a render, the fade is measured with the frame's own layout: measuring at once would lay the dialog out
+   * twice, and at the press of Export that layout came before the export's first frame.
+   */
+  let fadeFrame = 0;
+  const scheduleFade = () => { fadeFrame ||= requestAnimationFrame(() => { fadeFrame = 0; updateFade(); }); };
 
   // ---- The trim strip: the ends sit over the thumbnails' extent and write From and To.
   const validRange = () => {
@@ -654,12 +661,13 @@ export function openExportSheet({context, preferences = null, defaultDither = fa
     render();
     if (!validity.canExport || exporting || closed) return;
     remembered = exportPreferencesFromRequest(request, remembered);
-    onPreferences(remembered);
     setPlaying(false);
     dialog.setBusy(true);
+    // The choices are remembered once the export ends (saving the settings redraws the interface: not before the first frame).
     try { await onExport(currentRequest()); }
     catch (error) { globalThis.reportError?.(error); }
     finally {
+      onPreferences(remembered);
       if (!closed && !exporting) { dialog.setBusy(false); render(); }
     }
   }

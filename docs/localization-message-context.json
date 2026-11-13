@@ -15784,7 +15784,7 @@
   "errors.nativeVideoExport.renderedVideoFrameHasTheWrongDimensions": {
     "locations": [
       "src/native-video-export.mjs:70",
-      "src/video-export.mjs:283"
+      "src/video-export.mjs:293"
     ],
     "context": "if (!canvas || canvas.width !== width || canvas.height !== height) throw messageError(new Error(''), \"errors.nativeVideoExport.renderedVideoFrameHasTheWrongDime"
   },
@@ -18230,15 +18230,15 @@
   },
   "errors.videoExport.theVideoEncoderDidNotFinishItsPending": {
     "locations": [
-      "src/video-export.mjs:310"
+      "src/video-export.mjs:320"
     ],
     "context": "flushTimer = setTimeout(() => reject(messageError(new Error(''), \"errors.videoExport.theVideoEncoderDidNotFinishItsPending\", {})), 30000);"
   },
   "errors.videoExport.theVideoEncoderStoppedAcceptingFrames": {
     "locations": [
-      "src/video-export.mjs:272"
+      "src/video-export.mjs:281"
     ],
-    "context": "const timer = setTimeout(() => done(messageError(new Error(''), \"errors.videoExport.theVideoEncoderStoppedAcceptingFrames\", {})), 30000);"
+    "context": "timer = setTimeout(() => done(messageError(new Error(''), \"errors.videoExport.theVideoEncoderStoppedAcceptingFrames\", {})), 30000);"
   },
   "errors.videoExport.thisBrowserDoesNotSupportWebcodecsVideoExport": {
     "locations": [
@@ -19579,7 +19579,7 @@
   "exportSheet.closeExport": {
     "locations": [
       "src/export-sheet.mjs:270",
-      "src/export-sheet.mjs:736"
+      "src/export-sheet.mjs:744"
     ],
     "context": "const dialog = createDialog({size: 'lg', variant: 'export', id: EXPORT_DIALOG_ID, title: interfaceText(\"exportSheet.export\"), titleKey: \"exportSheet.export\", ov"
   },
@@ -19807,7 +19807,7 @@
   },
   "exportSheet.pausePreview": {
     "locations": [
-      "src/export-sheet.mjs:589"
+      "src/export-sheet.mjs:596"
     ],
     "context": "localizedAttribute(playButton, 'aria-label', (on ? \"exportSheet.pausePreview\" : \"exportSheet.playPreview\"), (on ? {} : {}));"
   },
@@ -19820,7 +19820,7 @@
   "exportSheet.playPreview": {
     "locations": [
       "src/export-sheet.mjs:175",
-      "src/export-sheet.mjs:589"
+      "src/export-sheet.mjs:596"
     ],
     "context": "'aria-label': interfaceText(\"exportSheet.playPreview\"), 'aria-labelKey': \"exportSheet.playPreview\", 'aria-labelParams': {}, 'aria-pressed': 'false'}, glyph(icon"
   },
@@ -20007,7 +20007,7 @@
   "filmstrip.card": {
     "locations": [
       "src/app.mjs:1190",
-      "src/export-sheet.mjs:497",
+      "src/export-sheet.mjs:504",
       "src/inspector-view.mjs:283",
       "src/layer-timeline.mjs:777",
       "src/sheet-filmstrip.mjs:437"
