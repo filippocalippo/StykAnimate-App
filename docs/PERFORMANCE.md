@@ -191,9 +191,12 @@ buffers, render targets and picture pages).
 `perf/lib/layers.mjs` is the one table that says which part of the app a function belongs to: a JavaScript module by
 its path, a WebAssembly function by its Rust crate, V8's own markers. Groups: `interface` (the timeline, the canvas
 overlay and gestures, the inspector, the shell, the editor's read view, the engine's interface modules, the binding
-glue, …), `engine` (editing commands, evaluation and draw lists, the GPU renderer, the CPU rasterizer, the document
-store, formats, the scheduler, allocation and copying, JSON, …), `browser` (garbage collection, the browser's native
+glue, …), `engine` (editing commands, evaluation and draw lists, math, the GPU renderer, the CPU rasterizer, the
+document store, formats, the scheduler, allocation and copying, JSON, …), `browser` (garbage collection, the browser's native
 work under a call, built-ins) and `tools` (the measurement itself). A thread parked waiting for work counts as idle.
+Math is `styk_math`, the `libm` crate and the compiler's builtins of the platform's `sin`, `cos`, `atan2` on
+WebAssembly (`compiler_builtins::math`): until 2026-11-13 those builtins counted as allocation and copying, with the
+memory functions of the same crate, which put a dense frame's trigonometry in the allocator's share.
 A new module that belongs to an existing layer needs a row there only when its name does not already match.
 
 ### Metrics and grades

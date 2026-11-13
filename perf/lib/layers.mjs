@@ -31,7 +31,7 @@ const MODULES = [
 const CRATES = new Map(Object.entries({
   styk_edit: 'engine-edit', styk_eval: 'engine-eval', styk_draw: 'engine-eval', styk_render: 'engine-render', styk_raster: 'engine-raster',
   styk_doc: 'engine-document', styk_formats: 'engine-formats', styk_piv: 'engine-formats', styk_export: 'engine-export', styk_drawing: 'engine-drawing',
-  styk_engine: 'engine-scheduler', styk_wasm: 'engine-binding', styk_math: 'engine-eval', styk_alloc: 'engine-memory', styk_codec_wasm: 'engine-formats', styk_drawing_wasm: 'engine-drawing',
+  styk_engine: 'engine-scheduler', styk_wasm: 'engine-binding', styk_math: 'engine-math', libm: 'engine-math', styk_alloc: 'engine-memory', styk_codec_wasm: 'engine-formats', styk_drawing_wasm: 'engine-drawing',
   wgpu: 'engine-render', wgpu_core: 'engine-render', wgpu_hal: 'engine-render', wgpu_types: 'engine-render', naga: 'engine-render', glow: 'engine-render',
   dlmalloc: 'engine-memory', compiler_builtins: 'engine-memory',
   serde_json: 'engine-json', serde: 'engine-json', ryu: 'engine-json', itoa: 'engine-json',
@@ -40,6 +40,11 @@ const CRATES = new Map(Object.entries({
 }));
 const CRATE = /(?:^|[^\w:])(?:<|&|dyn |mut )*([a-z][a-z0-9_]*)::/;
 const MEMORY = /^(memcpy|memmove|memset|memcmp|__rust_(alloc|dealloc|realloc)|__rdl_|malloc|free|realloc)/;
+/**
+ * The platform's `sin`, `cos`, `atan2`… on WebAssembly are the compiler's builtins (`compiler_builtins::math`, a copy of the `libm`
+ * crate): the arithmetic of geometry and evaluation, not the memory functions the rest of that crate holds.
+ */
+const MATH = /^compiler_builtins::math::/;
 const WAITING = /::(condvar|futex)::|memory_atomic_wait|std::thread::(sleep|park)/;
 
 export const LAYERS = Object.freeze({
@@ -58,6 +63,7 @@ export const LAYERS = Object.freeze({
   'interface-other': {title: 'Other interface code', group: 'interface'},
   'engine-edit': {title: 'Engine: editing commands', group: 'engine'},
   'engine-eval': {title: 'Engine: evaluation and draw lists', group: 'engine'},
+  'engine-math': {title: 'Engine: math (sin, cos, atan2, …)', group: 'engine'},
   'engine-render': {title: 'Engine: GPU renderer', group: 'engine'},
   'engine-raster': {title: 'Engine: CPU rasterizer', group: 'engine'},
   'engine-document': {title: 'Engine: document store', group: 'engine'},
@@ -98,6 +104,7 @@ function wasmLayer(mangled, url) {
   // A thread parked until there is work is not working: the standard library's waits count as idle.
   if (WAITING.test(name)) return 'idle';
   if (MEMORY.test(name)) return 'engine-memory';
+  if (MATH.test(name)) return 'engine-math';
   // V8's own trampolines between JavaScript and WebAssembly: the cost of crossing the boundary.
   if (/^(wasm-to-js|js-to-wasm)/.test(name)) return 'engine-binding';
   // A generic or trait method names several paths: the engine's own crate decides over the standard library's.
