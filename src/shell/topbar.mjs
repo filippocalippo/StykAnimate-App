@@ -93,6 +93,27 @@ export function measureBand(band, {steps = BAND_FOLDS, docked = true, folded = t
   }
 }
 
+/**
+ * Whether a font face's `unicode-range` (`U+0000-00FF, U+0131, U+4??`) covers a character of `text`; a range that
+ * cannot be read covers everything. The interface fonts come in subsets per script (base/fonts.css) that load as text
+ * needs them: a subset that covers none of the band's characters cannot change the band's width.
+ */
+export function rangeCoversText(range, text) {
+  const spans = [];
+  for (const part of String(range ?? '').split(',')) {
+    const match = /^\s*U\+([0-9a-f?]+)(?:-([0-9a-f]+))?\s*$/i.exec(part);
+    if (!match) return true;
+    const [, first, last] = match;
+    spans.push(last ? [parseInt(first, 16), parseInt(last, 16)] : [parseInt(first.replace(/\?/g, '0'), 16), parseInt(first.replace(/\?/g, 'f'), 16)]);
+  }
+  if (!spans.length) return true;
+  for (const character of String(text ?? '')) {
+    const code = character.codePointAt(0);
+    if (spans.some(([low, high]) => code >= low && code <= high)) return true;
+  }
+  return false;
+}
+
 /** A cheap fingerprint of what can change the band's width: its text and which parts show. */
 function signature(band) {
   let text = '';
@@ -159,8 +180,15 @@ export function watchBand(band, {window: win = globalThis.window, document: doc 
   const observer = new win.MutationObserver(() => { if (!deferred && signature(band) !== printed) schedule(); });
   observer.observe(band, {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'class', 'data-band-reserve']});
   const fonts = doc.fonts;
-  // Fonts that load after the band was measured refit it (a deferred first measurement waits for them instead).
-  const refit = () => { printed = ''; schedule(); };
+  // Fonts that load after the band was measured refit it (a deferred first measurement waits for them instead), unless
+  // none of them covers a character the band shows: another script's subset, loaded for text elsewhere (a window resize
+  // that lays out new text loads them), which made the band measure itself again at every step of the fold.
+  const refit = event => {
+    const faces = event?.fontfaces ? [...event.fontfaces] : [];
+    if (faces.length && !faces.some(face => rangeCoversText(face.unicodeRange, band.textContent))) return;
+    printed = '';
+    schedule();
+  };
   fonts?.addEventListener?.('loadingdone', refit);
 
   // The first commit: the stored widths, or nothing to fold on a wide window, else a measurement now.
