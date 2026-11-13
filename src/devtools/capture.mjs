@@ -125,6 +125,8 @@ export function shownFrames(taken) {
  */
 export function summarize(events, {slowest = 10} = {}) {
   const spans = new Map(), threads = new Map(), counters = new Map(), instants = new Map(), top = [];
+  // The shortest of the slowest kept so far: a span no longer is not one of them, and is not sorted in.
+  let floor = -Infinity;
   for (const event of events) {
     if (event.duration === -2) {
       const counter = counters.get(event.name) ?? {count: 0, last: 0, min: Infinity, max: -Infinity};
@@ -137,8 +139,9 @@ export function summarize(events, {slowest = 10} = {}) {
       let list = spans.get(key);
       if (!list) { spans.set(key, list = []); threads.set(key, event.thread); }
       list.push(event.duration);
+      if (event.duration <= floor) continue;
       top.push(event);
-      if (top.length > slowest * 4) { top.sort((a, b) => b.duration - a.duration); top.length = slowest; }
+      if (top.length > slowest * 4) { top.sort((a, b) => b.duration - a.duration); top.length = slowest; floor = top.at(-1).duration; }
     }
   }
   const spanRows = [...spans].map(([name, durations]) => {

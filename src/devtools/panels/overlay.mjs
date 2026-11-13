@@ -5,7 +5,8 @@
  * late frames, what the engine's threads prepare, memory, and the frame chart of the last two seconds in miniature.
  *
  * It must cost almost nothing: one canvas, drawn four times a second from reads the tools already keep (the frame
- * recorder, the sampler's last sample), with no layout. Its place is read when the stage's size changes (a resize
+ * recorder, the sampler's last sample), with no layout, in the thread's idle time after a frame (at the latest a
+ * quarter of a second late), so a drawing never stands in front of the next frame. Its place is read when the stage's size changes (a resize
  * observer, after layout), never while drawing. Each drawing is a span, `devtools overlay`, so its cost is measured
  * by the same tools it shows.
  */
@@ -22,7 +23,7 @@ export function createOverlay(runtime) {
   const canvas = element('canvas');
   const root = element('div', {id: 'styk-devtools-overlay', hidden: true, ariaHidden: 'true'}, canvas);
   document.body.append(root);
-  let timer = 0;
+  let timer = 0, pending = 0;
   /** The width of one character of the overlay's font, measured once per font. */
   const glyph = {font: '', width: 0};
   const place = () => {
@@ -35,13 +36,13 @@ export function createOverlay(runtime) {
   function show(visible = root.hidden) {
     if (visible === !root.hidden) return visible;
     root.hidden = !visible;
-    clearInterval(timer); timer = 0;
+    clearInterval(timer); timer = 0; cancelIdleCallback(pending); pending = 0;
     runtime.watch(visible);
     const viewport = document.getElementById('viewport');
     if (visible) {
       if (viewport) observer.observe(viewport); else place();
       paint();
-      timer = setInterval(paint, REDRAW_MS);
+      timer = setInterval(() => { pending ||= requestIdleCallback(() => { pending = 0; paint(); }, {timeout: REDRAW_MS}); }, REDRAW_MS);
     } else observer.disconnect();
     return visible;
   }

@@ -13,7 +13,7 @@
  *
  * Every number is the runtime's summary of the stretch (`runtime.summarize`, capture.mjs `analyze`), the sampler's
  * reads or the boundary meter's: the tab only lays them out. Live, the chart redraws four times a second and the rest
- * twice; nothing is rebuilt, only text, bar transforms and canvases change.
+ * twice, in the thread's idle time after a frame; nothing is rebuilt, only text, bar transforms and canvases change.
  */
 import {recentEvents, summarize} from '../capture.mjs';
 import {frameBounds, frameSeries, PHASES} from '../frames.mjs';
@@ -37,7 +37,7 @@ const MEMORY = [
   {key: 'gpuBytes', counter: 'memory gpu MB', label: 'GPU (stage)', title: 'What the stage holds on the graphics card: targets, layers, effects, glyphs'},
 ];
 
-export function createPerformanceTab({runtime, recording, panel}) {
+export function createPerformanceTab({runtime, recording, panel, idle}) {
   const {early, sampler} = runtime;
   const bar = recordingBar(recording);
   const section = (title, ...children) => {
@@ -225,11 +225,15 @@ export function createPerformanceTab({runtime, recording, panel}) {
     chart.redraw();
     if (hover >= 0) showDetail();
     if (ticks++ % 2) return;
-    setText(now.note, `last ${LIVE_MS / 1000} s`);
-    setText(interfaceSection.note, `last ${LIVE_MS / 1000} s, inclusive time of each span group`);
-    setText(boundarySection.note, `last ${LIVE_MS / 1000} s`);
-    showSummary(runtime.summarize(runtime.recent(LIVE_MS)), LIVE_MS / 1000);
-    showEngine(null); showMemory(null);
+    // The summary of the last seconds is the heavier part: it runs in the thread's idle time after a frame.
+    idle(() => {
+      if (recording.state.taken && !recording.running) return;
+      setText(now.note, `last ${LIVE_MS / 1000} s`);
+      setText(interfaceSection.note, `last ${LIVE_MS / 1000} s, inclusive time of each span group`);
+      setText(boundarySection.note, `last ${LIVE_MS / 1000} s`);
+      showSummary(runtime.summarize(runtime.recent(LIVE_MS)), LIVE_MS / 1000);
+      showEngine(null); showMemory(null);
+    });
   }
   recording.onChange(() => { if (root.isConnected) refresh(); });
 

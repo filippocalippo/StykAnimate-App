@@ -12,7 +12,8 @@
  *   performance.mjs, profiler.mjs, logs.mjs, parameters.mjs, inspector.mjs, jobs.mjs   one tab each;
  *   overlay.mjs     the overlay.
  * A tab is {name, root, shown?(), refresh?(), interval?}: `root` is built once and kept while other tabs show;
- * `shown` runs when it comes on screen, `refresh` every `interval` ms while it is on screen.
+ * `shown` runs when it comes on screen, `refresh` every `interval` ms while it is on screen. A tab hands its heavier
+ * work to `idle` (in its context), which runs it when the thread is idle after a frame, so it does not delay the next.
  *
  * The panel and the overlay are watchers (src/devtools/devtools.mjs `watch`): while either is on screen the frame
  * recorder, the boundary meter and the sampler run. Closed, collapsed or parked, nothing samples, ticks or redraws.
@@ -45,7 +46,7 @@ export function createPanels(runtime) {
   if (shell) root.classList.add('dt-docked');
 
   const recording = createRecording(runtime);
-  const context = {runtime, recording, panel: root};
+  const context = {runtime, recording, panel: root, idle: work => idle(work)};
   const tabs = [createPerformanceTab, createProfilerTab, createLogsTab, createParametersTab, createInspectorTab, createJobsTab].map(create => create(context));
   for (const tab of tabs) {
     tab.button = Object.assign(button(tab.name, () => show(tab.name)), {className: ''});
@@ -57,7 +58,7 @@ export function createPanels(runtime) {
   document.body.append(root);
   if (!shell) dragBy(header, root);
 
-  let current = tabs[0], active = false, timer = 0;
+  let current = tabs[0], active = false, timer = 0, idleWork = 0;
   if (shell) {
     shell.define({id: DEVELOPER_PANEL, title: 'Developer', icon: 'bug', docks: ['right', 'left', 'bottom'], floatable: true, min: 320, pref: 440, max: 960,
       // Nowhere until opened: a layout without it (every layout of the shipping build) keeps its shape.
@@ -83,7 +84,7 @@ export function createPanels(runtime) {
     visible = Boolean(visible);
     if (visible !== active) { active = visible; runtime.watch(visible); }
     if (active) show(current.name);
-    else { clearInterval(timer); timer = 0; }
+    else { clearInterval(timer); timer = 0; cancelIdleCallback(idleWork); idleWork = 0; }
   }
   function show(name) {
     const tab = tabs.find(item => item.name === name) ?? tabs[0];
@@ -96,6 +97,14 @@ export function createPanels(runtime) {
     if (tab.refresh) timer = setInterval(() => run(tab.refresh), tab.interval ?? 500);
   }
   /** Runs a tab's work as a span of the tools' own; a tab that throws shows why instead of refreshing again. */
+  /**
+   * Runs `work` when the thread is next idle after a frame (at the latest in 400 ms), as a span of the tools' own; one at
+   * a time, and only while the panel is on screen.
+   */
+  function idle(work) {
+    if (idleWork) return;
+    idleWork = requestIdleCallback(() => { idleWork = 0; if (active) run(work); }, {timeout: 400});
+  }
   function run(work) {
     const span = trace?.begin('devtools panel') ?? 0;
     try { work(); }

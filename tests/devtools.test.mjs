@@ -104,6 +104,11 @@ test('summaries group spans (edit calls by method, interface updates by surface)
   assert.deepEqual(summary.counters.queue, {last: 1, min: 1, max: 3, samples: 2});
   assert.equal(summary.instants.opened, 1);
   assert.equal(summary.slowest[0].name, 'edit session call poseJoint');
+  // The slowest spans of many are the same ten a full sort gives, ties in the order they were recorded.
+  const many = ring(512), durations = Array.from({length: 400}, (_, index) => (index * 37) % 101 / 10);
+  durations.forEach((ms, index) => push(many, `s${index}`, index, ms));
+  const expected = durations.map((ms, index) => ({name: `s${index}`, ms})).sort((x, y) => y.ms - x.ms).slice(0, 10).map(row => row.name);
+  assert.deepEqual(summarize(ringEvents(many).events).slowest.map(row => row.name), expected);
 });
 
 test('one percentile everywhere: nearest rank, a median that averages the middle pair, and a spread one stray run does not move', () => {

@@ -115,12 +115,14 @@ Six tabs; the first opens by default:
 The **performance overlay** is a small pill over the stage's top-left corner that lets input through. It shows the
 frame time seen and the input delay p95 (each with its grade), frames per second, late frames, the interface's work
 p95 against the period, the frames the engine's threads prepare, memory, and the last two seconds' frame chart in
-miniature. It is one canvas, drawn four times a second from reads the tools already keep, with no layout; its place is
-read when the stage's size changes. Measured during a drag at 144 Hz (Chrome, a loaded machine), a drawing takes about
-0.35 ms of script and 0.2 ms of canvas: under 0.02 ms a display frame.
+miniature. It is one canvas, drawn four times a second from reads the tools already keep, with no layout, in the
+thread's idle time after a frame; its place is read when the stage's size changes. Measured during a drag at 144 Hz, a
+drawing takes about 0.35 ms of script and 0.2 ms of canvas (its span reads about 1 ms on a loaded machine): under
+0.05 ms a display frame, and no difference in late frames beyond the noise on the `large` workload.
 
-Live, the Performance tab's chart redraws four times a second and its numbers and lists twice; nothing is rebuilt,
-only text, bar transforms and canvases change, and each section contains its own layout. The tabs listen through
+Live, the Performance tab's chart redraws four times a second (about 0.4 ms) and its numbers and lists twice (about
+2.5 ms on the `large` workload during a drag, in the thread's idle time after a frame, so it does not delay the next);
+nothing is rebuilt, only text, bar transforms and canvases change, and each section contains its own layout. The tabs listen through
 handler properties (`onclick`, `onpointermove`), never `addEventListener`, which the early script times as the app's
 input handling.
 
