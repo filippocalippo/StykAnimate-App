@@ -11,6 +11,7 @@
  */
 import {preparationSince} from './capture.mjs';
 import {displayPeriod, frameCountAt, frameWindow, inputCountAt, inputWindow, summarizeFrames, summarizeInputs} from './frames.mjs';
+import {breakdown} from './memory.mjs';
 import {distribution, round} from './stats.mjs';
 
 /** The numbers `sample` keeps, with the counter each is written to in the span ring (null: kept, not graphed). Bytes are counted in megabytes. */
@@ -80,6 +81,36 @@ export class Sampler {
     return {jsHeap: heap, engine, engineMemoryBytes: this.engine?.memoryBytes ?? null, engineMaximumBytes: this.engine?.memoryMaximumBytes ?? null,
       gpuBytes: renderer?.gpuBytes ?? null, gpuTotalBytes: renderer?.engine ? renderer.gpuBytes + renderer.engine.targetBytes + renderer.engine.spriteBytes : null, gpu: renderer?.engine ? {spriteBytes: renderer.engine.spriteBytes, targetBytes: renderer.engine.targetBytes, effectBytes: renderer.engine.effectBytes,
         layerBytes: renderer.engine.layerBytes, glyphBytes: renderer.engine.glyphBytes, softBytes: renderer.engine.softBytes} : null};
+  }
+
+  /**
+   * The registered memory owners now (src/trace.mjs `traceMemory`, and the early script's canvases and image bitmaps):
+   * [{owner, bytes, count, kind, where}], heaviest first. Each owner's read is its own count or a short walk: the
+   * panel reads them once a second, a checkpoint once.
+   */
+  owners() { return this.quietly(() => this.early.memory?.read() ?? []); }
+
+  /**
+   * This renderer process's memory as the system counts it, where the desktop's developer launch can say (its preload
+   * bridge): {privateBytes, residentBytes, sharedBytes, blinkBytes}. Null elsewhere (a browser).
+   */
+  async processMemory() {
+    const bridge = globalThis.__stykDevtoolsBridge;
+    if (typeof bridge?.processMemory !== 'function') return null;
+    const info = await bridge.processMemory();
+    const kilobytes = value => (Number.isFinite(value) ? value * 1024 : null);
+    return {privateBytes: kilobytes(info?.private), residentBytes: kilobytes(info?.residentSet), sharedBytes: kilobytes(info?.shared), blinkBytes: kilobytes(info?.blink?.total)};
+  }
+
+  /**
+   * The page's memory by owner now (memory.mjs `breakdown`): the engine's, the JavaScript heap, the owners, the process
+   * where it is known (else `processBytes`, when a caller read it). `threads` and `workers` are what an inspector or the
+   * browser measured of every thread, when given.
+   */
+  async breakdown({threads = null, workers = null, processBytes = null} = {}) {
+    const process = await this.processMemory().catch(() => null), memory = this.memory(), owners = this.owners();
+    return {process, owners, ...breakdown({processBytes: process?.privateBytes ?? processBytes, engine: memory.engine?.error ? null : memory.engine, engineMemoryBytes: memory.engineMemoryBytes,
+      jsHeap: memory.jsHeap, threads, workers, owners})};
   }
 
   /** The engine's frame preparation counters since it started: frames prepared on its threads, their total and worst time. Null when it is busy or not loaded. */

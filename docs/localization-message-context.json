@@ -8481,14 +8481,14 @@
   "desktop.preload.errors.aCallbackIsRequired": {
     "locations": [
       "desktop/preload.cjs:4",
-      "desktop/preload.cjs:46"
+      "desktop/preload.cjs:48"
     ],
     "context": "\"desktop.preload.errors.aCallbackIsRequired\": \"A callback is required.\","
   },
   "desktop.preload.errors.uiScaleMustBe75200InStepsOf5": {
     "locations": [
       "desktop/preload.cjs:5",
-      "desktop/preload.cjs:72"
+      "desktop/preload.cjs:74"
     ],
     "context": "\"desktop.preload.errors.uiScaleMustBe75200InStepsOf5\": \"UI scale must be 75–200 in steps of 5.\""
   },
@@ -13332,28 +13332,28 @@
   },
   "errors.drawingResources.aNewerDrawingWasRequested": {
     "locations": [
-      "src/drawing-resources.mjs:223"
+      "src/drawing-resources.mjs:232"
     ],
     "context": "if(this.decodeQueue.length>=2){const index=this.decodeQueue.findIndex(job=>!job.priority);if(index>=0)this.decodeQueue.splice(index,1)[0].reject(messageError(ne"
   },
   "errors.drawingResources.drawingChanged": {
     "locations": [
-      "src/drawing-resources.mjs:209"
+      "src/drawing-resources.mjs:218"
     ],
     "context": "if(this.disposed||e.disposed||generation!==this.generation)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingChanged\", {});"
   },
   "errors.drawingResources.drawingDocumentClosed": {
     "locations": [
-      "src/drawing-resources.mjs:197",
-      "src/drawing-resources.mjs:221",
-      "src/drawing-resources.mjs:359",
-      "src/drawing-resources.mjs:461"
+      "src/drawing-resources.mjs:206",
+      "src/drawing-resources.mjs:230",
+      "src/drawing-resources.mjs:368",
+      "src/drawing-resources.mjs:470"
     ],
     "context": "if(this.disposed)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingDocumentClosed\", {});"
   },
   "errors.drawingResources.drawingMemoryIsFullChoose1ResolutionOr": {
     "locations": [
-      "src/drawing-resources.mjs:142"
+      "src/drawing-resources.mjs:151"
     ],
     "context": "if(resident()+bytes>this.hardBudget)throw messageError(new Error(''), \"errors.drawingResources.drawingMemoryIsFullChoose1ResolutionOr\", {});"
   },
@@ -13372,8 +13372,8 @@
   },
   "errors.drawingResources.drawingPublicationCancelled": {
     "locations": [
-      "src/drawing-resources.mjs:365",
-      "src/drawing-resources.mjs:372"
+      "src/drawing-resources.mjs:374",
+      "src/drawing-resources.mjs:381"
     ],
     "context": "if(signal?.aborted)throw messageError(new DOMException('', 'AbortError'), \"errors.drawingResources.drawingPublicationCancelled\", {});"
   },
@@ -13385,7 +13385,7 @@
   },
   "errors.drawingResources.drawingStrokeWorkerStopped": {
     "locations": [
-      "src/drawing-resources.mjs:32"
+      "src/drawing-resources.mjs:33"
     ],
     "context": "open(){if(!this.worker){this.worker=new Worker(new URL('./drawing-stroke-worker.mjs',import.meta.url),{type:'module',name:'StykAnimate drawing stroke'});this.wo"
   },
@@ -13415,19 +13415,19 @@
   },
   "errors.drawingResources.invalidDrawingMemoryReservation": {
     "locations": [
-      "src/drawing-resources.mjs:125"
+      "src/drawing-resources.mjs:134"
     ],
     "context": "if(!Number.isFinite(bytes)||bytes<0)throw messageError(new Error(''), \"errors.drawingResources.invalidDrawingMemoryReservation\", {});"
   },
   "errors.drawingResources.strokePixelsCouldNotBeTransferred": {
     "locations": [
-      "src/drawing-resources.mjs:32"
+      "src/drawing-resources.mjs:33"
     ],
     "context": "open(){if(!this.worker){this.worker=new Worker(new URL('./drawing-stroke-worker.mjs',import.meta.url),{type:'module',name:'StykAnimate drawing stroke'});this.wo"
   },
   "errors.drawingResources.theDrawingEncoderLostItsTileCacheTry": {
     "locations": [
-      "src/drawing-resources.mjs:430"
+      "src/drawing-resources.mjs:439"
     ],
     "context": "if(result.missing?.length)throw messageError(new Error(''), \"errors.drawingResources.theDrawingEncoderLostItsTileCacheTry\", {});"
   },

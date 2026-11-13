@@ -36,6 +36,8 @@ if ((process.argv ?? []).includes('--styk-developer')) {
       contextBridge.exposeInMainWorld(developer.bridge, Object.freeze({
         reply: (ticket, answer) => ipcRenderer.send('styk:developer-reply', ticket, answer),
         ready: () => ipcRenderer.send('styk:developer-ready'),
+        // This renderer process's memory (kilobytes: private, resident, shared) and Blink's heap, for the tools' memory by owner.
+        processMemory: async () => ({...await process.getProcessMemoryInfo(), blink: process.getBlinkMemoryInfo()}),
       }));
       webFrame.executeJavaScript(developer.script);
     }

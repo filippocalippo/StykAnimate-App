@@ -14,6 +14,7 @@ import {frameBounds, frameCountAt, frameSeries, frameWindow, inputWindow, summar
 import {grade, GRADES, judgeCapture, LIMITS} from '../src/devtools/grades.mjs';
 import {elementName, unchangedWrites} from '../src/devtools/mutations.mjs';
 import {steadyOrder} from '../src/devtools/panels/rank.mjs';
+import {breakdown, breakdownMegabytes} from '../src/devtools/memory.mjs';
 import {Sampler} from '../src/devtools/sampler.mjs';
 import * as perfMetrics from '../perf/lib/metrics.mjs';
 import {distribution, median, quantile, spread} from '../src/devtools/stats.mjs';
@@ -261,6 +262,52 @@ test('the sampler writes its counters and keeps the same numbers as a short hist
   assert.equal(sampler.last.jobs.engine.cachedFrames, 4);
 });
 
+test('the page\'s memory splits by owner, and what no part names is said as unexplained', async () => {
+  const MB = 1048576;
+  const owners = [
+    {owner: 'drawing: cel tiles', bytes: 300 * MB, count: 1200, kind: 'buffers', where: 'page'},
+    {owner: 'canvases: 2D, read often', bytes: 20 * MB, count: 3, kind: 'pixels', where: 'page'},
+    {owner: 'canvases: WebGPU', bytes: 8 * MB, count: 1, kind: 'pixels', where: 'graphics'},
+  ];
+  const engine = {heapBytes: 900 * MB, liveBytes: 300 * MB, frameCacheBytes: 100 * MB, imagesReadyBytes: 0};
+  // An inspector read every thread: the engine's threads count the shared engine memory among their array buffers, and it is taken out once.
+  const threads = [
+    {thread: 'interface', name: 'interface', interface: true, usedBytes: 40 * MB, totalBytes: 60 * MB, backingBytes: 900 * MB + 350 * MB},
+    {thread: 'engine thread 1', name: 'engine thread', usedBytes: 4 * MB, totalBytes: 6 * MB, backingBytes: 900 * MB},
+    {thread: 'engine thread 2', name: 'engine thread', usedBytes: 4 * MB, totalBytes: 6 * MB, backingBytes: 900 * MB + MB},
+    {thread: 'StykAnimate drawing pixels 1', name: 'StykAnimate drawing pixels', usedBytes: 2 * MB, totalBytes: 3 * MB, backingBytes: 64 * MB},
+  ];
+  const split = breakdown({processBytes: 1600 * MB, engine, jsHeap: {usedBytes: 39 * MB, totalBytes: 59 * MB}, threads, owners});
+  const part = name => split.parts.find(row => row.part === name);
+  assert.equal(part('engine memory').bytes, 900 * MB);
+  assert.deepEqual(part('engine memory').rows.map(row => [row.name, row.bytes / MB]), [['in use', 300], ['of which the frame cache', 100], ['of which pictures waiting for the stage', 0], ['free: reserved by earlier work, kept', 600]]);
+  assert.equal(part('JavaScript heap').bytes, 60 * MB, 'the heap as the inspector counts it, committed');
+  assert.deepEqual(part('array buffers').rows.map(row => [row.name, row.bytes / MB]), [['drawing: cel tiles', 300], ['not named by an owner', 50]]);
+  assert.deepEqual(part('pictures').rows.map(row => row.name), ['canvases: 2D, read often']);
+  assert.deepEqual(part('workers').rows.map(row => [row.name, row.count, row.bytes / MB]), [['StykAnimate drawing pixels', 1, 67], ['engine thread', 2, 13]]);
+  assert.deepEqual(split.graphics.map(row => row.name), ['canvases: WebGPU'], 'what the graphics process keeps is listed apart, not subtracted');
+  assert.equal(split.explainedBytes, (900 + 60 + 350 + 20 + 67 + 13) * MB);
+  assert.equal(split.unexplainedBytes, split.processBytes - split.explainedBytes);
+  assert.deepEqual(split.missing, []);
+
+  // In the page alone (the live panel): no inspector, no process count. The owners are the array buffers, and the workers are missing.
+  const alone = breakdown({engine, jsHeap: {usedBytes: 39 * MB, totalBytes: 59 * MB}, owners});
+  assert.deepEqual([alone.unexplainedBytes, alone.missing, alone.parts.map(row => row.part)], [null, ['workers'], ['engine memory', 'JavaScript heap', 'array buffers', 'pictures']]);
+  assert.equal(alone.parts.find(row => row.part === 'array buffers').bytes, 300 * MB);
+  const megabytes = breakdownMegabytes(split);
+  assert.deepEqual([megabytes.process, megabytes['engine memory'], megabytes.unexplained, megabytes.rows.workers[0]], [1600, 900, 190, {name: 'StykAnimate drawing pixels', mb: 67, count: 1}]);
+
+  // The sampler reads the owners the early script keeps and the process's count from the desktop's bridge.
+  globalThis.__stykDevtoolsBridge = {processMemory: async () => ({private: 1600 * 1024, residentSet: 1700 * 1024, shared: 0, blink: {allocated: 1, total: 2}})};
+  try {
+    const early = {frames: recorder(), workers: {rows: [], sequence: 0}, browser: {}, memory: {read: () => owners}};
+    const sampler = new Sampler({app: {state: {}}, early, engine: {memoryBytes: 900 * MB, memory: () => engine}});
+    const live = await sampler.breakdown();
+    assert.equal(live.process.privateBytes, 1600 * MB);
+    assert.equal(live.unexplainedBytes, (1600 - 900 - 300 - 20) * MB, 'no JavaScript heap where performance.memory is missing');
+  } finally { delete globalThis.__stykDevtoolsBridge; }
+});
+
 test('the environment a profiling run asks for reaches the page only as the three keys it may set', () => {
   const {profilingEnvironment} = createRequire(import.meta.url)('../desktop/devtools.cjs');
   assert.deepEqual(profilingEnvironment(JSON.stringify({deviceMemoryGiB: 4, hardwareConcurrency: 4, parameters: {'engine.workers': 2, 'bad name!': 1, nested: {}}, other: 'dropped'})),
@@ -349,6 +396,12 @@ test('the instrumentation layer records nothing and returns defaults without the
   assert.equal(trace.traceBegin('x'), 0);
   assert.equal(trace.tuned('playback.lookaheadFrames', 48, {min: 2}), 48);
   trace.traceEnd(0); trace.traceInstant('x'); trace.traceCounter('x', 1); trace.traceComplete('x', 0, 1);
+  // A memory owner registers nothing and keeps no reference: the call returns the same no-op every time.
+  const owner = {bytes: 1};
+  const remove = trace.traceMemory('drawing: tiles', owner, target => target.bytes);
+  assert.equal(typeof remove, 'function');
+  assert.equal(remove, trace.traceMemory('canvases', owner, () => 0));
+  remove();
   const gate = await import('../src/devtools-gate.mjs');
   assert.equal(gate.startDevtools({}, {}), null);
 });

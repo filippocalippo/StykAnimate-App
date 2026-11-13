@@ -10,11 +10,12 @@
  * The profiled pass's own numbers are not reported, because its instruments slow what they watch.
  */
 import {performance} from 'node:perf_hooks';
+import {breakdownMegabytes} from '../../src/devtools/memory.mjs';
 import {round} from '../../src/devtools/stats.mjs';
 import {launch} from './app.mjs';
 import {createInput, paths} from './input.mjs';
 import {aggregate, captureMetrics, defaultJudge, format, judge} from './metrics.mjs';
-import {startProbes} from './probes.mjs';
+import {startProbes, threadNames} from './probes.mjs';
 import {backgroundLoad, BUSY_PERCENT} from './result.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -119,9 +120,25 @@ async function capture(app, scenario, context, state, {label, series, writes = f
   return {summary: stopped.summary, extra: extra ?? {}, wallMs, pages: stopped.pages};
 }
 
-/** The memory of the page, the engine and the app's processes now, in megabytes. */
+/**
+ * Every thread of the page as its inspector session counts it (`Runtime.getHeapUsage`): its heap in use and committed,
+ * and the array buffers it holds outside the heap (`backingStorageSize`). The names are the profiled pass's.
+ */
+export async function threadHeaps(app) {
+  const names = threadNames(app);
+  const read = async (sessionId, name) => {
+    const usage = await app.inspector.send('Runtime.getHeapUsage', {}, sessionId).catch(() => null);
+    return usage ? {thread: name, name: name.replace(/ \d+$/, ''), interface: sessionId === app.page, usedBytes: usage.usedSize, totalBytes: usage.totalSize, backingBytes: usage.backingStorageSize ?? null} : null;
+  };
+  return (await Promise.all([...names].map(([sessionId, name]) => read(sessionId, name)))).filter(Boolean);
+}
+
+/**
+ * The memory of the page, the engine and the app's processes now, in megabytes, with the page's memory by owner
+ * (`owners`: src/devtools/memory.mjs `breakdownMegabytes`): what every part holds and what is left unexplained.
+ */
 async function memoryNow(app) {
-  const [memory, processes] = await Promise.all([app.request('memory'), app.processes().catch(() => [])]);
+  const [memory, processes, threads] = await Promise.all([app.request('memory'), app.processes().catch(() => []), threadHeaps(app).catch(() => [])]);
   const byType = {};
   for (const row of processes) {
     const type = {Browser: 'browser', Tab: 'page', renderer: 'page', GPU: 'graphics'}[row.type] ?? 'other';
@@ -129,8 +146,10 @@ async function memoryNow(app) {
     if (Number.isFinite(bytes)) byType[type] = (byType[type] ?? 0) + bytes;
   }
   const total = Object.values(byType).reduce((sum, bytes) => sum + bytes, 0);
+  const split = await app.request('memory.breakdown', {threads, processBytes: byType.page ?? null}).catch(() => null);
   return {jsHeap: megabytes(memory.jsHeap?.usedBytes), engine: megabytes(memory.engine?.liveBytes), enginePeak: megabytes(memory.engine?.peakBytes), engineReserved: megabytes(memory.engineMemoryBytes),
-    frameCache: megabytes(memory.engine?.frameCacheBytes), gpu: megabytes(memory.gpuTotalBytes ?? memory.gpuBytes), page: megabytes(byType.page), graphics: megabytes(byType.graphics), browser: megabytes(byType.browser), total: total ? megabytes(total) : null};
+    frameCache: megabytes(memory.engine?.frameCacheBytes), gpu: megabytes(memory.gpuTotalBytes ?? memory.gpuBytes), page: megabytes(byType.page), graphics: megabytes(byType.graphics), browser: megabytes(byType.browser), total: total ? megabytes(total) : null,
+    ...(split ? {owners: breakdownMegabytes(split)} : {})};
 }
 
 /** The engine's threads as one row: their layers, modules and functions added up, with each thread's busy time. */

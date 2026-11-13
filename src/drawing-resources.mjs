@@ -10,6 +10,7 @@ import {historyPixelBytes} from './drawing-history-codec.mjs';
 import {drawingMetadata,EMPTY_PNG} from './drawing-model.mjs';
 import {TileStore,TILE,TILE_BYTES,tileKey,tileTransparent} from './drawing-tiles.mjs';
 import {applyTileChanges} from './drawing-pixels.mjs';
+import {traceMemory} from './trace.mjs';
 import {tileStoreFromList} from './drawing-tile-codec.mjs';
 import {presenterScratch,retainedPresenterScratch,levelStore,invalidateLevels} from './drawing-raster.mjs';
 import {prepareDrawingChanges, needsDrawingPreparation, validateDrawingChanges} from './drawing-preparation.mjs';
@@ -39,6 +40,12 @@ class StrokeWorker {
 /** Resident tile budget from device memory: animation scrubbing wants many
  * cels resident. navigator.deviceMemory reports up to 8 (GiB). */
 export function defaultTileBudget(memory=globalThis.navigator?.deviceMemory){const gib=Number.isFinite(memory)&&memory>0?memory:4;return Math.max(192,Math.min(768,gib*96))*1024*1024;}
+/** What one owner holds, for the developer tools' memory by owner (src/trace.mjs `traceMemory`): reads of counts the
+ * owner keeps, never a change to them (`residentMemory()` enrols stores, so the tiles are read as they were last counted). */
+const memoryOfTiles=r=>({bytes:r.pixelMemory.bytes,count:r.pixelMemory.references.size});
+const memoryOfHistory=r=>{let bytes=r.history?.residentBytes??0;const seen=new Set();for(const e of r.surfaces())for(const step of e.deferred??[])if(!seen.has(step.changes)&&!r.history?.owns(step.changes)){seen.add(step.changes);bytes+=historyPixelBytes(step.changes);}return {bytes,count:(r.history?.records.size??0)+seen.size};};
+const memoryOfLevels=r=>{let bytes=0,count=0;for(const e of r.surfaces())for(const level of e.levels??[])if(level){bytes+=level.bytes??0;count++;}return {bytes,count};};
+const memoryOfPreviews=r=>({bytes:r.previews?.bytes??0,count:r.previews?.cache.size??0});
 // Mip levels the decode worker prepares: 4× drawings viewed at 100% use level 2.
 const DECODE_LEVELS=3;
 const sideBytes=s=>s==null?0:s.byteLength===4?TILE_BYTES:s.byteLength;
@@ -58,6 +65,8 @@ export class DrawingResources {
     this.pixelMemory=new DrawingTileMemory();
     if(typeof Worker!=='undefined')this.previews=new DrawingPreviewCache(new DrawingWorker(),{budgetBytes:scratchBytes,onReady:()=>this.onChange(),onError,reserve:bytes=>this.scratchReserved(null,bytes),hold:(job,bytes)=>this.hold(job,bytes,job.entry)});
     this.history=history===false?null:history??(typeof Worker!=='undefined'&&typeof indexedDB!=='undefined'?new DrawingHistory({reserve:bytes=>this.reserve(bytes),hold:bytes=>this.hold(this.history,bytes),onWarning:error=>this.onError(error)}):null);
+    // The developer tools' memory by owner (docs/DEVTOOLS.md): what this document's drawings hold, read only when the tools take a checkpoint.
+    this.untraced=[traceMemory('drawing: cel tiles',this,memoryOfTiles),traceMemory('drawing: undo pixels kept in memory',this,memoryOfHistory),traceMemory('drawing: tile levels',this,memoryOfLevels),traceMemory('drawing: previews',this,memoryOfPreviews,'pixels')];
   }
   /** While a stroke session or scrub owns the UI thread, the publication
    * debounce and the thumbnail pump wait; clearing busy re-arms both. */
@@ -458,5 +467,5 @@ export class DrawingResources {
     for(const [id,e] of this.entries)if(!reachable.has(id)&&!retained.has(id)&&!e.pinned){e.disposed=true;this.dropScratch(e);e.store=null;e.levels=null;e.levelKnown=null;this.entries.delete(id);}
     this.residentMemory();
   }
-  dispose(){if(this.disposed)return this.disposal;this.disposed=true;this.disposal=this.history?.dispose().catch(()=>{})??Promise.resolve();this.previews?.dispose();this.generation++;clearTimeout(this.timer);this.worker.dispose();for(const w of this._encoders??[])if(w!==this.worker)w.dispose();this.decodeWorker.dispose();this.thumbnailWorker.dispose();if(this.strokeWorker.close)this.strokeWorker.close();else this.strokeWorker.dispose();this.thumbnailQueue.clear();for(const t of this.thumbnailCache.values())t.canvas.width=t.canvas.height=1;this.thumbnailCache.clear();for(const job of this.decodeQueue)job.reject(messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingDocumentClosed", {}));this.decodeQueue=[];for(const e of this.surfaces()){this.dropScratch(e);e.disposed=true;e.store=null;e.levels=null;e.levelKnown=null;}this.transients.clear();this.entries.clear();this.pixelMemory.dispose();this.working?.clear();owners.delete(this.report);return this.disposal;}
+  dispose(){if(this.disposed)return this.disposal;this.disposed=true;this.disposal=this.history?.dispose().catch(()=>{})??Promise.resolve();this.previews?.dispose();this.generation++;clearTimeout(this.timer);this.worker.dispose();for(const w of this._encoders??[])if(w!==this.worker)w.dispose();this.decodeWorker.dispose();this.thumbnailWorker.dispose();if(this.strokeWorker.close)this.strokeWorker.close();else this.strokeWorker.dispose();this.thumbnailQueue.clear();for(const t of this.thumbnailCache.values())t.canvas.width=t.canvas.height=1;this.thumbnailCache.clear();for(const job of this.decodeQueue)job.reject(messageError(new DOMException('', 'AbortError'), "errors.drawingResources.drawingDocumentClosed", {}));this.decodeQueue=[];for(const e of this.surfaces()){this.dropScratch(e);e.disposed=true;e.store=null;e.levels=null;e.levelKnown=null;}this.transients.clear();this.entries.clear();this.pixelMemory.dispose();this.working?.clear();for(const stop of this.untraced)stop();owners.delete(this.report);return this.disposal;}
 }
