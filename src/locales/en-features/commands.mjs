@@ -212,7 +212,7 @@ export default Object.freeze({
   "commands.checkUpdates": "Check for updates…",
   "commands.restartUpdate": "Restart to update",
   "commands.feedback": "Report a bug or share an idea…",
-  "commands.privacy": "Privacy and diagnostics",
+  "commands.privacy": "Privacy",
   "commands.donate": "Support development",
   "commands.website": "StykAnimate website",
   "commands.menu": "Main menu",

@@ -1946,12 +1946,6 @@
     ],
     "context": "messageTuple(['first-frame', 'first', interfaceText(\"applicationMenu.firstFrame\"), \"Home\"], {2: {key: \"applicationMenu.firstFrame\", params: {}}}), messageTuple("
   },
-  "applicationMenu.privacyDiagnostics": {
-    "locations": [
-      "src/application-menu.mjs:93"
-    ],
-    "context": "help: [messageTuple(['help', 'help', interfaceText(\"applicationMenu.keyboardShortcuts\"), '?'], {2: {key: \"applicationMenu.keyboardShortcuts\", params: {}}}), mes"
-  },
   "applicationMenu.removeJointKeepEnds": {
     "locations": [
       "src/application-menu.mjs:57"
@@ -6797,9 +6791,10 @@
   },
   "commands.privacy": {
     "locations": [
+      "src/application-menu.mjs:93",
       "src/ui/command-catalog.mjs:334"
     ],
-    "context": "['privacy', english[\"commands.privacy\"], 'lock', {labelKey: \"commands.privacy\", requires: ['desktop:stats'], keywords: ['statistics']}],"
+    "context": "help: [messageTuple(['help', 'help', interfaceText(\"applicationMenu.keyboardShortcuts\"), '?'], {2: {key: \"applicationMenu.keyboardShortcuts\", params: {}}}), mes"
   },
   "commands.recentProject": {
     "locations": [
