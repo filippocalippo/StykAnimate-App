@@ -5,7 +5,14 @@ import {setCanvasSize} from './ui/dom-write.mjs';
  * canvas between the scene and the overlay. The worker's exact pixels replace
  * it segment by segment once they are presented, so the pen never waits for a
  * worker round trip or a frame. It is a preview only: nothing here reaches
- * document data, history or exports. */
+ * document data, history or exports.
+ *
+ * It holds ink only while a stroke draws, so it is sized when it next draws,
+ * not when the stage resizes: once created (the first visit to Draw) it
+ * otherwise followed every divider drag and window resize for the rest of the
+ * session, and each size is a new low-latency buffer in the graphics process
+ * (hundreds of megabytes over a divider drag). Between strokes it is empty,
+ * so a stale size shows nothing. */
 export class WetInk {
   constructor(viewport, before) {
     const canvas = this.canvas = document.createElement('canvas');
@@ -16,11 +23,13 @@ export class WetInk {
     // compositor frame; browsers without it return an ordinary context.
     this.ctx = canvas.getContext('2d', {desynchronized: true}) ?? canvas.getContext('2d');
     this.box = null;
-    this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.resize());
+    this.stale = true;
+    this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { this.stale = true; });
     this.observer?.observe(viewport);
-    this.resize();
   }
+  /** Sizes the canvas to its viewport in device pixels (clearing it when the size changes). */
   resize() {
+    this.stale = false;
     const rect = this.canvas.parentElement?.getBoundingClientRect(), dpr = globalThis.devicePixelRatio || 1;
     if (!rect) return;
     const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
@@ -31,6 +40,7 @@ export class WetInk {
    * and softness apply to the whole layer, so overlapping round segments never
    * darken where they meet. */
   draw(paths, {color, opacity = 1, blur = 0}) {
+    if (this.stale) this.resize();
     const ctx = this.ctx, dpr = this.dpr;
     this.clearBox();
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
