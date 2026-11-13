@@ -61,7 +61,9 @@ Live parameters are registered where they are used:
 - `engine.workers`, the preparation threads (applies on reload);
 - `engine.memoryMaximumMiB`, the most the engine's memory may reserve, as a device with little address space gets
   (applies on reload);
-- `engine.atlasPages`, the sprite pages kept resident.
+- `engine.atlasPages`, the sprite pages kept resident;
+- `stage.shadingRuns`, whether the stage draws runs of primitives with the simpler fragment shaders (1) or all with the
+  general one (0) over the device's choice (-1: on for a software rasterizer, [rendering.md](engine/rendering.md#without-a-graphics-card)).
 
 A frame is late when it took over one and a half of the display's periods; the tools measure the period (the shortest
 run of frames seen), so there is no threshold to set.
