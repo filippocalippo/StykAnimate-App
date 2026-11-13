@@ -4,6 +4,7 @@
  * Plain text, no colour: it is read in terminals, logs and by agents.
  */
 import {format, METRICS} from './metrics.mjs';
+import {BUSY_PERCENT} from './result.mjs';
 
 const pad = (text, width) => String(text).padEnd(width);
 const percent = (part, whole) => (whole > 0 ? `${Math.round(part / whole * 100)}%` : '–');
@@ -40,7 +41,7 @@ export function overview(result) {
   for (const pair of result.pairs) {
     lines.push(`== ${pairLine(pair)}`);
     if (pair.error) lines.push(`   NOT COMPLETED: ${pair.error}`);
-    if (pair.facts?.backgroundLoadPercent > 20) lines.push(`   the machine was busy with other work (${pair.facts.backgroundLoadPercent}% of its processor) when this started: its numbers are slower and noisier than they would be`);
+    if (pair.facts?.backgroundLoadPercent > BUSY_PERCENT) lines.push(`   the machine was busy with other work (${pair.facts.backgroundLoadPercent}% of its processor) when this started: its numbers are slower and noisier than they would be`);
     for (const scenario of pair.scenarios) {
       if (scenario.skipped) { lines.push(`   ${pad(scenario.id, 22)} skipped: ${scenario.skipped}`); continue; }
       if (scenario.error) { lines.push(`   ${pad(scenario.id, 22)} FAILED: ${scenario.error}`); continue; }
