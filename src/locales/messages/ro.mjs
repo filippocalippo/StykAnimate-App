@@ -174,7 +174,7 @@ const messages = {
   "settings.search": "Caută setări",
   "settings.searchResults": "Setări care corespund cu „{query}”",
   "settings.noResults": "Nicio setare nu corespunde cu „{query}”.",
-  "settings.privacy": "Confidențialitate și diagnosticare…",
+  "settings.privacy": "Confidențialitate",
   "settings.sendFeedback": "Trimite feedback…",
   "settings.interfaceSize": "Dimensiunea interfeței",
   "settings.timeline": "Cronologie",
@@ -6360,7 +6360,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Mută fișierul AppImage într-un dosar cu permisiune de scriere, de exemplu Applications din dosarul tău personal, și pornește-l din nou pentru a activa actualizările automate.",
   "desktop.updates.supportedInstallerRequired": "Actualizările automate necesită programul de instalare pentru Windows sau fișierul AppImage pentru Linux.",
   "desktop.updates.windowsSetupRequired": "Instalează StykAnimate folosind programul de instalare Windows Setup pentru a activa actualizările automate.",
-  "desktop.updates.retryConnection": "Actualizarea nu a putut fi încheiată. Verifică-ți conexiunea și încearcă din nou."
+  "desktop.updates.retryConnection": "Actualizarea nu a putut fi încheiată. Verifică-ți conexiunea și încearcă din nou.",
+  "settings.privacyLede": "Statisticile anonime ne arată ce trebuie făcut mai rapid și ce trebuie reparat.",
+  "privacy.notice.text": "StykAnimate trimite statistici anonime despre viteză și blocări. Nimic din animațiile tale.",
+  "privacy.notice.details": "Ce se trimite",
+  "privacy.notice.turnOff": "Dezactivează",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "Statisticile sunt dezactivate. Le poți reactiva din Preferințe, la Confidențialitate.",
+  "privacy.statistics": "Statistici",
+  "privacy.send": "Trimite statistici anonime",
+  "privacy.sendNote": "Viteză, blocări și ce funcții sunt folosite. Nimic din animațiile tale.",
+  "privacy.forcedOff": "Statisticile sunt dezactivate pe acest computer.",
+  "privacy.notUploaded": "Aceasta este o rulare de dezvoltare: rapoartele sunt colectate, dar nu sunt trimise.",
+  "privacy.seeReport": "Vezi ultimul raport",
+  "privacy.note": "Notă de confidențialitate",
+  "privacy.reportTitle": "Ultimul raport",
+  "privacy.reportIntro": "Exact asta a trimis StykAnimate ultima dată și asta așteaptă să fie trimis.",
+  "privacy.nothingSent": "Încă nu s-a trimis nimic."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

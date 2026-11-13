@@ -164,7 +164,7 @@ const messages = {
   "settings.search": "البحث في الإعدادات",
   "settings.searchResults": "الإعدادات المطابقة لـ «{query}»",
   "settings.noResults": "لا توجد إعدادات تطابق «{query}».",
-  "settings.privacy": "الخصوصية والتشخيص…",
+  "settings.privacy": "الخصوصية",
   "settings.sendFeedback": "إرسال ملاحظات…",
   "settings.interfaceSize": "حجم الواجهة",
   "settings.timeline": "الخط الزمني",
@@ -6483,7 +6483,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "انقل ملف AppImage إلى مجلد قابل للكتابة، مثل مجلد Applications داخل مجلدك الرئيسي، ثم شغّله مجددًا لتفعيل التحديثات التلقائية.",
   "desktop.updates.supportedInstallerRequired": "تتطلب التحديثات التلقائية برنامج تثبيت Windows أو ملف AppImage لنظام Linux.",
   "desktop.updates.windowsSetupRequired": "ثبّت StykAnimate باستخدام برنامج التثبيت Windows Setup لتفعيل التحديثات التلقائية.",
-  "desktop.updates.retryConnection": "تعذّر إكمال التحديث. تحقّق من اتصالك وأعد المحاولة."
+  "desktop.updates.retryConnection": "تعذّر إكمال التحديث. تحقّق من اتصالك وأعد المحاولة.",
+  "settings.privacyLede": "تساعدنا الإحصاءات المجهولة على معرفة ما يجب تسريعه وما يجب إصلاحه.",
+  "privacy.notice.text": "يرسل StykAnimate إحصاءات مجهولة الهوية عن السرعة والأعطال. لا شيء من رسومك المتحركة.",
+  "privacy.notice.details": "ما الذي يُرسل",
+  "privacy.notice.turnOff": "إيقاف",
+  "privacy.notice.ok": "موافق",
+  "privacy.notice.turnedOff": "الإحصاءات متوقفة. يمكنك تشغيلها مجددًا من التفضيلات، ضمن الخصوصية.",
+  "privacy.statistics": "الإحصاءات",
+  "privacy.send": "إرسال إحصاءات مجهولة الهوية",
+  "privacy.sendNote": "السرعة والأعطال والميزات المستخدمة. لا شيء من رسومك المتحركة.",
+  "privacy.forcedOff": "الإحصاءات متوقفة على هذا الكمبيوتر.",
+  "privacy.notUploaded": "هذا تشغيل تطويري: تُجمع التقارير لكنها لا تُرسل.",
+  "privacy.seeReport": "عرض آخر تقرير",
+  "privacy.note": "ملاحظة الخصوصية",
+  "privacy.reportTitle": "آخر تقرير",
+  "privacy.reportIntro": "هذا بالضبط ما أرسله StykAnimate آخر مرة، وما ينتظر الإرسال.",
+  "privacy.nothingSent": "لم يُرسل أي شيء بعد."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

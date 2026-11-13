@@ -174,7 +174,7 @@ const messages = {
   "settings.search": "Buscar en la configuración",
   "settings.searchResults": "Configuración que coincide con “{query}”",
   "settings.noResults": "Ninguna opción de configuración coincide con “{query}”.",
-  "settings.privacy": "Privacidad y diagnósticos…",
+  "settings.privacy": "Privacidad",
   "settings.sendFeedback": "Enviar comentarios…",
   "settings.interfaceSize": "Tamaño de la interfaz",
   "settings.timeline": "Línea de tiempo",
@@ -6360,7 +6360,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Mueve el archivo AppImage a una carpeta con permisos de escritura, como Applications dentro de tu carpeta personal, y vuelve a ejecutarlo para activar las actualizaciones automáticas.",
   "desktop.updates.supportedInstallerRequired": "Las actualizaciones automáticas requieren el instalador de Windows o el archivo AppImage para Linux.",
   "desktop.updates.windowsSetupRequired": "Instala StykAnimate usando el instalador Windows Setup para activar las actualizaciones automáticas.",
-  "desktop.updates.retryConnection": "No se pudo completar la actualización. Revisa tu conexión e inténtalo de nuevo."
+  "desktop.updates.retryConnection": "No se pudo completar la actualización. Revisa tu conexión e inténtalo de nuevo.",
+  "settings.privacyLede": "Las estadísticas anónimas nos muestran qué hacer más rápido y qué corregir.",
+  "privacy.notice.text": "StykAnimate envía estadísticas anónimas sobre velocidad y cierres inesperados. Nada de tus animaciones.",
+  "privacy.notice.details": "Qué se envía",
+  "privacy.notice.turnOff": "Desactivar",
+  "privacy.notice.ok": "Aceptar",
+  "privacy.notice.turnedOff": "Las estadísticas están desactivadas. Puedes volver a activarlas en Preferencias, en Privacidad.",
+  "privacy.statistics": "Estadísticas",
+  "privacy.send": "Enviar estadísticas anónimas",
+  "privacy.sendNote": "Velocidad, cierres inesperados y qué funciones se usan. Nada de tus animaciones.",
+  "privacy.forcedOff": "Las estadísticas están desactivadas en esta computadora.",
+  "privacy.notUploaded": "Esta es una versión de desarrollo: los reportes se recopilan, pero no se suben.",
+  "privacy.seeReport": "Ver el último reporte",
+  "privacy.note": "Aviso de privacidad",
+  "privacy.reportTitle": "El último reporte",
+  "privacy.reportIntro": "Esto es exactamente lo que StykAnimate envió por última vez y lo que está pendiente de envío.",
+  "privacy.nothingSent": "Todavía no se ha enviado nada."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

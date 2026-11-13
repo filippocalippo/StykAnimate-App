@@ -172,7 +172,7 @@ const messages = {
   "settings.search": "Αναζήτηση ρυθμίσεων",
   "settings.searchResults": "Ρυθμίσεις που ταιριάζουν με «{query}»",
   "settings.noResults": "Καμία ρύθμιση δεν ταιριάζει με «{query}».",
-  "settings.privacy": "Απόρρητο και διαγνωστικά…",
+  "settings.privacy": "Απόρρητο",
   "settings.sendFeedback": "Αποστολή σχολίων…",
   "settings.interfaceSize": "Μέγεθος περιβάλλοντος εργασίας",
   "settings.timeline": "Χρονογραμμή",
@@ -6319,7 +6319,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Μετακινήστε το αρχείο AppImage σε φάκελο όπου έχετε δικαίωμα εγγραφής, όπως τον φάκελο Applications μέσα στον προσωπικό σας φάκελο, και εκτελέστε το ξανά για να ενεργοποιήσετε τις αυτόματες ενημερώσεις.",
   "desktop.updates.supportedInstallerRequired": "Οι αυτόματες ενημερώσεις απαιτούν το πρόγραμμα εγκατάστασης για Windows ή το αρχείο AppImage για Linux.",
   "desktop.updates.windowsSetupRequired": "Εγκαταστήστε το StykAnimate με το πρόγραμμα εγκατάστασης Windows Setup για να ενεργοποιήσετε τις αυτόματες ενημερώσεις.",
-  "desktop.updates.retryConnection": "Δεν ήταν δυνατή η ολοκλήρωση της ενημέρωσης. Ελέγξτε τη σύνδεσή σας και δοκιμάστε ξανά."
+  "desktop.updates.retryConnection": "Δεν ήταν δυνατή η ολοκλήρωση της ενημέρωσης. Ελέγξτε τη σύνδεσή σας και δοκιμάστε ξανά.",
+  "settings.privacyLede": "Τα ανώνυμα στατιστικά μάς δείχνουν τι να κάνουμε πιο γρήγορο και τι να διορθώσουμε.",
+  "privacy.notice.text": "Το StykAnimate στέλνει ανώνυμα στατιστικά για την ταχύτητα και τις καταρρεύσεις. Τίποτα από τα κινούμενα σχέδιά σας.",
+  "privacy.notice.details": "Τι αποστέλλεται",
+  "privacy.notice.turnOff": "Απενεργοποίηση",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "Τα στατιστικά απενεργοποιήθηκαν. Μπορείτε να τα ενεργοποιήσετε ξανά από τις Προτιμήσεις, στην ενότητα Απόρρητο.",
+  "privacy.statistics": "Στατιστικά",
+  "privacy.send": "Αποστολή ανώνυμων στατιστικών",
+  "privacy.sendNote": "Ταχύτητα, καταρρεύσεις και ποιες λειτουργίες χρησιμοποιούνται. Τίποτα από τα κινούμενα σχέδιά σας.",
+  "privacy.forcedOff": "Τα στατιστικά είναι απενεργοποιημένα σε αυτόν τον υπολογιστή.",
+  "privacy.notUploaded": "Αυτή είναι έκδοση ανάπτυξης: οι αναφορές συλλέγονται αλλά δεν αποστέλλονται.",
+  "privacy.seeReport": "Προβολή της τελευταίας αναφοράς",
+  "privacy.note": "Σημείωμα απορρήτου",
+  "privacy.reportTitle": "Η τελευταία αναφορά",
+  "privacy.reportIntro": "Αυτό ακριβώς έστειλε την τελευταία φορά το StykAnimate και αυτό περιμένει να σταλεί.",
+  "privacy.nothingSent": "Δεν έχει σταλεί τίποτα ακόμα."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

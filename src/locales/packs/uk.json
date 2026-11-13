@@ -185,7 +185,7 @@
     "settings.search": "Шукати налаштування",
     "settings.searchResults": "Налаштування за запитом «{query}»",
     "settings.noResults": "Немає налаштувань за запитом «{query}».",
-    "settings.privacy": "Приватність і діагностика…",
+    "settings.privacy": "Приватність",
     "settings.sendFeedback": "Надіслати відгук…",
     "settings.interfaceSize": "Розмір інтерфейсу",
     "settings.timeline": "Часова шкала",
@@ -6410,6 +6410,22 @@
     "desktop.updates.writableAppImageRequired": "Перемістіть AppImage до папки з доступом для запису, наприклад до Applications у вашій домашній папці, і знову відкрийте застосунок, щоб увімкнути автоматичні оновлення.",
     "desktop.updates.supportedInstallerRequired": "Для автоматичних оновлень потрібна програма встановлення для Windows або AppImage для Linux.",
     "desktop.updates.windowsSetupRequired": "Установіть StykAnimate за допомогою програми встановлення Windows Setup, щоб увімкнути автоматичні оновлення.",
-    "desktop.updates.retryConnection": "Не вдалося завершити оновлення. Перевірте з'єднання та спробуйте знову."
+    "desktop.updates.retryConnection": "Не вдалося завершити оновлення. Перевірте з'єднання та спробуйте знову.",
+    "settings.privacyLede": "Анонімна статистика показує нам, що варто пришвидшити, а що виправити.",
+    "privacy.notice.text": "StykAnimate надсилає анонімну статистику про швидкість і збої. Нічого з ваших анімацій.",
+    "privacy.notice.details": "Що надсилається",
+    "privacy.notice.turnOff": "Вимкнути",
+    "privacy.notice.ok": "OK",
+    "privacy.notice.turnedOff": "Статистику вимкнено. Увімкнути її знову можна в Налаштуваннях, у розділі «Приватність».",
+    "privacy.statistics": "Статистика",
+    "privacy.send": "Надсилати анонімну статистику",
+    "privacy.sendNote": "Швидкість, збої та які функції використовуються. Нічого з ваших анімацій.",
+    "privacy.forcedOff": "Статистику вимкнено на цьому комп'ютері.",
+    "privacy.notUploaded": "Це запуск для розробки: звіти збираються, але не надсилаються.",
+    "privacy.seeReport": "Переглянути останній звіт",
+    "privacy.note": "Повідомлення про приватність",
+    "privacy.reportTitle": "Останній звіт",
+    "privacy.reportIntro": "Саме це StykAnimate надіслав востаннє, і це чекає на надсилання.",
+    "privacy.nothingSent": "Ще нічого не надіслано."
   }
 }

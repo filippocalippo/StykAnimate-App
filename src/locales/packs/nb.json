@@ -185,7 +185,7 @@
     "settings.search": "Søk i innstillinger",
     "settings.searchResults": "Innstillinger som samsvarer med «{query}»",
     "settings.noResults": "Ingen innstillinger samsvarer med «{query}».",
-    "settings.privacy": "Personvern og diagnostikk…",
+    "settings.privacy": "Personvern",
     "settings.sendFeedback": "Send tilbakemelding…",
     "settings.interfaceSize": "Størrelse på grensesnittet",
     "settings.timeline": "Tidslinje",
@@ -6332,6 +6332,22 @@
     "desktop.updates.writableAppImageRequired": "Flytt AppImage-filen til en mappe med skrivetilgang, for eksempel Applications i hjemmemappen din, og åpne appen på nytt for å aktivere automatiske oppdateringer.",
     "desktop.updates.supportedInstallerRequired": "Automatiske oppdateringer krever installasjonsprogrammet for Windows eller AppImage-filen for Linux.",
     "desktop.updates.windowsSetupRequired": "Installer StykAnimate med installasjonsprogrammet Windows Setup for å aktivere automatiske oppdateringer.",
-    "desktop.updates.retryConnection": "Oppdateringen kunne ikke fullføres. Kontroller tilkoblingen og prøv igjen."
+    "desktop.updates.retryConnection": "Oppdateringen kunne ikke fullføres. Kontroller tilkoblingen og prøv igjen.",
+    "settings.privacyLede": "Anonym statistikk viser oss hva som bør bli raskere, og hva som må fikses.",
+    "privacy.notice.text": "StykAnimate sender anonym statistikk om hastighet og krasj. Ingenting fra animasjonene dine.",
+    "privacy.notice.details": "Hva som sendes",
+    "privacy.notice.turnOff": "Slå av",
+    "privacy.notice.ok": "OK",
+    "privacy.notice.turnedOff": "Statistikk er slått av. Du kan slå den på igjen i Innstillinger, under Personvern.",
+    "privacy.statistics": "Statistikk",
+    "privacy.send": "Send anonym statistikk",
+    "privacy.sendNote": "Hastighet, krasj og hvilke funksjoner som brukes. Ingenting fra animasjonene dine.",
+    "privacy.forcedOff": "Statistikk er slått av på denne datamaskinen.",
+    "privacy.notUploaded": "Dette er en utviklingskjøring: rapporter samles inn, men lastes ikke opp.",
+    "privacy.seeReport": "Se den siste rapporten",
+    "privacy.note": "Personvernerklæring",
+    "privacy.reportTitle": "Den siste rapporten",
+    "privacy.reportIntro": "Dette er nøyaktig det StykAnimate sendte sist, og det som venter på å bli sendt.",
+    "privacy.nothingSent": "Ingenting er sendt ennå."
   }
 }

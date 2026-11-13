@@ -172,7 +172,7 @@ const messages = {
   "settings.search": "Search settings",
   "settings.searchResults": "Settings matching “{query}”",
   "settings.noResults": "No settings match “{query}”.",
-  "settings.privacy": "Privacy and diagnostics…",
+  "settings.privacy": "Privacy",
   "settings.sendFeedback": "Send feedback…",
   "settings.interfaceSize": "Interface size",
   "settings.timeline": "Timeline",
@@ -241,6 +241,7 @@ const messages = {
   "settings.canvasLede": "How the stage moves and what it shows while you pose.",
   "settings.animationLede": "Keyframes, playback and how often your work is kept safe.",
   "settings.shortcutsLede": "Click a shortcut to record a new one. A command can have up to four.",
+  "settings.privacyLede": "Anonymous statistics show us what to make faster and what to fix.",
   "settings.feedbackLede": "Found a bug or have an idea? Reports go privately to the developer, and replies show up right here in the app.",
   "settings.panelLayoutsNote": "Put every panel back where it started.",
   "settings.donateNote": "StykAnimate is free. Help keep it that way.",
@@ -6668,7 +6669,22 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Move the AppImage to a writable folder, such as Applications in your home folder, and reopen it to enable automatic updates.",
   "desktop.updates.supportedInstallerRequired": "Automatic updates require the Windows installer or Linux AppImage.",
   "desktop.updates.windowsSetupRequired": "Install StykAnimate using the Windows Setup installer to enable automatic updates.",
-  "desktop.updates.retryConnection": "The update could not be completed. Check your connection and try again."
+  "desktop.updates.retryConnection": "The update could not be completed. Check your connection and try again.",
+  "privacy.notice.text": "StykAnimate sends anonymous statistics about speed and crashes. Nothing from your animations.",
+  "privacy.notice.details": "What is sent",
+  "privacy.notice.turnOff": "Turn off",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "Statistics are off. You can turn them back on in Preferences, under Privacy.",
+  "privacy.statistics": "Statistics",
+  "privacy.send": "Send anonymous statistics",
+  "privacy.sendNote": "Speed, crashes and which features are used. Nothing from your animations.",
+  "privacy.forcedOff": "Statistics are turned off for this computer.",
+  "privacy.notUploaded": "This is a development run: reports are collected but not uploaded.",
+  "privacy.seeReport": "See the last report",
+  "privacy.note": "Privacy note",
+  "privacy.reportTitle": "The last report",
+  "privacy.reportIntro": "This is exactly what StykAnimate last sent, and what is waiting to be sent.",
+  "privacy.nothingSent": "Nothing has been sent yet."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

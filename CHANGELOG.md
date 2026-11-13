@@ -22,6 +22,8 @@ What's new in each version of StykAnimate.
 
 ### Changed
 
+- The desktop app now sends anonymous statistics about speed and crashes, never anything from your animations. You can turn them off, and see exactly what was sent, in Preferences under Privacy.
+- The privacy window at first start is gone: Home tells you about statistics in one line instead.
 - Ctrl-dragging a node that uses IK stretches it like any other node.
 - A calmer top bar: the menus are in a short StykAnimate menu, and your open projects take their place.
 - Shorter right-click menus on the canvas, with less frequent figure commands grouped under More figure actions.

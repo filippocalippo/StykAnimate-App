@@ -176,7 +176,7 @@ const messages = {
   "settings.search": "Išči nastavitve",
   "settings.searchResults": "Nastavitve za »{query}«",
   "settings.noResults": "Nobena nastavitev se ne ujema z »{query}«.",
-  "settings.privacy": "Zasebnost in diagnostika…",
+  "settings.privacy": "Zasebnost",
   "settings.sendFeedback": "Pošlji povratne informacije…",
   "settings.interfaceSize": "Velikost vmesnika",
   "settings.timeline": "Časovnica",
@@ -6401,7 +6401,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Premaknite AppImage v mapo z dovoljenjem za pisanje, na primer Applications v domači mapi, in znova odprite aplikacijo, da omogočite samodejne posodobitve.",
   "desktop.updates.supportedInstallerRequired": "Samodejne posodobitve zahtevajo namestitveni program za Windows ali AppImage za Linux.",
   "desktop.updates.windowsSetupRequired": "Namestite StykAnimate z namestitvenim programom Windows Setup, da omogočite samodejne posodobitve.",
-  "desktop.updates.retryConnection": "Posodobitve ni bilo mogoče dokončati. Preverite povezavo in poskusite znova."
+  "desktop.updates.retryConnection": "Posodobitve ni bilo mogoče dokončati. Preverite povezavo in poskusite znova.",
+  "settings.privacyLede": "Anonimna statistika nam pokaže, kaj pospešiti in kaj popraviti.",
+  "privacy.notice.text": "StykAnimate pošilja anonimno statistiko o hitrosti in sesutjih. Nič iz vaših animacij.",
+  "privacy.notice.details": "Kaj se pošilja",
+  "privacy.notice.turnOff": "Izklopi",
+  "privacy.notice.ok": "V redu",
+  "privacy.notice.turnedOff": "Statistika je izklopljena. Znova jo lahko vklopite v Nastavitvah, pod Zasebnost.",
+  "privacy.statistics": "Statistika",
+  "privacy.send": "Pošiljaj anonimno statistiko",
+  "privacy.sendNote": "Hitrost, sesutja in katere funkcije se uporabljajo. Nič iz vaših animacij.",
+  "privacy.forcedOff": "Statistika je na tem računalniku izklopljena.",
+  "privacy.notUploaded": "To je razvojni zagon: poročila se zbirajo, a ne pošiljajo.",
+  "privacy.seeReport": "Prikaži zadnje poročilo",
+  "privacy.note": "Obvestilo o zasebnosti",
+  "privacy.reportTitle": "Zadnje poročilo",
+  "privacy.reportIntro": "Točno to je StykAnimate nazadnje poslal in to čaka na pošiljanje.",
+  "privacy.nothingSent": "Nič še ni bilo poslano."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

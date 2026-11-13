@@ -179,7 +179,7 @@
     "settings.search": "Tìm cài đặt",
     "settings.searchResults": "Cài đặt khớp với “{query}”",
     "settings.noResults": "Không có cài đặt nào khớp với “{query}”.",
-    "settings.privacy": "Quyền riêng tư và chẩn đoán…",
+    "settings.privacy": "Quyền riêng tư",
     "settings.sendFeedback": "Gửi phản hồi…",
     "settings.interfaceSize": "Kích thước giao diện",
     "settings.timeline": "Dòng thời gian",
@@ -6287,6 +6287,22 @@
     "desktop.updates.writableAppImageRequired": "Chuyển AppImage vào thư mục có thể ghi, chẳng hạn như Applications trong thư mục cá nhân của bạn, rồi mở lại để bật cập nhật tự động.",
     "desktop.updates.supportedInstallerRequired": "Cập nhật tự động cần bộ cài dành cho Windows hoặc AppImage dành cho Linux.",
     "desktop.updates.windowsSetupRequired": "Cài đặt StykAnimate bằng bộ cài Windows Setup để bật cập nhật tự động.",
-    "desktop.updates.retryConnection": "Không thể hoàn tất cập nhật. Kiểm tra kết nối và thử lại."
+    "desktop.updates.retryConnection": "Không thể hoàn tất cập nhật. Kiểm tra kết nối và thử lại.",
+    "settings.privacyLede": "Số liệu thống kê ẩn danh cho chúng tôi biết cần tăng tốc điều gì và cần sửa điều gì.",
+    "privacy.notice.text": "StykAnimate gửi số liệu thống kê ẩn danh về tốc độ và sự cố. Không có gì từ hoạt hình của bạn.",
+    "privacy.notice.details": "Những gì được gửi",
+    "privacy.notice.turnOff": "Tắt",
+    "privacy.notice.ok": "OK",
+    "privacy.notice.turnedOff": "Đã tắt thống kê. Bạn có thể bật lại trong Tùy chọn, mục Quyền riêng tư.",
+    "privacy.statistics": "Thống kê",
+    "privacy.send": "Gửi số liệu thống kê ẩn danh",
+    "privacy.sendNote": "Tốc độ, sự cố và những tính năng được dùng. Không có gì từ hoạt hình của bạn.",
+    "privacy.forcedOff": "Thống kê đã bị tắt trên máy tính này.",
+    "privacy.notUploaded": "Đây là bản chạy phát triển: báo cáo được thu thập nhưng không được tải lên.",
+    "privacy.seeReport": "Xem báo cáo gần nhất",
+    "privacy.note": "Thông báo về quyền riêng tư",
+    "privacy.reportTitle": "Báo cáo gần nhất",
+    "privacy.reportIntro": "Đây chính xác là những gì StykAnimate đã gửi lần gần nhất và những gì đang chờ gửi.",
+    "privacy.nothingSent": "Chưa có gì được gửi."
   }
 }

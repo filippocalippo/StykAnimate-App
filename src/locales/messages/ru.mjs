@@ -176,7 +176,7 @@ const messages = {
   "settings.search": "Поиск настроек",
   "settings.searchResults": "Настройки по запросу «{query}»",
   "settings.noResults": "Настройки по запросу «{query}» не найдены.",
-  "settings.privacy": "Конфиденциальность и диагностика…",
+  "settings.privacy": "Конфиденциальность",
   "settings.sendFeedback": "Отправить отзыв…",
   "settings.interfaceSize": "Размер интерфейса",
   "settings.timeline": "Шкала времени",
@@ -6401,7 +6401,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Переместите AppImage в папку с правом записи, например Applications в вашей домашней папке, и запустите его снова, чтобы включить автоматические обновления.",
   "desktop.updates.supportedInstallerRequired": "Для автоматических обновлений требуется установщик для Windows или AppImage для Linux.",
   "desktop.updates.windowsSetupRequired": "Установите StykAnimate с помощью установщика Windows Setup, чтобы включить автоматические обновления.",
-  "desktop.updates.retryConnection": "Не удалось завершить обновление. Проверьте подключение и повторите попытку."
+  "desktop.updates.retryConnection": "Не удалось завершить обновление. Проверьте подключение и повторите попытку.",
+  "settings.privacyLede": "Анонимная статистика показывает нам, что нужно ускорить и что исправить.",
+  "privacy.notice.text": "StykAnimate отправляет анонимную статистику о скорости и сбоях. Ничего из ваших анимаций.",
+  "privacy.notice.details": "Что отправляется",
+  "privacy.notice.turnOff": "Выключить",
+  "privacy.notice.ok": "ОК",
+  "privacy.notice.turnedOff": "Статистика выключена. Включить её снова можно в Параметрах, в разделе «Конфиденциальность».",
+  "privacy.statistics": "Статистика",
+  "privacy.send": "Отправлять анонимную статистику",
+  "privacy.sendNote": "Скорость, сбои и используемые функции. Ничего из ваших анимаций.",
+  "privacy.forcedOff": "Статистика выключена на этом компьютере.",
+  "privacy.notUploaded": "Это сборка для разработки: отчёты собираются, но не отправляются.",
+  "privacy.seeReport": "Посмотреть последний отчёт",
+  "privacy.note": "Уведомление о конфиденциальности",
+  "privacy.reportTitle": "Последний отчёт",
+  "privacy.reportIntro": "Это именно то, что StykAnimate отправил в последний раз, и то, что ждёт отправки.",
+  "privacy.nothingSent": "Пока ничего не отправлено."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

@@ -174,7 +174,7 @@ const messages = {
   "settings.search": "Rechercher dans les paramètres",
   "settings.searchResults": "Paramètres correspondant à « {query} »",
   "settings.noResults": "Aucun paramètre ne correspond à « {query} ».",
-  "settings.privacy": "Confidentialité et diagnostics…",
+  "settings.privacy": "Confidentialité",
   "settings.sendFeedback": "Envoyer un commentaire…",
   "settings.interfaceSize": "Taille de l’interface",
   "settings.timeline": "Timeline",
@@ -6360,7 +6360,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Déplacez l’AppImage dans un dossier accessible en écriture, par exemple Applications dans votre dossier personnel, puis relancez l’application pour activer les mises à jour automatiques.",
   "desktop.updates.supportedInstallerRequired": "Les mises à jour automatiques nécessitent le programme d’installation Windows ou l’AppImage Linux.",
   "desktop.updates.windowsSetupRequired": "Installez StykAnimate avec le programme d’installation Windows Setup pour activer les mises à jour automatiques.",
-  "desktop.updates.retryConnection": "La mise à jour n’a pas pu être terminée. Vérifiez votre connexion et réessayez."
+  "desktop.updates.retryConnection": "La mise à jour n’a pas pu être terminée. Vérifiez votre connexion et réessayez.",
+  "settings.privacyLede": "Les statistiques anonymes nous montrent ce qu’il faut accélérer et ce qu’il faut corriger.",
+  "privacy.notice.text": "StykAnimate envoie des statistiques anonymes sur la vitesse et les plantages. Rien de vos animations.",
+  "privacy.notice.details": "Ce qui est envoyé",
+  "privacy.notice.turnOff": "Désactiver",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "Les statistiques sont désactivées. Vous pouvez les réactiver dans Préférences, rubrique Confidentialité.",
+  "privacy.statistics": "Statistiques",
+  "privacy.send": "Envoyer des statistiques anonymes",
+  "privacy.sendNote": "Vitesse, plantages et fonctionnalités utilisées. Rien de vos animations.",
+  "privacy.forcedOff": "Les statistiques sont désactivées sur cet ordinateur.",
+  "privacy.notUploaded": "Version de développement. Les rapports sont collectés mais pas envoyés.",
+  "privacy.seeReport": "Voir le dernier rapport",
+  "privacy.note": "Note de confidentialité",
+  "privacy.reportTitle": "Le dernier rapport",
+  "privacy.reportIntro": "Voici exactement ce que StykAnimate a envoyé en dernier, et ce qui attend d’être envoyé.",
+  "privacy.nothingSent": "Rien n’a encore été envoyé."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

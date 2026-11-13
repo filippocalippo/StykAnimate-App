@@ -482,7 +482,7 @@
     "settings.search": "Einstellungen durchsuchen",
     "settings.searchResults": "Einstellungen zu „{query}“",
     "settings.noResults": "Keine Einstellungen zu „{query}“ gefunden.",
-    "settings.privacy": "Datenschutz und Diagnosedaten…",
+    "settings.privacy": "Datenschutz",
     "settings.sendFeedback": "Feedback senden…",
     "settings.interfaceSize": "Oberflächengröße",
     "settings.panelLayouts": "Bedienfeldanordnungen",
@@ -6328,6 +6328,22 @@
     "desktop.updates.writableAppImageRequired": "Verschiebe das AppImage in einen beschreibbaren Ordner, zum Beispiel „Applications“ in deinem Benutzerordner, und starte es erneut, um automatische Updates zu aktivieren.",
     "desktop.updates.supportedInstallerRequired": "Automatische Updates erfordern das Windows-Installationsprogramm oder das Linux-AppImage.",
     "desktop.updates.windowsSetupRequired": "Installiere StykAnimate mit dem Installationsprogramm „Windows Setup“, um automatische Updates zu aktivieren.",
-    "desktop.updates.retryConnection": "Das Update konnte nicht abgeschlossen werden. Prüfe deine Verbindung und versuche es erneut."
+    "desktop.updates.retryConnection": "Das Update konnte nicht abgeschlossen werden. Prüfe deine Verbindung und versuche es erneut.",
+    "settings.privacyLede": "Anonyme Statistiken zeigen uns, was schneller werden muss und was repariert werden muss.",
+    "privacy.notice.text": "StykAnimate sendet anonyme Statistiken zu Geschwindigkeit und Abstürzen. Nichts aus deinen Animationen.",
+    "privacy.notice.details": "Was gesendet wird",
+    "privacy.notice.turnOff": "Ausschalten",
+    "privacy.notice.ok": "OK",
+    "privacy.notice.turnedOff": "Statistiken sind aus. Du kannst sie in den Einstellungen unter Datenschutz wieder einschalten.",
+    "privacy.statistics": "Statistiken",
+    "privacy.send": "Anonyme Statistiken senden",
+    "privacy.sendNote": "Geschwindigkeit, Abstürze und welche Funktionen genutzt werden. Nichts aus deinen Animationen.",
+    "privacy.forcedOff": "Statistiken sind auf diesem Computer ausgeschaltet.",
+    "privacy.notUploaded": "Dies ist eine Entwicklungsversion: Berichte werden gesammelt, aber nicht hochgeladen.",
+    "privacy.seeReport": "Letzten Bericht ansehen",
+    "privacy.note": "Datenschutzhinweis",
+    "privacy.reportTitle": "Der letzte Bericht",
+    "privacy.reportIntro": "Hier steht genau, was StykAnimate zuletzt gesendet hat und was noch auf den Versand wartet.",
+    "privacy.nothingSent": "Bisher wurde nichts gesendet."
   }
 }

@@ -181,7 +181,7 @@
     "settings.search": "Søg i indstillinger",
     "settings.searchResults": "Indstillinger, der matcher “{query}”",
     "settings.noResults": "Ingen indstillinger matcher “{query}”.",
-    "settings.privacy": "Privatliv og diagnosticering…",
+    "settings.privacy": "Privatliv",
     "settings.sendFeedback": "Send feedback…",
     "settings.interfaceSize": "Brugerfladens størrelse",
     "settings.timeline": "Tidslinje",
@@ -6328,6 +6328,22 @@
     "desktop.updates.writableAppImageRequired": "Flyt AppImage til en mappe med skriveadgang, f.eks. Applications i din hjemmemappe, og start det igen for at aktivere automatiske opdateringer.",
     "desktop.updates.supportedInstallerRequired": "Automatiske opdateringer kræver installationsprogrammet til Windows eller AppImage-versionen til Linux.",
     "desktop.updates.windowsSetupRequired": "Installer StykAnimate med installationsprogrammet Windows Setup for at aktivere automatiske opdateringer.",
-    "desktop.updates.retryConnection": "Opdateringen kunne ikke afsluttes. Kontrollér din forbindelse, og prøv igen."
+    "desktop.updates.retryConnection": "Opdateringen kunne ikke afsluttes. Kontrollér din forbindelse, og prøv igen.",
+    "settings.privacyLede": "Anonyme statistikker viser os, hvad der skal gøres hurtigere, og hvad der skal rettes.",
+    "privacy.notice.text": "StykAnimate sender anonyme statistikker om hastighed og nedbrud. Intet fra dine animationer.",
+    "privacy.notice.details": "Hvad sendes der",
+    "privacy.notice.turnOff": "Slå fra",
+    "privacy.notice.ok": "OK",
+    "privacy.notice.turnedOff": "Statistikker er slået fra. Du kan slå dem til igen under Præferencer, Privatliv.",
+    "privacy.statistics": "Statistikker",
+    "privacy.send": "Send anonyme statistikker",
+    "privacy.sendNote": "Hastighed, nedbrud og hvilke funktioner der bruges. Intet fra dine animationer.",
+    "privacy.forcedOff": "Statistikker er slået fra på denne computer.",
+    "privacy.notUploaded": "Dette er en udviklingskørsel: rapporter indsamles, men uploades ikke.",
+    "privacy.seeReport": "Se den seneste rapport",
+    "privacy.note": "Om privatliv",
+    "privacy.reportTitle": "Den seneste rapport",
+    "privacy.reportIntro": "Dette er præcis, hvad StykAnimate sendte sidst, og hvad der venter på at blive sendt.",
+    "privacy.nothingSent": "Intet er sendt endnu."
   }
 }

@@ -185,7 +185,7 @@
     "settings.search": "Hledat v nastavení",
     "settings.searchResults": "Nastavení odpovídající „{query}“",
     "settings.noResults": "Žádné nastavení neodpovídá „{query}“.",
-    "settings.privacy": "Soukromí a diagnostika…",
+    "settings.privacy": "Soukromí",
     "settings.sendFeedback": "Odeslat zpětnou vazbu…",
     "settings.interfaceSize": "Velikost rozhraní",
     "settings.timeline": "Časová osa",
@@ -6410,6 +6410,22 @@
     "desktop.updates.writableAppImageRequired": "Přesuňte soubor AppImage do složky s oprávněním k zápisu, například do složky Applications ve své domovské složce, a znovu ho spusťte. Tím povolíte automatické aktualizace.",
     "desktop.updates.supportedInstallerRequired": "Automatické aktualizace vyžadují instalátor pro Windows nebo soubor AppImage pro Linux.",
     "desktop.updates.windowsSetupRequired": "Chcete-li povolit automatické aktualizace, nainstalujte StykAnimate pomocí instalátoru Windows Setup.",
-    "desktop.updates.retryConnection": "Aktualizaci se nepodařilo dokončit. Zkontrolujte připojení a zkuste to znovu."
+    "desktop.updates.retryConnection": "Aktualizaci se nepodařilo dokončit. Zkontrolujte připojení a zkuste to znovu.",
+    "settings.privacyLede": "Anonymní statistiky nám ukazují, co zrychlit a co opravit.",
+    "privacy.notice.text": "StykAnimate odesílá anonymní statistiky o rychlosti a pádech. Nic z vašich animací.",
+    "privacy.notice.details": "Co se odesílá",
+    "privacy.notice.turnOff": "Vypnout",
+    "privacy.notice.ok": "OK",
+    "privacy.notice.turnedOff": "Statistiky jsou vypnuté. Znovu je zapnete v Předvolbách v části Soukromí.",
+    "privacy.statistics": "Statistiky",
+    "privacy.send": "Odesílat anonymní statistiky",
+    "privacy.sendNote": "Rychlost, pády a používané funkce. Nic z vašich animací.",
+    "privacy.forcedOff": "Statistiky jsou na tomto počítači vypnuté.",
+    "privacy.notUploaded": "Toto je vývojové spuštění: zprávy se shromažďují, ale neodesílají.",
+    "privacy.seeReport": "Zobrazit poslední zprávu",
+    "privacy.note": "Informace o soukromí",
+    "privacy.reportTitle": "Poslední zpráva",
+    "privacy.reportIntro": "Přesně tohle StykAnimate naposledy odeslal a tohle čeká na odeslání.",
+    "privacy.nothingSent": "Zatím nebylo nic odesláno."
   }
 }

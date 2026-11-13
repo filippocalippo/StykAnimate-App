@@ -172,7 +172,7 @@ const messages = {
   "settings.search": "Hae asetuksia",
   "settings.searchResults": "Hakua ”{query}” vastaavat asetukset",
   "settings.noResults": "Hakua ”{query}” vastaavia asetuksia ei löytynyt.",
-  "settings.privacy": "Tietosuoja ja diagnostiikka…",
+  "settings.privacy": "Tietosuoja",
   "settings.sendFeedback": "Lähetä palautetta…",
   "settings.interfaceSize": "Käyttöliittymän koko",
   "settings.timeline": "Aikajana",
@@ -6319,7 +6319,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Siirrä AppImage-tiedosto kansioon, johon sinulla on kirjoitusoikeus, esimerkiksi kotikansiosi Applications-kansioon, ja käynnistä se uudelleen. Näin saat automaattiset päivitykset käyttöön.",
   "desktop.updates.supportedInstallerRequired": "Automaattiset päivitykset edellyttävät Windows-asennusohjelmaa tai Linuxin AppImage-tiedostoa.",
   "desktop.updates.windowsSetupRequired": "Ota automaattiset päivitykset käyttöön asentamalla StykAnimate Windows Setup -asennusohjelmalla.",
-  "desktop.updates.retryConnection": "Päivitystä ei voitu viimeistellä. Tarkista yhteytesi ja yritä uudelleen."
+  "desktop.updates.retryConnection": "Päivitystä ei voitu viimeistellä. Tarkista yhteytesi ja yritä uudelleen.",
+  "settings.privacyLede": "Nimettömät tilastot näyttävät meille, mitä pitää nopeuttaa ja mitä korjata.",
+  "privacy.notice.text": "StykAnimate lähettää nimettömiä tilastoja nopeudesta ja kaatumisista. Ei mitään animaatioistasi.",
+  "privacy.notice.details": "Mitä lähetetään",
+  "privacy.notice.turnOff": "Poista käytöstä",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "Tilastot ovat pois käytöstä. Voit ottaa ne uudelleen käyttöön Asetusten Tietosuoja-osiosta.",
+  "privacy.statistics": "Tilastot",
+  "privacy.send": "Lähetä nimettömiä tilastoja",
+  "privacy.sendNote": "Nopeus, kaatumiset ja käytetyt ominaisuudet. Ei mitään animaatioistasi.",
+  "privacy.forcedOff": "Tilastot on poistettu käytöstä tällä tietokoneella.",
+  "privacy.notUploaded": "Tämä on kehitysversio: raportit kerätään, mutta niitä ei lähetetä.",
+  "privacy.seeReport": "Näytä viimeisin raportti",
+  "privacy.note": "Tietosuojaseloste",
+  "privacy.reportTitle": "Viimeisin raportti",
+  "privacy.reportIntro": "Tämä on tarkalleen se, mitä StykAnimate lähetti viimeksi, ja mitä odottaa lähettämistä.",
+  "privacy.nothingSent": "Mitään ei ole vielä lähetetty."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

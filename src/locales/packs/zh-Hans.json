@@ -184,7 +184,7 @@
     "settings.search": "搜索设置",
     "settings.searchResults": "与“{query}”匹配的设置",
     "settings.noResults": "没有与“{query}”匹配的设置。",
-    "settings.privacy": "隐私与诊断…",
+    "settings.privacy": "隐私",
     "settings.sendFeedback": "发送反馈…",
     "settings.interfaceSize": "界面大小",
     "settings.timeline": "时间轴",
@@ -6292,6 +6292,22 @@
     "desktop.updates.writableAppImageRequired": "请将 AppImage 文件移到可写入的文件夹（例如用户主目录中的 Applications 文件夹），然后重新运行，以启用自动更新。",
     "desktop.updates.supportedInstallerRequired": "自动更新仅支持 Windows 安装版和 Linux 版 AppImage。",
     "desktop.updates.windowsSetupRequired": "请使用 Windows Setup 安装 StykAnimate，以启用自动更新。",
-    "desktop.updates.retryConnection": "无法完成更新。请检查网络连接后重试。"
+    "desktop.updates.retryConnection": "无法完成更新。请检查网络连接后重试。",
+    "settings.privacyLede": "匿名统计数据让我们知道哪些地方需要提速、哪些问题需要修复。",
+    "privacy.notice.text": "StykAnimate 会发送关于速度和崩溃的匿名统计数据，不含你动画中的任何内容。",
+    "privacy.notice.details": "发送了什么",
+    "privacy.notice.turnOff": "关闭",
+    "privacy.notice.ok": "确定",
+    "privacy.notice.turnedOff": "统计已关闭。你可以在“偏好设置”的“隐私”中重新开启。",
+    "privacy.statistics": "统计",
+    "privacy.send": "发送匿名统计数据",
+    "privacy.sendNote": "速度、崩溃以及使用了哪些功能。不含你动画中的任何内容。",
+    "privacy.forcedOff": "此电脑已关闭统计。",
+    "privacy.notUploaded": "这是开发版运行：会收集报告，但不会上传。",
+    "privacy.seeReport": "查看最近一次报告",
+    "privacy.note": "隐私说明",
+    "privacy.reportTitle": "最近一次报告",
+    "privacy.reportIntro": "以下正是 StykAnimate 最近一次发送的内容，以及等待发送的内容。",
+    "privacy.nothingSent": "尚未发送任何内容。"
   }
 }

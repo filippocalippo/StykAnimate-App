@@ -66,7 +66,7 @@ Statistics are on unless a person turns them off.
   opens "See the last report" and leaves the line in place. Using the switch in Preferences answers it too.
 - **Nothing leaves before the line was shown:** the desktop process uploads only once Home has displayed the
   line on this installation (`noticeShown` in `stats-state.json`, set through `markStatsNoticeShown` the first
-  time the line is on screen) or the line was answered. Counting and queueing may run before that. A person who
+  time the line is on screen with no dialog over it) or the line was answered. Counting and queueing may run before that. A person who
   starts the app with Home turned off (Settings › Interface) keeps their reports on the computer until they
   visit Home once.
 - **Preferences, Privacy** (`src/privacy-settings.mjs`): a switch "Send anonymous statistics", "See the last

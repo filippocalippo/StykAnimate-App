@@ -67,6 +67,7 @@
     "test:project-tabs:desktop": "node scripts/smoke-project-tabs.mjs",
     "test:home": "node tests/home.browser.mjs && node tests/tutorials.browser.mjs",
     "test:home:desktop": "node scripts/smoke-home.mjs",
+    "test:privacy": "node tests/privacy.browser.mjs",
     "test:project-library": "node --test scripts/project-library.test.mjs",
     "test:recovery:desktop": "node scripts/smoke-recovery.mjs",
     "benchmark:native-import": "node scripts/benchmark-native-import.mjs",

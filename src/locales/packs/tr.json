@@ -181,7 +181,7 @@
     "settings.search": "Ayarlarda ara",
     "settings.searchResults": "“{query}” ile eşleşen ayarlar",
     "settings.noResults": "“{query}” ile eşleşen ayar bulunamadı.",
-    "settings.privacy": "Gizlilik ve tanılama…",
+    "settings.privacy": "Gizlilik",
     "settings.sendFeedback": "Geri bildirim gönder…",
     "settings.interfaceSize": "Arayüz boyutu",
     "settings.timeline": "Zaman çizelgesi",
@@ -6328,6 +6328,22 @@
     "desktop.updates.writableAppImageRequired": "AppImage dosyasını yazma izniniz olan bir klasöre, örneğin ev klasörünüzdeki Applications klasörüne taşıyın ve otomatik güncellemeleri etkinleştirmek için yeniden açın.",
     "desktop.updates.supportedInstallerRequired": "Otomatik güncellemeler için Windows kurulum programı veya Linux AppImage dosyası gerekir.",
     "desktop.updates.windowsSetupRequired": "Otomatik güncellemeleri etkinleştirmek için StykAnimate uygulamasını Windows Setup kurulum programıyla yükleyin.",
-    "desktop.updates.retryConnection": "Güncelleme tamamlanamadı. Bağlantınızı kontrol edin ve yeniden deneyin."
+    "desktop.updates.retryConnection": "Güncelleme tamamlanamadı. Bağlantınızı kontrol edin ve yeniden deneyin.",
+    "settings.privacyLede": "Anonim istatistikler neyi hızlandırmamız ve neyi düzeltmemiz gerektiğini gösterir.",
+    "privacy.notice.text": "StykAnimate hız ve çökmelerle ilgili anonim istatistikler gönderir. Animasyonlarınızdan hiçbir şey gönderilmez.",
+    "privacy.notice.details": "Neler gönderiliyor",
+    "privacy.notice.turnOff": "Kapat",
+    "privacy.notice.ok": "Tamam",
+    "privacy.notice.turnedOff": "İstatistikler kapatıldı. Ayarlar'daki Gizlilik bölümünden yeniden açabilirsiniz.",
+    "privacy.statistics": "İstatistikler",
+    "privacy.send": "Anonim istatistik gönder",
+    "privacy.sendNote": "Hız, çökmeler ve hangi özelliklerin kullanıldığı. Animasyonlarınızdan hiçbir şey gönderilmez.",
+    "privacy.forcedOff": "Bu bilgisayarda istatistikler kapalı.",
+    "privacy.notUploaded": "Bu bir geliştirme sürümü: raporlar toplanıyor ancak yüklenmiyor.",
+    "privacy.seeReport": "Son raporu göster",
+    "privacy.note": "Gizlilik bildirimi",
+    "privacy.reportTitle": "Son rapor",
+    "privacy.reportIntro": "StykAnimate'in en son gönderdikleri ve gönderilmeyi bekleyenler tam olarak bunlar.",
+    "privacy.nothingSent": "Henüz hiçbir şey gönderilmedi."
   }
 }

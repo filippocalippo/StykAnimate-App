@@ -183,7 +183,7 @@
     "settings.search": "חיפוש הגדרות",
     "settings.searchResults": "הגדרות התואמות ל־״{query}״",
     "settings.noResults": "אין הגדרות התואמות ל־״{query}״.",
-    "settings.privacy": "פרטיות ואבחון…",
+    "settings.privacy": "פרטיות",
     "settings.sendFeedback": "שליחת משוב…",
     "settings.interfaceSize": "גודל הממשק",
     "settings.timeline": "ציר זמן",
@@ -6369,6 +6369,22 @@
     "desktop.updates.writableAppImageRequired": "יש להעביר את ה־AppImage לתיקייה עם הרשאת כתיבה, למשל Applications בתיקיית הבית שלך, ולהפעיל אותו מחדש כדי לאפשר עדכונים אוטומטיים.",
     "desktop.updates.supportedInstallerRequired": "עדכונים אוטומטיים דורשים את תוכנית ההתקנה ל־Windows או את ה־AppImage ל־Linux.",
     "desktop.updates.windowsSetupRequired": "יש להתקין את StykAnimate באמצעות תוכנית ההתקנה Windows Setup כדי לאפשר עדכונים אוטומטיים.",
-    "desktop.updates.retryConnection": "לא ניתן היה להשלים את העדכון. יש לבדוק את החיבור ולנסות שוב."
+    "desktop.updates.retryConnection": "לא ניתן היה להשלים את העדכון. יש לבדוק את החיבור ולנסות שוב.",
+    "settings.privacyLede": "סטטיסטיקה אנונימית מראה לנו מה לזרז ומה לתקן.",
+    "privacy.notice.text": "StykAnimate שולחת סטטיסטיקה אנונימית על מהירות וקריסות. שום דבר מהאנימציות שלך.",
+    "privacy.notice.details": "מה נשלח",
+    "privacy.notice.turnOff": "כיבוי",
+    "privacy.notice.ok": "אישור",
+    "privacy.notice.turnedOff": "הסטטיסטיקה כבויה. אפשר להפעיל אותה שוב בהעדפות, תחת פרטיות.",
+    "privacy.statistics": "סטטיסטיקה",
+    "privacy.send": "שליחת סטטיסטיקה אנונימית",
+    "privacy.sendNote": "מהירות, קריסות ובאילו תכונות משתמשים. שום דבר מהאנימציות שלך.",
+    "privacy.forcedOff": "הסטטיסטיקה כבויה במחשב הזה.",
+    "privacy.notUploaded": "זו הרצת פיתוח: הדוחות נאספים אבל לא נשלחים.",
+    "privacy.seeReport": "הצגת הדוח האחרון",
+    "privacy.note": "הודעת פרטיות",
+    "privacy.reportTitle": "הדוח האחרון",
+    "privacy.reportIntro": "זה בדיוק מה ש-StykAnimate שלחה לאחרונה, ומה שממתין לשליחה.",
+    "privacy.nothingSent": "עדיין לא נשלח דבר."
   }
 }

@@ -35,9 +35,21 @@ as soon as a project comes to the front or a command works on the animation. The
   window.
 - While Home shows, only Home's shortcuts and the ones that bring a project to the front work (New, Open, Save,
   the palette, Settings, Help, the project switch); every other key belongs to the page.
-- Messages show in Home's box while it shows (the stage header is under it). Startup prompts (What's new,
-  the privacy question) still open over Home.
+- Messages show in Home's box while it shows (the stage header is under it). Startup prompts (What's new)
+  still open over Home.
 - Showing Home pauses playback and ends a running tutorial.
+
+## The statistics line (desktop)
+
+While statistics are on and the person has not answered it, the page starts with one quiet line: "StykAnimate
+sends anonymous statistics about speed and crashes. Nothing from your animations." with *What is sent*, *Turn
+off* and *OK* ([STATISTICS.md](STATISTICS.md), "On and off"). It is part of the page's flow, above the greeting:
+nothing floats over the page or the stage, and it blocks nothing. *OK* and *Turn off* answer it for good (*Turn
+off* also turns statistics off and says once, in a message, where to turn them on again); *What is sent* opens
+"See the last report" and leaves it in place. The first time it is on screen with no dialog over it (What's new opens over Home at a first start), Home tells the desktop process
+(`markStatsNoticeShown`), which uploads nothing before that. `home.mjs` asks `src/privacy-settings.mjs` whether
+to show it (`statsNoticeWanted`) and for its answers; `home-view.mjs` draws it (`.home-notice`). The browser build
+has no statistics and no line.
 
 ## Start
 
@@ -87,6 +99,7 @@ Help links Keyboard shortcuts, Search commands and, on the desktop, What's new a
 
 - `tests/home-model.test.mjs`: the model, Home's settings and Start's canvases.
 - `scripts/project-library.test.mjs`: the list in the main process.
+- `tests/privacy.browser.mjs`: the statistics line, with a desktop bridge faked in the page.
 - `tests/home.browser.mjs`: Home in the browser (startup, keys, Start, messages, Learn, language, setting,
   small windows).
 - `scripts/smoke-home.mjs`: Home in the desktop app with the real list (saving, opening, pins, folders,
