@@ -378,8 +378,10 @@ selection is the editor's to tell with a call, and the frame does not depend on 
   Where nothing is built in parallel (the WebAssembly build: its parallelism is whole frames on workers), a frame without joins
   built for no memory (a worker's frame, a movieclip's scene) is built and spliced one object at a time in draw order, each in
   the buffers of the one before (`build_streamed` in the tests), and a build nothing else holds gives the scene its geometry
-  rather than a copy. The scenes, the draw lists and every read are the ones the plain builds give
-  (`styk-eval/tests/build_throughput.rs`).
+  rather than a copy. A preparation worker builds each frame in the buffers of the scene it built before
+  (`build_reusing` and `SceneSpares`: each object's joints, lengths and segments, and the scene's items, points and spans), which it
+  keeps only from one frame to the next ([threading.md](threading.md)). The scenes, the draw lists and every read are the ones the
+  plain builds give (`styk-eval/tests/build_throughput.rs`).
 - A geometry read names the read the interface holds (`since`). The session sends the groups of the objects built since that
   read, or all of them when the read named is not the one the session last answered or the scene on show is older than that read
   (a scene the stage drew of this frame before the interface read another). The groups held stay as they are, so the

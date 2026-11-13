@@ -360,14 +360,18 @@ impl Engine {
     /// Runs background work on the calling thread until [`Engine::stop`]. Blocks while
     /// there is nothing to do, so it must not be called on a browser's interface thread.
     pub fn work(&self) {
+        // What this worker's last frame left for its next one: kept while it makes frame after frame (`frames::Spares`).
+        let mut spares = frames::Spares::default();
         loop {
             if self.inner.stopping.load(Ordering::SeqCst) {
+                spares.release();
                 // Cancellation retains cleanup until a worker runs it.
                 let task = detach_task(&mut self.inner.state.lock().retained_tasks);
                 if let Some(mut node) = task { node.pop_front().expect("detached task")(self); self.notify_progress(); continue; }
                 return;
             }
-            if !self.step() {
+            if !self.step_with(&mut spares) {
+                spares.idle();
                 self.inner.state.wait_for_work(&self.inner.stopping);
             }
         }
@@ -376,6 +380,11 @@ impl Engine {
     /// Runs one unit of background work on the calling thread, if there is any.
     /// A host without worker threads calls this between its own tasks.
     pub fn step(&self) -> bool {
+        self.step_with(&mut frames::Spares::default())
+    }
+
+    /// [`Engine::step`], a frame made in what the worker's frame before it left (`spares`), which any other work lets go of first.
+    fn step_with(&self, spares: &mut frames::Spares) -> bool {
         let job = {
             let mut state = self.inner.state.lock();
             if let Some(task) = detach_task(&mut state.retained_tasks) {
@@ -393,6 +402,10 @@ impl Engine {
                 Job::Frames(state.frames.work(state.current.clone()))
             }
         };
+        if !matches!(job, Job::Frames(_)) {
+            // Work other than frames (a save's helpers, pictures) may need the memory; frames that follow each other do not wait for it.
+            spares.release();
+        }
         match job {
             Job::Retained(mut node) => node.pop_front().expect("detached retained task")(self),
             Job::Task(mut node) => match node.pop_front().expect("detached task") {
@@ -401,11 +414,12 @@ impl Engine {
                 OrdinaryTask::Decode(generation, picture) => self.decode_picture(&generation, picture),
             },
             Job::Frames(work) => {
-                if !work.step(self) {
+                if !work.step(self, spares) {
                     // Nothing is waiting for a frame: the work nothing waits for runs, and wakes nobody (a waiter of the
                     // progress counter redraws on every tick of it).
                     let idle = detach_task(&mut self.inner.state.lock().idle_tasks);
                     let Some(mut node) = idle else { return false };
+                    spares.release();
                     if let Some(OrdinaryTask::Run(task)) = node.pop_front() { task(self); }
                     return true;
                 }
