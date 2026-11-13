@@ -252,6 +252,58 @@ export const move = {
   reset(context) { context.editor.undo(); },
 };
 
+export const moveMany = {
+  id: 'edit.move-many', layer: 'edit session', title: 'Move every figure: select all, drag, commit, undo, redo',
+  description: 'Every figure selected as Ctrl+A selects them (`selectMany`), then a move as the canvas makes it when the graphics card moves the '
+    + 'figures while the pointer is down: `beginTranslationDrag`, one `moveSelection` from the start at the release, `commitDrag`, `undo`, `redo`. '
+    + 'Each call is timed inside the engine and whole (the interface adopting its answer), and so is the geometry read after the commit with the '
+    + 'joints of every selected figure, as the canvas reads them to draw the handles.',
+  metrics: {select: ms('Select every figure, whole'), begin: ms('Begin the move, in the engine'), 'begin.whole': ms('Begin the move, whole'),
+    move: ms('The move, in the engine'), 'move.whole': ms('The move, whole'), commit: ms('Commit, in the engine'), 'commit.whole': ms('Commit, whole'),
+    read: ms('The geometry read after the commit, with every selected figure\'s joints'), 'read.calls': count('Engine calls of that read'),
+    undo: ms('Undo, in the engine'), 'undo.whole': ms('Undo, whole'), redo: ms('Redo, in the engine'), 'redo.whole': ms('Redo, whole'),
+    'move.answer': kb('Answer of the move'), 'commit.answer': kb('Answer of the commit')},
+  headline: ['commit', 'commit.whole', 'move', 'begin', 'read', 'read.calls', 'undo', 'redo'],
+  setup(context) {
+    const {editor} = context;
+    if (editor.tick !== 0) editor.seek(0);
+    const uids = editor.selectionFrame.objects.map(object => object.unique_id);
+    if (uids.length < 2) throw new Error('The workload has fewer than two figures to move.');
+    return {uids};
+  },
+  // The document is the engine's and the first tick is on show and read, as after any seek; nothing is selected, as before Ctrl+A.
+  prepare(context) {
+    const {editor} = context;
+    context.publish();
+    if (editor.tick !== 0) editor.seek(0);
+    void editor.geometry;
+    editor.select(null);
+  },
+  run(context, {uids}) {
+    const {editor, measure} = context;
+    const select = measure(() => editor.selectMany(uids));
+    if (editor.selectedUids.size !== uids.length) throw new Error(`Only ${editor.selectedUids.size} of ${uids.length} figures were selected.`);
+    const begin = measure(() => editor.beginTranslationDrag('Move connected figures'));
+    if (begin.value === false) throw new Error('The move did not begin.');
+    const move = measure(() => editor.moveSelection(12, -7, {fromStart: true, movePins: false}));
+    const commit = measure(() => editor.commitDrag());
+    if (commit.value !== true) throw new Error('The move did not commit.');
+    // What the handles of the selected figures read: every joint of each (docs/SCENE-EDITING.md, "Joints in dense frames").
+    const read = measure(() => {
+      const geometry = editor.geometry, selected = [...geometry.objects.values()].filter(group => group && editor.selectedUids.has(group.obj.unique_id));
+      geometry.build?.(selected);
+      for (const group of selected) void group.joints;
+    });
+    const undo = measure(() => editor.undo()), redo = measure(() => editor.redo());
+    if (!editor.canUndo || editor.canRedo) throw new Error('Undo and redo did not bring the move back.');
+    return {select: select.ms, begin: begin.engineMs, 'begin.whole': begin.ms, move: move.engineMs, 'move.whole': move.ms, commit: commit.engineMs, 'commit.whole': commit.ms,
+      read: read.ms, 'read.calls': read.calls.length, undo: undo.engineMs, 'undo.whole': undo.ms, redo: redo.engineMs, 'redo.whole': redo.ms,
+      'move.answer': move.bytes / 1024, 'commit.answer': commit.bytes / 1024};
+  },
+  // The redone move is undone and the selection let go of: the document is the one opened again.
+  reset(context) { context.editor.undo(); context.editor.select(null); },
+};
+
 export const save = {
   id: 'save', layer: 'files', title: 'Save the project (.styk)',
   description: 'The project file as the app saves it (`save_project` through src/engine/engine-document-export.mjs): the session hands its document '
@@ -369,7 +421,7 @@ export const raster = {
 };
 
 /** Every benchmark, in the order a workload runs them. */
-export const BENCHMARKS = Object.freeze([open, session, frame, playback, reads, pose, move, save, pivot, raster]);
+export const BENCHMARKS = Object.freeze([open, session, frame, playback, reads, pose, move, moveMany, save, pivot, raster]);
 
 /** What a scaling run measures at every size: how opening, a frame and an edit grow with the scene. */
 export const SCALING_BENCHMARKS = Object.freeze([open, frame, pose]);
