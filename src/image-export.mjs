@@ -22,6 +22,26 @@ const MiB = 1024 * 1024;
 /** The frames an animated GIF's worker may keep between its two passes: 256 MiB, less on a machine of under 8 GiB. */
 export const gifRetainedBytes = (deviceMemory = deviceMemoryHint()) =>
   Math.min(256 * MiB, Math.floor(((Number.isFinite(deviceMemory) && deviceMemory > 0 ? deviceMemory : 4) * 1024 * MiB) / 32));
+/** How long a worker started ahead of an export waits for one. */
+const WARM_MS = 60000;
+/** An image export worker started ahead of an export, and when it is given up. */
+let warm = null;
+const createWorker = () => new Worker(new URL("./image-export-worker.mjs", import.meta.url), { type: "module", name: "StykAnimate image export" });
+/**
+ * Starts an image export worker ahead of an export (the export dialog opens), so the export does not wait for its
+ * modules to load. Given up after a minute without an export; one at a time.
+ */
+export function prewarmImageExport() {
+  if (warm || typeof Worker === "undefined") return;
+  const entry = (warm = { worker: createWorker(), timer: setTimeout(() => { if (warm === entry) { warm = null; entry.worker.terminate(); } }, WARM_MS) });
+}
+/** The warmed worker, or a new one. */
+function takeWorker() {
+  const entry = warm;
+  warm = null;
+  if (entry) clearTimeout(entry.timer);
+  return entry?.worker ?? createWorker();
+}
 const formats = new Set([
   "gif",
   "apng",
@@ -140,10 +160,7 @@ export async function exportAnimation({
   ) {
     throw messageError(new Error(''), "errors.imageExport.thisBrowserCannotExportImagesInAWorker", {});
   }
-  const worker = new Worker(
-    new URL("./image-export-worker.mjs", import.meta.url),
-    { type: "module", name: "StykAnimate image export" },
-  );
+  const worker = takeWorker();
   let sequence = 0,
     pending = null,
     failure;

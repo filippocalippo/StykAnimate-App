@@ -14352,75 +14352,75 @@
   },
   "errors.imageExport.anImageFrameCouldNotBeTransferred": {
     "locations": [
-      "src/image-export.mjs:162"
+      "src/image-export.mjs:179"
     ],
     "context": "fail(messageError(new Error(''), \"errors.imageExport.anImageFrameCouldNotBeTransferred\", {})),"
   },
   "errors.imageExport.chooseBetween1AndExportFrames": {
     "locations": [
-      "src/image-export.mjs:100"
+      "src/image-export.mjs:120"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.chooseBetween1AndExportFrames\", {value: maxFrames.toLocaleString()});"
   },
   "errors.imageExport.chooseGifApngOrAPngJpegGif": {
     "locations": [
-      "src/image-export.mjs:77"
+      "src/image-export.mjs:97"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.chooseGifApngOrAPngJpegGif\", {});"
   },
   "errors.imageExport.imageEncodingFailed": {
     "locations": [
-      "src/image-export.mjs:171"
+      "src/image-export.mjs:188"
     ],
     "context": ": request.reject(restoreMessageError((event.data.error ? new Error(event.data.error) : messageError(new Error(''), \"errors.imageExport.imageEncodingFailed\")), e"
   },
   "errors.imageExport.imageEncodingTimedOutExportStoppedTryAgain": {
     "locations": [
-      "src/image-export.mjs:181"
+      "src/image-export.mjs:198"
     ],
     "context": "const timer = setTimeout(() => fail(messageError(new Error(''), \"errors.imageExport.imageEncodingTimedOutExportStoppedTryAgain\", {})), timeoutMs);"
   },
   "errors.imageExport.imageExportCancelled": {
     "locations": [
-      "src/image-export.mjs:34"
+      "src/image-export.mjs:54"
     ],
     "context": "messageError(new DOMException('', \"AbortError\"), \"errors.imageExport.imageExportCancelled\", {});"
   },
   "errors.imageExport.imageExportsSupportDimensionsUpTo16384": {
     "locations": [
-      "src/image-export.mjs:92"
+      "src/image-export.mjs:112"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.imageExportsSupportDimensionsUpTo16384\", {value: Math.round(EXPORT_MAX_PIXELS / 1e6)});"
   },
   "errors.imageExport.jpegQualityMustBeBetweenZeroAndOne": {
     "locations": [
-      "src/image-export.mjs:119"
+      "src/image-export.mjs:139"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.jpegQualityMustBeBetweenZeroAndOne\", {});"
   },
   "errors.imageExport.renderedImageFrameHasTheWrongDimensions": {
     "locations": [
-      "src/image-export.mjs:260",
-      "src/image-export.mjs:268",
-      "src/image-export.mjs:276"
+      "src/image-export.mjs:277",
+      "src/image-export.mjs:285",
+      "src/image-export.mjs:293"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.renderedImageFrameHasTheWrongDimensions\", {value: index + 1});"
   },
   "errors.imageExport.renderedSvgFrameMustContainSvgTextOr": {
     "locations": [
-      "src/image-export.mjs:241"
+      "src/image-export.mjs:258"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.renderedSvgFrameMustContainSvgTextOr\", {value: index + 1});"
   },
   "errors.imageExport.theImageExportWorkerStopped": {
     "locations": [
-      "src/image-export.mjs:159"
+      "src/image-export.mjs:176"
     ],
     "context": "fail((event.message ? new Error(event.message) : messageError(new Error(''), \"errors.imageExport.theImageExportWorkerStopped\")));"
   },
   "errors.imageExport.thisBrowserCannotExportImagesInAWorker": {
     "locations": [
-      "src/image-export.mjs:141"
+      "src/image-export.mjs:161"
     ],
     "context": "throw messageError(new Error(''), \"errors.imageExport.thisBrowserCannotExportImagesInAWorker\", {});"
   },

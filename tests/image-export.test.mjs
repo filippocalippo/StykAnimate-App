@@ -135,3 +135,20 @@ test('a pixel frame of the wrong size stops a GIF export before it reaches the w
   await assert.rejects(exportAnimation({...options, format: 'gif', renderPixels: async () => ({data: new Uint8ClampedArray(12), width: 2, height: 2})}), /wrong dimensions/);
   assert.equal(requests.filter(r => r.message.operation === 'frame').length, 0);
 });
+
+test('the export dialog warms an image export worker that the next export takes, and one no export takes ends', async t => {
+  const {workers} = environment(t);
+  const {prewarmImageExport} = await import('../src/image-export.mjs');
+  t.mock.timers.enable({apis: ['setTimeout']});
+  prewarmImageExport();
+  prewarmImageExport();
+  assert.equal(workers.length, 1, 'one warm worker at a time');
+  const exported = exportAnimation({...options, format: 'apng', renderPNGFrame: frame});
+  t.mock.timers.tick(0);
+  await exported;
+  assert.equal(workers.length, 1, 'the export took the warm worker');
+  prewarmImageExport();
+  assert.equal(workers.length, 2);
+  t.mock.timers.tick(60000);
+  assert.equal(workers[1].terminated, true, 'given up after a minute');
+});

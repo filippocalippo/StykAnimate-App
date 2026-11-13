@@ -17,6 +17,9 @@
  * docs/engine/rendering.md, Exports). So the worker draws the export's next frames ahead
  * into free read-back slots while earlier ones are mapped, and puts a frame on the canvas
  * only when it is asked for: at most `AHEAD` frames, as many slots as the renderer has.
+ * Once it has answered for a tick of the timeline (a bitmap or pixels), it reads the next
+ * tick's frame the same way while the encoder works, and answers its request with that
+ * (`readAhead`): one frame, given up when another is asked for.
  *
  * `warm` joins the engine and gets the GPU device ahead of an export (while the export
  * dialog is open), so `start` only pins the document. Requests run one at a time;
@@ -46,6 +49,17 @@ let releasing = false, running = Promise.resolve();
 /** Read-back slots not holding a tile, and the frames drawn ahead by tick: their slots and reads. */
 let free = [];
 const ahead = new Map();
+/** The tick last answered for, and the next frame read for a request that may follow: {key, result}. */
+let served = null, readFrame = null;
+/** What identifies a request `readAhead` can answer: a tick of the timeline as a bitmap or as pixels. */
+const readKey = message => message.operation === 'render' && !message.override && !message.svg && !message.native && Number.isInteger(message.tick)
+  ? `${message.tick}:${message.pixels ? 'pixels' : 'bitmap'}` : null;
+/** Gives up the frame read ahead (its bitmap closed once it is read). */
+function dropRead() {
+  const read = readFrame;
+  readFrame = null;
+  read?.result.then(result => result?.bitmap?.close(), () => {});
+}
 
 const released = () => new DOMException('The export renderer was released.', 'AbortError');
 const check = () => { if (releasing) throw released(); };
@@ -177,6 +191,28 @@ async function svg(message, pose, last, started) {
 }
 
 async function render(message) {
+  const key = readKey(message), read = readFrame;
+  served = message.tick ?? null;
+  // Read while the encoder worked on the tick before (a failure then is this request's).
+  if (key && read?.key === key) { readFrame = null; return read.result; }
+  dropRead();
+  return readTick(message);
+}
+
+/**
+ * Reads the tick after `message`'s as `message` asked for its own, unless another frame was asked for since or the
+ * export ends there. Runs in the request chain: a request that comes meanwhile waits for it.
+ */
+async function readAhead(message) {
+  const tick = message.tick + 1;
+  if (served !== message.tick || readFrame || !renderer || tick > (options.last ?? tick)) return;
+  const result = readTick({...message, tick});
+  result.catch(() => {});
+  readFrame = {key: readKey({...message, tick}), result};
+  await result.catch(() => {});
+}
+
+async function readTick(message) {
   const started = performance.now();
   const pose = message.override ? frameDocument?.keyframes?.[0] : null;
   if (message.override && !pose) throw new Error('The current export frame was not transferred.');
@@ -235,7 +271,7 @@ async function operate(message) {
     case 'start': return start(message);
     case 'frame-start': frameDocument = undefined; return {};
     case 'frame-chunk': frameDocument = applyDocumentChunk(frameDocument, message.chunk); return {};
-    case 'retile': await discardAhead(); renderer.retile(Math.max(64, Math.min(4096, message.tileSize | 0))); layout(); return {};
+    case 'retile': dropRead(); await discardAhead(); renderer.retile(Math.max(64, Math.min(4096, message.tileSize | 0))); layout(); return {};
     case 'render': return render(message);
     default: throw new Error(`Unknown export operation ${message.operation}.`);
   }
@@ -244,6 +280,7 @@ async function operate(message) {
 /** Frees the renderer, the GPU device and this thread's stack, then ends the worker. */
 async function release() {
   releasing = true;
+  dropRead();
   await running.catch(() => {});
   try { renderer?.dispose(); device?.dispose(); } catch { /* the device may be gone already */ }
   // Destroying the device rejects the read-backs still pending, and their answers run through
@@ -271,6 +308,7 @@ self.addEventListener('message', ({data: message}) => {
   run.then(result => {
     if (message.id === undefined) { self.postMessage({warmed: true}); return; }
     self.postMessage({id: message.id, ok: true, ...result}, result.bitmap ? [result.bitmap] : result.pixels ? [result.pixels.data.buffer] : []);
+    if (readKey(message) && !releasing) running = running.then(() => readAhead(message)).catch(() => {});
   }, error => {
     if (message.id === undefined) { self.postMessage({warmed: false, error: String(error?.message ?? error)}); return; }
     const text = error?.message ?? String(error);
