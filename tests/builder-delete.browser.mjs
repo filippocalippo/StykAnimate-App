@@ -1,6 +1,6 @@
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
-import {builderFixture} from '../scripts/builder-benchmark-fixture.mjs';
+import {builderFixture} from './support/builder-fixture.mjs';
 const browser=await chromium.launch({channel:'chrome',headless:true});
 const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));

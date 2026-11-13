@@ -9,5 +9,7 @@ export function startDevtools(app, owners) {
   if (globalThis.__STYK_DEVTOOLS__ !== true) return null;
   // A URL the bundler does not follow: the tools stay out of every bundle.
   const url = new URL('./devtools/devtools.mjs', import.meta.url).href;
-  return import(url).then(tools => tools.start(app, owners), error => { console.error('[devtools] The developer tools did not load:', error); return null; });
+  // The app calls this as the last step of its start: the tools report that moment as when it was ready.
+  const readyAt = performance.now();
+  return import(url).then(tools => tools.start(app, {...owners, readyAt}), error => { console.error('[devtools] The developer tools did not load:', error); return null; });
 }

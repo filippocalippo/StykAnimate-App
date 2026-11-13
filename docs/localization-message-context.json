@@ -381,7 +381,7 @@
   },
   "app.editorReadyFileServiceUnavailable": {
     "locations": [
-      "src/app.mjs:6233"
+      "src/app.mjs:6239"
     ],
     "context": "status({messageKey: \"app.editorReadyFileServiceUnavailable\", messageParams: {}}, true);"
   },
@@ -483,8 +483,8 @@
     "locations": [
       "src/app.mjs:4067",
       "src/app.mjs:4881",
-      "src/app.mjs:6113",
-      "src/app.mjs:6128"
+      "src/app.mjs:6116",
+      "src/app.mjs:6131"
     ],
     "context": "if (builderMode?.active) return toast(interfaceText(\"app.finishTheFigureOrReturnToAnimateTo2\"), \"app.finishTheFigureOrReturnToAnimateTo2\", {});"
   },
@@ -687,7 +687,7 @@
   },
   "app.loadingThePivotConverterFirstUseOnly": {
     "locations": [
-      "src/app.mjs:6224"
+      "src/app.mjs:6230"
     ],
     "context": "if (state === \"loading\") status(stage === \"runtime\" ? {messageKey: \"app.loadingThePivotConverterFirstUseOnly\", messageParams: {}} : {messageKey: \"app.startingTh"
   },
@@ -899,7 +899,7 @@
   },
   "app.preparingCanvasAndEffects": {
     "locations": [
-      "src/app.mjs:6191"
+      "src/app.mjs:6194"
     ],
     "context": "status({messageKey: \"app.preparingCanvasAndEffects\", messageParams: {}}, false, true);"
   },
@@ -933,13 +933,13 @@
       "src/app.mjs:1911",
       "src/app.mjs:3351",
       "src/app.mjs:3613",
-      "src/app.mjs:6203"
+      "src/app.mjs:6208"
     ],
     "context": "status({messageKey: \"app.ready\", messageParams: {}});"
   },
   "app.reconnectCanvas": {
     "locations": [
-      "src/app.mjs:6335"
+      "src/app.mjs:6341"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
@@ -1199,7 +1199,7 @@
   },
   "app.startingThePivotConverter": {
     "locations": [
-      "src/app.mjs:6224"
+      "src/app.mjs:6230"
     ],
     "context": "if (state === \"loading\") status(stage === \"runtime\" ? {messageKey: \"app.loadingThePivotConverterFirstUseOnly\", messageParams: {}} : {messageKey: \"app.startingTh"
   },
@@ -1259,13 +1259,13 @@
   },
   "app.theCanvasCouldNotReconnectYourAnimationIs": {
     "locations": [
-      "src/app.mjs:6279"
+      "src/app.mjs:6285"
     ],
     "context": "localizedText($(\"renderer-error\").querySelector('p'), \"app.theCanvasCouldNotReconnectYourAnimationIs\", {});"
   },
   "app.theGraphicsDeviceWasResetReconnectingYourCanvas": {
     "locations": [
-      "src/app.mjs:6335"
+      "src/app.mjs:6341"
     ],
     "context": "localizedMarkup($(\"renderer-error\"), `<p data-i18n=\"app.theGraphicsDeviceWasResetReconnectingYourCanvas\">${messageHTML(\"app.theGraphicsDeviceWasResetReconnectin"
   },
@@ -11876,14 +11876,14 @@
   },
   "errors.app.selectionChangedReopenTheColorPicker": {
     "locations": [
-      "src/app.mjs:6365",
-      "src/app.mjs:6372"
+      "src/app.mjs:6371",
+      "src/app.mjs:6378"
     ],
     "context": "if(editor.report!==report||editor.tick!==tick||[...editor.selectedUids].join(',')!==uids)throw messageError(new Error(''), \"errors.app.selectionChangedReopenThe"
   },
   "errors.app.selectionChangedReopenThePalette": {
     "locations": [
-      "src/app.mjs:6358"
+      "src/app.mjs:6364"
     ],
     "context": "if(editor.report!==report||editor.selectedUid!==uid||editor.figure!==figure||editor.tick!==tick)throw messageError(new Error(''), \"errors.app.selectionChangedRe"
   },
@@ -11907,7 +11907,7 @@
   },
   "errors.app.theGraphicsDeviceWasLost": {
     "locations": [
-      "src/app.mjs:6318"
+      "src/app.mjs:6324"
     ],
     "context": "telemetry.error(Object.assign(messageError(new Error(''), \"errors.app.theGraphicsDeviceWasLost\", {}), { name: 'GPUError', telemetryCode: 'device_lost' }), 'gpu'"
   },
@@ -17035,25 +17035,25 @@
   },
   "errors.uiInvalidation.surfaceIsAlreadyDeclared": {
     "locations": [
-      "src/ui/ui-invalidation.mjs:90"
+      "src/ui/ui-invalidation.mjs:94"
     ],
     "context": "if (byName.has(name)) throw messageError(new Error(''), \"errors.uiInvalidation.surfaceIsAlreadyDeclared\", {name: name});"
   },
   "errors.uiInvalidation.surfaceNeedsAnUpdateFunction": {
     "locations": [
-      "src/ui/ui-invalidation.mjs:91"
+      "src/ui/ui-invalidation.mjs:95"
     ],
     "context": "if (typeof update !== 'function') throw messageError(new TypeError(''), \"errors.uiInvalidation.surfaceNeedsAnUpdateFunction\", {name: name});"
   },
   "errors.uiInvalidation.unknownInvalidationReason": {
     "locations": [
-      "src/ui/ui-invalidation.mjs:92"
+      "src/ui/ui-invalidation.mjs:96"
     ],
     "context": "for (const reason of on) if (!UI_REASONS.includes(reason)) throw messageError(new TypeError(''), \"errors.uiInvalidation.unknownInvalidationReason\", {reason: rea"
   },
   "errors.uiInvalidation.unknownSurface": {
     "locations": [
-      "src/ui/ui-invalidation.mjs:113"
+      "src/ui/ui-invalidation.mjs:117"
     ],
     "context": "if (!surface) throw messageError(new Error(''), \"errors.uiInvalidation.unknownSurface\", {name: name});"
   },
@@ -25817,7 +25817,7 @@
   "rendererStatus.deviceLost": {
     "locations": [
       "src/app.mjs:1760",
-      "src/app.mjs:6314"
+      "src/app.mjs:6320"
     ],
     "context": "if (state.renderer.stats?.backend === \"WebGPU device lost\") localizedText($(\"renderer-label\"), \"rendererStatus.deviceLost\");"
   },

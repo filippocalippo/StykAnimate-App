@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {newOwnedEditor} from './support/owned-editor.mjs';
-import {builderFixture} from '../scripts/builder-benchmark-fixture.mjs';
+import {builderFixture} from './support/builder-fixture.mjs';
 
 /** `prepare(report)` changes the document before it opens. */
 function fixture(prepare = null) {

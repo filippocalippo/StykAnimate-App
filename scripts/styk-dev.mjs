@@ -12,19 +12,23 @@
 // `trace.save` is the client's own: it stops the capture, reads every page and writes the Perfetto file. With several
 // developer builds running, name one with --pid. The pipe only accepts this user's local connections.
 // This client never starts the app, so it never chooses a data folder: an agent starts a developer build with
-// STYK_USER_DATA_DIR set to a scratch folder (scripts/styk-profile.mjs --app does), never on the owner's data.
+// STYK_USER_DATA_DIR set to a scratch folder (perf/lib/app.mjs `launch` does), never on the owner's data.
 import net from 'node:net';
 import {readdirSync, writeFileSync} from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 export const PIPE_PREFIX = 'stykanimate-dev-';
-export const pipePath = pid => `\\\\.\\pipe\\${PIPE_PREFIX}${pid}`;
+/** Where a developer build serves its control channel (desktop/devtools.cjs): a named pipe on Windows, a socket file in the temp folder elsewhere. */
+export const pipePath = pid => (process.platform === 'win32' ? `\\\\.\\pipe\\${PIPE_PREFIX}${pid}` : path.join(os.tmpdir(), `${PIPE_PREFIX}${pid}.sock`));
 
 /** The process ids of the running developer builds, from the pipes they serve. */
 export function runningBuilds() {
-  try { return readdirSync('\\\\.\\pipe\\').filter(name => name.startsWith(PIPE_PREFIX)).map(name => Number(name.slice(PIPE_PREFIX.length))).filter(Number.isInteger); }
-  catch { return []; }
+  try {
+    const names = process.platform === 'win32' ? readdirSync('\\\\.\\pipe\\') : readdirSync(os.tmpdir()).filter(name => name.endsWith('.sock')).map(name => name.slice(0, -5));
+    return names.filter(name => name.startsWith(PIPE_PREFIX)).map(name => Number(name.slice(PIPE_PREFIX.length))).filter(Number.isInteger);
+  } catch { return []; }
 }
 
 /** A connection that sends requests in order and resolves each with its answer. */

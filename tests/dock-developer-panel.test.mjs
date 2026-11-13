@@ -11,7 +11,7 @@ import {paintedMetrics} from '../src/shell/dock-host.mjs';
 
 const metrics = paintedMetrics({ruler: 32, pinnedRow: 32, row: 32});
 const ID = 'developer';
-// The descriptor src/devtools/panels.mjs defines (that module is a developer file the shipping build leaves out).
+// The descriptor src/devtools/panels/panels.mjs defines (that module is a developer file the shipping build leaves out).
 const DEVELOPER = normalizePanelDescriptor({id: ID, title: 'Developer', icon: 'bug', docks: ['right', 'left', 'bottom'], floatable: true, min: 320, pref: 440, max: 960, defaultDock: 'hidden'});
 const developerCatalog = Object.freeze([...PANEL_CATALOG, DEVELOPER]);
 const shipping = {catalog: PANEL_CATALOG};

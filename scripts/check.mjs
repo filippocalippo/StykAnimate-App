@@ -17,7 +17,7 @@ async function discover(directory) {
     else if (/\.(mjs|cjs|js)$/.test(entry.name)) sources.push(relative);
   }
 }
-for (const directory of ['src', 'desktop', 'scripts', 'tests']) await discover(directory);
+for (const directory of ['src', 'desktop', 'scripts', 'tests', 'perf']) await discover(directory);
 // One `node --check` per file, several at a time: starting the processes is what takes the time.
 const errors = new Array(sources.length);
 const check = (index) => new Promise((resolve) => {

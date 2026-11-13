@@ -6,7 +6,7 @@ The next source iteration changes native opening to pass the selected file's com
 
 ## Recorded desktop comparison
 
-`scripts/benchmark-native-import.mjs` invokes the actual native open action, waits for the project to load into the WebGPU editor, and observes renderer and Electron-main timer gaps. Each file was imported once into a fresh codec cache on Windows with NVIDIA Lovelace. These observations include OS scheduling, test overhead, and concurrent machine activity. They are not input-to-display measurements or guarantees.
+A script since removed (`npm run perf -- run` measures opening today, `docs/PERFORMANCE.md`) invoked the actual native open action, waited for the project to load into the WebGPU editor, and observed renderer and Electron-main timer gaps. Each file was imported once into a fresh codec cache on Windows with NVIDIA Lovelace. These observations include OS scheduling, test overhead, and concurrent machine activity. They are not input-to-display measurements or guarantees.
 
 | File | Source / expanded JSON | Baseline / compact UI open | Baseline / compact main maximum timer gap | Baseline / compact renderer longest task |
 | --- | --- | --- | --- | --- |

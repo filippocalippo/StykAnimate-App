@@ -3,14 +3,16 @@
  * the app is ready, and only when the developer build's early script (early.js) marked the page; the shipping build has
  * neither file.
  *
- * `start(app, owners)` builds the tools over the early script's rings: the panels and overlay (panels.mjs), the control
+ * `start(app, owners)` builds the tools over the early script's rings: the panels and overlay (panels/panels.mjs), the control
  * channel's operations (control.mjs) and its transport to the desktop's named pipe. `app` is `window.styk`; `owners` the
  * reads the app hands over (the engine's loader, the lazy tables' reader), since a module of the app imported from here
  * would be a second copy.
  */
-import {Capture, DEVELOPER, ringEvents} from './capture.mjs';
+import {meterBoundary} from './boundary.mjs';
+import {analyze, Capture, DEVELOPER, recentEvents} from './capture.mjs';
 import {createControl} from './control.mjs';
-import {createPanels} from './panels.mjs';
+import {frameCountAt, frameWindow, inputCountAt, inputWindow} from './frames.mjs';
+import {createPanels} from './panels/panels.mjs';
 import {Sampler} from './sampler.mjs';
 import {useTableReader} from './inspector.mjs';
 
@@ -24,26 +26,48 @@ export async function start(app, owners = {}) {
   useTableReader(owners.tableOf);
   const engine = owners.loadEngine ? await owners.loadEngine().catch(() => null) : null;
   const trace = globalThis.__stykTrace;
-  const sampler = new Sampler({app, early, engine});
-  const capture = new Capture(early.ring);
+  // Every call the interface makes into the engine, counted where the generated classes define them (boundary.mjs).
+  const boundary = meterBoundary(engine?.boundary, early, trace);
+  const sampler = new Sampler({app, early, engine, boundary});
+  const capture = new Capture(early.ring, {frames: early.frames, boundary, preparation: () => sampler.preparation()});
 
   let watchers = 0, counterTimer = 0;
   const runtime = {
-    app, early, sampler, capture, engine,
-    /** Frames and counters are sampled only while something watches (the overlay, a capture). */
+    app, early, sampler, capture, engine, boundary,
+    /** When the app finished starting (performance.now ms): it starts the tools as its last step (src/devtools-gate.mjs). */
+    readyAt: owners.readyAt ?? performance.now(),
+    /**
+     * Frames, the engine boundary and the sampler's counters are recorded only while something watches (the panel on
+     * screen, the overlay, a capture): each watcher calls `watch(true)` once and `watch(false)` once. With none, nothing ticks.
+     */
     watch(on) {
       early.watchFrames(on);
       watchers = Math.max(0, watchers + (on ? 1 : -1));
-      if (watchers && !counterTimer) counterTimer = setInterval(() => { try { sampler.sampleCounters(trace); } catch { /* a read that fails skips a sample */ } }, 250);
+      const sample = () => { try { sampler.sample(trace); } catch { /* a read that fails skips a sample */ } };
+      if (watchers && !counterTimer) { counterTimer = setInterval(sample, 250); sample(); }
       if (!watchers && counterTimer) { clearInterval(counterTimer); counterTimer = 0; }
     },
+    /**
+     * The last `ms` of the rings, shaped as a capture (capture.mjs `analyze` reads either). Frames exist only for the
+     * time something watched; the calls into the engine are the boundary meter's live window (to the half second).
+     */
     recent(ms) {
-      const since = performance.now() - ms, {events} = ringEvents(early.ring, Math.max(0, early.ring.total - early.ring.capacity));
-      return events.filter(event => event.start >= since);
+      const stoppedAt = performance.now(), startedAt = stoppedAt - ms;
+      return {label: 'recent', startedAt, stoppedAt, startedTime: Date.now() - ms, events: recentEvents(early.ring, startedAt), dropped: 0,
+        frames: frameWindow(early.frames, frameCountAt(early.frames, startedAt)), inputs: inputWindow(early.frames, inputCountAt(early.frames, startedAt)),
+        boundary: boundary.recent(ms, stoppedAt), preparation: null};
     },
-    startCapture(label) { runtime.watch(true); return capture.start(label); },
+    startCapture(label) { const started = capture.start(label); runtime.watch(true); return started; },
     stopCapture() { const taken = capture.stop(); runtime.watch(false); return taken; },
-    lateMs: () => trace.parameter('devtools.lateFrameMs', 25, {min: 8, max: 200, description: 'A display frame longer than this is late (overlay and summaries)'}),
+    /**
+     * A capture's summary (capture.mjs `analyze`), judged against the display's period once it has been measured (until
+     * then a capture's own median frame stands for it). The control channel, the profiling runner and the panels all
+     * summarize through here, so they print the same numbers.
+     */
+    summarize(taken, options = {}) {
+      const period = sampler.displayPeriod();
+      return analyze(taken, {periodMs: period.measured ? period.periodMs : null, ...options});
+    },
     setParameter(name, value) {
       const entry = early.parameters.registry.get(name);
       if (!entry) return;
@@ -72,7 +96,6 @@ export async function start(app, owners = {}) {
       return name;
     },
   };
-  runtime.lateMs();
   runtime.panels = createPanels(runtime);
   runtime.control = createControl(runtime);
   connectDesktop(runtime.control);

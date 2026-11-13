@@ -54,7 +54,7 @@ export default [
   // The desktop shell.
   {files: ['desktop/**/*.cjs'], languageOptions: {sourceType: 'commonjs', globals: globals.node}},
   // Tools and tests run in Node; a browser test also holds functions that run in the page, where `styk` is the app's handle.
-  {files: ['scripts/**', 'tests/**', 'backend/**/*.mjs', 'engine/tools/**', '*.mjs'], languageOptions: {globals: {...globals.node, ...globals.browser, styk: 'readonly'}}},
+  {files: ['scripts/**', 'tests/**', 'perf/**', 'backend/**/*.mjs', 'engine/tools/**', '*.mjs'], languageOptions: {globals: {...globals.node, ...globals.browser, styk: 'readonly'}}},
   // The UI canvas lab: a local server and its fake CLI in Node; the board, the screen frame and its mockup kit in the browser.
   {files: ['labs/ui-canvas/server.mjs', 'labs/ui-canvas/lib/**', 'labs/ui-canvas/test/**'], languageOptions: {globals: globals.node}},
   {files: ['labs/ui-canvas/app/**', 'labs/ui-canvas/frame/**', 'labs/ui-canvas/kit/**', 'labs/ui-canvas/shared/**'], languageOptions: {globals: globals.browser}},
@@ -64,8 +64,8 @@ export default [
   // Scripts that drive the app hold functions that run in its page, where the page's own names exist: an undefined
   // name cannot be told from one of those here. Their mistakes show when the script runs.
   {
-    files: ['tests/**/*.browser.mjs', 'tests/**/*.desktop.mjs', 'tests/document-export-browser.mjs', 'tests/import-client-only.mjs', 'tests/join-interaction-profile.mjs',
-      'scripts/smoke-*.mjs', 'scripts/benchmark-*.{mjs,cjs}', 'scripts/dense-drag-benchmark.mjs', 'scripts/corpus-gestures.mjs'],
+    files: ['tests/**/*.browser.mjs', 'tests/**/*.desktop.mjs', 'tests/document-export-browser.mjs', 'tests/import-client-only.mjs',
+      'scripts/smoke-*.mjs', 'scripts/benchmark-*.{mjs,cjs}'],
     rules: {'no-undef': 'off'},
   },
 ];

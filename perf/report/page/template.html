@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="npm run perf -- report">
+<title>{{title}}</title>
+<style>{{style}}</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <h1>StykAnimate performance</h1>
+      <div id="runs" class="runs"></div>
+    </div>
+    <div id="controls" class="controls"></div>
+  </div>
+</header>
+<main>
+  <nav id="contents" class="contents" aria-label="Sections of this page"></nav>
+  <div id="overview">
+    <div id="overview-lead"></div>
+{{notes}}
+    <div id="overview-sections"><noscript><p class="panel">This page draws its tables and charts with JavaScript. The data is in the result.json files it was made from.</p></noscript></div>
+  </div>
+  <div id="scenario" hidden></div>
+</main>
+<div id="tooltip" role="tooltip" hidden></div>
+<script type="application/json" id="report-data">{{data}}</script>
+<script>{{script}}</script>
+</body>
+</html>

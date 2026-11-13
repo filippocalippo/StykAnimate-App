@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {builderFixture} from '../scripts/builder-benchmark-fixture.mjs';
+import {builderFixture} from './support/builder-fixture.mjs';
 import {ConstructionIndex,strokeSegments} from '../src/builder-construction.mjs';
 import {validateScene} from '../src/pivot/model.mjs';
 import {ownedEditorFor} from './support/owned-editor.mjs';

@@ -31,7 +31,8 @@ Several agents and people work in this repository at the same time. Run `git sta
 | Home, project list, tutorials | `docs/HOME.md`, `docs/TUTORIALS.md` |
 | The browser build | `docs/WEB.md`; Linux: `docs/LINUX.md` |
 | Packaging, updates, releases | `docs/DESKTOP-RELEASE.md`, `docs/UPDATES.md`, `docs/RELEASING.md` |
-| Developer tools and profiling | `docs/DEVTOOLS.md` |
+| Anything for speed, or how speed is measured | `docs/PERFORMANCE.md` |
+| The developer tools inside the app | `docs/DEVTOOLS.md` |
 
 ## Checking your work
 
@@ -44,6 +45,7 @@ Run what your change can affect, and say in your report what you ran and what it
 - `npm run test:browser -- <words>`: the browser tests whose file names contain a word, against a server it starts. Without words it runs all of them (about fifteen minutes).
 - `scripts/smoke-*.mjs`: the desktop app in a real window, for a change to saving, files, windows or exports.
 - `npm run engine:parity`: the engine against its recorded fixtures. Slow; run it for a change to evaluation, formats or editing commands.
+- `npm run perf -- run`: the app's speed, scenario by scenario, with where each one's time went (about four minutes; `--scenario`, `--workload` and `--env` narrow it to seconds). `npm run perf -- compare <before>` says what a change made better or worse beyond noise, and `npm run perf -- engine` measures the engine alone. `docs/PERFORMANCE.md`.
 
 The Tests workflow runs the checks and unit tests on Linux and Windows for every pull request, the Rust tests on Linux when `engine/` or `tests/fixtures/` changed, and builds the browser version and a packaged Linux app. It is meant to finish in about five minutes for a change outside the engine and under ten for one inside it: a job that makes it slower needs a reason. It does not run the full browser suite or the desktop smoke scripts, which need a real GPU and a real window that the runners lack: run the ones your change affects on your own machine, and all of `npm run test:browser` before a release. Parity runs weekly and after an engine change reaches `main`.
 
@@ -68,7 +70,7 @@ The Tests workflow runs the checks and unit tests on Linux and Windows for every
 - **Heavy work has limits.** Queues and caches (memory and GPU) are bounded and released when a document or a revision goes away. Work that can be cancelled stays cancellable, and a stale result is dropped. No full-document copy or serialization on a path a person waits on.
 - **The desktop app stays locked down.** Keep Electron's context isolation and the narrow preload and IPC surface. Projects are processed on the person's machine; sending one anywhere needs an explicit product decision.
 
-When you change a hot path, measure a dense scene before and after on the same machine and settings, and report the trade-off. A number from one GPU says little about another.
+When you change a hot path, measure a dense scene before and after on the same machine and settings, and report the trade-off: `npm run perf -- run --label before`, the change, `npm run perf -- run --label after`, `npm run perf -- compare before after` (`docs/PERFORMANCE.md`). A number from one GPU says little about another, and a run taken while the machine was busy says so in its summary: do not compare it with a quiet one.
 
 ## Where an engine change goes
 

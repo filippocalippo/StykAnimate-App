@@ -16,6 +16,16 @@ export async function nodeEngine() {
   return {engine: registeredEngine()};
 }
 
+/**
+ * The engine's generated module, started by `nodeEngine()`: the classes `src/engine/` uses on its other threads (the CPU export
+ * renderer, `OpenedDocument`), for tools that run them on this one. The same module instance the engine was loaded from, not a
+ * second load: a module URL is evaluated once per process.
+ */
+export async function engineBindings() {
+  await nodeEngine();
+  return import('../../src/engine/pkg/styk_engine.js');
+}
+
 /** A session on `report` exactly as given (its JSON), without opening it: no normalization, no publication. */
 export async function sessionFromDocument(report, state, revision = 1) {
   const {engine} = await nodeEngine();
