@@ -1315,8 +1315,12 @@ export function createDockHost({document: doc = globalThis.document, window: win
    * other parts) does not depend on that place, so it is measured only when the rail or one of its parts changes size
    * (the observer below, after layout); a solve decides the columns from it without reading layout. Measuring right
    * after a commit's writes forced a style and layout pass inside every commit of a divider drag or a window resize.
+   *
+   * Until the observer has reported once, every solve measures: the rail's tools are still arriving while the app
+   * starts, and columns decided from a first, early measurement gave the stage a clearance that changed a frame later,
+   * after the view had been fitted to it.
    */
-  let railNatural = null;
+  let railNatural = null, railObserved = false;
   const railColumnsFit = () => {
     let columns = railColumns;
     if (solution?.rail?.orientation === 'horizontal') columns = 1;
@@ -1348,12 +1352,12 @@ export function createDockHost({document: doc = globalThis.document, window: win
     const after = horizontal && rail.scrollWidth - rail.scrollLeft - rail.clientWidth > 1;
     if (rail.hasAttribute('data-more-after') !== after) rail.toggleAttribute('data-more-after', after);
   };
-  const railObserver = rail ? new win.ResizeObserver(railFit) : null;
+  const railObserver = rail ? new win.ResizeObserver(() => { railObserved = true; railFit(); }) : null;
   if (rail) {
     for (const element of [rail, ...rail.children]) railObserver.observe(element);
     rail.addEventListener('scroll', railFit, {passive: true, signal});
-    // Whether the rail scrolls changes only with its size, which the observer sees; before its first measure a solve fits it in full.
-    listeners.solve.add(() => (railNatural ? railColumnsFit() : railFit()));
+    // Whether the rail scrolls changes only with its size, which the observer sees; before its first report a solve fits it in full.
+    listeners.solve.add(() => (railObserved ? railColumnsFit() : railFit()));
   }
   const bandWatch = band ? watchBand(band, {window: win, document: doc, storage: browserStorage(win), start: ready, onChange: () => schedule()}) : null;
   const modeObserver = new win.MutationObserver(modeChanged);

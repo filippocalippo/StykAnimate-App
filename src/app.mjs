@@ -5908,6 +5908,15 @@ async function init() {
     ready: editorReady,
     touch: touchMode,
   });
+  // A fitted view follows the stage's clearance as it follows its size: a solve can change the clearance without
+  // resizing #viewport (the tool rail going from two columns to one), which no resize reports.
+  let clearance = Object.values(shell.stageInsets()).join();
+  shell.onSolve(() => {
+    const next = Object.values(shell.stageInsets()).join();
+    if (next === clearance) return;
+    clearance = next;
+    if (isFittedView()) fit();
+  });
   workspaceLayout = shell.workspace;
   window.styk.workspace = workspaceLayout;
   window.styk.shell = shell;
