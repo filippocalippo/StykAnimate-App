@@ -270,32 +270,64 @@ export const save = {
   },
 };
 
-/** The most segment-frames one Pivot export repetition writes: every tick is a stored frame, about 70 ms of the stress scene each. */
+/** The most segment-frames one baked Pivot export writes: about 10 ms a frame of the stress scene on a quiet machine. */
 const EXPORT_SEGMENT_FRAMES = 1000000;
+
+/** Poses one joint of the middle figure at the first tick of `editor`'s document and commits it. */
+function poseOnce(editor, spec) {
+  if (editor.tick !== 0) editor.seek(0);
+  editor.select(Math.floor(spec.figures / 2) + 1, Math.min(spec.segments - 1, spec.chain + Math.floor(spec.chain / 2)));
+  if (!editor.beginDrag('Pose joint')) throw new Error('The edit before the export did not begin.');
+  void editor.geometry;
+  editor.poseJoint(0, 0, {pixel: 1});
+  if (editor.commitDrag() !== true) throw new Error('The edit before the export did not commit.');
+}
 
 export const pivot = {
   id: 'export', layer: 'files', title: 'Export as Pivot (.piv)',
-  description: 'The Pivot export as the app makes it (`export_document` with the codec\'s request as its output): every tick baked into a stored frame, '
-    + 'Pivot having no interpolation, written as the JSON the codec encodes (the codec\'s own encoding is not part of the engine). The engine reports no '
-    + 'phases for it. A document of more than a million segment-frames is exported cut to as many ticks as make that many (the same figures and '
-    + 'segments over two keyframes): the time per exported frame is what carries over to the whole document.',
-  metrics: {ms: ms('Export, whole', {digits: 1}), perFrame: ms('Per exported frame'), frames: count('Frames exported'), written: mb('Written (the codec\'s request)')},
-  headline: ['ms', 'perFrame', 'frames', 'written'],
+  description: 'The Pivot export as the app makes it (`export_document` with the codec\'s request as its output, the JSON the codec encodes; the codec\'s '
+    + 'own encoding is not part of the engine, and the engine reports no phases for it). A document as it was opened keeps its keyframes with their '
+    + 'durations (`kept`); once it has been edited in the app, every tick is baked into a stored frame, Pivot having no interpolation, which is what '
+    + 'a person who animated something waits for. Both are exported from a copy of the document, cut to as many ticks as make a million segment-frames '
+    + 'when it is longer (the same figures and segments over two keyframes): first as opened, then after one pose (not timed), which an undo takes back.',
+  metrics: {ms: ms('Export after an edit (every tick baked), whole', {digits: 1}), perFrame: ms('Per baked frame'), frames: count('Frames baked'),
+    written: {...mb('Written after an edit (the codec\'s request)'), digits: 2}, kept: ms('Export as opened (its keyframes kept), whole', {digits: 1}),
+    'kept.perFrame': ms('Per kept frame'), 'kept.written': {...mb('Written as opened'), digits: 2}},
+  headline: ['ms', 'perFrame', 'frames', 'written', 'kept', 'kept.perFrame'],
+  // A copy of its own (released by the runner with the workload), checked once to keep its keyframes as opened and to bake every tick after an edit.
   setup(context) {
     const {spec, measured} = context, ticks = Math.min(measured.frames, Math.max(2, Math.floor(EXPORT_SEGMENT_FRAMES / measured.segmentsPerFrame)));
-    if (ticks >= measured.frames) return {editor: context.editor, owner: context.owner, ticks};
-    // Opened in an editor of its own, which the runner releases with the workload.
-    return {...context.open({...spec, id: `${spec.id}-cut`, keyframes: 2, hold: ticks - 1}), ticks};
+    const cut = ticks >= measured.frames ? spec : {...spec, id: `${spec.id}-cut`, keyframes: 2, hold: ticks - 1};
+    const copy = context.open(cut), stored = () => {
+      context.publish(copy.owner);
+      const made = context.app.makeExportDocument({join: null, address: context.engine.handle.address(), revision: copy.editor.revision,
+        request: {format: 'piv', name: context.name, output: 'document'}, cancelled: () => false});
+      return JSON.parse(new TextDecoder().decode(made.bytes)).keyframes.length;
+    };
+    const kept = stored();
+    if (kept !== cut.keyframes) throw new Error(`The export of the document as opened stored ${kept} frames for its ${cut.keyframes} keyframes.`);
+    poseOnce(copy.editor, spec);
+    const baked = stored();
+    if (baked !== ticks) throw new Error(`The export of the edited document stored ${baked} frames for its ${ticks} ticks.`);
+    copy.editor.undo();
+    return {...copy, ticks, keyframes: cut.keyframes};
   },
-  // An export reads the engine's document at the editor's revision, not a session's: the exported one is published first.
-  prepare(context, state) { context.publish(state.owner); },
   run(context, state) {
-    const started = performance.now();
-    const made = context.app.makeExportDocument({join: null, address: context.engine.handle.address(), revision: state.editor.revision,
-      request: {format: 'piv', name: context.name, output: 'codec'}, cancelled: () => false});
-    const took = performance.now() - started;
-    return {ms: took, perFrame: took / state.ticks, frames: state.ticks, written: made.bytes.length / MB};
+    // An export reads the engine's document at the editor's revision, not a session's: the copy is published before each export (not timed).
+    const exported = () => {
+      context.publish(state.owner);
+      const started = performance.now();
+      const made = context.app.makeExportDocument({join: null, address: context.engine.handle.address(), revision: state.editor.revision,
+        request: {format: 'piv', name: context.name, output: 'codec'}, cancelled: () => false});
+      return {ms: performance.now() - started, written: made.bytes.length / MB};
+    };
+    const kept = exported();
+    poseOnce(state.editor, context.spec);
+    const baked = exported();
+    return {ms: baked.ms, perFrame: baked.ms / state.ticks, frames: state.ticks, written: baked.written, kept: kept.ms, 'kept.perFrame': kept.ms / state.keyframes, 'kept.written': kept.written};
   },
+  // The pose is undone: the copy is as it was opened again.
+  reset(context, state) { state.editor.undo(); },
   teardown(context) { context.publish(); },
 };
 

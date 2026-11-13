@@ -32,7 +32,7 @@ rate here as what each worker adds, and a time as what one thread spends.
 | `edit.pose` | edit session | A pose drag through the owner: begin, 60 steps, commit, undo, redo; each call inside the engine and whole, the answer's size, the geometry read after a step. |
 | `edit.move` | edit session | The same for moving a figure (`beginTranslationDrag`, `moveSelection` from the start). |
 | `save` | files | `save_project` through `makeProjectFile`: the `.styk` file with its phases (lift, check, sections, assemble) and its size. |
-| `export` | files | `export_document` as the Pivot export asks (`output: 'codec'`), per exported frame. |
+| `export` | files | `export_document` as the Pivot export asks (`output: 'codec'`): the document as opened (its keyframes kept), and a copy edited once, which bakes every tick into a stored frame, per baked frame. |
 | `raster` | CPU rasterizer | `ExportRenderer.create_cpu`: a frame prepared, drawn tile by tile and read out, at 1280×720 and 1920×1080. |
 
 Every benchmark also reports `memory.peak`: the most engine memory a round added above what the engine held when it
@@ -63,10 +63,11 @@ export's request into a `.piv` file is a module of its own, not part of the engi
 - **A known state.** Before every round the workload's document is published afresh and the engine's queue run, so
   nothing a round before prepared is still held. Each benchmark's `prepare` puts the engine in the state it needs and says
   why (a new publication for a cold frame, an editor that has just loaded the document for a session, an undo after a drag).
-- **Work is cut, not rounds.** Playback prepares about a million segments a repetition (4 to 48 frames); a Pivot export of
-  more than a million segment-frames exports the same figures cut to as many ticks; a drag reads the geometry after every
-  fifth step. On a machine 20 to 50 % busy with other work the default run (four workloads, five rounds) took 47 to 53 s
-  (43 to 48 s of processor time) and `--scale` 19 to 22 s; the stress scene is about half of the default run.
+- **Work is cut, not rounds.** Playback prepares about a million segments a repetition (4 to 48 frames); the baked Pivot
+  export of a document of more than a million segment-frames exports the same figures cut to as many ticks; a drag reads
+  the geometry after every fifth step. On a machine shared with other work (20 to 100 % of its processor busy) the default
+  run (four workloads, five rounds) took 47 to 81 s, 43 to 64 s of it processor time, and `--scale` 19 to 22 s; the stress
+  scene is about half of the default run, so `--workload small,medium,large` is the loop for quick checks.
 - **The machine.** A run records how busy the processor was before and after it (`backgroundLoad`) and how much
   processor time it used: a run that took far longer than its processor time waited for other programs, and its numbers
   are slower and noisier for it. Before every round it also times a fixed piece of plain JavaScript (`speed.mjs`), the
