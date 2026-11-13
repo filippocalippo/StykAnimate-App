@@ -4,10 +4,13 @@
  */
 import canvas from './canvas.mjs';
 import drawing from './drawing.mjs';
+import exports from './export.mjs';
 import files, {open} from './files.mjs';
 import interfaceScenarios from './interface.mjs';
 import playback from './playback.mjs';
 import pose from './pose.mjs';
+import projects from './projects.mjs';
+import save from './save.mjs';
 import selection from './selection.mjs';
 import timeline from './timeline.mjs';
 
@@ -18,6 +21,9 @@ export const SCENARIOS = Object.freeze([...files, ...playback, ...timeline, ...c
   ...selection,
   ...interfaceScenarios,
   ...drawing,
+  ...save,
+  ...exports,
+  ...projects,
 ]);
 
 /**

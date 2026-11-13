@@ -166,8 +166,16 @@ A request is `{id, op, args?, detail?: "short" | "full"}`. The answer is `{id, o
 | `open` | `{url, name}`: open a document the page can fetch. Over the pipe, `{path}`: the main process opens the file as it opens one from outside, and the answer comes once it is drawn |
 | `screenshot` | the stage as a PNG data URL |
 | `tools.overlay`, `tools.panel` | show or hide the overlay and the panel |
+| `document.mark`, `document.wait` | `{token}`: wait until another document is in front and drawn (what `open {path}` and a project switch wait for) |
+| `dialog.answer` | over the pipe: answers the main process's next save or open dialog. `{kind: "save" \| "open", path}` (absolute) or `{kind, cancel: true}` queues one answer; `{clear: true}` drops those waiting; `{unanswered: "cancel"}` cancels a dialog nothing answered instead of showing it, and keeps an error box (`showErrorBox`) from showing (`"show"` again restores both). Every answer returns `{pending, unanswered, asked}`: the answers waiting and the last 16 dialogs asked, with their title, default path and what answered them |
 
 There is deliberately no operation that runs arbitrary code: the browser inspector is there for that.
+
+`dialog.answer` exists because a script cannot see or click a native dialog and must never leave one waiting on the screen of
+whoever is at the computer: it wraps `dialog.showSaveDialog`, `showOpenDialog` and `showErrorBox` inside `desktop/devtools.cjs`,
+so the packaged app has neither the file nor a line for it. Production IPC still takes no path from the page; only a client of
+the developer pipe, which only the current user reaches, gives one. A profiling run (`perf/lib/app.mjs`) sets `unanswered:
+"cancel"` as it starts and answers each dialog its scenarios cause (`App.answerDialog`).
 
 `node scripts/styk-dev.mjs <op> [json]` is the client. `trace.save '{"path": "x.json"}'` stops a capture and writes
 the Perfetto file.

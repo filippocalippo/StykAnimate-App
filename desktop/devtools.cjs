@@ -6,7 +6,7 @@
 // It gives the page's preload script the early script (src/devtools/early.js, run before any page script) and the name
 // of the bridge the page answers through, turns on the inspector, and serves the control channel: a named pipe (a
 // socket file outside Windows) that only this user reaches, one JSON request per line, answered in order.
-const { app, ipcMain } = require('electron');
+const { app, dialog, ipcMain } = require('electron');
 const { readFileSync, unlinkSync } = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
@@ -41,6 +41,80 @@ function profilingEnvironment(text) {
   return Object.keys(environment).length ? environment : null;
 }
 
+/**
+ * Answers for the main process's save and open dialogs, given over the control channel (`dialog.answer`): a script
+ * that drives the app (a profiling run, docs/PERFORMANCE.md) can neither see nor click a native dialog, and must never
+ * leave one waiting on the screen of whoever is at the computer. main.cjs asks for every path through
+ * `dialog.showSaveDialog` and `dialog.showOpenDialog`, so `answerDialogs` wraps those two functions of Electron's
+ * `dialog` here, in the developer launch only: the packaged app neither has this file nor gains a line for it.
+ *
+ * An answer is one use: the next dialog of its kind takes the oldest answer queued for that kind (a path, or a
+ * cancel). A dialog with no answer queued is shown as usual, unless the driver said `unanswered: 'cancel'`; then it is
+ * answered as cancelled instead, so a run that lost track of a dialog fails visibly rather than waits on a window.
+ * The last dialogs asked are kept, with what answered them, so the driver can check the dialog it expected came.
+ * An error box (`dialog.showErrorBox`: a file that could not be opened) asks nothing but holds the main process while
+ * it shows: under `unanswered: 'cancel'` it is kept in that list, with its message, and not shown.
+ */
+const DIALOG_KINDS = ['save', 'open'], MAX_QUEUED = 8, MAX_ASKED = 16;
+function createDialogAnswers({ now = () => Date.now() } = {}) {
+  const queued = { save: [], open: [] }, asked = [];
+  let unanswered = 'show';
+  const status = () => ({ pending: { save: queued.save.length, open: queued.open.length }, unanswered, asked: asked.map(row => ({ ...row })) });
+  return {
+    /** `{kind, path}` or `{kind, cancel: true}` queues an answer; `{clear: true}` drops every queued one; `{unanswered}` sets the policy. */
+    answer(args = {}) {
+      if (args.clear === true) { queued.save.length = 0; queued.open.length = 0; }
+      if (args.unanswered !== undefined) {
+        if (!['show', 'cancel'].includes(args.unanswered)) throw new Error('unanswered is "show" or "cancel".');
+        unanswered = args.unanswered;
+      }
+      if (args.kind !== undefined) {
+        if (!DIALOG_KINDS.includes(args.kind)) throw new Error('kind is "save" or "open".');
+        const cancel = args.cancel === true;
+        if (!cancel && !(typeof args.path === 'string' && args.path.length <= 1024 && path.isAbsolute(args.path))) throw new Error('Give an absolute path (at most 1024 characters), or cancel: true.');
+        if (queued[args.kind].length >= MAX_QUEUED) throw new Error(`At most ${MAX_QUEUED} answers wait for ${args.kind} dialogs.`);
+        queued[args.kind].push(cancel ? { cancel: true } : { path: path.normalize(args.path) });
+      }
+      return status();
+    },
+    /** What answers the dialog of `kind` being asked now: {path}, {cancel: true} or null (show it), recorded with the dialog's title and default path. */
+    take(kind, options = {}) {
+      const answer = queued[kind].shift() ?? (unanswered === 'cancel' ? { cancel: true, unanswered: true } : null);
+      asked.push({ kind, title: String(options.title ?? ''), defaultPath: String(options.defaultPath ?? ''), answer: answer ? (answer.cancel ? (answer.unanswered ? 'cancelled (unanswered)' : 'cancelled') : answer.path) : 'shown', at: now() });
+      if (asked.length > MAX_ASKED) asked.shift();
+      return answer;
+    },
+    /** Records an error box; true when it is to be shown. */
+    error(title, message) {
+      asked.push({ kind: 'error', title: String(title ?? '').slice(0, 200), message: String(message ?? '').slice(0, 500), answer: unanswered === 'cancel' ? 'not shown' : 'shown', at: now() });
+      if (asked.length > MAX_ASKED) asked.shift();
+      return unanswered !== 'cancel';
+    },
+    status,
+  };
+}
+
+/** Wraps `dialog.showSaveDialog`, `showOpenDialog` and `showErrorBox` so that `answers` decides each before a window shows. */
+function answerDialogs(dialog, answers) {
+  const original = { save: dialog.showSaveDialog, open: dialog.showOpenDialog, error: dialog.showErrorBox };
+  // Electron takes (window, options) or (options).
+  const optionsOf = args => (args.length > 1 ? args[1] : args[0]) ?? {};
+  dialog.showSaveDialog = function (...args) {
+    const answer = answers.take('save', optionsOf(args));
+    if (!answer) return original.save.apply(this, args);
+    return Promise.resolve(answer.cancel ? { canceled: true, filePath: '' } : { canceled: false, filePath: answer.path });
+  };
+  dialog.showOpenDialog = function (...args) {
+    const answer = answers.take('open', optionsOf(args));
+    if (!answer) return original.open.apply(this, args);
+    return Promise.resolve(answer.cancel ? { canceled: true, filePaths: [] } : { canceled: false, filePaths: [answer.path] });
+  };
+  dialog.showErrorBox = function (title, message) {
+    if (answers.error(title, message)) original.error.call(this, title, message);
+  };
+  return () => { dialog.showSaveDialog = original.save; dialog.showOpenDialog = original.open; dialog.showErrorBox = original.error; };
+}
+
 /** The app's processes as the operating system counts them: type, CPU seconds so far, and memory in bytes. */
 function processMetrics() {
   return app.getAppMetrics().map(metric => ({
@@ -64,6 +138,8 @@ function startDevtools({ appRoot, page, openFile }) {
   // The preload script asks once, before the page's first script: a synchronous answer keeps the early script first.
   ipcMain.on('styk:developer-early', event => { event.returnValue = { script: early, bridge: BRIDGE }; });
 
+  const dialogs = createDialogAnswers();
+  const restoreDialogs = answerDialogs(dialog, dialogs);
   const waiting = new Map();
   let nextTicket = 1, ready = false;
   const settle = (ticket, line) => {
@@ -104,11 +180,19 @@ function startDevtools({ appRoot, page, openFile }) {
     await openFile(path.resolve(request.args.path));
     return askPage({ id, op: 'document.wait', args: { token: marked.result.token, timeoutMs: request.args.timeoutMs }, detail: request.detail });
   };
-  /** One request line to one answer line. `process.metrics` is the main process's own answer: the page cannot see the other processes. */
+  /**
+   * One request line to one answer line. `process.metrics` and `dialog.answer` are the main process's own answers: the
+   * page can see neither the other processes nor the native dialogs.
+   */
   const ask = line => {
     let request;
     try { request = JSON.parse(line); } catch { return Promise.resolve(failure(null, 'The request is not JSON.', 'Send one JSON object per line.')); }
-    if (request?.op === 'process.metrics') return Promise.resolve(JSON.stringify({ id: Number.isInteger(request.id) ? request.id : null, ok: true, result: { rows: processMetrics() } }));
+    const id = Number.isInteger(request?.id) ? request.id : null;
+    if (request?.op === 'process.metrics') return Promise.resolve(JSON.stringify({ id, ok: true, result: { rows: processMetrics() } }));
+    if (request?.op === 'dialog.answer') {
+      try { return Promise.resolve(JSON.stringify({ id, ok: true, result: dialogs.answer(request.args ?? {}) })); }
+      catch (error) { return Promise.resolve(failure(id, error.message, 'docs/DEVTOOLS.md lists the arguments of dialog.answer.')); }
+    }
     return request?.op === 'open' && typeof request.args?.path === 'string' ? openPath(request) : askPage(request);
   };
 
@@ -140,10 +224,11 @@ function startDevtools({ appRoot, page, openFile }) {
     pageChanged() { ready = false; },
     close() {
       server.close();
+      restoreDialogs();
       for (const ticket of [...waiting.keys()]) settle(ticket, failure(null, 'The app is closing.', ''));
       if (process.platform !== 'win32') { try { unlinkSync(file); } catch { /* already gone */ } }
     },
   };
 }
 
-module.exports = { developerLaunch, startDevtools, profilingEnvironment };
+module.exports = { developerLaunch, startDevtools, profilingEnvironment, createDialogAnswers, answerDialogs };

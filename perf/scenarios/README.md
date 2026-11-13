@@ -54,6 +54,10 @@ duration when the capture's length is not it (`{metrics: {duration: opened.ms}}`
 - `context.app`: the app (`perf/lib/app.mjs`): `request(op, args)` is the developer tools' control channel
   (`docs/DEVTOOLS.md` lists the operations), `evaluate(fn, argument)` runs a function in the page, `open(file)` opens a
   document, `quiet()` closes what covers the stage, `shell(op, args)` is the desktop's own half.
+  `answerDialog(kind, file)` answers the desktop's next save or open dialog with a path (`null`: cancel) and `dialogs()`
+  says which dialogs came and what answered them: a run never shows a native dialog, so a scenario that saves or exports
+  answers its dialog first (`save.mjs`, `export.mjs`). Files a scenario writes go in a `scratchFolder` (`perf/lib/files.mjs`)
+  under the system's temp folder, removed in its teardown.
 - `context.request`, `context.evaluate`: the same two, shorter.
 - `context.input`: `stroke(path, {durationMs, hz, button, pressure})`, `wheel(x, y, {notches, deltaY, durationMs, ctrl})`,
   `click(x, y)`, `key(name, {ctrl, shift, alt})`, `keys(name, {count, durationMs})`, `move`, `down`, `up`, `hold`,
