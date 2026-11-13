@@ -471,6 +471,7 @@ Interface: stays in JS.
 | `src/canvas-context-menu.mjs` |  | stays |  |
 | `src/canvas-guides.mjs` |  | stays |  |
 | `src/canvas-handle-overlay.mjs` |  | stays |  |
+| `src/canvas-handle-sprites.mjs` |  | stays |  |
 | `src/canvas-handles.mjs` |  | stays |  |
 | `src/canvas-pinch.mjs` |  | stays |  |
 | `src/canvas-pose-input.mjs` |  | stays |  |

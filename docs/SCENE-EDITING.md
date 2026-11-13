@@ -213,11 +213,18 @@ The joint overlay keeps what it painted (`src/canvas-handle-overlay.mjs`). With 
 moves those pixels by whole backing pixels and paints only the strips that came into view, and the joints are painted afresh
 once the view rests, so the picture at rest is always a full repaint's; with fewer, repainting them is cheaper and a pan does
 that, as before. A zoom resizes the joints' descriptors instead of building them again, and when the zoom
-makes every joint the smallest (or largest) size the segments' lengths are not read at all. The strips a pan brings in are
-painted unclipped on a spare surface and copied over, because a clip's antialiased edge changes the pixels beside it
-(`tests/canvas-handle-overlay.browser.mjs` compares every pan with a full repaint, pixel for pixel). A pose change repaints
-its damage under a clip as it always has: the copy would make the clip's edge exact too, but it costs more than the repaint,
-on every frame of a drag in an ordinary document.
+makes every joint the smallest (or largest) size the segments' lengths are not read at all.
+
+Each joint is a stamp, not a path (`src/canvas-handle-sprites.mjs`). Two paths a joint, a fill and an outline, kept the
+graphics process busy rasterising: 3,200 joints held a busy scene at 30 frames a second while scrubbing. Each look (shape,
+size, colour, outline, device-pixel ratio) is painted once as the same path, at each quarter of a backing pixel, into one
+atlas of 1024 × 1024 backing pixels, and a joint is copied from the picture of its centre's quarter to whole backing pixels,
+never resampled: it sits within an eighth of a backing pixel of where its path was, and is not softer. The atlas is emptied
+when full (a zoom makes new sizes every frame) or when the device-pixel ratio changes, and made 2048 × 2048 once when one pass
+needs more; what one pass cannot fit even then is painted as a path. The strips a pan brings in and the damage of a pose change are cleared and their joints stamped again,
+each stamp cut to those pixels, so both are a full repaint's exactly with no clip, whose coverage would move some pixels a
+level (`tests/canvas-handle-overlay.browser.mjs` compares pose damage and pans with a full repaint pixel for pixel, and the
+stamps with the paths: on a quarter of a backing pixel they differ no more than a path differs from itself moved).
 
 ## Joining and node selection
 
