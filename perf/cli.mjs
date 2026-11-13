@@ -2,7 +2,7 @@
 //
 //   npm run perf -- run [suite] [--env gpu,software] [--workload small,stress] [--scenario canvas,pose.drag-joint]
 //                       [--passes 3] [--no-profile] [--no-startup] [--raw] [--label <name>]
-//                       [--param engine.workers=2] [--experiment <file.js>]
+//                       [--param engine.workers=2] [--experiment <file.js>] [--collect-garbage]
 //   npm run perf -- list                       scenarios, workloads, environments, suites and engine benchmarks
 //   npm run perf -- show [run] [scenario] [--env <id>] [--workload <id>]
 //   npm run perf -- memory [run] [--env <id>] [--workload <id>] [--detail] [--after <scenario>]
@@ -69,7 +69,7 @@ const STARTUP_WORDS = new Set(['app.start', 'startup']);
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : /(ch|sh|s|x)$/.test(word) ? 'es' : 's'}`;
 
 async function run(argv) {
-  const {words, options} = parse(argv, ['no-profile', 'no-startup', 'raw']);
+  const {words, options} = parse(argv, ['no-profile', 'no-startup', 'raw', 'collect-garbage']);
   if (words.length > 1) throw new Usage('`run` takes one suite name; scenarios go in --scenario.');
   const name = words[0] ?? 'quick', plan = suiteNamed(name), first = plan.parts[0];
   // Options replace the suite's parts with one: what an option does not name comes from the suite's first part.
@@ -104,7 +104,7 @@ async function run(argv) {
     startups.add(chosen.id);
     if (startupOnly && !startup) continue;
     const pair = startupOnly ? {environment: {id: chosen.id, title: chosen.title, description: chosen.description}, workload: {id: spec.id, title: spec.title, description: spec.description},
-      facts: null, startup: null, scenarios: [], memory: [], error: null} : await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), experiment, parameters, log});
+      facts: null, startup: null, scenarios: [], memory: [], error: null} : await runPair({environment: chosen, workload: {...spec, measured: measure(spec)}, scenarios, open, passes, profile, raw: Boolean(options.raw), experiment, parameters, collectGarbage: Boolean(options['collect-garbage']), log});
     if (startup) pair.scenarios.unshift(startup);
     pairs.push(pair);
     // A long run keeps what it has measured: stopped now, its folder holds every launch finished so far, and says so.

@@ -138,7 +138,10 @@ export async function threadHeaps(app) {
  * The memory of the page, the engine and the app's processes now, in megabytes, with the page's memory by owner
  * (`owners`: src/devtools/memory.mjs `breakdownMegabytes`): what every part holds and what is left unexplained.
  */
-async function memoryNow(app) {
+async function memoryNow(app, {collect = false} = {}) {
+  // Asked for, a full collection on every thread first: the checkpoint is then what is held, not what waits for a collection.
+  if (collect) await Promise.all([app.page, ...app.inspector.workersOf(app.page).map(target => target.sessionId)]
+    .map(sessionId => Promise.race([app.inspector.send('HeapProfiler.collectGarbage', {}, sessionId), sleep(5000)]).catch(() => {})));
   const [memory, processes, threads] = await Promise.all([app.request('memory'), app.processes().catch(() => []), threadHeaps(app).catch(() => [])]);
   const byType = {};
   for (const row of processes) {
@@ -251,7 +254,7 @@ async function readTrace(app, pages) {
  * Returns {environment, workload, facts, startup, scenarios, memory, error}. Never throws for a scenario; an app that
  * cannot start or dies is `error` on the pair, with what had been measured until then.
  */
-export async function runPair({environment, workload, scenarios, open, passes = 3, profile = true, raw = false, experiment = null, parameters = null, log = () => {}}) {
+export async function runPair({environment, workload, scenarios, open, passes = 3, profile = true, raw = false, experiment = null, parameters = null, collectGarbage = false, log = () => {}}) {
   const pair = {environment: {id: environment.id, title: environment.title, description: environment.description}, workload: {id: workload.id, title: workload.title, description: workload.description, ...workload.measured},
     facts: null, startup: null, scenarios: [], memory: [], error: null};
   let app = null;
@@ -269,16 +272,17 @@ export async function runPair({environment, workload, scenarios, open, passes = 
       window: facts.window, reports: facts.navigator, asked: facts.asked, cpuSlowdown: environment.cpuSlowdown ?? 1, slowedTargets: app.slowed.length, backgroundLoadPercent: busy};
     if (experiment) pair.facts.experiment = {name: experiment.name, sha256: experiment.sha256};
     if (parameters) pair.facts.parameters = parameters;
+    if (collectGarbage) pair.facts.collectedGarbage = true;
     pair.startup = {readyMs: app.timings.readyMs, inspectorMs: app.timings.inspectorMs};
     const context = createContext(app, workload, pair.facts);
-    pair.memory.push({after: 'start', ...await memoryNow(app)});
+    pair.memory.push({after: 'start', ...await memoryNow(app, {collect: collectGarbage})});
     const list = workload.builtin || !open ? scenarios.filter(scenario => scenario !== open) : [open, ...scenarios.filter(scenario => scenario !== open)];
     for (const scenario of list) {
       const started = performance.now();
       const result = await runScenario(app, scenario, context, {passes, profile, raw});
       pair.scenarios.push(result);
       // A checkpoint that cannot be read in half a minute is left empty: it never holds the run up.
-      pair.memory.push({after: scenario.id, ...await within(30000, 'the memory checkpoint', memoryNow(app)).catch(() => ({}))});
+      pair.memory.push({after: scenario.id, ...await within(30000, 'the memory checkpoint', memoryNow(app, {collect: collectGarbage})).catch(() => ({}))});
       log(`${environment.id}/${workload.id} ${scenario.id}: ${result.error ? `FAILED ${result.error}` : result.skipped ? `skipped (${result.skipped})` : `${result.grade ?? '–'}, ${result.judged?.decided} ${format(result.judged?.decided, result.judged?.value, result.definitions)}`} (${Math.round((performance.now() - started) / 100) / 10} s)`);
       if (scenario === open && result.error) throw new Error(`The workload did not open: ${result.error}`);
       if (app.inspector.closed) throw new Error('The app closed during the run.');

@@ -191,7 +191,11 @@ buffers, render targets and picture pages). Each checkpoint also holds `owners`,
 ([DEVTOOLS.md](DEVTOOLS.md#memory-by-owner)), in megabytes: the engine memory, the interface thread's heap and array
 buffers (by the owners that registered them, and the rest), the canvases and bitmaps kept in the page, every worker's heap
 and array buffers grouped by name (the runner reads each thread through the inspector, `threadHeaps` in `perf/lib/run.mjs`),
-and what is left `unexplained`. `npm run perf -- memory <run>` prints the checkpoints with that split.
+and what is left `unexplained`. `npm run perf -- memory <run>` prints the checkpoints with that split. A checkpoint is
+taken as the app is, garbage included: on the stress scene a brush stroke leaves 300 to 400 MB of JavaScript heap and tens of
+megabytes of array buffers waiting for a collection, which the page's total counts (a full collection took one page from 1,456 to
+1,009 MB). `run --collect-garbage` collects on every thread before each checkpoint, so the numbers are what is held; it changes
+when the app collects, so compare such a run only with another taken the same way.
 
 ### Layers
 
