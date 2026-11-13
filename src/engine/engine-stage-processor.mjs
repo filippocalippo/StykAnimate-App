@@ -13,7 +13,7 @@
  * engine (its memory and progress counter), `scene` the scene canvas. `onPicture(prepared, at, {tick, revision})` is told
  * when a frame is shown; `onFailed()` when the workers could not draw one (the stage then draws with its device).
  */
-import {traceComplete, tracing} from '../trace.mjs';
+import {traceComplete, traceMemory, tracing} from '../trace.mjs';
 
 /** How long a wait for the workers lasts before it looks again (a frame whose job had nothing to report). */
 const WAIT_MS = 16;
@@ -22,6 +22,7 @@ export function createProcessorStage({stage, engine, scene, onPicture = () => {}
   let on = false, canvas = null, context = null, image = null, waiting = false, destroyed = false;
   /** What each frame asked of the workers was for, by its number: when, which tick, a prepared frame or the edit frame. */
   const asked = new Map();
+  let untraced = [];
   const show = visible => {
     if (canvas) canvas.style.visibility = visible ? '' : 'hidden';
     scene.style.visibility = visible ? 'hidden' : '';
@@ -30,6 +31,9 @@ export function createProcessorStage({stage, engine, scene, onPicture = () => {}
     get on() { return on; },
     /** The canvas the frames are shown on (null until the first is). */
     get canvas() { return canvas; },
+    /** Bytes of the frame's copy, and of the canvas's backing (four a pixel). */
+    get imageBytes() { return image?.data.length ?? 0; },
+    get canvasBytes() { return canvas ? canvas.width * canvas.height * 4 : 0; },
     /** Draws on the workers (true) or with the stage's device (false); the scene canvas shows while it is off. */
     set(wanted) {
       wanted = Boolean(wanted) && !destroyed;
@@ -89,6 +93,7 @@ export function createProcessorStage({stage, engine, scene, onPicture = () => {}
     },
     destroy() {
       destroyed = true;
+      for (const stop of untraced) stop();
       asked.clear();
       canvas?.remove();
       canvas = context = image = null;
@@ -96,5 +101,7 @@ export function createProcessorStage({stage, engine, scene, onPicture = () => {}
       scene.style.visibility = '';
     },
   };
+  // What the page holds for the frames (the developer tools' memory by owner): the copy of the newest one and the canvas showing it.
+  untraced = [traceMemory('stage: processor frame copy', self, presenter => presenter.imageBytes, 'buffers'), traceMemory('stage: processor canvas', self, presenter => presenter.canvasBytes, 'pixels')];
   return self;
 }

@@ -270,8 +270,8 @@ pictures arrive. Not done.
   is drawn. The preview worker's GPU device keeps the pictures it was given (`Gpu.uploaded`), so it asks the
   CPU only for the ones the device lacks; before, both kept every picture of the document.
 - **The stage drawn on the processor** (`styk_engine::stage_raster`, without a graphics card): at most three frame buffers
-  of the canvas's size (one being drawn, one finished and not yet shown, one kept for the next frame: 7.3 MiB at
-  1,560 × 1,175 device pixels), as straight RGBA; a newer request replaces the one waiting, so a gesture never piles up
+  of the canvas's size (one being drawn, one finished and not yet shown, one kept for the next frame: 7.5 MB at
+  1,160 × 540 device pixels, the stage of a 1,248 × 800 window at 125%), as straight RGBA; a newer request replaces the one waiting, so a gesture never piles up
   frames. The pictures its frames sample are the decoded images the stage takes from the engine (shared with the GPU
   upload, not copied) in a `styk_raster::Images` under its budget (a sixteenth of the memory), the least recently used
   dropped and decoded again from the document on a worker when a frame needs them; the live cels' slots are tiles in the
