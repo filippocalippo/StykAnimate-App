@@ -241,6 +241,8 @@ async function encodeVideo(container, {width, height, fps, totalFrames, renderFr
   let failure, wake, completed = false;
   const frameWindow = videoFrameWindow(width, height);
   let submitted = 0;
+  /** Whether the encoder kept frames back until it was flushed: then every full window is flushed. */
+  let holdsFrames = false;
   // The next frame, drawn while this one is encoded: a VideoFrame holds its own copy of the canvas it is made from.
   let ahead = null;
   const renderAhead = index => {
@@ -249,7 +251,7 @@ async function encodeVideo(container, {width, height, fps, totalFrames, renderFr
     return next;
   };
   const encoder = new VideoEncoder({
-    output(chunk, metadata) { try { muxer.add(chunk, metadata); } catch (error) { failure ||= error; wake?.(error); } },
+    output(chunk, metadata) { try { muxer.add(chunk, metadata); wake?.(); } catch (error) { failure ||= error; wake?.(error); } },
     error(error) { failure ||= error; wake?.(error); },
   });
   const check = () => { if (signal?.aborted) throw cancelled(); if (failure) throw failure; };
@@ -263,17 +265,25 @@ async function encodeVideo(container, {width, height, fps, totalFrames, renderFr
   };
   try {
     encoder.configure(config);
+    // A full window waits until the encoder has given out a frame: a frame with output is no longer held, while
+    // its leaving the queue (dequeue) says nothing about pixels kept inside. Quality mode must not drop frames.
+    // The encoder keeps working meanwhile; an encoder that gives out nothing until it is flushed is flushed.
     const drain = () => new Promise((resolve, reject) => {
+      let timer = null;
       const done = error => {
         clearTimeout(timer);
         wake = null;
         error ? reject(error) : resolve();
       };
-      const timer = setTimeout(() => done(messageError(new Error(''), "errors.videoExport.theVideoEncoderStoppedAcceptingFrames", {})), 30000);
-      wake = done;
-      // Quality mode must not drop frames. Flush the bounded window instead of
-      // waiting on dequeue, which says nothing about internally retained pixels.
-      try {encoder.flush().then(() => done(failure), done);} catch (error) {done(error);}
+      const flushAll = () => {
+        holdsFrames = true;
+        wake = error => { if (error) done(error); };
+        timer = setTimeout(() => done(messageError(new Error(''), "errors.videoExport.theVideoEncoderStoppedAcceptingFrames", {})), 30000);
+        try {encoder.flush().then(() => done(failure), done);} catch (error) {done(error);}
+      };
+      if (holdsFrames) return flushAll();
+      wake = error => { if (error) done(error); else if (submitted - muxer.frames < frameWindow) done(failure); };
+      timer = setTimeout(() => { clearTimeout(timer); flushAll(); }, 1000);
     });
     for (let index = 0; index < totalFrames; index++) {
       check();
