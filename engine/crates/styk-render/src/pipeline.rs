@@ -229,11 +229,12 @@ impl Renderer {
 /// else draws as before, in painter order. `additive` adds colour and alpha to the
 /// target (styk-draw `F_ADD`, generated effects that add light). `samples` per pixel.
 pub(crate) fn prim_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, depth: Option<wgpu::DepthStencilState>, additive: bool, samples: u32) -> wgpu::RenderPipeline {
-    shaded_pipeline(device, layout, shader, depth, additive, samples, Shading::Full.entry(false))
+    shaded_pipeline(device, layout, shader, depth, additive, samples, Shading::Full, false)
 }
 
-/// [`prim_pipeline`] with the fragment entry point `entry` ([`crate::shading`]).
-pub(crate) fn shaded_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, depth: Option<wgpu::DepthStencilState>, additive: bool, samples: u32, entry: &str) -> wgpu::RenderPipeline {
+/// [`prim_pipeline`] with the vertex and fragment entry points of `shading` ([`crate::shading`]), in their `plain` form.
+pub(crate) fn shaded_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, depth: Option<wgpu::DepthStencilState>, additive: bool, samples: u32, shading: Shading, plain: bool) -> wgpu::RenderPipeline {
+    let entry = shading.entry(plain);
     let dst_factor = if additive { wgpu::BlendFactor::One } else { wgpu::BlendFactor::OneMinusSrcAlpha };
     let premultiplied = wgpu::BlendState {
         color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor, operation: wgpu::BlendOperation::Add },
@@ -250,7 +251,7 @@ pub(crate) fn shaded_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayo
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: shader,
-            entry_point: Some("vs_main"),
+            entry_point: Some(shading.vertex_entry()),
             compilation_options: Default::default(),
             buffers: &[Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<GpuPrim>() as u64,
@@ -314,7 +315,7 @@ impl Renderer {
             if !used[i] {
                 return None;
             }
-            Some(made[i].get_or_insert_with(|| shaded_pipeline(device, layout, shader, None, false, samples, Shading::SIMPLER[i].entry(plain))).clone())
+            Some(made[i].get_or_insert_with(|| shaded_pipeline(device, layout, shader, None, false, samples, Shading::SIMPLER[i], plain)).clone())
         })
     }
 

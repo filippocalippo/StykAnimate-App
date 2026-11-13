@@ -242,7 +242,9 @@ view's fill in their own colour), `fs_stroke` (those and segments, discs and rin
 tiles), `fs_composite` (isolated groups' layers composited into their parents: translucent figures, onion skins, effects)
 and `fs_main` (every kind). Each simpler one has a `_plain` form for an upright view with the native painter, the stage's,
 which leaves out the turned artboard's clip and the Canvas painter's masks: both are off there, but a software rasterizer
-ran their code for every fragment all the same. On a software rasterizer (`wgpu::DeviceType::Cpu`, which wgpu reports for
+ran their code for every fragment all the same. The vertex stage is split the same way (`vs_flat`, `vs_stroke`,
+`vs_vector`, `vs_image`, `vs_composite` beside `vs_main`, over shared corner functions): with every primitive off screen
+the 3,200-segment scene still took 41 of its 60 ms a frame, a third of the frame running every kind's vertex code. On a software rasterizer (`wgpu::DeviceType::Cpu`, which wgpu reports for
 SwiftShader and llvmpipe from the WebGL renderer string, and for lavapipe and WARP) a pass draws each run of primitives with
 the simplest one that holds every kind in it (`shading.rs`): a paint record (a gradient), a face of a depth run, an additive
 record, lone glyphs, the background picture and generated effects take `fs_main`, and so does a run that mixes the kinds of

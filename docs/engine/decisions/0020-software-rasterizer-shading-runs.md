@@ -28,7 +28,8 @@ tiles, glyphs, gradients, composites and generated effects. Measured in the app,
   polylines), `fs_image` (pictures and drawing tiles), `fs_composite` (isolated groups' layers) and `fs_main`
   (everything, as before). Each holds the code of fewer kinds, so a software rasterizer runs only that code. Each simpler
   one also has a `_plain` form, used for an upright view with the native painter (the stage), without the turned
-  artboard's clip and the Canvas painter's masks.
+  artboard's clip and the Canvas painter's masks. Each simpler class has a vertex entry point of its own too (`vs_flat`,
+  `vs_stroke`, …), over the same corner functions as `vs_main`.
 - On a software rasterizer a pass draws each run of primitives with the simplest entry point that holds every kind in
   it (`styk-render/src/shading.rs`): a paint record (a gradient), a face of a depth run, an additive record, a lone glyph,
   the background picture, a generated effect, or a run mixing the kinds of two simpler ones takes `fs_main`. The root's background is a run of its own (it was its own draw call already).

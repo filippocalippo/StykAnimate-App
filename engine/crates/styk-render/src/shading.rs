@@ -5,8 +5,9 @@
 //! rectangle paid for pictures, glyphs, gradients and generated effects: the document's background alone cost 61 ms of a
 //! 78 ms frame. So the shader has entry points over the same functions (`fs_flat`, `fs_stroke`, `fs_vector`, `fs_image`,
 //! `fs_composite`, `fs_main`), each holding the code of fewer kinds, and a pass draws each run of primitives with the
-//! simplest one that holds all of the run's kinds; an upright view with the native painter takes the `_plain` form of the
-//! simpler ones, without the turned artboard's clip and the Canvas painter's masks. The pixels are the same whichever
+//! simplest one that holds all of the run's kinds, with the vertex entry point of the same kinds (`vs_flat`, …); an upright
+//! view with the native painter takes the `_plain` form of the simpler fragment ones, without the turned artboard's clip
+//! and the Canvas painter's masks. The pixels are the same whichever
 //! draws them (`tests/shading.rs`).
 
 use styk_draw::*;
@@ -47,6 +48,18 @@ impl Shading {
             (Shading::Composite, false) => "fs_composite",
             (Shading::Composite, true) => "fs_composite_plain",
             (Shading::Full, _) => "fs_main",
+        }
+    }
+
+    /// The vertex entry point that places the same kinds.
+    pub(crate) fn vertex_entry(self) -> &'static str {
+        match self {
+            Shading::Flat => "vs_flat",
+            Shading::Stroke => "vs_stroke",
+            Shading::Vector => "vs_vector",
+            Shading::Image => "vs_image",
+            Shading::Composite => "vs_composite",
+            Shading::Full => "vs_main",
         }
     }
 
