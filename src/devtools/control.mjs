@@ -11,6 +11,7 @@
 import {analyze, perfettoTrace, ringEvents} from './capture.mjs';
 import {round} from './stats.mjs';
 import {commandLog, documentSummary, framePage, historyPage, treePage} from './inspector.mjs';
+import {recordWrites} from './mutations.mjs';
 
 export const PROTOCOL_VERSION = 1;
 /** Pages of trace text `trace.read` hands out. */
@@ -44,7 +45,7 @@ function focused() {
 
 export function createControl(runtime) {
   const {app, early, sampler, capture} = runtime;
-  let lastTrace = null, markCount = 0, preparedBefore = null;
+  let lastTrace = null, markCount = 0, preparedBefore = null, writes = null;
   const marks = new Map();
   const editor = () => app.editor ?? fail('The editor is not ready.', {hint: 'Wait for window.styk.ready.'});
 
@@ -128,19 +129,26 @@ export function createControl(runtime) {
       return {rows: rows.slice(-Math.max(1, Math.min(1000, limit))), matched: rows.length, last: early.logs.sequence, dropped: early.logs.dropped};
     },
 
-    'trace.start': ({label = ''} = {}) => {
+    /**
+     * Starts a capture. `writes: true` also records which interface elements are rewritten meanwhile (mutations.mjs):
+     * it costs a little per write, so ask for it in a pass that explains, not in one that is timed.
+     */
+    'trace.start': ({label = '', writes: recordsWrites = false} = {}) => {
       const started = capture.start(label);
       runtime.watch(true);
       preparedBefore = sampler.preparation();
+      writes = recordsWrites ? recordWrites() : null;
       return started;
     },
     /** Ends the capture. `series: true` adds the frames as chart series; `detail: "full"` returns every span group. */
     'trace.stop': ({series = false} = {}, full) => {
+      const written = writes?.stop() ?? null;
+      writes = null;
       const taken = capture.stop();
       runtime.watch(false);
       const text = JSON.stringify(perfettoTrace(taken.events, {origin: taken.startedAt, metadata: {label: taken.label, startedTime: taken.startedTime}}));
       const period = sampler.displayPeriod();
-      const summary = {...analyze(taken, {periodMs: period.measured ? period.periodMs : null, series}), preparation: preparationSince(preparedBefore, sampler.preparation())};
+      const summary = {...analyze(taken, {periodMs: period.measured ? period.periodMs : null, series}), preparation: preparationSince(preparedBefore, sampler.preparation()), ...(written ? {writes: written} : {})};
       lastTrace = {text, summary};
       return {label: taken.label, events: taken.events.length, dropped: taken.dropped, ms: Math.round(taken.stoppedAt - taken.startedAt), traceBytes: text.length,
         pages: Math.ceil(text.length / TRACE_PAGE), summary: full ? summary : shortSummary(summary)};

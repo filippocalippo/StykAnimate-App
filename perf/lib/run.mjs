@@ -82,8 +82,8 @@ function createContext(app, workload, facts) {
 }
 
 /** One measured stretch: the app's capture around `scenario.run`. Returns the capture's full summary and what `run` returned. */
-async function capture(app, scenario, context, state, {label, series}) {
-  await app.request('trace.start', {label});
+async function capture(app, scenario, context, state, {label, series, writes = false}) {
+  await app.request('trace.start', {label, writes});
   let extra = null, failure = null;
   const started = performance.now();
   try {
@@ -164,20 +164,22 @@ async function runScenario(app, scenario, context, {passes, profile, raw}) {
     result.grade = result.judged.grade;
     if (profile && scenario.profile !== false) {
       const probes = await startProbes(app);
-      let repeats = 0, failure = null;
+      let repeats = 0, failure = null, written = null;
       try {
         // An operation is over in milliseconds, too few samples to say anything: it repeats, with its reset, until the
         // profilers have watched a second and a half of it.
         const enough = performance.now() + (scenario.kind === 'operation' ? 1500 : 0);
         do {
-          await within(timeout, `${scenario.id}: profiled pass`, capture(app, scenario, context, state, {label: `${scenario.id} (profiled)`, series: false}));
+          const taken = await within(timeout, `${scenario.id}: profiled pass`, capture(app, scenario, context, state, {label: `${scenario.id} (profiled)`, series: false, writes: true}));
+          // Which interface elements the scenario rewrote: the first time through says it.
+          written ??= taken.summary.writes ?? null;
           await within(timeout, `${scenario.id}: reset`, Promise.resolve(scenario.reset?.(context, state)));
           repeats++;
         } while (performance.now() < enough && repeats < 12);
       } catch (error) { failure = error; }
       const recorded = await probes.stop();
       if (failure) throw failure;
-      result.attribution = {repeats, threads: mergeThreads(recorded.threads), browser: recorded.trace, processes: recorded.processes};
+      result.attribution = {repeats, threads: mergeThreads(recorded.threads), browser: recorded.trace, processes: recorded.processes, writes: written};
       if (raw) result.raw = recorded.raw;
     }
   } catch (error) {

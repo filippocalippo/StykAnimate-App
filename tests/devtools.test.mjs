@@ -11,6 +11,7 @@ import {meterBoundary} from '../src/devtools/boundary.mjs';
 import {analyze, Capture, perfettoTrace, ringEvents, summarize} from '../src/devtools/capture.mjs';
 import {filterLogs, preparationSince} from '../src/devtools/control.mjs';
 import {frameCountAt, frameSeries, frameWindow, inputWindow, summarizeFrames} from '../src/devtools/frames.mjs';
+import {elementName, unchangedWrites} from '../src/devtools/mutations.mjs';
 import {distribution, median, quantile, spread} from '../src/devtools/stats.mjs';
 import {treePage, preview} from '../src/devtools/inspector.mjs';
 import {MARKERS, isDeveloperPath, scanBinary, scanCapabilities, scanWeb} from '../scripts/check-devtools-shipping.mjs';
@@ -161,6 +162,18 @@ test('what the engine prepared between two reads survives its counters starting 
   assert.deepEqual(preparationSince({prepared: 10, totalMs: 100, inline: 1}, {prepared: 14, totalMs: 120, inline: 1}), {frames: 4, msPerFrame: 5, inline: 0});
   assert.deepEqual(preparationSince({prepared: 90, totalMs: 900, inline: 4}, {prepared: 3, totalMs: 6, inline: 0}), {frames: 3, msPerFrame: 2, inline: 0});
   assert.equal(preparationSince(null, {prepared: 1, totalMs: 1, inline: 0}), null);
+});
+
+test('an interface write is named by its element, and a write that put back the value already there is told apart', () => {
+  const panel = {nodeType: 1, id: 'timeline', localName: 'div', className: '', parentElement: null};
+  const playhead = {nodeType: 1, id: '', localName: 'div', className: 'sheet-playhead  active extra', parentElement: {nodeType: 1, id: '', localName: 'div', className: '', parentElement: panel}};
+  assert.deepEqual([elementName(panel), elementName(playhead), elementName({nodeType: 1, id: '', localName: 'span', className: '', parentElement: null}), elementName({nodeType: 3})],
+    ['#timeline', '#timeline div.sheet-playhead.active', 'span', '(text)']);
+  // Three writes to one attribute, in order: a → b, b → b (nothing changed), b → c (the value it holds now); and a text put back as it was.
+  const element = {getAttribute: () => 'c'}, text = {data: 'same'};
+  const records = [{type: 'attributes', target: element, attributeName: 'style', oldValue: 'a'}, {type: 'attributes', target: element, attributeName: 'style', oldValue: 'b'},
+    {type: 'attributes', target: element, attributeName: 'style', oldValue: 'b'}, {type: 'characterData', target: text, oldValue: 'same'}, {type: 'childList', target: element}];
+  assert.deepEqual(unchangedWrites(records), [false, true, false, true, false]);
 });
 
 test('the environment a profiling run asks for reaches the page only as the three keys it may set', () => {

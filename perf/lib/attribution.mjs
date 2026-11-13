@@ -78,7 +78,8 @@ const GPU_CATEGORIES = [
   ['stage', /^(WebGPU|Dawn|WebGPUDecoder|GLES2Decoder|GLES2Implementation|WebGL|RendererMainThread|ValidatingAbstractTextureImpl|BufferManager|TextureManager|CommandBufferStub::OnAsyncFlush$)/],
   ['present', /^(SkiaOutputSurface|SkiaOutputDevice|DXGISwapChain|DCompPresenter|DCLayerTree|Swap|Present|NativeViewGLSurface|GLSurface|DirectComposition|OverlayProcessor|Display::DrawAndSwap|BufferQueue)/],
 ];
-export const GPU_TITLES = Object.freeze({interface: 'Rasterizing the interface (DOM)', stage: 'The stage\'s graphics commands', present: 'Presenting frames', other: 'Other'});
+// `interface` is every 2D raster the page asks for: the interface's elements and the 2D canvases over the stage (the handle overlay).
+export const GPU_TITLES = Object.freeze({interface: 'Rasterizing 2D content (the interface, the overlay canvas)', stage: 'The stage\'s graphics commands', present: 'Presenting frames', other: 'Other'});
 
 const categoryOf = (table, name) => { for (const [id, pattern] of table) if (pattern.test(name)) return id; return 'other'; };
 

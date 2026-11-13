@@ -485,6 +485,7 @@ Interface: stays in JS.
 | `src/devtools/early.js` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/frames.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/inspector.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/mutations.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/panels.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/sampler.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/stats.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |

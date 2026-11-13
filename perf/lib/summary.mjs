@@ -105,6 +105,12 @@ export function explain(pair, scenario) {
       if (browser.graphics.length) lines.push('  The graphics process, by kind of work:', ...browser.graphics.map(row => `    ${pad(row.title, 46)} ${row.ms} ms`));
       lines.push(`  The browser recalculated style ${browser.counts.styleRecalculations}×, laid out ${browser.counts.layouts}×, painted ${browser.counts.paints}×, rasterized the interface ${browser.counts.interfaceRasters}×, collected garbage ${browser.counts.garbageCollections}×.`);
     }
+    if (attribution.writes?.rows.length) {
+      const {writes} = attribution;
+      lines.push(`  The interface was written ${writes.writes} times in one pass, on ${writes.elements} elements; ${writes.unchanged} of the writes put back the value already there. Most written:`,
+        ...writes.rows.slice(0, 12).map(row => `    ${pad(row.element.slice(0, 52), 52)} ${pad(`${row.attributes + row.text + row.children}×`, 7)} ${[row.attributes ? `attributes ${row.attributes} (${row.names.join(', ')})` : '', row.text ? `text ${row.text}` : '', row.children ? `children ${row.children}` : ''].filter(Boolean).join(', ')}`
+          + `${row.nodes > 1 ? ` on ${row.nodes} elements` : ''}${row.unchanged ? `; ${row.unchanged === row.attributes + row.text + row.children ? 'all' : row.unchanged} unchanged` : ''}`));
+    }
     if (attribution.processes.length) lines.push('  Processor time by process: ' + attribution.processes.map(row => `${row.type} ${row.cpuMs} ms`).join(', '));
   }
   if (scenario.notes.length) lines.push('', 'Notes:', ...scenario.notes.map(note => `  ${note}`));

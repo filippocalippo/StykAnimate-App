@@ -629,6 +629,7 @@ src/devtools/devtools.mjs	ui	-	stays	developer tools, developer launch only (doc
 src/devtools/early.js	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/frames.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/inspector.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools/mutations.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/panels.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/sampler.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/stats.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
