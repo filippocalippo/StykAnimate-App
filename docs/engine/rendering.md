@@ -265,6 +265,16 @@ views (fitted, the canvas smaller than the view, partly off screen, through the 
 painter), smooth and crisp, with the runs on and off, and requires the same bytes on each software rasterizer and on a
 graphics card's Vulkan; a second test changes a primitive's kind in a list drawn over the one before.
 
+Measured 2026-11-13 in the desktop app without a graphics card (`--disable-gpu`, SwiftShader; the machine 87–100% busy with
+other work, so read the ratios), playing three seconds in one launch with `stage.shadingRuns` 0 and then the device's
+choice, frame time seen: the small scene (240 segments) 109 → 24 ms, the busy one (3,200) 165 → 48 ms, with a moving
+camera 139 → 39 ms, translucent filled shapes 241 → 71 ms, labels 294 → 124 ms, pictures on the limbs 173 → 107 ms; the
+effects scene stays over a second (its filter passes, `passes.wgsl`, are the cost). The stage's picture was the same
+with the runs on and off in all 28 views compared (seven scenes, four views, device pixels of the composited page). What
+was measured on the way: on the busy scene the segments' draw was 40 of 71 ms, of which a constant-colour fragment shader
+saved 10 and sending every vertex off screen showed the vertex shader at about a third of the frame; turning
+multisampling off changed nothing measurable.
+
 ## Text
 
 The JavaScript editor's WebGPU renderer (since deleted) never drew text as vectors

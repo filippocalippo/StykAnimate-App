@@ -51,8 +51,10 @@ tiles, glyphs, gradients, composites and generated effects. Measured in the app,
   level between the two shaders, which is why a graphics card keeps the general one. Refactoring `fs_main` into the shared
   functions changed no pixel: 432 frames of the same lists and views, drawn before and after on Vulkan, both Direct3D 12
   adapters and GL, were byte-identical.
-- In the app on SwiftShader the stage's picture with the runs on and off is compared by a script over the small, busy,
-  shapes and sprites scenes in four views (see [rendering.md](../rendering.md#without-a-graphics-card) for the result).
+- In the app on SwiftShader the stage's picture with the runs on and off was the same in all 28 views compared (the
+  small, busy, pictures, effects, camera, labels and shapes scenes in four views each, device pixels of the composited
+  page), and playing went from 109 to 24 ms a frame on the small scene and from 165 to 48 ms on the busy one, in one
+  launch on a busy machine ([rendering.md](../rendering.md#without-a-graphics-card)).
 
 ## Consequences
 
