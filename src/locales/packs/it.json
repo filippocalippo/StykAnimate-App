@@ -183,7 +183,7 @@
     "settings.search": "Cerca nelle impostazioni",
     "settings.searchResults": "Impostazioni corrispondenti a «{query}»",
     "settings.noResults": "Nessuna impostazione corrisponde a «{query}».",
-    "settings.privacy": "Privacy e diagnostica…",
+    "settings.privacy": "Privacy",
     "settings.sendFeedback": "Invia feedback…",
     "settings.interfaceSize": "Dimensione dell’interfaccia",
     "settings.timeline": "Timeline",
@@ -6369,6 +6369,22 @@
     "desktop.updates.writableAppImageRequired": "Sposta l’AppImage in una cartella con permessi di scrittura, ad esempio Applications nella tua cartella personale, quindi riapri l’app per attivare gli aggiornamenti automatici.",
     "desktop.updates.supportedInstallerRequired": "Gli aggiornamenti automatici richiedono il programma di installazione per Windows o l’AppImage Linux.",
     "desktop.updates.windowsSetupRequired": "Installa StykAnimate tramite il programma di installazione Windows Setup per attivare gli aggiornamenti automatici.",
-    "desktop.updates.retryConnection": "Impossibile completare l’aggiornamento. Verifica la connessione e riprova."
+    "desktop.updates.retryConnection": "Impossibile completare l’aggiornamento. Verifica la connessione e riprova.",
+    "settings.privacyLede": "Le statistiche anonime ci mostrano cosa rendere più veloce e cosa correggere.",
+    "privacy.notice.text": "StykAnimate invia statistiche anonime su velocità e arresti anomali. Niente delle tue animazioni.",
+    "privacy.notice.details": "Cosa viene inviato",
+    "privacy.notice.turnOff": "Disattiva",
+    "privacy.notice.ok": "OK",
+    "privacy.notice.turnedOff": "Statistiche disattivate. Puoi riattivarle in Preferenze, nella sezione Privacy.",
+    "privacy.statistics": "Statistiche",
+    "privacy.send": "Invia statistiche anonime",
+    "privacy.sendNote": "Velocità, arresti anomali e funzioni usate. Niente delle tue animazioni.",
+    "privacy.forcedOff": "Le statistiche sono disattivate su questo computer.",
+    "privacy.notUploaded": "Questa è un’esecuzione di sviluppo: i report vengono raccolti ma non inviati.",
+    "privacy.seeReport": "Vedi l’ultimo report",
+    "privacy.note": "Informativa sulla privacy",
+    "privacy.reportTitle": "L’ultimo report",
+    "privacy.reportIntro": "Ecco esattamente cosa ha inviato StykAnimate l’ultima volta e cosa è in attesa di essere inviato.",
+    "privacy.nothingSent": "Non è ancora stato inviato nulla."
   }
 }

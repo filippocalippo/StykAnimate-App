@@ -174,7 +174,7 @@ const messages = {
   "settings.search": "Pesquisar configurações",
   "settings.searchResults": "Configurações correspondentes a “{query}”",
   "settings.noResults": "Nenhuma configuração corresponde a “{query}”.",
-  "settings.privacy": "Privacidade e diagnósticos…",
+  "settings.privacy": "Privacidade",
   "settings.sendFeedback": "Enviar comentário…",
   "settings.interfaceSize": "Tamanho da interface",
   "settings.timeline": "Linha do tempo",
@@ -6360,7 +6360,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Mova o AppImage para uma pasta com permissão de gravação, como Applications na sua pasta pessoal, e abra-o novamente para ativar as atualizações automáticas.",
   "desktop.updates.supportedInstallerRequired": "As atualizações automáticas exigem o instalador para Windows ou o AppImage para Linux.",
   "desktop.updates.windowsSetupRequired": "Instale o StykAnimate usando o instalador Windows Setup para ativar as atualizações automáticas.",
-  "desktop.updates.retryConnection": "Não foi possível concluir a atualização. Verifique sua conexão e tente novamente."
+  "desktop.updates.retryConnection": "Não foi possível concluir a atualização. Verifique sua conexão e tente novamente.",
+  "settings.privacyLede": "As estatísticas anônimas nos mostram o que deixar mais rápido e o que corrigir.",
+  "privacy.notice.text": "O StykAnimate envia estatísticas anônimas sobre velocidade e travamentos. Nada das suas animações.",
+  "privacy.notice.details": "O que é enviado",
+  "privacy.notice.turnOff": "Desativar",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "As estatísticas estão desativadas. Você pode reativá-las em Preferências, na seção Privacidade.",
+  "privacy.statistics": "Estatísticas",
+  "privacy.send": "Enviar estatísticas anônimas",
+  "privacy.sendNote": "Velocidade, travamentos e quais recursos são usados. Nada das suas animações.",
+  "privacy.forcedOff": "As estatísticas estão desativadas neste computador.",
+  "privacy.notUploaded": "Esta é uma execução de desenvolvimento: os relatórios são coletados, mas não enviados.",
+  "privacy.seeReport": "Ver o último relatório",
+  "privacy.note": "Aviso de privacidade",
+  "privacy.reportTitle": "O último relatório",
+  "privacy.reportIntro": "Isto é exatamente o que o StykAnimate enviou por último e o que está aguardando envio.",
+  "privacy.nothingSent": "Nada foi enviado ainda."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

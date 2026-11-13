@@ -172,7 +172,7 @@ const messages = {
   "settings.search": "Keresés a beállításokban",
   "settings.searchResults": "Beállítások ehhez a kereséshez: „{query}”",
   "settings.noResults": "Nincs találat erre a keresésre: „{query}”.",
-  "settings.privacy": "Adatvédelem és diagnosztika…",
+  "settings.privacy": "Adatvédelem",
   "settings.sendFeedback": "Visszajelzés küldése…",
   "settings.interfaceSize": "Felület mérete",
   "settings.timeline": "Idővonal",
@@ -6319,7 +6319,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Az automatikus frissítések engedélyezéséhez helyezd át az AppImage-fájlt egy írható mappába, például a saját mappád Applications mappájába, majd indítsd el újra.",
   "desktop.updates.supportedInstallerRequired": "Az automatikus frissítésekhez a Windows-telepítő vagy a Linux AppImage-fájl szükséges.",
   "desktop.updates.windowsSetupRequired": "Az automatikus frissítések engedélyezéséhez telepítsd a StykAnimate alkalmazást a Windows Setup telepítővel.",
-  "desktop.updates.retryConnection": "A frissítést nem sikerült befejezni. Ellenőrizd az internetkapcsolatodat, majd próbáld újra."
+  "desktop.updates.retryConnection": "A frissítést nem sikerült befejezni. Ellenőrizd az internetkapcsolatodat, majd próbáld újra.",
+  "settings.privacyLede": "A névtelen statisztikákból látjuk, mit kell gyorsítani és mit kell javítani.",
+  "privacy.notice.text": "A StykAnimate névtelen statisztikákat küld a sebességről és az összeomlásokról. Semmit az animációidból.",
+  "privacy.notice.details": "Mit küld",
+  "privacy.notice.turnOff": "Kikapcsolás",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "A statisztikák ki vannak kapcsolva. A Beállítások Adatvédelem részében kapcsolhatod vissza őket.",
+  "privacy.statistics": "Statisztikák",
+  "privacy.send": "Névtelen statisztikák küldése",
+  "privacy.sendNote": "Sebesség, összeomlások és a használt funkciók. Semmit az animációidból.",
+  "privacy.forcedOff": "A statisztikák ki vannak kapcsolva ezen a számítógépen.",
+  "privacy.notUploaded": "Ez egy fejlesztői futtatás: a jelentések gyűlnek, de nem töltődnek fel.",
+  "privacy.seeReport": "Az utolsó jelentés megtekintése",
+  "privacy.note": "Adatvédelmi tájékoztató",
+  "privacy.reportTitle": "Az utolsó jelentés",
+  "privacy.reportIntro": "Pontosan ezt küldte el legutóbb a StykAnimate, és ez vár elküldésre.",
+  "privacy.nothingSent": "Eddig semmit sem küldött el."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

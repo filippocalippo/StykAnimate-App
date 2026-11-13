@@ -172,7 +172,7 @@ const messages = {
   "settings.search": "Баптауларды іздеу",
   "settings.searchResults": "«{query}» сұрауына сәйкес баптаулар",
   "settings.noResults": "«{query}» сұрауына сәйкес баптау жоқ.",
-  "settings.privacy": "Құпиялық және диагностика…",
+  "settings.privacy": "Құпиялық",
   "settings.sendFeedback": "Кері байланыс жіберу…",
   "settings.interfaceSize": "Интерфейс өлшемі",
   "settings.timeline": "Уақыт шкаласы",
@@ -6319,7 +6319,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Автоматты жаңартуларды қосу үшін AppImage файлын жазуға рұқсат берілген бумаға, мысалы, үй бумаңыздағы Applications бумасына көшіріп, қайта ашыңыз.",
   "desktop.updates.supportedInstallerRequired": "Автоматты жаңартулар үшін Windows орнатқышы немесе Linux AppImage файлы қажет.",
   "desktop.updates.windowsSetupRequired": "Автоматты жаңартуларды қосу үшін StykAnimate қолданбасын Windows Setup орнатқышымен орнатыңыз.",
-  "desktop.updates.retryConnection": "Жаңартуды аяқтау мүмкін болмады. Қосылымыңызды тексеріп, қайталап көріңіз."
+  "desktop.updates.retryConnection": "Жаңартуды аяқтау мүмкін болмады. Қосылымыңызды тексеріп, қайталап көріңіз.",
+  "settings.privacyLede": "Анонимді статистика бізге нені жылдамдату және нені түзету керегін көрсетеді.",
+  "privacy.notice.text": "StykAnimate жылдамдық пен ақаулы жабылулар туралы анонимді статистика жібереді. Анимацияларыңыздан ештеңе жіберілмейді.",
+  "privacy.notice.details": "Не жіберіледі",
+  "privacy.notice.turnOff": "Өшіру",
+  "privacy.notice.ok": "Жарайды",
+  "privacy.notice.turnedOff": "Статистика өшірілді. Оны Баптаулардағы Құпиялық бөлімінде қайта қоса аласыз.",
+  "privacy.statistics": "Статистика",
+  "privacy.send": "Анонимді статистика жіберу",
+  "privacy.sendNote": "Жылдамдық, ақаулы жабылулар және қандай мүмкіндіктер қолданылатыны. Анимацияларыңыздан ештеңе жіберілмейді.",
+  "privacy.forcedOff": "Бұл компьютерде статистика өшірулі.",
+  "privacy.notUploaded": "Бұл — әзірлеу нұсқасы: есептер жиналады, бірақ жіберілмейді.",
+  "privacy.seeReport": "Соңғы есепті көру",
+  "privacy.note": "Құпиялық туралы ескертпе",
+  "privacy.reportTitle": "Соңғы есеп",
+  "privacy.reportIntro": "StykAnimate соңғы рет жіберген және жіберуді күтіп тұрған деректер дәл осындай.",
+  "privacy.nothingSent": "Әзірге ештеңе жіберілген жоқ."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

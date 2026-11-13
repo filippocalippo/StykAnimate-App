@@ -170,7 +170,7 @@ const messages = {
   "settings.search": "Cari pengaturan",
   "settings.searchResults": "Pengaturan yang cocok dengan “{query}”",
   "settings.noResults": "Tidak ada pengaturan yang cocok dengan “{query}”.",
-  "settings.privacy": "Privasi dan diagnostik…",
+  "settings.privacy": "Privasi",
   "settings.sendFeedback": "Kirim umpan balik…",
   "settings.interfaceSize": "Ukuran antarmuka",
   "settings.timeline": "Linimasa",
@@ -6278,7 +6278,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Pindahkan AppImage ke folder dengan izin tulis, misalnya Applications di folder beranda Anda, lalu buka kembali aplikasi untuk mengaktifkan pembaruan otomatis.",
   "desktop.updates.supportedInstallerRequired": "Pembaruan otomatis memerlukan program pemasang untuk Windows atau AppImage untuk Linux.",
   "desktop.updates.windowsSetupRequired": "Pasang StykAnimate menggunakan program pemasang Windows Setup untuk mengaktifkan pembaruan otomatis.",
-  "desktop.updates.retryConnection": "Pembaruan tidak dapat diselesaikan. Periksa koneksi dan coba lagi."
+  "desktop.updates.retryConnection": "Pembaruan tidak dapat diselesaikan. Periksa koneksi dan coba lagi.",
+  "settings.privacyLede": "Statistik anonim menunjukkan kepada kami apa yang perlu dipercepat dan apa yang perlu diperbaiki.",
+  "privacy.notice.text": "StykAnimate mengirim statistik anonim tentang kecepatan dan crash. Tidak ada apa pun dari animasi Anda.",
+  "privacy.notice.details": "Apa yang dikirim",
+  "privacy.notice.turnOff": "Matikan",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "Statistik dimatikan. Anda dapat menyalakannya lagi di Preferensi, bagian Privasi.",
+  "privacy.statistics": "Statistik",
+  "privacy.send": "Kirim statistik anonim",
+  "privacy.sendNote": "Kecepatan, crash, dan fitur yang digunakan. Tidak ada apa pun dari animasi Anda.",
+  "privacy.forcedOff": "Statistik dimatikan untuk komputer ini.",
+  "privacy.notUploaded": "Ini adalah versi pengembangan: laporan dikumpulkan tetapi tidak diunggah.",
+  "privacy.seeReport": "Lihat laporan terakhir",
+  "privacy.note": "Catatan privasi",
+  "privacy.reportTitle": "Laporan terakhir",
+  "privacy.reportIntro": "Inilah persis yang terakhir dikirim StykAnimate, dan yang sedang menunggu untuk dikirim.",
+  "privacy.nothingSent": "Belum ada yang dikirim."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

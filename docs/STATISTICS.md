@@ -58,13 +58,29 @@ moving a number; it cannot make false reports impossible.
 
 Statistics are on unless a person turns them off.
 
-- **First start:** Home shows one line, once: what is sent, with "What is sent", "Turn off" and "OK".
-- **Preferences, Privacy:** a switch, "See the last report" (the exact JSON last sent and what is waiting),
-  and a link to the privacy note on the website.
+- **The first-start line:** while statistics are on and the line was not answered (`noticeSeen` false), Home
+  shows one quiet line at the top of its page: "StykAnimate sends anonymous statistics about speed and
+  crashes. Nothing from your animations." with "What is sent", "Turn off" and "OK". It stays, on every visit to
+  Home, until one of "OK" and "Turn off" is pressed: both answer it for good (`markStatsNoticeSeen`), and "Turn
+  off" also turns statistics off and says once that Preferences, Privacy turns them on again. "What is sent"
+  opens "See the last report" and leaves the line in place. Using the switch in Preferences answers it too.
+- **Nothing leaves before the line was shown:** the desktop process uploads only once Home has displayed the
+  line on this installation (`noticeShown` in `stats-state.json`, set through `markStatsNoticeShown` the first
+  time the line is on screen with no dialog over it) or the line was answered. Counting and queueing may run before that. A person who
+  starts the app with Home turned off (Settings › Interface) keeps their reports on the computer until they
+  visit Home once.
+- **Preferences, Privacy** (`src/privacy-settings.mjs`): a switch "Send anonymous statistics", "See the last
+  report" (a dialog with exactly what `previewStats()` returns, the last batch sent and what is waiting, as
+  JSON, with Copy; "Nothing has been sent yet" before the first upload), and "Privacy note", which opens the
+  website's privacy page (`openServicePage('privacy')`; the main process opens only its own fixed pages). Forced
+  off, the switch is off and disabled with a line that says so; in a development run that uploads nothing, a
+  line says reports are collected but not uploaded. The Help menu's item, the `privacy` command and a
+  `stykanimate://privacy` link open Preferences at this section (`openPrivacy`). The browser build has no
+  desktop bridge and shows neither the line nor the section.
 - **Off means off:** no counting on the frame path, no queue on disk, no upload, and what was waiting is
   deleted. The environment variable `STYK_NO_STATS=1` forces off and hides the line and the switch's effect.
 - **People who answered the old consent window:** whoever chose Reject there starts with statistics off and
-  is not shown the line. Everyone else starts with them on and sees the line once. The old file
+  is not shown the line. Everyone else starts with them on and sees the line until they answer it. The old file
   (`telemetry-state.json`: identifier and queued summaries) is deleted at the first start of the new version.
 - **Development runs** (an unpackaged app) collect and show "the last report" but upload only when
   `STYK_SITE_URL` names a local site (`http://127.0.0.1` or `http://localhost`). Tests and smoke scripts never
@@ -72,10 +88,6 @@ Statistics are on unless a person turns them off.
   data folder), except `scripts/smoke-boot.mjs`, which checks that a development run collects and sends nothing.
 - **The developer tools' page** (`npm run dev`, or the profiling command in Chrome) collects in memory even
   without a desktop process, and sends nothing, so the profiling command can read the same numbers.
-
-The interface for this (the first-start line, the Preferences section, "See the last report") is the next
-piece of work. Until it exists, every way to it (the Help menu's item, the `privacy` command, Home's link and a
-`stykanimate://privacy` link) goes through `openPrivacy` (`src/privacy-settings.mjs`), which opens Preferences.
 
 ## How much is sent
 
@@ -200,14 +212,15 @@ The editor's collector (`src/stats/collector.mjs`) holds the session in memory a
 fresh summary at most once a minute and when the page is hidden or closed, and each problem and failed file
 operation as it happens. The desktop process validates everything with `schema.mjs`, adds what only it knows
 (the session's id, day, ending, the four `first` facts, the installation's age range and the time of day), and
-keeps two files: `stats-state.json` in the app's data folder (on or off, the line seen, the first-run day,
+keeps two files: `stats-state.json` in the app's data folder (on or off, the line shown and answered, the first-run day,
 recent days of use, the last batch sent) and `stats-session.json` in the window process's own folder (the
 running session and the queue: at most 64 reports and 7 days). A second window process (another workspace)
 keeps its own session file in its workspace folder.
 
 It uploads about five seconds after the app starts, when it quits (waiting at most two seconds), and every 30
 minutes while reports other than the running session are waiting; at most 16 reports and 32 KB a batch, oldest
-first, four batches an upload at most. The running session's summary is never uploaded while it runs. The
+first, four batches an upload at most. The running session's summary is never uploaded while it runs, and
+nothing is uploaded before the first-start line was shown ("On and off"). The
 request is `POST <site>/api/v1/stats` with the JSON batch, no other header than its content type and no
 identifier. The intake's answers:
 
@@ -224,8 +237,9 @@ The bridge the preload script exposes (`window.stykDesktop`), all of it:
 | Call | Does |
 | --- | --- |
 | `getStatsState()` | `{enabled, counting, forcedOff, noticeSeen, uploads}`: `counting` is false while statistics are off and in a session that was not chosen ("How much is sent"); the editor collects only while it is true. `uploads` is false in a development run without a local site |
-| `setStatsEnabled(on)` | turns statistics on or off and returns the state |
-| `markStatsNoticeSeen()` | records that the first-start line was shown |
+| `setStatsEnabled(on)` | turns statistics on or off and returns the state; using the switch also answers the first-start line |
+| `markStatsNoticeSeen()` | records that the first-start line was answered ("OK" or "Turn off"): Home no longer shows it |
+| `markStatsNoticeShown()` | records that Home displayed the first-start line: from then on uploads may go |
 | `sendStatsSession(summary, facts)` | the running session's summary so far; `facts` are what only the page knows of the machine: the graphics backend and the refresh rate it observes |
 | `sendStatsReport(report)` | one `problem` or `file` report |
 | `previewStats()` | `{lastSent, waiting}`: the last batch uploaded and the reports queued |
@@ -249,5 +263,9 @@ and a number from a desk mean the same thing.
   summary, off meaning off, and the trace layer's listener.
 - `node --test tests/stats-service.test.mjs`: the desktop service (queue, migration, off, the boundary, uploads
   and each answer, the three endings, the `first` facts), the bridge and the packaged files.
-- `npm run test:stats` runs the three. `tests/devtools.test.mjs` holds the trace layer to its guarantees with a
+- `node --test tests/stats-interface.test.mjs`: when Home shows the first-start line and what its buttons do, the
+  Privacy section's states and controls, and what "See the last report" shows.
+- `npm run test:privacy` (`tests/privacy.browser.mjs`): the line on Home and the Privacy section in a page, with a
+  desktop bridge faked in it.
+- `npm run test:stats` runs the four unit test files. `tests/devtools.test.mjs` holds the trace layer to its guarantees with a
   listener, and `tests/app-bundle.test.mjs` the line tables.

@@ -72,7 +72,7 @@ class StatsService {
     this.siteUrl = statsEndpoint(siteUrl, channel === 'development');
     this.forcedOff = env?.STYK_NO_STATS === '1';
     this.facts = { backend: 'unknown', refresh: 'unknown' };
-    this.settings = { v: 1, enabled: true, noticeSeen: false, firstDay: null, days: [], backSeen: false, sample: 100, pausedUntil: 0, lastSent: null };
+    this.settings = { v: 1, enabled: true, noticeSeen: false, noticeShown: false, firstDay: null, days: [], backSeen: false, sample: 100, pausedUntil: 0, lastSent: null };
     this.running = null; this.queue = []; this.sent = {};
     this.nextUpload = 0; this.inflight = null; this.closed = false; this.timer = null; this.startTimer = null;
   }
@@ -98,7 +98,7 @@ class StatsService {
   readSettings(value) {
     const s = this.settings;
     if (typeof value.enabled === 'boolean') s.enabled = value.enabled;
-    s.noticeSeen = value.noticeSeen === true; s.backSeen = value.backSeen === true;
+    s.noticeSeen = value.noticeSeen === true; s.noticeShown = value.noticeShown === true; s.backSeen = value.backSeen === true;
     if (validDay(value.firstDay)) s.firstDay = value.firstDay;
     if (Array.isArray(value.days)) s.days = [...new Set(value.days.filter(validDay))].sort().slice(-MAX_DAYS_KEPT);
     if (this.schema.SAMPLE_STEPS.includes(value.sample)) s.sample = value.sample;
@@ -166,20 +166,33 @@ class StatsService {
     return { enabled, counting: enabled && !this.closed && Boolean(this.running), forcedOff: this.forcedOff, noticeSeen: this.settings.noticeSeen, uploads: enabled && Boolean(this.siteUrl) };
   }
   notify() { this.onState(this.getState()); }
-  /** Turns statistics on (a fresh session) or off (what was waiting is deleted). */
+  /**
+   * Turns statistics on (a fresh session) or off (what was waiting is deleted). The switch is a person's own answer,
+   * so it also answers the first-start line.
+   */
   async setEnabled(on) {
     if (typeof on !== 'boolean') throw new TypeError('Statistics are turned on or off with true or false.');
-    if (this.forcedOff || on === this.settings.enabled) return this.getState();
-    this.settings.enabled = on;
-    if (on) { this.startSession(); this.schedule(); }
-    else { this.dispose(); this.running = null; this.queue = []; this.sent = {}; }
+    if (this.forcedOff || on === this.settings.enabled && this.settings.noticeSeen) return this.getState();
+    this.settings.noticeSeen = true;
+    if (on !== this.settings.enabled) {
+      this.settings.enabled = on;
+      if (on) { this.startSession(); this.schedule(); }
+      else { this.dispose(); this.running = null; this.queue = []; this.sent = {}; }
+    }
     await this.persist(); this.notify(); return this.getState();
   }
-  /** Records that the first-start line was shown. */
+  /** Records that the first-start line was answered ("OK" or "Turn off"): Home no longer shows it. */
   async markNoticeSeen() {
     if (!this.forcedOff && !this.settings.noticeSeen) { this.settings.noticeSeen = true; await this.persist(); this.notify(); }
     return this.getState();
   }
+  /** Records that Home displayed the first-start line: from now on uploads may go (docs/STATISTICS.md, "On and off"). */
+  async markNoticeShown() {
+    if (!this.forcedOff && !this.settings.noticeShown) { this.settings.noticeShown = true; await this.persist(); }
+    return this.getState();
+  }
+  /** Nothing leaves the computer before the first-start line was displayed or answered on this installation. */
+  get announced() { return this.settings.noticeShown || this.settings.noticeSeen; }
   /** What only the page knows of the machine: the graphics backend and the display's refresh rate. */
   setFacts(facts) {
     if (!plain(facts) || !this.schema) return;
@@ -274,7 +287,7 @@ class StatsService {
     return this.inflight;
   }
   async send(quitting) {
-    if (this.forcedOff || !this.settings.enabled || !this.siteUrl || !this.schema || !VERSION.test(this.version ?? '')) return false;
+    if (this.forcedOff || !this.settings.enabled || !this.announced || !this.siteUrl || !this.schema || !VERSION.test(this.version ?? '')) return false;
     const time = this.now();
     if (time < this.nextUpload || time < this.settings.pausedUntil) return false;
     let delivered = false;

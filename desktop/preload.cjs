@@ -104,6 +104,7 @@ contextBridge.exposeInMainWorld('stykDesktop', Object.freeze({
   getStatsState: () => ipcRenderer.invoke('styk:stats-state'),
   setStatsEnabled: on => ipcRenderer.invoke('styk:stats-enabled', on),
   markStatsNoticeSeen: () => ipcRenderer.invoke('styk:stats-notice-seen'),
+  markStatsNoticeShown: () => ipcRenderer.invoke('styk:stats-notice-shown'),
   sendStatsSession: (summary, facts) => ipcRenderer.invoke('styk:stats-session', summary, facts),
   sendStatsReport: report => ipcRenderer.invoke('styk:stats-report', report),
   previewStats: () => ipcRenderer.invoke('styk:stats-preview'),

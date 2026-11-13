@@ -217,7 +217,7 @@ const messages = {
   "settings.search": "Instellingen zoeken",
   "settings.searchResults": "Instellingen voor ‘{query}’",
   "settings.noResults": "Geen instellingen gevonden voor ‘{query}’.",
-  "settings.privacy": "Privacy en diagnostiek…",
+  "settings.privacy": "Privacy",
   "settings.sendFeedback": "Feedback sturen…",
   "settings.interfaceSize": "Interfacegrootte",
   "settings.timeline": "Tijdlijn",
@@ -6319,7 +6319,23 @@ const messages = {
   "desktop.updates.writableAppImageRequired": "Verplaats de AppImage naar een map met schrijfrechten, bijvoorbeeld Applications in je persoonlijke map, en start de app opnieuw om automatische updates in te schakelen.",
   "desktop.updates.supportedInstallerRequired": "Voor automatische updates is het installatieprogramma voor Windows of de Linux AppImage vereist.",
   "desktop.updates.windowsSetupRequired": "Installeer StykAnimate met het installatieprogramma Windows Setup om automatische updates in te schakelen.",
-  "desktop.updates.retryConnection": "De update kon niet worden voltooid. Controleer je verbinding en probeer het opnieuw."
+  "desktop.updates.retryConnection": "De update kon niet worden voltooid. Controleer je verbinding en probeer het opnieuw.",
+  "settings.privacyLede": "Anonieme statistieken laten ons zien wat sneller moet en wat we moeten oplossen.",
+  "privacy.notice.text": "StykAnimate verstuurt anonieme statistieken over snelheid en crashes. Niets uit je animaties.",
+  "privacy.notice.details": "Wat wordt verstuurd",
+  "privacy.notice.turnOff": "Uitzetten",
+  "privacy.notice.ok": "OK",
+  "privacy.notice.turnedOff": "Statistieken staan uit. Je kunt ze weer aanzetten in Voorkeuren, onder Privacy.",
+  "privacy.statistics": "Statistieken",
+  "privacy.send": "Anonieme statistieken versturen",
+  "privacy.sendNote": "Snelheid, crashes en welke functies worden gebruikt. Niets uit je animaties.",
+  "privacy.forcedOff": "Statistieken staan uit op deze computer.",
+  "privacy.notUploaded": "Dit is een ontwikkelversie: rapporten worden verzameld maar niet geüpload.",
+  "privacy.seeReport": "Laatste rapport bekijken",
+  "privacy.note": "Privacyverklaring",
+  "privacy.reportTitle": "Het laatste rapport",
+  "privacy.reportIntro": "Dit is precies wat StykAnimate het laatst heeft verstuurd, en wat nog wacht om verstuurd te worden.",
+  "privacy.nothingSent": "Er is nog niets verstuurd."
 };
 for (const message of Object.values(messages)) if (typeof message === 'object') Object.freeze(message);
 export default Object.freeze(messages);

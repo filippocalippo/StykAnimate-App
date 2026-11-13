@@ -3,8 +3,8 @@
  * colour-coded tiles.
  *
  *   the head      the StykAnimate mark, the title, a search pill and a round close
- *   the sidebar   one row per section, each with its concept-tinted glyph tile;
- *                 Privacy and the Support card at its foot. Below 620px of
+ *   the sidebar   one row per section, each with its concept-tinted glyph tile
+ *                 (Privacy's in a quiet ink); the Support card at its foot. Below 620px of
  *                 dialog it becomes a scrolling strip under the head.
  *   a page        a display title and one line of lede, then titled cards
  *   a card        rows split by hairlines: words (a label and a grey hint) at
@@ -12,6 +12,7 @@
  *                 timeline tiles, the handle preview) spans the card
  *   shortcuts     the same cards, each binding a keycap chip
  *   feedback      three illustrated tiles, then the privacy line
+ *   privacy       the statistics switch, then two quiet links (desktop only)
  *
  * Sizes follow the dialog (container styk-settings) and its content pane
  * (container settings-content), never the viewport. */
@@ -96,15 +97,9 @@
   .styk-settings [data-tint="time"] { --_soft: var(--tint-time-soft); --_ink: var(--tint-time-ink); --_badge: var(--badge-time); }
   .styk-settings [data-tint="camera"] { --_soft: var(--tint-camera-soft); --_ink: var(--tint-camera-ink); --_badge: var(--badge-camera); }
   .styk-settings [data-tint="draw"] { --_soft: var(--tint-draw-soft); --_ink: var(--tint-draw-ink); --_badge: var(--badge-new); }
+  .styk-settings [data-tint="quiet"] { --_soft: var(--surface-sunken); --_ink: var(--text-2); --_badge: var(--primary); --on-badge: var(--on-primary); }
 
   .styk-settings-actions { display: grid; gap: var(--space-2); margin-block-start: auto; }
-  .styk-settings-privacy {
-    display: flex; align-items: center; gap: var(--space-2); min-block-size: var(--control-md);
-    padding: 0 var(--space-2-5); border: 0; border-radius: var(--radius-md);
-    background: transparent; color: var(--text-2); font: var(--type-small-strong); text-align: start;
-  }
-  .styk-settings-privacy:where(:hover) { background: var(--surface-hover); color: var(--text-1); }
-  .styk-settings-privacy > svg { inline-size: var(--icon-sm); block-size: var(--icon-sm); }
   .styk-settings-donate {
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2-5);
     padding: var(--space-3); border: 0; border-radius: var(--radius-xl);
@@ -160,6 +155,8 @@
   .styk-settings-hint { min-inline-size: 0; overflow-wrap: anywhere; max-inline-size: 56ch; font: var(--type-small); color: var(--text-3); text-wrap: pretty; }
   .styk-settings-row > .ui-select { flex: 0 1 220px; min-inline-size: 132px; }
   .styk-settings-row > .ui-select > select { max-inline-size: none; text-overflow: ellipsis; }
+  /* Privacy: See the last report and the privacy note, two quiet buttons on one row at the start of the card. */
+  .styk-privacy-links { justify-content: flex-start; flex-wrap: wrap; gap: var(--space-1); min-block-size: 48px; }
   .styk-settings-block { display: grid; justify-content: stretch; gap: var(--space-3); padding-block: var(--space-4); }
   .styk-settings-note {
     display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3);
@@ -356,7 +353,7 @@
   .settings-feedback-lock > svg { inline-size: var(--icon-md); block-size: var(--icon-md); }
 
   /* Focus: the kit's ring everywhere. */
-  .styk-settings :where(.styk-settings-close, .styk-settings-tabs > button, .styk-settings-privacy, .styk-settings-donate, .styk-settings-icon-button, .settings-feedback-tile, .hotkey-binding > button, .hotkey-add, .hotkey-reset):focus-visible {
+  .styk-settings :where(.styk-settings-close, .styk-settings-tabs > button, .styk-settings-donate, .styk-settings-icon-button, .settings-feedback-tile, .hotkey-binding > button, .hotkey-add, .hotkey-reset):focus-visible {
     outline: 2px solid var(--focus-ring); outline-offset: var(--focus-offset);
   }
 
@@ -380,8 +377,7 @@
     .styk-settings-tabs > button { flex: none; inline-size: auto; min-block-size: 38px; padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1); white-space: nowrap; }
     .styk-settings-tab-icon { inline-size: 28px; block-size: 28px; border-radius: var(--radius-sm); }
     .styk-settings-actions { display: flex; flex: none; gap: var(--space-1); margin: 0; }
-    .styk-settings-privacy { inline-size: var(--control-lg); block-size: var(--control-lg); justify-content: center; padding: 0; }
-    .styk-settings-privacy > span, .styk-settings-donate-text, .styk-settings-donate > svg:last-child { display: none; }
+    .styk-settings-donate-text, .styk-settings-donate > svg:last-child { display: none; }
     .styk-settings-donate { display: grid; grid-template-columns: auto; padding: 0; background: transparent; }
     .styk-settings-content { --_pad-block: var(--space-5); --_pad-inline: var(--space-4); }
     .styk-settings-page > h3 { font-size: var(--text-20); line-height: var(--leading-20); letter-spacing: var(--tracking-title); }

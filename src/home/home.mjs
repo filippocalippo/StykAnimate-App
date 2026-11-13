@@ -18,12 +18,14 @@
  * ctx (from app.mjs): {root, editor, state, actions, desktop, overlays, guarded,
  * toast(text, key, params), menu(items, anchor, options), prompt(options),
  * acceptNativeFile(result), activateDocument(token), picture(), fit(), pause(),
- * focusStage(), settings(), tutorials(), studio(), startupView}; getters for
- * what the app creates later.
+ * focusStage(), settings(), tutorials(), studio(), privacy, startupView}; getters
+ * for what the app creates later. `privacy` (src/privacy-settings.mjs) decides
+ * the first-start line about statistics and does what its buttons ask.
  */
 import {t as interfaceText, interfaceLocalization} from '../localization.mjs';
 import {createStartupDocument, STARTUP_CANVASES} from '../startup-document.mjs';
 import {createHomeView} from './home-view.mjs';
+import {statsNoticeWanted} from '../privacy-settings.mjs';
 import {ALL_PROJECTS, PINNED_PROJECTS, HOME_LAYOUTS, HOME_SORTS, folderScope, validScope, tutorialProgress} from './home-model.mjs';
 
 /**
@@ -51,9 +53,10 @@ export function createHome(ctx) {
   const supported = Boolean(desktop?.listProjects);
   const model = {
     supported, news: Boolean(desktop?.getUpdateState), feedback: Boolean(desktop?.supportRequest), loading: supported, projects: [], folders: [], scope: ALL_PROJECTS, query: '',
-    sort: 'recent', layout: 'grid', busyId: null, tutorials: tutorialProgress([], []), documentName: '', firstTime: false,
+    sort: 'recent', layout: 'grid', busyId: null, tutorials: tutorialProgress([], []), documentName: '', firstTime: false, statsNotice: false,
   };
-  let view = null, shown = false, loads = 0, pictureTimer = 0, storedPicture = null;
+  const privacy = ctx.privacy?.available ? ctx.privacy : null;
+  let view = null, shown = false, loads = 0, pictureTimer = 0, storedPicture = null, noticeShown = false, noticeTimer = 0;
   // Pictures already read, newest last: scrolling back to a card shows it at once.
   const pictures = new Map();
   const say = (key, params = {}) => ctx.toast(interfaceText(key, params), key, params);
@@ -65,11 +68,24 @@ export function createHome(ctx) {
     model.tutorials = tutorialProgress(ctx.tutorials()?.list ?? [], settings.tutorialsDone ?? []);
     model.documentName = editor.name || interfaceText('home.untitled');
     model.firstTime = !model.loading && !model.projects.length && !model.tutorials.done;
+    model.statsNotice = statsNoticeWanted(privacy?.state);
   }
   function draw(what) {
     if (!view || !shown) return;
     read();
     view.render(model, what);
+    noteShown();
+  }
+  /**
+   * The line is on screen, with no dialog over Home (What's new opens over it at a first start): the desktop may upload
+   * from now on (docs/STATISTICS.md, "On and off"). Said once a run; while a dialog covers Home, asked again each second.
+   */
+  function noteShown() {
+    win.clearTimeout(noticeTimer);
+    if (!shown || !model.statsNotice || noticeShown) return;
+    if (overlays.blocksHotkeys?.()) { noticeTimer = win.setTimeout(noteShown, 1000); return; }
+    noticeShown = true;
+    Promise.resolve(privacy.markShown()).catch(() => { noticeShown = false; });
   }
 
   // ---- The project list --------------------------------------------------------------------------------------------
@@ -256,7 +272,12 @@ export function createHome(ctx) {
       layout: detail => { if (HOME_LAYOUTS.includes(detail.layout)) { ctx.settings()?.commit({homeLayout: detail.layout}); draw(['projects']); } },
       search: value => { model.query = value; draw(['projects']); },
       tutorial: guarded(detail => ctx.tutorials()?.start(detail.id)),
+      // The first-start line: What is sent leaves it in place; OK and Turn off answer it for good.
+      'stats-details': guarded(() => privacy?.showReport()),
+      'stats-ok': guarded(() => privacy?.answer('ok')),
+      'stats-off': guarded(async () => { const message = await privacy?.answer('off'); if (message) say(message); }),
     }});
+    privacy?.subscribe(() => draw(['notice']));
     if (supported) view.setPreviewSource(picture);
     // Escape goes back to the animation, wherever focus is; a menu or a dialog over Home keeps the key for itself
     // (the overlay manager's own Escape runs first and marks the key handled).
@@ -289,6 +310,7 @@ export function createHome(ctx) {
       view.page.scrollTop = 0;
       draw();
       void load().catch(ctx.fail);
+      void privacy?.refresh().catch(() => {});
     }
     if (section) view.reveal(section);
     else if (focus) view.page.focus({preventScroll: true});
@@ -338,6 +360,6 @@ export function createHome(ctx) {
     refresh: () => (shown ? load() : Promise.resolve()),
     get view() { return view; },
     get model() { return model; },
-    destroy() { win.clearTimeout(pictureTimer); view?.destroy(); },
+    destroy() { win.clearTimeout(pictureTimer); win.clearTimeout(noticeTimer); view?.destroy(); },
   };
 }

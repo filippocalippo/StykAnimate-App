@@ -185,7 +185,7 @@
     "settings.search": "Szukaj ustawień",
     "settings.searchResults": "Ustawienia pasujące do „{query}”",
     "settings.noResults": "Żadne ustawienia nie pasują do „{query}”.",
-    "settings.privacy": "Prywatność i diagnostyka…",
+    "settings.privacy": "Prywatność",
     "settings.sendFeedback": "Wyślij opinię…",
     "settings.interfaceSize": "Rozmiar interfejsu",
     "settings.timeline": "Oś czasu",
@@ -6410,6 +6410,22 @@
     "desktop.updates.writableAppImageRequired": "Przenieś plik AppImage do folderu, w którym możesz zapisywać pliki, na przykład Applications w swoim folderze domowym, i uruchom go ponownie, aby włączyć automatyczne aktualizacje.",
     "desktop.updates.supportedInstallerRequired": "Automatyczne aktualizacje wymagają instalatora dla systemu Windows lub AppImage dla systemu Linux.",
     "desktop.updates.windowsSetupRequired": "Zainstaluj StykAnimate za pomocą instalatora Windows Setup, aby włączyć automatyczne aktualizacje.",
-    "desktop.updates.retryConnection": "Nie udało się ukończyć aktualizacji. Sprawdź połączenie i spróbuj ponownie."
+    "desktop.updates.retryConnection": "Nie udało się ukończyć aktualizacji. Sprawdź połączenie i spróbuj ponownie.",
+    "settings.privacyLede": "Anonimowe statystyki pokazują nam, co przyspieszyć, a co naprawić.",
+    "privacy.notice.text": "StykAnimate wysyła anonimowe statystyki o szybkości i awariach. Nic z twoich animacji.",
+    "privacy.notice.details": "Co jest wysyłane",
+    "privacy.notice.turnOff": "Wyłącz",
+    "privacy.notice.ok": "OK",
+    "privacy.notice.turnedOff": "Statystyki są wyłączone. Możesz je ponownie włączyć w Preferencjach, w sekcji Prywatność.",
+    "privacy.statistics": "Statystyki",
+    "privacy.send": "Wysyłaj anonimowe statystyki",
+    "privacy.sendNote": "Szybkość, awarie i używane funkcje. Nic z twoich animacji.",
+    "privacy.forcedOff": "Statystyki są wyłączone na tym komputerze.",
+    "privacy.notUploaded": "To jest uruchomienie deweloperskie: raporty są zbierane, ale nie wysyłane.",
+    "privacy.seeReport": "Pokaż ostatni raport",
+    "privacy.note": "Informacja o prywatności",
+    "privacy.reportTitle": "Ostatni raport",
+    "privacy.reportIntro": "Dokładnie to StykAnimate wysłał ostatnio i to czeka na wysłanie.",
+    "privacy.nothingSent": "Nic jeszcze nie zostało wysłane."
   }
 }

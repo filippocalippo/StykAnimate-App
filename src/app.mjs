@@ -65,7 +65,7 @@ import {createTutorials} from './tutorials/tutorials.mjs';
 import {installProjectTabs} from './shell/project-tabs-view.mjs';
 import {createProjectSwitcher} from './shell/project-switcher.mjs';
 import {movieclipScopes, sessionProjectName} from './editor-sessions.mjs';
-import {openPrivacy} from './privacy-settings.mjs';
+import {openPrivacy, createPrivacy} from './privacy-settings.mjs';
 import {COMMAND_BY_ID} from './ui/command-catalog.mjs';
 import { FeedbackUI } from './feedback-ui.mjs';
 import { UpdateUI } from './update-ui.mjs';
@@ -4694,6 +4694,10 @@ const projectSwitcher = createProjectSwitcher({
   activate: guarded((id) => projects.activate(id)),
   picture: (id) => projectTabsView.picture(id),
 });
+// Statistics' interface (src/privacy-settings.mjs): Home's first-start line and Preferences' Privacy section.
+const privacy = createPrivacy({ desktop, overlays, t: (key, params) => kitT(key, params) ?? interfaceText(key, params) });
+// Read once at start, so Preferences never opens on a switch that is not yet known; changes are pushed after that.
+void privacy.refresh().catch(() => {});
 // Home (src/home/home.mjs, docs/HOME.md): the page with the projects and the tutorials, over the workspace.
 const home = createHome({
   root: $("home"), editor, state, actions, desktop, overlays, guarded, fail, toast, fit, pause, acceptNativeFile,
@@ -4707,7 +4711,7 @@ const home = createHome({
   },
   picture: () => projectTabsView.picture(projects.tabs.activeId),
   focusStage: () => viewport.focus({ preventScroll: true }),
-  settings: () => editorSettings, tutorials: () => tutorials, studio: () => studioShell,
+  settings: () => editorSettings, tutorials: () => tutorials, studio: () => studioShell, privacy,
   startupView: desktop?.startupView ?? window.stykStartupView,
 });
 // The tutorials (src/tutorials/tutorials.mjs, docs/TUTORIALS.md): guided steps in the editor itself, on a practice animation.
@@ -5845,7 +5849,7 @@ async function init() {
       ? (value) => desktop.setEditorSettings(value)
       : undefined,
     onResetWorkspace: () => workspaceLayout?.reset(),
-    onPrivacy: desktop?.getStatsState ? () => openPrivacy(editorSettings) : undefined,
+    privacy,
     onFeedback: desktop?.supportRequest ? options => feedbackUI.open(options) : undefined,
     onDonate: desktop?.openDonate ? () => desktop.openDonate() : undefined,
   });

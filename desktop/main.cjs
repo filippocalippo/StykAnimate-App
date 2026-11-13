@@ -343,12 +343,13 @@ function registerIpc() {
   handle('styk:stats-state', withStats(() => stats.getState()));
   handle('styk:stats-enabled', withStats(on => stats.setEnabled(on)));
   handle('styk:stats-notice-seen', withStats(() => stats.markNoticeSeen()));
+  handle('styk:stats-notice-shown', withStats(() => stats.markNoticeShown()));
   handle('styk:stats-session', withStats((summary, facts) => stats.recordSession(summary, facts)));
   handle('styk:stats-report', withStats(report => stats.recordReport(report)));
   handle('styk:stats-preview', withStats(() => stats.preview()));
   handle('styk:service-page', (event, page) => {
     trusted(event);
-    const route = { home: '/', download: '/download/' }[page];
+    const route = { home: '/', download: '/download/', privacy: '/privacy/' }[page];
     if (!route) throw messageError(new Error(''), 'desktop.main.errors.unknownStykAnimatePage', {});
     const site = statsEndpoint(!app.isPackaged ? process.env.STYK_SITE_URL || serviceConfig.siteUrl : serviceConfig.siteUrl, !app.isPackaged);
     if (!site) throw messageError(new Error(''), 'desktop.main.errors.thePublicWebsiteIsNotConfiguredYetContactAleRipresoGmailCom', {});

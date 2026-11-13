@@ -214,6 +214,8 @@ const TABS = [
   ["shortcuts", "keyboard", "camera"],
 ];
 const FEEDBACK_TAB = ["feedback", "message", "draw"];
+/** Privacy (src/privacy-settings.mjs): the desktop app's statistics, in a quiet ink rather than a concept hue. */
+const PRIVACY_TAB = ["privacy", "lock", "quiet"];
 /** The tabs the sidebar search looks through (Shortcuts has its own search). */
 const SEARCH_TABS = ["interface", "canvas", "animation"];
 const SYMBOL_URL = new URL("../symbol.svg", import.meta.url).href;
@@ -272,7 +274,7 @@ export class EditorSettings {
     onPersist,
     onResetWorkspace,
     localization,
-    onPrivacy,
+    privacy,
     onFeedback,
     onDonate,
   } = {}) {
@@ -293,7 +295,7 @@ export class EditorSettings {
       ((next) =>
         localStorage.setItem(EDITOR_SETTINGS_KEY, JSON.stringify(next)));
     this.onResetWorkspace = onResetWorkspace;
-    this.onPrivacy = onPrivacy;
+    this.privacy = privacy?.available ? privacy : null;
     this.onFeedback = onFeedback;
     this.onDonate = onDonate;
     this.tab = "interface";
@@ -302,7 +304,7 @@ export class EditorSettings {
     this.pending = null;
     this.timer = null;
     this.error = null;
-    this.tabs = onFeedback ? [...TABS, FEEDBACK_TAB] : TABS;
+    this.tabs = [...TABS, ...(onFeedback ? [FEEDBACK_TAB] : []), ...(this.privacy ? [PRIVACY_TAB] : [])];
     this.dialog = document.createElement("dialog");
     this.dialog.className = "styk-settings";
     localizedAttribute(this.dialog, "aria-label", "settings.editorLabel", {});
@@ -322,13 +324,8 @@ export class EditorSettings {
     this.syncTabOrientation();
     this.hotkeySettings = new HotkeySettings(this);
     const actions = this.dialog.querySelector('.styk-settings-actions');
-    if (onPrivacy) {
-      const button = document.createElement('button'); button.type = 'button'; button.className = 'styk-settings-privacy'; button.dataset.settingsPrivacy = '';
-      localizedMarkup(button, `${icon('lock')}<span ${messageAttributes('settings.privacy', {})}>${escape(this.say('settings.privacy'))}</span>`);
-      localizedAttribute(button, "title", 'settings.privacy', {}); button.setAttribute('aria-label', button.title);
-      button.onclick = () => { this.close(); void this.onPrivacy(); };
-      appendLocalized(actions, button);
-    }
+    // The Privacy section follows the statistics' state while it shows.
+    this.unsubscribePrivacy = this.privacy?.subscribe(() => { if (this.dialog.open && this.tab === 'privacy' && !this.query.trim()) this.render({retain: true}); });
     if (onDonate) {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'styk-settings-donate'; button.dataset.settingsDonate = '';
@@ -381,6 +378,7 @@ export class EditorSettings {
       event.stopPropagation();
       const tab = event.target.closest("[role=tab]");
       if (tab) this.selectTab(tab.dataset.tab);
+      if (this.privacy?.handle(event, error => this.showError(error))) return;
       const feedback = event.target.closest('[data-settings-feedback]');
       if (feedback) { this.close(); this.onFeedback?.(feedback.dataset.settingsFeedback === 'inbox' ? {view: 'inbox'} : {category: feedback.dataset.settingsFeedback}); }
       if (event.target.closest("[data-scale-reset]")) {
@@ -399,6 +397,7 @@ export class EditorSettings {
         );
     });
     this.dialog.addEventListener("change", async (event) => {
+      if (this.privacy?.handle(event, error => this.showError(error))) return;
       const input = event.target.closest("[data-setting]");
       if (!input) return;
       let value =
@@ -451,11 +450,6 @@ export class EditorSettings {
     this.labelSearch();
     for (const button of this.dialog.querySelectorAll('[data-tab]'))
       localizedText(button.querySelector('[data-settings-tab-label]'), 'settings.' + button.dataset.tab, {});
-    const privacy = this.dialog.querySelector('[data-settings-privacy]');
-    if (privacy) {
-      privacy.querySelector('span').textContent = localizedAttribute(privacy, "title", 'settings.privacy', {});
-      privacy.setAttribute('aria-label', privacy.title);
-    }
     const donate = this.dialog.querySelector('[data-settings-donate]');
     if (donate) {
       localizedText(donate.querySelector('strong'), 'settings.donate', {});
@@ -503,6 +497,8 @@ export class EditorSettings {
     if (field) { field.focus(); field.scrollIntoView?.({block: 'nearest'}); }
     else this.dialog.querySelector(`[data-tab="${this.tab}"]`).focus();
   }
+  /** Whether Preferences has the section `id` (Privacy exists only with the desktop's statistics). */
+  hasTab(id) { return this.tabs.some(([tab]) => tab === id); }
   close() {
     this.dialog.close();
     void this.flush();
@@ -522,6 +518,8 @@ export class EditorSettings {
     this.dialog.dataset.tab = this.tab;
     this.content.setAttribute("aria-labelledby", `styk-settings-tab-${this.tab}`);
     this.render();
+    // The statistics' state is read again each time the section is chosen.
+    if (this.tab === 'privacy') void this.privacy.refresh().catch(error => this.showError(error));
     this.content.scrollTop = 0;
   }
   /** Searches Interface, Canvas and Animation together; an empty query shows the selected tab again. */
@@ -677,6 +675,7 @@ export class EditorSettings {
         ['ctrlSpaceDrag', 'ctrlSpaceDragResult'],
         ['shiftSpaceDrag', 'shiftSpaceDragResult'],
       ].map(([gesture, result]) => `<div class="styk-settings-row"><dt ${messageAttributes('settings.gesture.' + gesture, {})}>${escape(say('settings.gesture.' + gesture))}</dt><dd ${messageAttributes('settings.gesture.' + result, {})}>${escape(say('settings.gesture.' + result))}</dd></div>`).join("")}</dl>`, 'settings-pen-gestures');
+    if (tab === 'privacy') return this.privacy?.sectionHTML(this) ?? '';
     if (tab === 'feedback')
       return `<div class="settings-feedback-actions">${[
         ['bug', 'bug', 'draw'],
@@ -782,6 +781,7 @@ export class EditorSettings {
   async destroy() {
     await this.flush();
     this.unsubscribeLocale?.();
+    this.unsubscribePrivacy?.();
     this.compactLayout.removeEventListener('change', this.syncTabOrientation);
     this.dialog.remove();
   }
