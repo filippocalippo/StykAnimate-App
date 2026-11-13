@@ -1,7 +1,8 @@
 //! A fast hasher for maps whose keys the engine makes: small integers (figure ids), addresses of nodes, tile coordinates. It is Fx hashing (the
 //! multiply-and-rotate of rustc's own maps) with a final mix, and it is not safe for a key that can come from a file: someone who knows it can
 //! build keys that all hash alike, and a map of them takes quadratic time. **Strings of a document (object keys, names, ids a file chooses) go
-//! in a standard `HashMap`**, whose SipHash does not have that weakness (`Shape::index` does; a parser that keys by what it reads should too).
+//! in a standard `HashMap`**, whose SipHash does not have that weakness (a parser that keys by what it reads should too), or in a table that
+//! bounds how far a lookup may search and falls back to SipHash when the keys do not fit it (a shape's field index, `value.rs`).
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};

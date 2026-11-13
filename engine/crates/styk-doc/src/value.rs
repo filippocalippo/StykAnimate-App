@@ -102,10 +102,81 @@ impl Blob {
 pub struct Shape {
     keys: Box<[Arc<str>]>,
     /// Built on first lookup for wide objects; narrow ones scan.
-    index: OnceLock<HashMap<Arc<str>, u32>>,
+    index: OnceLock<Index>,
 }
 
 const SCAN_KEYS: usize = 8;
+
+/// Where a wide shape's keys are. Every read of a field looks its key up, so the lookup is a fast hash of the key's text into a table
+/// of slots, each the key's place and the hash's high half, searched from the hash's slot onwards (linear probing). A file chooses
+/// its keys, and keys made to hash alike would make such a table quadratic: the table is only kept when every key lies within
+/// [`PROBES`] slots of where its hash points, so a lookup, found or not, reads at most that many slots. Keys for which it cannot be made
+/// are looked up through SipHash, as every wide shape was before.
+#[derive(Debug)]
+enum Index {
+    /// `(hash >> 32) << 32 | place + 1` per slot, `0` for an empty slot; the length is a power of two.
+    Probed(Box<[u64]>),
+    Sip(HashMap<Arc<str>, u32>),
+}
+
+/// The most slots a key may lie past the one its hash points to; a lookup reads no more.
+const PROBES: usize = 8;
+
+/// The fast hash of a key's text (`fast::FastHasher`, which is not safe on its own for keys a file chooses: see [`Index`]).
+#[inline]
+fn key_hash(key: &str) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = crate::fast::FastHasher::default();
+    hasher.write(key.as_bytes());
+    hasher.finish()
+}
+
+impl Index {
+    fn new(keys: &[Arc<str>]) -> Index {
+        Index::probed(keys).unwrap_or_else(|| Index::Sip(keys.iter().enumerate().map(|(i, k)| (k.clone(), i as u32)).collect()))
+    }
+
+    /// The probed table of `keys`, between two and four slots a key; `None` when a key would lie [`PROBES`] slots or more from its place.
+    fn probed(keys: &[Arc<str>]) -> Option<Index> {
+        if keys.len() >= u32::MAX as usize {
+            return None;
+        }
+        let size = (keys.len() * 2).next_power_of_two();
+        let mask = size - 1;
+        let mut slots = vec![0u64; size];
+        for (place, key) in keys.iter().enumerate() {
+            let hash = key_hash(key);
+            let home = hash as usize & mask;
+            let free = (0..PROBES).map(|step| (home + step) & mask).find(|&slot| slots[slot] == 0)?;
+            slots[free] = (hash & !0xffff_ffff) | (place as u64 + 1);
+        }
+        Some(Index::Probed(slots.into_boxed_slice()))
+    }
+
+    #[inline]
+    fn position(&self, keys: &[Arc<str>], key: &str) -> Option<usize> {
+        match self {
+            Index::Probed(slots) => {
+                let hash = key_hash(key);
+                let (mask, tag) = (slots.len() - 1, hash & !0xffff_ffff);
+                let home = hash as usize & mask;
+                for step in 0..PROBES {
+                    let slot = slots[(home + step) & mask];
+                    if slot == 0 {
+                        return None;
+                    }
+                    // The first key in probe order that is `key`: the first of equal keys, as a scan finds it.
+                    let place = (slot & 0xffff_ffff) as usize - 1;
+                    if slot & !0xffff_ffff == tag && &*keys[place] == key {
+                        return Some(place);
+                    }
+                }
+                None
+            }
+            Index::Sip(index) => index.get(key).map(|&i| i as usize),
+        }
+    }
+}
 
 impl Shape {
     pub fn new(keys: impl Into<Box<[Arc<str>]>>) -> Arc<Shape> {
@@ -121,14 +192,12 @@ impl Shape {
         &self.keys
     }
 
+    #[inline]
     pub fn position(&self, key: &str) -> Option<usize> {
         if self.keys.len() <= SCAN_KEYS {
             return self.keys.iter().position(|k| &**k == key);
         }
-        self.index
-            .get_or_init(|| self.keys.iter().enumerate().map(|(i, k)| (k.clone(), i as u32)).collect())
-            .get(key)
-            .map(|&i| i as usize)
+        self.index.get_or_init(|| Index::new(&self.keys)).position(&self.keys, key)
     }
 }
 
@@ -789,6 +858,35 @@ mod tests {
         let started = std::time::Instant::now();
         assert!(keys.iter().enumerate().all(|(at, key)| shape.position(key) == Some(at)));
         assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+        // They cannot lie close to where the fast hash points: the shape looks them up through SipHash.
+        assert!(matches!(shape.index.get(), Some(Index::Sip(_))));
+        // Nine of them are enough to leave the fast table, and a key they do not hold is not found.
+        let few = Shape::new(keys[..9].to_vec());
+        assert!(keys[..9].iter().enumerate().all(|(at, key)| few.position(key) == Some(at)));
+        assert!(matches!(few.index.get(), Some(Index::Sip(_))));
+        assert_eq!(few.position(&keys[9]), None);
+    }
+
+    #[test]
+    fn a_wide_shape_finds_each_key_where_a_scan_finds_it() {
+        // Keys as documents have them: field names, numbered ones, integer keys, long ones sharing a prefix, the empty key, non-ASCII ones.
+        let mut names: Vec<String> = ["object_slot", "unique_id", "figure_type_id", "root_x", "root_y", "scale", "color_override_raw", "field28", "angles",
+            "len_flag", "lengths", "bend_flag", "bends", "join", "", "é", "日本", "_stykIK"].iter().map(|key| key.to_string()).collect();
+        names.extend((0..300).map(|n| n.to_string()));
+        names.extend((0..300).map(|n| format!("segment_{n}_color_with_a_long_common_prefix_and_suffix")));
+        let lookups: Vec<String> = names.iter().cloned().chain(["missing", "object_slot2", "unique_i", "0x", "-1", "segment_300_color_with_a_long_common_prefix_and_suffix"].map(String::from)).collect();
+        let mut probed = 0;
+        for width in [9, 10, 16, 17, 31, 64, 100, 257, names.len()] {
+            for start in [0, 5, 17] {
+                let keys: Vec<Arc<str>> = names.iter().cycle().skip(start).take(width).map(|key| Arc::from(key.as_str())).collect();
+                let shape = Shape::new(keys.clone());
+                for key in &lookups {
+                    assert_eq!(shape.position(key), keys.iter().position(|k| &**k == key.as_str()), "{key:?} in {width} keys from {start}");
+                }
+                probed += usize::from(matches!(shape.index.get(), Some(Index::Probed(_))));
+            }
+        }
+        assert!(probed > 0, "the fast table holds keys like these");
     }
 
     #[test]

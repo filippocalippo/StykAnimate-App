@@ -694,6 +694,36 @@ pub fn to_string(value: &Value) -> String {
     unsafe { String::from_utf8_unchecked(out) }
 }
 
+/// Whether `a` and `b` are written as the same text (`to_string(a) == to_string(b)`), found without writing either: a shared node is the
+/// same text, and the first difference ends the comparison. Numbers are the same text when they are equal (`0` and `-0` are both `0`) or
+/// both not finite (`null`, as a null is); strings and keys by their text; objects key by key in their order.
+pub fn same_text(a: &Value, b: &Value) -> bool {
+    /// The text of two numbers: equal finite values are written alike, and every number that is not finite is written `null`.
+    fn numbers(x: f64, y: f64) -> bool {
+        if x.is_finite() && y.is_finite() { x == y } else { !x.is_finite() && !y.is_finite() }
+    }
+    /// A number against an element of an ordinary array.
+    fn number(x: f64, y: &Value) -> bool {
+        match y {
+            Value::Num(y) => numbers(x, *y),
+            Value::Null => !x.is_finite(),
+            _ => false,
+        }
+    }
+    match (a, b) {
+        (Value::Null, Value::Null) => true,
+        (Value::Num(x), _) => number(*x, b),
+        (Value::Null, Value::Num(y)) => !y.is_finite(),
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Str(_) | Value::Blob(_), Value::Str(_) | Value::Blob(_)) => a == b,
+        (Value::Nums(x), Value::Nums(y)) => Arc::ptr_eq(x, y) || (x.len() == y.len() && x.iter().zip(y.iter()).all(|(x, y)| numbers(x, y))),
+        (Value::Nums(x), Value::Arr(items)) | (Value::Arr(items), Value::Nums(x)) => x.len() == items.len() && x.iter().zip(items.iter()).all(|(x, y)| number(x, y)),
+        (Value::Arr(x), Value::Arr(y)) => Arc::ptr_eq(x, y) || (x.len() == y.len() && x.iter().zip(y.iter()).all(|(x, y)| same_text(x, y))),
+        (Value::Obj(x), Value::Obj(y)) => Arc::ptr_eq(x, y) || (x.len() == y.len() && x.iter().zip(y.iter()).all(|((kx, x), (ky, y))| kx == ky && same_text(x, y))),
+        _ => false,
+    }
+}
+
 /// Nodes looked at between two questions to `check` in [`read_back`].
 const READ_BACK_STRIDE: usize = 4096;
 
@@ -975,6 +1005,32 @@ pub fn base64_strict(text: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn values_are_the_same_text_exactly_when_they_write_the_same_text() {
+        use crate::{Blob, Nums, Value};
+        use std::sync::Arc;
+        let packed = |values: &[f64]| Value::Nums(Arc::new(Nums::F64(values.to_vec().into())));
+        let object = |members: &[(&str, Value)]| Value::object(members.iter().map(|(key, value)| (Arc::from(*key), value.clone())).collect());
+        let blob = Value::Blob(Arc::new(Blob { prefix: Arc::from("data:x;base64,"), bytes: Arc::from(&b"hi!"[..]) }));
+        let values = vec![
+            Value::Null, Value::Bool(true), Value::Bool(false), Value::Num(0.0), Value::Num(-0.0), Value::Num(1.0), Value::Num(0.1 + 0.2), Value::Num(0.3),
+            Value::Num(f64::NAN), Value::Num(f64::INFINITY), Value::Num(f64::NEG_INFINITY), Value::Num(1e21), Value::Num(1e-7),
+            Value::str(""), Value::str("0"), Value::str("null"), Value::str("data:x;base64,aGkh"), Value::str("é"), blob,
+            packed(&[]), packed(&[1.0, 2.0]), packed(&[1.0, -0.0]), packed(&[1.0, 0.0]), packed(&[1.0, f64::NAN]), packed(&[1.0, f64::INFINITY]), Value::nums(&[1.0, 2.0]),
+            Value::array(vec![Value::Num(1.0), Value::Null]), Value::array(vec![Value::Num(1.0), Value::str("2")]), Value::array(vec![Value::Num(1.0), Value::Num(2.0), Value::Null]),
+            Value::array(vec![Value::Null, Value::Num(1.0)]), Value::array(vec![]),
+            object(&[]), object(&[("a", Value::Num(1.0)), ("b", Value::Null)]), object(&[("b", Value::Null), ("a", Value::Num(1.0))]),
+            object(&[("a", Value::Num(1.0)), ("b", Value::Num(f64::NAN))]), object(&[("a", Value::Num(-0.0)), ("b", Value::Num(f64::NEG_INFINITY))]),
+            object(&[("a", Value::Num(1.0))]), object(&[("a", Value::Num(1.0)), ("c", Value::Null)]), object(&[("2", Value::Null), ("10", packed(&[1.0, f64::NAN]))]),
+            object(&[("x", object(&[("y", Value::array(vec![Value::Num(1.0), Value::Null]))]))]), object(&[("x", object(&[("y", packed(&[1.0, f64::NAN]))]))]),
+        ];
+        for a in &values {
+            for b in &values {
+                assert_eq!(super::same_text(a, b), to_string(a) == to_string(b), "{} against {}", to_string(a), to_string(b));
+            }
+        }
+    }
+
     #[test]
     fn the_weight_of_a_number_is_the_length_of_its_text() {
         use crate::{Nums, Value};
