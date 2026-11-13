@@ -512,3 +512,84 @@ fn clearing_tiles_carry_refusal_provenance_to_complete_frame_presenters() {
     assert!(batch.images[0].rgba.iter().all(|&byte| byte==0));
     assert!(engine.take_picture_batch(1).refused.is_empty());
 }
+
+/// A drawing tile of the root at `(x, y)` of the scene, `side` units square, sampling the slot at texel `(u, v)` of `layer` and, with
+/// `parent`, the paint row of its parent tile.
+fn tile(x: f32, y: f32, side: f32, layer: u32, u: u32, v: u32, parent: Option<u32>) -> styk_draw::Prim {
+    let page = PAGE as f32;
+    styk_draw::Prim { kind: K_IMAGE | styk_draw::F_DRAWING, group: 0, color: 0xffff_ffff, paint: parent.unwrap_or(styk_draw::NO_PAINT), a: [x, y, side, 0.0], b: [0.0, side, layer as f32, 0.0], c: [u as f32 / page, v as f32 / page, (u + 64) as f32 / page, (v + 64) as f32 / page] }
+}
+
+/// The part a frame differs in: the quads of the drawing tiles whose slot or parent slot was written since the frame on show, and the
+/// drawing tiles the list changed in, before and after, through the view; the frame whole when something else changed.
+#[test]
+fn a_frame_differs_in_the_tiles_written_and_changed_since_the_frame_on_show() {
+    // Two units a pixel, the scene's origin at (10, 20).
+    let matrix = [2.0, 0.0, 0.0, 2.0, 10.0, 20.0];
+    let background = styk_draw::Prim { kind: styk_draw::K_FILL_VIEW, ..Default::default() };
+    let capsule = styk_draw::Prim { kind: styk_draw::K_CAPSULE, a: [0.0, 0.0, 400.0, 300.0], ..Default::default() };
+    let list = DrawList {
+        prims: vec![background, capsule, tile(0.0, 0.0, 32.0, 3, 2, 2, None), tile(32.0, 0.0, 32.0, 3, 70, 2, Some(0)), tile(100.0, 100.0, 64.0, 3, 138, 2, None)],
+        paints: vec![[3.0, 206.0, 2.0, 1.0]],
+        ..Default::default()
+    };
+    let mut written = LiveWrites::default();
+    let mut runs = DrawingRuns::default();
+    assert_eq!(written.part(&list, None, runs.of(&Arc::new(list.clone()), None), matrix), Some([0.0; 4]), "nothing changed: an empty part");
+    // The first tile's slot: its quad, (0, 0)–(32, 32) in the scene, is (10, 20)–(74, 84) on the target, with the margin.
+    written.mark(3, 2, 2);
+    assert_eq!(written.part(&list, None, runs.of(&Arc::new(list.clone()), None), matrix), Some([8.0, 18.0, 76.0, 86.0]));
+    // The second tile's parent: the second tile, beside the first.
+    written.clear();
+    written.mark(3, 206, 2);
+    assert_eq!(written.part(&list, None, runs.of(&Arc::new(list.clone()), None), matrix), Some([72.0, 18.0, 140.0, 86.0]));
+    // A tile that moved: where it was and where it is.
+    written.clear();
+    let mut moved = list.clone();
+    moved.prims[4] = tile(120.0, 100.0, 64.0, 3, 138, 2, None);
+    assert_eq!(written.part(&moved, Some((&list, &[(4, 5)])), runs.of(&Arc::new(moved.clone()), None), matrix), Some([208.0, 218.0, 380.0, 350.0]));
+    // A tile that became room: where it was.
+    let mut gone = list.clone();
+    gone.prims[4] = styk_eval::drawlist::room_quad(&list.prims[4]);
+    assert_eq!(written.part(&gone, Some((&list, &[(4, 5)])), runs.of(&Arc::new(gone.clone()), None), matrix), Some([208.0, 218.0, 340.0, 350.0]));
+    // A tile of a level the view does not show draws nothing, moved or written: it adds nothing (this view shows a level-3 tile 64 units
+    // square at two pixels a texel, where it shows level 0).
+    let mut upper = list.clone();
+    upper.prims[4].b[3] = 3.0;
+    let mut upper_moved = upper.clone();
+    upper_moved.prims[4].a[0] += 500.0;
+    assert_eq!(written.part(&upper_moved, Some((&upper, &[(4, 5)])), runs.of(&Arc::new(upper_moved.clone()), None), matrix), Some([0.0; 4]));
+    // Anything else that changed can reach anywhere: the frame is drawn whole.
+    let mut other = list.clone();
+    other.prims[1].a[2] += 1.0;
+    assert_eq!(written.part(&other, Some((&list, &[(1, 2)])), runs.of(&Arc::new(other.clone()), None), matrix), None);
+    let mut nested = list.clone();
+    nested.prims[2].group = 1;
+    written.mark(3, 2, 2);
+    assert_eq!(written.part(&nested, None, runs.of(&Arc::new(nested.clone()), None), matrix), None, "a tile in an isolation group is drawn through its group");
+    let longer = DrawList { prims: [list.prims.clone(), vec![background]].concat(), ..list.clone() };
+    assert_eq!(written.part(&longer, Some((&list, &[])), runs.of(&Arc::new(longer.clone()), None), matrix), None, "a list laid out anew");
+}
+
+/// The runs of a list's drawing tiles are kept for a list encoded over the one they were found in, and read again for any other.
+#[test]
+fn drawing_runs_are_kept_while_lists_keep_their_layout() {
+    let capsule = styk_draw::Prim { kind: styk_draw::K_CAPSULE, ..Default::default() };
+    let first = Arc::new(DrawList { prims: vec![capsule, tile(0.0, 0.0, 32.0, 3, 2, 2, None), tile(32.0, 0.0, 32.0, 3, 70, 2, None), capsule, tile(0.0, 32.0, 32.0, 3, 138, 2, None)], ..Default::default() });
+    let mut runs = DrawingRuns::default();
+    assert_eq!(runs.of(&first, None), &[(1, 3), (4, 5)]);
+    // Encoded over it, a tile changed: the same runs, without reading the list.
+    let mut next = (*first).clone();
+    next.prims[2].a[0] += 1.0;
+    let next = Arc::new(next);
+    assert_eq!(runs.of(&next, Some((&first, &[(2, 3)]))), &[(1, 3), (4, 5)], "kept while the change lies in them");
+    // A change outside them (a capsule became a tile), a list laid out anew, or over a list they were not found in: read again.
+    let mut third = (*next).clone();
+    third.prims[0] = tile(0.0, 0.0, 1.0, 3, 2, 2, None);
+    let third = Arc::new(third);
+    assert_eq!(runs.of(&third, Some((&next, &[(0, 1)]))), &[(0, 3), (4, 5)]);
+    let other = Arc::new((*first).clone());
+    assert_eq!(runs.of(&other, None), &[(1, 3), (4, 5)]);
+    let unrelated = Arc::new(DrawList { prims: vec![capsule; 5], ..Default::default() });
+    assert_eq!(runs.of(&unrelated, Some((&first, &[]))), &[] as &[(u32, u32)], "over a list they were not found in");
+}

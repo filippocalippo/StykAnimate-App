@@ -148,3 +148,154 @@ fn canvas_cel_sampling_matches_the_gpu() {
         }
     }
 }
+
+/// `list` with `count` quads of a live cel's room (`styk_eval::drawlist::room_quad`) after its tiles, as the encoder pads a live cel.
+fn with_room(mut list: DrawList, count: usize) -> DrawList {
+    let at = list.prims.iter().position(|p| p.kind & 255 == K_COMPOSITE).unwrap_or(list.prims.len());
+    let room = styk_eval::drawlist::room_quad(&list.prims[0]);
+    assert!(styk_eval::drawlist::is_room_quad(&room));
+    list.prims.splice(at..at, std::iter::repeat_n(room, count));
+    for pass in &mut list.passes {
+        if pass.start as usize >= at { pass.start += count as u32; }
+        if pass.end as usize >= at { pass.end += count as u32; }
+    }
+    list
+}
+
+/// The room a live cel's block keeps for the tiles a stroke adds draws nothing: the frame with it is the frame without it, byte for
+/// byte, on the CPU and on the GPU, at every level a view shows, in Canvas sampling and direct, smooth and crisp.
+#[test]
+fn a_live_cels_room_draws_nothing() {
+    let (assets, decoded, images) = images();
+    let cases = [(1.0, false, false), (1.3, true, true), (0.71, false, true), (0.5, false, false), (0.3, true, false), (2.6, false, false)];
+    for edges in [Edges::Smooth, Edges::Crisp] {
+        for canvas in [false, true] {
+            for &(scale, rotated, tint) in &cases {
+                let (plain, padded) = (list(&assets, canvas, tint), with_room(list(&assets, canvas, tint), 59));
+                let view = view(scale, rotated);
+                let what = format!("Canvas {canvas}, scale {scale}, rotated {rotated}, tint {tint}, {edges:?}");
+                assert!(styk_raster::render(&plain, &images, &view, SIZE, edges).pixels == styk_raster::render(&padded, &images, &view, SIZE, edges).pixels, "CPU, {what}");
+            }
+        }
+    }
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+        eprintln!("skipped on the GPU: no adapter");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+    for edges in [Edges::Smooth, Edges::Crisp] {
+        let mut renderer = Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, edges);
+        renderer.prepare_sprites(&assets);
+        renderer.upload_images(&assets, &decoded);
+        for canvas in [false, true] {
+            for &(scale, rotated, tint) in &cases {
+                let view = view(scale, rotated);
+                let mut frame = |list: DrawList| {
+                    renderer.set_list(&Arc::new(list));
+                    let mut encoder = device.create_command_encoder(&Default::default());
+                    renderer.render(&mut encoder, &view, SIZE);
+                    queue.submit([encoder.finish()]);
+                    read_frame(&device, &queue, renderer.frame_texture().expect("a frame")).2
+                };
+                let (plain, padded) = (frame(list(&assets, canvas, tint)), frame(with_room(list(&assets, canvas, tint), 59)));
+                assert!(plain == padded, "GPU, Canvas {canvas}, scale {scale}, rotated {rotated}, tint {tint}, {edges:?}");
+            }
+        }
+    }
+}
+
+/// The bounds in output pixels of a drawing tile's quad under `view`, with a margin of two pixels.
+fn quad_bounds(p: &Prim, view: &ViewParams) -> [f64; 4] {
+    let m = view.matrix;
+    let (o, u, v) = ([p.a[0] as f64, p.a[1] as f64], [p.a[2] as f64, p.a[3] as f64], [p.b[0] as f64, p.b[1] as f64]);
+    let corners = [o, [o[0] + u[0], o[1] + u[1]], [o[0] + v[0], o[1] + v[1]], [o[0] + u[0] + v[0], o[1] + u[1] + v[1]]].map(|c| [m[0] * c[0] + m[2] * c[1] + m[4], m[1] * c[0] + m[3] * c[1] + m[5]]);
+    let (xs, ys) = (corners.map(|c| c[0]), corners.map(|c| c[1]));
+    [xs.iter().copied().fold(f64::INFINITY, f64::min) - 2.0, ys.iter().copied().fold(f64::INFINITY, f64::min) - 2.0, xs.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 2.0, ys.iter().copied().fold(f64::NEG_INFINITY, f64::max) + 2.0]
+}
+
+/// A frame that differs from the one before it in a part (a stroke's tiles) is drawn in that part alone over the kept frame, and is the
+/// frame drawn whole, byte for byte, with four samples a pixel and with one; a frame of another view, or over pictures uploaded since,
+/// is drawn whole.
+#[test]
+fn a_frame_drawn_in_a_part_is_the_frame_drawn_whole() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+        eprintln!("skipped: no adapter");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+    let (assets, decoded, _) = images();
+    // With the simpler shaders a software rasterizer draws with, a part is drawn from the primitives that can reach it alone.
+    for (edges, multisampled, software) in [(Edges::Smooth, true, false), (Edges::Smooth, false, false), (Edges::Crisp, false, false), (Edges::Smooth, true, true), (Edges::Crisp, false, true)] {
+        let fresh = || {
+            let mut renderer = Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, edges);
+            renderer.set_multisampled(multisampled);
+            renderer.set_shading_runs(software);
+            renderer.prepare_sprites(&assets);
+            renderer.upload_images(&assets, &decoded);
+            renderer
+        };
+        let draw = |renderer: &mut Renderer, list: &Arc<DrawList>, view: &ViewParams, within: Option<[f64; 4]>| {
+            if let Some(rect) = within {
+                renderer.redraw_within(rect);
+            }
+            renderer.set_list(list);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            renderer.render(&mut encoder, view, SIZE);
+            queue.submit([encoder.finish()]);
+            (read_frame(&device, &queue, renderer.frame_texture().expect("a frame")).2, renderer.drew_part())
+        };
+        for (scale, rotated) in [(1.0, false), (1.3, true), (0.71, false)] {
+            let what = format!("{edges:?}, multisampled {multisampled}, software {software}, scale {scale}, rotated {rotated}");
+            let view = view(scale, rotated);
+            // The cel's tiles over segments: one across the part, one whose fringe alone reaches it, one far from it.
+            let with_segments = || {
+                let mut list = list(&assets, false, false);
+                let segment = |a: [f32; 4], hw: f32| Prim { kind: styk_draw::K_CAPSULE, group: 0, color: 0xff30_60c0, paint: NO_PAINT, a, b: [hw, 0.0, 0.0, 0.0], c: [0.0; 4] };
+                list.prims.splice(0..0, [segment([-20.0, 20.0, 150.0, 40.0], 3.0), segment([100.0, -3.4, 100.0, -40.0], 1.0), segment([150.0, 150.0, 170.0, 160.0], 2.0)]);
+                for pass in &mut list.passes { pass.end += 3; }
+                list
+            };
+            let before = Arc::new(with_segments());
+            // A tile moves by a few units and another goes (its quad becomes the room of a live cel's block): what a stroke frame changes.
+            let mut changed = with_segments();
+            changed.prims[4].a[0] += 3.25;
+            changed.prims[4].a[1] -= 1.5;
+            changed.prims[5] = styk_eval::drawlist::room_quad(&changed.prims[5]);
+            let after = Arc::new(changed);
+            let part = [4usize, 5].iter().flat_map(|&i| [quad_bounds(&before.prims[i], &view), quad_bounds(&after.prims[i], &view)]).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
+            let whole = draw(&mut fresh(), &after, &view, None).0;
+
+            let mut kept = fresh();
+            kept.set_keep_frames(true);
+            draw(&mut kept, &before, &view, None);
+            let (drawn, in_part) = draw(&mut kept, &after, &view, Some(part));
+            assert!(in_part, "{what}: the frame is drawn in the part");
+            assert!(drawn == whole, "{what}: the frame drawn in a part is the frame drawn whole");
+            let (again, in_part) = draw(&mut kept, &after, &view, Some(part));
+            assert!(in_part && again == whole, "{what}: drawn in the part again, the same frame");
+
+            // Another view: the kept frame is not what it would be drawn over.
+            let mut other = fresh();
+            other.set_keep_frames(true);
+            draw(&mut other, &before, &self::view(scale * 1.01, rotated), None);
+            let (drawn, in_part) = draw(&mut other, &after, &view, Some(part));
+            assert!(!in_part && drawn == whole, "{what}: after another view the frame is drawn whole");
+
+            // Pictures uploaded since the kept frame: drawn whole.
+            let mut uploaded = fresh();
+            uploaded.set_keep_frames(true);
+            draw(&mut uploaded, &before, &view, None);
+            uploaded.upload_images(&assets, &decoded);
+            let (drawn, in_part) = draw(&mut uploaded, &after, &view, Some(part));
+            assert!(!in_part && drawn == whole, "{what}: over pictures uploaded since, the frame is drawn whole");
+
+            // Not kept: drawn whole.
+            let mut plain = fresh();
+            draw(&mut plain, &before, &view, None);
+            let (drawn, in_part) = draw(&mut plain, &after, &view, Some(part));
+            assert!(!in_part && drawn == whole, "{what}: a renderer that keeps no frame draws it whole");
+        }
+    }
+}

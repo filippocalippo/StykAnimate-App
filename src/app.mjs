@@ -32,7 +32,7 @@ import { Editor } from "./editor.mjs";
 import { worldToScreen, screenToWorld, objectBounds } from "./renderer-geometry.mjs";
 import { createStage, startStage } from "./engine/engine-stage.mjs";
 import { createStagePlayback } from "./engine/engine-playback.mjs";
-import { createScrubPreview, createSeekCosts } from "./engine/engine-scrub.mjs";
+import { createScrubPreview, createSeekCosts, FIRST_STEP_MS } from "./engine/engine-scrub.mjs";
 import { installEngineOwner } from "./engine/engine-owner.mjs";
 import { loadEngine } from "./engine/engine.mjs";
 import { useEngine, prepareOpen } from "./engine/engine-open.mjs";
@@ -160,7 +160,7 @@ import { TweenerControls } from "./tweener-controls.mjs";
 import { onFontsReady } from "./ui/font-loading.mjs";
 import { createOverlayManager } from "./ui/overlay-manager.mjs";
 import { createInvalidator } from "./ui/ui-invalidation.mjs";
-import { setAttr, setHidden, setMarkup, setText } from "./ui/dom-write.mjs";
+import { setAttr, setCanvasSize, setHidden, setMarkup, setProp, setText } from "./ui/dom-write.mjs";
 import { installMenuBar, menuFor, openMenu } from "./ui/ui-menu.mjs";
 import { createToasts } from "./ui/ui-toast.mjs";
 import { createStageHead } from "./shell/stage-head.mjs";
@@ -615,8 +615,8 @@ const scrubPreview = createScrubPreview({
   playback, total: () => editor.totalTicks, engine: () => state.renderer?.engineSide?.engine ?? null,
   prepare: (ticks, playhead) => { syncPlayback(); void playback.prepareRange(ticks, {playhead}).catch(error => { if (error.name !== "AbortError") fail(error); }); },
 });
-/** Whether steering the playhead shows prepared frames. The prepared frames have the scene's background: Build's canvas colour keeps the editing scrub. */
-const scrubDear = () => seekCosts.dear(editor.report) && builderBackgroundColor(state.settings, state) === undefined;
+/** Whether steering the playhead shows prepared frames (from a press that starts a run, `first`, only where its exact frame is far dearer: FIRST_STEP_MS). The prepared frames have the scene's background: Build's canvas colour keeps the editing scrub. */
+const scrubDear = ({first = false} = {}) => seekCosts.dear(editor.report, first ? FIRST_STEP_MS : undefined) && builderBackgroundColor(state.settings, state) === undefined;
 function scrubStarted({steps = false} = {}) {
   // Decided once for the drag (or a run of frame steps). A selected layer's figures are found in the frame of the tick it ends on.
   if (scrubDear()) { scrubPreview.begin(editor.tick, {steps}); editor.holdSheetFollow(true); }
@@ -1148,7 +1148,7 @@ function nudgePathFalloff(step) {
 /** The canvas tooltip for the hovered trail point names both gestures. */
 function syncPathTooltip() {
   const hover = state.hoverPathPoint;
-  if (!hover) { clearTranslation(overlay, 'title'); overlay.title = ""; return; }
+  if (!hover) { clearTranslation(overlay, 'title'); setProp(overlay, "title", ""); return; }
   const frame = {messageKey:hover.tick===editor.tick?'exportSheet.currentFrame':'filmstrip.card',messageParams:{frame:hover.tick+1}};
   localizedAttribute(overlay, "title", (editor.motionPathFalloff() ? 'app.frameDragToReshapeMotionpathfalloffradiusFramesOfTheArc' : 'app.frameDragToReposeValue1RightDragToReshape'), (editor.motionPathFalloff() ? {frame, motionPathFalloffRadius: state.settings.motionPathFalloffRadius} : {frame, value1: hover.tick === editor.tick ? "" : {messageKey:'app.withoutLeavingThisFrameDoubleClickToGo'}}));
 }
@@ -1254,8 +1254,8 @@ function resize() {
   flushPoseMove();
   const r = viewport.getBoundingClientRect(),
     d = window.devicePixelRatio || 1;
-  overlay.width = Math.round(r.width * d);
-  overlay.height = Math.round(r.height * d);
+  // The overlay repaints in full after a resize; a size it already has is not written (a write clears and reallocates it).
+  setCanvasSize(overlay, Math.round(r.width * d), Math.round(r.height * d));
   state.renderer?.resize(r.width, r.height, d * previewRenderScale());
   timelineUI?.resize();
   if (isFittedView()) {
@@ -1634,7 +1634,8 @@ function loop(now) {
     } else if (packet && (packet.cameraEnabled ?? true) === !state.scrubbing) {
       preparedPresented = state.renderer.renderPrepared(packet.key, {view: state.view, cameraEnabled: !state.scrubbing}) === true;
       if (preparedPresented) {
-        if (playbackAwaitsDraw) playbackMetrics.present(performance.now());
+        // A frame drawn on the engine's workers counts when its picture is shown (onPicture below).
+        if (playbackAwaitsDraw && !state.renderer.presentsLater) playbackMetrics.present(performance.now());
         playbackAwaitsDraw = false;
         ctx.clearRect(0, 0, overlay.width, overlay.height);
       } else if (state.playing) state.dirtyRender = true; // The picture on show stays and the frame is drawn on the next animation frame.
@@ -1644,16 +1645,18 @@ function loop(now) {
       const editStarted = performance.now();
       const drawingPreview=drawingController?.renderPreview;
       // The geometry the overlay reads. The engine draws from its session, so the picture does not wait for it: it is read after the picture.
-      const heldGeometry = drawingPreview?.geometry || motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
+      // A drawing's first stroke reads its preview's whole geometry only when the overlay needs it (a dense frame's is a read of every figure).
+      const heldGeometry = drawingPreview ? null : motionDisplay()?.geometry || state.drag?.geometry || keyboardHandleGesture?.geometry;
       const source = drawingPreview ? null : editor._shown?.source(Boolean(motionDisplay())) ?? null;
       editingDrawn = state.renderer.render({
         tick: editor.tick,
         vfxEnabled: state.vfxEnabled,
         report: drawingPreview?.report??editor.report,
         documentReport: editor.report,
-        // The frame as poses is read only by a draw that does not take it from the session.
+        // The frame as poses is read only by a draw that does not take it from the session. The preview's frame is one object for the
+        // whole stroke: the stage sends it once.
         get frame() { return drawingPreview?.frame ?? currentFrame(); },
-        geometry: source ? undefined : heldGeometry ?? editor.geometry,
+        geometry: source || drawingPreview ? undefined : heldGeometry ?? editor.geometry,
         // The engine draws the frame its session shows; the interface's own frame (a drawing's first stroke) crosses as poses.
         source,
         view: state.view,
@@ -1670,9 +1673,8 @@ function loop(now) {
       // directions before yielding; cancellation may leave no further RAF.
       syncBackgroundInteraction(viewChanging);
       // What is presented is what was drawn: a frame the stage could not draw yet leaves the previous picture on show.
-      if (editingDrawn) state.lastEditingPresentation = {tick:editor.tick,revision:editor.revision,at:performance.now(),
-        sequence:(state.lastEditingPresentation?.sequence ?? 0)+1};
-      overlayRender(() => heldGeometry ?? editor.geometry);
+      if (editingDrawn && !state.renderer.presentsLater) presentedEditing(editor.tick, editor.revision, performance.now());
+      overlayRender(() => drawingPreview?.geometry ?? heldGeometry ?? editor.geometry);
       drawingController?.overlayDraw(ctx);
       // What a paint at a new tick costs the interface decides how the next playhead drag of this document scrubs.
       if (editingDrawn && !drawingPreview) seekCosts.record(editor.report, editor.tick, performance.now() - editStarted);
@@ -5906,6 +5908,15 @@ async function init() {
     ready: editorReady,
     touch: touchMode,
   });
+  // A fitted view follows the stage's clearance as it follows its size: a solve can change the clearance without
+  // resizing #viewport (the tool rail going from two columns to one), which no resize reports.
+  let clearance = Object.values(shell.stageInsets()).join();
+  shell.onSolve(() => {
+    const next = Object.values(shell.stageInsets()).join();
+    if (next === clearance) return;
+    clearance = next;
+    if (isFittedView()) fit();
+  });
   workspaceLayout = shell.workspace;
   window.styk.workspace = workspaceLayout;
   window.styk.shell = shell;
@@ -6218,9 +6229,12 @@ function recoverCanvas(refreshGpuBudget) {
   })().finally(() => {rendererRecovery = null;});
   return rendererRecovery;
 }
+/** The stage shows the edit frame of `tick` at `revision` (what the developer tools wait for). */
+function presentedEditing(tick, revision, at) { state.lastEditingPresentation = {tick, revision, at, sequence: (state.lastEditingPresentation?.sequence ?? 0) + 1}; }
 function rendererOptions() {
   return {
-    onInvalidate: requestRender,
+    // A frame drawn on the engine's workers is presented when its picture is shown, not when it was asked for.
+    onInvalidate: requestRender, onPicture: (prepared, at, frame) => { if (!prepared) presentedEditing(frame.tick, frame.revision, at); else if (state.playing) playbackMetrics.present(at); },
     onMonitorPicture: requestMonitorRender,
     // A frame the engine refused: the previous picture stays and the document's next revision is tried again.
     onError: error => { stats.problem(error); status(error, true); },

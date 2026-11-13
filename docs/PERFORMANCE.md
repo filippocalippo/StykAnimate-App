@@ -124,7 +124,10 @@ truth, and compare only runs taken under similar conditions.
   machine, and a slow app shows as fewer, later frames.
 - **Startup** is the launch itself: measured apart, three fresh launches per environment, on a bundle built from this
   checkout as a packaged app starts (`perf/lib/startup.mjs`; [APP-START.md](APP-START.md)), with the app's own steps as
-  phases. Every other scenario runs from the sources, where a profile can name the module a function is in.
+  phases. Every other scenario runs from the sources, where a profile can name the module a function is in. A run that
+  names its scenarios measures no startup unless it names `app.start` (or `startup`): `--scenario app.start` alone
+  measures only the launches (`--passes` of them, at least three) and opens no workload. `show <run> app.start` prints
+  the first launch's steps and the spans until ready (the engine's start, the graphics calls, the long tasks).
 
 ### How a run reaches the app
 
@@ -164,6 +167,15 @@ pan that is the whole wait. Where the picture is made off the interface thread a
 dense scene), a scenario reads the capture's `shown` series instead: when the stage drew which tick, against when
 each input happened (`perf/lib/latency.mjs`).
 
+**Pictures shown after their frame** (`picture.felt`, `picture.input.p95`). Where the stage draws on the engine's workers (no
+graphics card, [rendering.md](engine/rendering.md#the-stage-on-the-processor)), the frame that asks for a picture ends before the
+picture is there, so the frame time and the input delay say how free the interface thread was, not what the person saw. A picture
+shown later has a span of its own (`stage picture`, from the draw that asked for it to its showing), and the capture says, for the
+inputs whose frame asked for a picture: how long each picture stood still while the hand had moved, weighted as `frame.felt` is
+(`picture.felt`), and how long each input waited for the first picture asked for after it (`picture.input.p95`)
+(`src/devtools/capture.mjs` `pictureTimes`). A gesture is judged on them too, with the frame's limits; a capture whose pictures are
+drawn in their frame has neither, so its grade is what it was.
+
 **Spans**: named stretches of the interface thread, nested: every input handler (`on pointermove (canvas)`), every
 animation-frame callback, the `paint`, the `stage draw`, every `interface update` by surface, every
 `edit session call` by method, the app's start as phases. [DEVTOOLS.md](DEVTOOLS.md) lists where each is recorded.
@@ -184,16 +196,27 @@ method: how often, how long in all, the worst. It answers "what did the interfac
 
 **Memory**: after every scenario, the memory of the page, the graphics process and the browser process, the engine's
 memory in use, its peak and what it has reserved, the JavaScript heap and the GPU memory the stage holds (its
-buffers, render targets and picture pages).
+buffers, render targets and picture pages). Each checkpoint also holds `owners`, the page's process by owner
+([DEVTOOLS.md](DEVTOOLS.md#memory-by-owner)), in megabytes: the engine memory, the interface thread's heap and array
+buffers (by the owners that registered them, and the rest), the canvases and bitmaps kept in the page, every worker's heap
+and array buffers grouped by name (the runner reads each thread through the inspector, `threadHeaps` in `perf/lib/run.mjs`),
+and what is left `unexplained`. `npm run perf -- memory <run>` prints the checkpoints with that split. A checkpoint is
+taken as the app is, garbage included: on the stress scene a brush stroke leaves 300 to 400 MB of JavaScript heap and tens of
+megabytes of array buffers waiting for a collection, which the page's total counts (a full collection took one page from 1,456 to
+1,009 MB). `run --collect-garbage` collects on every thread before each checkpoint, so the numbers are what is held; it changes
+when the app collects, so compare such a run only with another taken the same way.
 
 ### Layers
 
 `perf/lib/layers.mjs` is the one table that says which part of the app a function belongs to: a JavaScript module by
 its path, a WebAssembly function by its Rust crate, V8's own markers. Groups: `interface` (the timeline, the canvas
 overlay and gestures, the inspector, the shell, the editor's read view, the engine's interface modules, the binding
-glue, …), `engine` (editing commands, evaluation and draw lists, the GPU renderer, the CPU rasterizer, the document
-store, formats, the scheduler, allocation and copying, JSON, …), `browser` (garbage collection, the browser's native
+glue, …), `engine` (editing commands, evaluation and draw lists, math, the GPU renderer, the CPU rasterizer, the
+document store, formats, the scheduler, allocation and copying, JSON, …), `browser` (garbage collection, the browser's native
 work under a call, built-ins) and `tools` (the measurement itself). A thread parked waiting for work counts as idle.
+Math is `styk_math`, the `libm` crate and the compiler's builtins of the platform's `sin`, `cos`, `atan2` on
+WebAssembly (`compiler_builtins::math`): until 2026-11-13 those builtins counted as allocation and copying, with the
+memory functions of the same crate, which put a dense frame's trigonometry in the allocator's share.
 A new module that belongs to an existing layer needs a row there only when its name does not already match.
 
 ### Metrics and grades

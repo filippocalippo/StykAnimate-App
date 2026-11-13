@@ -1,4 +1,12 @@
-import {CanvasHandleOverlay, paintCanvasHandle} from '../src/canvas-handle-overlay.mjs';
+import {CanvasHandleOverlay} from '../src/canvas-handle-overlay.mjs';
+import {HandleSprites, paintCanvasHandle, STEPS} from '../src/canvas-handle-sprites.mjs';
+
+/** What a full repaint paints for each `[handle, point]` of `list`, in order: a stamp of each from `sprites`. A full repaint
+ * of the overlay is compared with its own pictures: a picture painted elsewhere in an atlas can antialias a level apart
+ * (the shape's points round differently in floating point), as a path painted elsewhere on the canvas does. */
+function stamps(context, list, dpr, outline, sprites) {
+  sprites.paint(context, list.map(([handle]) => handle), list.map(([, point]) => point.x), list.map(([, point]) => point.y), list.length, {dpr, outline});
+}
 
 /** Browser-callable exact-pixel comparison of local damage against the former
  * full handle pass. No renderer, document caches or application UI required.
@@ -12,21 +20,22 @@ export function verifyCanvasHandleOverlay() {
     Object.defineProperty(handles, 'groups', {value: groups}); return handles;
   };
   for (const dpr of [1, 1.5, 2]) for (const outline of [false, true]) {
-    const width = 240, height = 140, surface = new OffscreenCanvas(width * dpr, height * dpr);
-    const overlay = new CanvasHandleOverlay(new OffscreenCanvas(1, 1)), context = surface.getContext('2d');
-    const reference = new OffscreenCanvas(width * dpr, height * dpr), expected = reference.getContext('2d');
+    const width = 240, height = 140, surface = readable(width * dpr, height * dpr);
+    const overlay = new CanvasHandleOverlay(readable(1, 1)), context = surface.getContext('2d');
+    const reference = readable(width * dpr, height * dpr), expected = reference.getContext('2d');
     let projected = 0, transform = point => point;
     const project = point => { projected++; return transform(point); };
     const draw = (groups, name, {projectionKey = 'view', translations} = {}) => {
       context.setTransform(dpr, 0, 0, dpr, 0, 0); context.clearRect(0, 0, width, height);
       const stats = overlay.draw(context, grouped(groups), {project, projectionKey, width, height, dpr, outline, translations});
       expected.setTransform(dpr, 0, 0, dpr, 0, 0); expected.clearRect(0, 0, width, height);
-      for (const group of groups) if (!translations?.has(group.uid))
-        for (const item of group.handles) paintCanvasHandle(expected, item, transform(item.point), outline);
+      const list = [];
+      for (const group of groups) if (!translations?.has(group.uid)) for (const item of group.handles) list.push([item, transform(item.point)]);
       if (translations) for (const group of groups) for (const item of group.handles) {
         const delta = translations.get(item.uid); if (!delta) continue;
-        paintCanvasHandle(expected, item, transform({x: item.point.x + delta.x, y: item.point.y + delta.y}), outline);
+        list.push([item, transform({x: item.point.x + delta.x, y: item.point.y + delta.y})]);
       }
+      stamps(expected, list, dpr, outline, overlay.sprites);
       const actualPixels = context.getImageData(0, 0, surface.width, surface.height).data,
         expectedPixels = expected.getImageData(0, 0, reference.width, reference.height).data;
       for (let i = 0; i < actualPixels.length; i++)
@@ -61,7 +70,7 @@ export function verifyCanvasHandleOverlay() {
     overlay.clear(); check(draw([small, top], 'document/style invalidation releases retained groups').full,
       'An invalidated overlay must rebuild');
   }
-  return {checks};
+  return checks;
 }
 
 /** A canvas read back often. Every canvas the pan checks compare is one, so all paint the same way: a browser may paint a
@@ -96,11 +105,13 @@ export function verifyCanvasHandlePans() {
     // What a full repaint at translation `at` paints, as backing pixels.
     const fresh = (list, at) => {
       expected.setTransform(dpr, 0, 0, dpr, 0, 0); expected.clearRect(0, 0, width, height);
+      const shown = [];
       for (const group of list) for (const handle of group.handles) {
         const p = handle.point;
         const px = linear[0] * p.x + linear[2] * p.y + at.x, py = linear[1] * p.x + linear[3] * p.y + at.y, radius = handle.screenRadius + 1;
-        if (px + radius > 0 && px - radius < width && py + radius > 0 && py - radius < height) paintCanvasHandle(expected, handle, {x: px, y: py}, outline);
+        if (px + radius > 0 && px - radius < width && py + radius > 0 && py - radius < height) shown.push([handle, {x: px, y: py}]);
       }
+      stamps(expected, shown, dpr, outline, overlay.sprites);
       return expected.getImageData(0, 0, reference.width, reference.height).data;
     };
     let before = null;
@@ -143,6 +154,136 @@ export function verifyCanvasHandlePans() {
     check(draw(moved, x, y, 'rest after a pan with a pose change', {rest: true}).full, 'Resting after a pan with a pose change repaints in full');
     x += width * 2;
     check(draw(moved, x, y, 'pan past the view').full, 'A pan past the whole view repaints');
+  }
+  return checks;
+}
+
+/** The stamps against the paths the overlay painted before them, on canvases read back (CPU) and not (GPU, where the
+ * browser has one): sizes, colours and device-pixel ratios, outlines on and off, connectors and IK markers. A handle whose
+ * centre is on a quarter of a backing pixel is stamped from a picture of the path at that place; anywhere else it is placed
+ * at most an eighth of a backing pixel from it, which changes the antialiasing of its edge pixels and nothing else.
+ * Answers, for each case, the largest difference of a channel and how many pixels differ. */
+export function verifyCanvasHandleStamps() {
+  const check = (condition, message) => { if (!condition) throw new Error(message); };
+  const checks = [];
+  let seed = 3;
+  const random = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+  const colors = ['#ff0000', '#ff8800', '#0000ff', '#0080ff', '#ffffff', '#d3d3d3', '#808080', '#b04040'];
+  for (const cpu of [true, false]) for (const dpr of [1, 1.25, 1.5, 2]) for (const outline of [false, true]) for (const quarters of [true, false]) {
+    // Handles on a grid, apart (where two overlap, a moved edge mixes one colour for another): every size the settings allow.
+    const width = 320, height = 240, list = [];
+    for (let y = 12; y < height - 12; y += 24) for (let x = 12; x < width - 12; x += 24) {
+      const handle = {screenRadius: 2 + random() * 8, color: colors[Math.floor(random() * colors.length)], connector: random() < .15, ik: random() < .15};
+      const point = quarters ? {x: Math.round((x + random()) * dpr * STEPS) / STEPS / dpr, y: Math.round((y + random()) * dpr * STEPS) / STEPS / dpr}
+        : {x: x + random(), y: y + random()};
+      list.push([handle, point]);
+    }
+    // Backing pixels apart: the paths are also painted this far right and down, to see how far a path differs from itself
+    // moved by whole backing pixels (the rasteriser rounds a shape's points differently in another place).
+    const shift = 37, w = Math.round(width * dpr), h = Math.round(height * dpr);
+    const make = (extra = 0) => { const canvas = new OffscreenCanvas(w + extra, h + extra); canvas.getContext('2d', {willReadFrequently: cpu}); return canvas; };
+    const stamped = make(), painted = make(), moved = make(shift), a = stamped.getContext('2d'), b = painted.getContext('2d'), c = moved.getContext('2d');
+    stamps(a, list, dpr, outline, new HandleSprites((width, height) => {
+      const canvas = new OffscreenCanvas(width, height); canvas.getContext('2d', {willReadFrequently: cpu}); return canvas;
+    }));
+    b.setTransform(dpr, 0, 0, dpr, 0, 0); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (const [handle, point] of list) {
+      paintCanvasHandle(b, handle, point, outline);
+      paintCanvasHandle(c, handle, {x: point.x + shift / dpr, y: point.y + shift / dpr}, outline);
+    }
+    const paths = b.getImageData(0, 0, w, h).data;
+    const compare = (pixels, stride, offset) => {
+      let covered = 0, apart = 0, far = 0, coverage = 0, pathCoverage = 0;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const i = 4 * (y * w + x), j = 4 * ((y + offset) * stride + x + offset);
+        // Premultiplied, as the canvas holds them: unpremultiplied, a pixel of alpha 1 has only 0 or 255 for a colour.
+        let most = Math.abs(pixels[j + 3] - paths[i + 3]);
+        for (let k = 0; k < 3; k++) most = Math.max(most, Math.round(Math.abs(pixels[j + k] * pixels[j + 3] - paths[i + k] * paths[i + 3]) / 255));
+        if (pixels[j + 3] || paths[i + 3]) covered++;
+        if (most > 2) apart++;
+        if (most > 48) far++;
+        coverage += pixels[j + 3]; pathCoverage += paths[i + 3];
+      }
+      return {covered, apart, far, coverage: coverage / pathCoverage};
+    };
+    const result = compare(a.getImageData(0, 0, w, h).data, w, 0), control = compare(c.getImageData(0, 0, w + shift, h + shift).data, w + shift, shift);
+    checks.push({name: `${cpu ? 'CPU' : 'GPU'}, DPR ${dpr}, outline ${outline}, ${quarters ? 'centres on quarters' : 'centres anywhere'}`, quarters, ...result, control});
+  }
+  // On a quarter, a stamp is the path but for edge pixels where the shape's points round differently: no more of them than a
+  // path moved by whole backing pixels has (and a little slack). Anywhere, an edge moves by up to an eighth of a backing
+  // pixel, which changes its pixels a little and seldom much. Never does a stamp cover more or less than the path: it is not
+  // resampled, so not softer.
+  const failures = checks.filter(({quarters, covered, apart, far, coverage, control}) =>
+    (quarters ? apart > 1.5 * control.apart + .005 * covered || far > 1.5 * control.far + .001 * covered : apart > .5 * covered || far > .03 * covered) ||
+    Math.abs(coverage - 1) > .01);
+  check(!failures.length, `Stamps against paths, pixels that differ by more than two and more than 48 levels (a path moved by whole pixels):\n${
+    failures.map(({name, covered, apart, far, coverage, control}) =>
+      `${name}: ${apart} and ${far} of ${covered} (${control.apart} and ${control.far}), coverage ${coverage.toFixed(4)}`).join('\n')}`);
+  return checks;
+}
+
+/** A selection dragged by one delta is a layer of its own, panned by the delta: its pixels must be a full repaint of the moving
+ * figures at the translation the layer says it painted at (strips and rests), or the picture before moved (whole-pixel steps),
+ * and the stationary layer must stay the full repaint of the others, untouched by the drag. */
+export function verifyCanvasHandleMoves() {
+  const check = (condition, message) => { if (!condition) throw new Error(message); };
+  const checks = [];
+  let seed = 11;
+  const random = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+  const colors = ['#ff0000', '#ff8800', '#0000ff', '#ffffff'];
+  const groups = Array.from({length: 18}, (_, g) => {
+    const cx = random() * 420 - 90, cy = random() * 300 - 80;
+    return {uid: g + 1, handles: Array.from({length: 12}, () => ({uid: g + 1, point: {x: cx + random() * 50 - 25, y: cy + random() * 50 - 25},
+      screenRadius: 2 + random() * 4, color: colors[Math.floor(random() * colors.length)], connector: random() < .1, ik: random() < .1}))};
+  });
+  const grouped = list => { const handles = list.flatMap(group => group.handles); Object.defineProperty(handles, 'groups', {value: list}); return handles; };
+  const selected = groups.filter(group => group.uid % 2), others = groups.filter(group => !(group.uid % 2));
+  for (const dpr of [1, 1.5, 2]) for (const outline of [false, true]) for (const linear of [[1, 0, 0, 1], [.8, .3, -.3, .8]]) {
+    const width = 240, height = 140, w = Math.round(width * dpr), h = Math.round(height * dpr);
+    const target = readable(w, h), context = target.getContext('2d'), reference = readable(w, h), expected = reference.getContext('2d');
+    const overlay = new CanvasHandleOverlay(readable(1, 1));
+    const view = {x: 3, y: 2};
+    const fresh = (list, at) => {
+      expected.setTransform(dpr, 0, 0, dpr, 0, 0); expected.clearRect(0, 0, width, height);
+      const shown = [];
+      for (const group of list) for (const handle of group.handles) {
+        const p = handle.point, px = linear[0] * p.x + linear[2] * p.y + at.x, py = linear[1] * p.x + linear[3] * p.y + at.y, radius = handle.screenRadius + 1;
+        if (px + radius > 0 && px - radius < width && py + radius > 0 && py - radius < height) shown.push([handle, {x: px, y: py}]);
+      }
+      stamps(expected, shown, dpr, outline, overlay.sprites);
+      return expected.getImageData(0, 0, w, h).data;
+    };
+    const same = (actual, source, name, offset = null) => {
+      for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+        const strip = offset && ((offset.x > 0 ? px < offset.x : px >= w + offset.x) || (offset.y > 0 ? py < offset.y : py >= h + offset.y));
+        const i = 4 * (py * w + px), j = offset && !strip ? 4 * ((py - offset.y) * w + px - offset.x) : i, from = offset && !strip ? source.before : source.full;
+        for (let k = 0; k < 4; k++) check(actual[i + k] === from[j + k], `${name}, DPR ${dpr}, outline ${outline}, linear ${linear}: pixel ${px},${py} channel ${k} (${actual[i + k]} vs ${from[j + k]})`);
+      }
+    };
+    const translations = new Map(selected.map(group => [group.uid, {x: 0, y: 0}]));
+    let before = null, delta = {x: 0, y: 0};
+    const draw = (name, {rest = false, moved = true} = {}) => {
+      for (const uid of translations.keys()) translations.set(uid, delta);
+      const from = overlay.moving?.at;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0); context.clearRect(0, 0, width, height);
+      const stats = overlay.draw(context, grouped(groups), {matrix: [...linear, view.x, view.y], projectionKey: 'view', width, height, dpr, outline, translations, rest});
+      const layer = overlay.moving, at = layer.at, actual = layer.context.getImageData(0, 0, w, h).data;
+      const wanted = {x: view.x + linear[0] * delta.x + linear[2] * delta.y, y: view.y + linear[1] * delta.x + linear[3] * delta.y};
+      check(Math.abs(at.x - wanted.x) * dpr <= .5 + 1e-9 && Math.abs(at.y - wanted.y) * dpr <= .5 + 1e-9, `${name}: the layer is within half a backing pixel of the drag`);
+      check(stats.settle || at.x === wanted.x && at.y === wanted.y, `${name}: a draw that does not ask to settle is exactly where the drag is`);
+      const offset = moved && from && !stats.moving.full ? {x: Math.round((at.x - from.x) * dpr), y: Math.round((at.y - from.y) * dpr)} : null;
+      same(actual, {full: fresh(selected, at), before}, name, offset);
+      same(overlay.context.getImageData(0, 0, w, h).data, {full: fresh(others, view)}, `${name}: the stationary layer`);
+      before = actual;
+      checks.push({name, dpr, outline, linear, ...stats});
+      return stats;
+    };
+    draw('press', {moved: false});
+    for (const [dx, dy, name] of [[4 / dpr, 0, 'whole backing pixels'], [-6 / dpr, 5 / dpr, 'diagonal'], [7, -3, 'CSS pixels'], [2.3, 1.7, 'fractional'], [-5.1, .4, 'fractional back']]) {
+      delta = {x: delta.x + dx, y: delta.y + dy};
+      draw(name);
+    }
+    check(draw('the drag rests', {rest: true, moved: false}).settle === false, 'Once the drag rests the moving figures are a full repaint, exactly where dragged');
   }
   return checks;
 }

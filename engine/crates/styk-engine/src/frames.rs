@@ -57,9 +57,178 @@ pub(crate) fn hidden_slots(generation: &Generation, frame: &styk_eval::eval::Fra
 /// A frame's draw list. `cull`: the frame is for the screen, where it is drawn clipped to the artboard, so what lies outside the artboard
 /// is left out ([`styk_eval::drawlist::cull_outside`]); an export keeps the whole list (its bytes do not change).
 pub(crate) fn produce(generation: &Generation, tick: f64, hidden_uids: &[u32], effects: bool, cull: bool, clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>) -> FrameData {
-    crate::frame_builder::FrameBuilder::prepare_fresh(generation, tick, &crate::frame_builder::Options {
-        hidden_uids: hidden_uids.to_vec(), effects, clip_to_canvas: cull, ..Default::default()
-    }, clock)
+    produce_reusing(generation, tick, hidden_uids, effects, cull, clock, None)
+}
+
+/// [`produce`], the scene built in the buffers a worker's frame before this one left (`spares`), to which this frame's are given back.
+pub(crate) fn produce_reusing(generation: &Generation, tick: f64, hidden_uids: &[u32], effects: bool, cull: bool, clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>, spares: Option<&mut Spares>) -> FrameData {
+    let options = crate::frame_builder::Options { hidden_uids: hidden_uids.to_vec(), effects, clip_to_canvas: cull, ..Default::default() };
+    let Some(spares) = spares else { return crate::frame_builder::FrameBuilder::prepare_fresh(generation, tick, &options, clock, None) };
+    let data = crate::frame_builder::FrameBuilder::prepare_fresh(generation, tick, &options, clock, Some(&mut spares.scene));
+    spares.bound();
+    data
+}
+
+/// What a worker's frames leave for its next one (the buffers of a scene, [`styk_eval::geometry::SceneSpares`]): the worker that makes
+/// frame after frame of a dense scene builds each in the buffers of the one before instead of allocating and freeing them under the
+/// lock every thread's allocator shares. Kept only from one frame to the next: a worker lets them go before any other kind of work, once
+/// it has waited [`Spares::IDLE_WAITS`] times in a row with nothing to do, and when they would hold more than [`Spares::most_bytes`]
+/// or bring what all the workers keep above [`Spares::most_held`]. They hold no part of a document, only memory.
+#[derive(Default)]
+pub(crate) struct Spares {
+    scene: styk_eval::geometry::SceneSpares,
+    idle: u32,
+    /// What this worker's spares add to [`HELD`].
+    counted: usize,
+    /// What the buffers of the last frame made in them held, kept or let go ([`Spares::last_scene_bytes`]).
+    last: usize,
+}
+
+/// What the spares of every worker hold together (`Spares::counted` of each).
+static HELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+impl Spares {
+    /// Waits for work (each at most 50 ms, `Shared::wait_for_work`, or until work is published) after which the spares are let go of.
+    pub(crate) const IDLE_WAITS: u32 = 8;
+
+    /// The most one worker keeps: a thirty-second of the memory the module may use (64 MiB of 2 GiB), a scene of about 250,000
+    /// segments. A larger scene is built as before.
+    pub(crate) fn most_bytes() -> usize {
+        styk_alloc::ceiling() / 32
+    }
+
+    /// The most all the workers keep together: an eighth of the memory (256 MiB of 2 GiB), the spares of five workers making frames
+    /// of 200,000 segments at once. A worker whose spares would go above it builds its next frame as before.
+    pub(crate) fn most_held() -> usize {
+        styk_alloc::ceiling() / 8
+    }
+
+    /// After a frame: what it left is kept if it is within the bounds.
+    fn bound(&mut self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.idle = 0;
+        let bytes = self.scene.bytes();
+        self.last = bytes;
+        // This worker's count becomes `bytes`; the total is read with the new count added and the old one still in, so that two
+        // workers counting at once both see each other (both may let theirs go, never both stay above the bound).
+        let total = HELD.fetch_add(bytes, SeqCst).saturating_add(bytes).saturating_sub(self.counted);
+        HELD.fetch_sub(self.counted, SeqCst);
+        self.counted = bytes;
+        if bytes > Self::most_bytes() || total > Self::most_held() {
+            self.release();
+        }
+    }
+
+    /// What the scene of the last frame made in these buffers held at its fullest, whether they were kept or let go after it.
+    pub(crate) fn last_scene_bytes(&self) -> usize {
+        self.last
+    }
+
+    /// The worker waited for work and found none.
+    pub(crate) fn idle(&mut self) {
+        self.idle = self.idle.saturating_add(1);
+        if self.idle >= Self::IDLE_WAITS {
+            self.release();
+        }
+    }
+
+    /// Lets the buffers go.
+    pub(crate) fn release(&mut self) {
+        if self.counted != 0 {
+            HELD.fetch_sub(std::mem::take(&mut self.counted), std::sync::atomic::Ordering::SeqCst);
+        }
+        if !self.scene.is_empty() {
+            self.scene = Default::default();
+        }
+    }
+
+    /// The memory held.
+    #[cfg(test)]
+    pub(crate) fn bytes(&self) -> usize {
+        self.scene.bytes()
+    }
+
+    /// What every worker's spares hold together.
+    #[cfg(test)]
+    pub(crate) fn held() -> usize {
+        HELD.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for Spares {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// The frames the workers are making now, whatever revision each is for, and what making one frame of the document holds at
+/// once (its scene's buffers and its draw list, as the last frame made measured it). An engine's, across the cache's publications.
+#[derive(Default)]
+pub(crate) struct Making {
+    count: std::sync::atomic::AtomicUsize,
+    lineage: std::sync::atomic::AtomicU64,
+    working: std::sync::atomic::AtomicUsize,
+    /// A worker found no room for a frame since the last frame was done.
+    refused: std::sync::atomic::AtomicBool,
+}
+
+impl Making {
+    /// What the frames being made may hold together: an eighth of the memory the module may use (240 MiB of 2 GiB, four frames of
+    /// 200,000 segments). One frame is always made.
+    pub(crate) fn most_bytes() -> usize {
+        styk_alloc::ceiling() / 8
+    }
+
+    /// Counts one more frame of `lineage` being made, if there is room for it: none is being made, or a frame of this document was
+    /// made before (until then what one holds is not known, and frames are made one at a time) and they fit [`Making::most_bytes`].
+    pub(crate) fn start(&self, lineage: u64) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        let known = self.lineage.load(SeqCst) == lineage;
+        let each = self.working.load(SeqCst);
+        let mut count = self.count.load(SeqCst);
+        loop {
+            if count != 0 && !(known && (count + 1).saturating_mul(each) <= Self::most_bytes()) {
+                self.refused.store(true, SeqCst);
+                return false;
+            }
+            match self.count.compare_exchange_weak(count, count + 1, SeqCst, SeqCst) {
+                Ok(_) => return true,
+                Err(now) => count = now,
+            }
+        }
+    }
+
+    /// A frame of `lineage` was made, holding `working` bytes at its fullest.
+    pub(crate) fn done(&self, lineage: u64, working: usize) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.working.store(working, SeqCst);
+        self.lineage.store(lineage, SeqCst);
+        self.lost();
+    }
+
+    /// One frame fewer is being made: it was done, or the thread making it stopped (at most one frame a thread; a thread that was making
+    /// none leaves the count one short, which lets one more frame start).
+    pub(crate) fn lost(&self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let mut count = self.count.load(SeqCst);
+        while count != 0 {
+            match self.count.compare_exchange_weak(count, count - 1, SeqCst, SeqCst) {
+                Ok(_) => break,
+                Err(now) => count = now,
+            }
+        }
+    }
+
+    /// Whether a worker found no room since this was last asked.
+    pub(crate) fn take_refused(&self) -> bool {
+        self.refused.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Frames being made now.
+    #[cfg(test)]
+    pub(crate) fn count(&self) -> usize {
+        self.count.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// A finite, nonnegative sample in the existing frame cache. Integer and fractional
@@ -342,6 +511,86 @@ mod tests {
         assert_eq!(cache.entries[&playhead].data.tick, 3.5);
     }
 
+    /// Frames being made hold their scenes until they are done: one more starts only while they fit an eighth of the memory, a
+    /// document's first frame is made alone (what one holds is not known yet), and one frame is always made.
+    #[test]
+    fn frames_being_made_together_fit_the_memory_frames_may_take() {
+        // A memory of 1,024 MiB: frames may take 120 MiB (an eighth of the 960 below the reserve).
+        styk_alloc::with_limit(1 << 30, || {
+            let making = Making::default();
+            assert_eq!(Making::most_bytes(), 120 << 20);
+            assert!(making.start(1), "one frame is always made");
+            assert!(!making.start(1), "what a frame of this document holds is not known yet: one at a time");
+            assert!(making.take_refused());
+            making.done(1, 50 << 20);
+            assert!(making.start(1) && making.start(1), "two frames of 50 MiB fit");
+            assert!(!making.start(1), "a third does not");
+            assert!(!making.start(2), "nor a frame of another document, whose frames are not measured");
+            making.done(1, 50 << 20);
+            making.done(1, 50 << 20);
+            assert_eq!(making.count(), 0);
+            assert!(making.start(2), "with nothing being made, any frame starts");
+            making.done(2, 2 << 20);
+            assert!((0..60).all(|_| making.start(2)), "small frames are made as many at once as there are workers");
+            // A thread that stopped while it made a frame never says it was done: it is counted out when it is reported lost.
+            for _ in 0..60 { making.lost(); }
+            assert!(making.start(3) && !making.start(3), "the first frame of a new document is made alone, whatever was lost before");
+        });
+    }
+
+    /// The cache does not make a frame it would drop as soon as it was made: with the budget full of frames nearer the playhead, a
+    /// farther one waits; a nearer one, or one after the playhead moved past what is kept, is made.
+    #[test]
+    fn a_frame_the_full_cache_would_drop_at_once_is_not_made() {
+        let making = Making::default();
+        let mut cache = Cache::new(DrawList::default().bytes() * 3 + 3 * 256);
+        cache.reset(7);
+        cache.total = 20;
+        cache.playhead = 0.into();
+        let epoch = cache.epoch;
+        for tick in [0u32, 1, 2] { cache.finish(7, epoch, tick.into(), Some(frame(7, tick))).unwrap(); }
+        assert_eq!(cache.entries.len(), 3);
+        cache.wanted = vec![5.into()];
+        assert_eq!(cache.take_admitted(&making, 7), cache::Taken::Kept);
+        assert_eq!(making.count(), 0, "a frame not made is not counted");
+        // The playhead moves past the frames kept: they are the farthest now, and the next frame takes the place of one of them.
+        cache.playhead = 4.into();
+        assert_eq!(cache.take_admitted(&making, 7), cache::Taken::Tick(5.into()));
+        assert_eq!(making.count(), 1);
+    }
+
+    /// A worker makes each frame in the buffers its frame before left (`Spares`): the frames are the ones made from nothing, of every
+    /// fixture in turn (a document's first frame is made in another document's buffers), at keys and between them; the buffers are kept
+    /// across a short wait and let go after `IDLE_WAITS` waits with nothing to do, or at once.
+    #[test]
+    fn frames_made_in_a_workers_spares_are_the_frames_made_fresh() {
+        let clock: Arc<dyn Fn() -> f64 + Send + Sync> = Arc::new(|| 0.0);
+        let mut spares = Spares::default();
+        let mut lent = 0;
+        for name in ["eval/follow-figures.json", "eval/sheet-mixed-keys.json", "eval/movieclip-joined.json", "eval/color-transitions.json", "vfx/attached.json", "drawlist/painted-limbs.json"] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures").join(name);
+            let engine = Engine::new(|| 0.0, crate::Budgets::for_device(None));
+            engine.open(&std::fs::read(path).unwrap(), "json", name).unwrap();
+            let generation = engine.generation().unwrap();
+            let total = generation.playable_ticks().max(1) as f64;
+            for tick in [0.0, 1.0, 0.5, total - 1.0, (total / 2.0).floor() + 0.5, 0.0] {
+                let tick = tick.clamp(0.0, total - 1.0);
+                lent += usize::from(spares.bytes() > 0);
+                let fresh = produce(&generation, tick, &[], true, true, clock.clone());
+                let reused = produce_reusing(&generation, tick, &[], true, true, clock.clone(), Some(&mut spares));
+                assert_eq!(format!("{:?}", reused.list), format!("{:?}", fresh.list), "{name}@{tick}");
+                assert_eq!((reused.camera, reused.background), (fresh.camera, fresh.background), "{name}@{tick}");
+            }
+        }
+        assert!(lent > 0, "frames were made in what the frame before left");
+        assert!(spares.bytes() > 0);
+        // What every worker keeps is counted together (other tests' workers may add theirs meanwhile, never take this one's away).
+        assert!(Spares::held() >= spares.bytes(), "the spares are counted among what all the workers keep");
+        for _ in 1..Spares::IDLE_WAITS { spares.idle(); }
+        assert!(spares.bytes() > 0, "kept across a short wait");
+        spares.idle();
+        assert_eq!((spares.bytes(), spares.counted), (0, 0), "let go once the worker has had nothing to do for a while, and no longer counted");
+    }
 }
 
 #[cfg(test)]

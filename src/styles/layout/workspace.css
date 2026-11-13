@@ -6,6 +6,22 @@
  * transforms, filters or clips it: the stage island's rounded corners are
  * painted as caps above it. */
 @layer layout {
+  /* The grid's own numbers, which only .shell-work reads, do not inherit: the dock host rewrites the stage's column on
+   * every frame of a divider drag, and an inherited custom property changed there restyles every element of every
+   * panel (233 ms of style in a 1.5 s drag; 14 ms once they stopped inheriting). The rail's offsets (--shell-rail,
+   * --shell-rail-top) are read by the rail and still inherit. */
+  @property --shell-columns { syntax: "*"; inherits: false; }
+  @property --shell-rows { syntax: "*"; inherits: false; }
+  @property --shell-areas { syntax: "*"; inherits: false; }
+  @property --shell-gap { syntax: "*"; inherits: false; }
+  @property --shell-row-gap { syntax: "*"; inherits: false; }
+  @property --shell-pad-top { syntax: "*"; inherits: false; }
+  @property --shell-pad-end { syntax: "*"; inherits: false; }
+  @property --shell-pad-bottom { syntax: "*"; inherits: false; }
+  @property --shell-pad-start { syntax: "*"; inherits: false; }
+  @property --shell-gutter-x { syntax: "*"; inherits: false; }
+  @property --shell-gutter-y { syntax: "*"; inherits: false; }
+
   .shell-work {
     position: relative; display: grid; min-block-size: 0; min-inline-size: 0;
     grid-template-columns: var(--shell-columns, var(--rail-w) minmax(0, 1fr) var(--inspector-w));

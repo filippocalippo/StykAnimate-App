@@ -43,6 +43,13 @@ try {
   };
   const artworkUnder = (v, x, y) => ({ x: (x - area.left - v.x) / v.scale, y: (y - area.top - v.y) / v.scale });
 
+  // The view the app starts with is fitted to the layout it settled on: the tool rail's columns are decided before the
+  // first fit, or the fitted view follows them (it once sat 26 px off, fitted to a rail of two columns that became one).
+  const started = await view();
+  await page.evaluate(() => window.styk.fit());
+  const refitted = await view();
+  check('The view at the start is the fitted view of the settled layout', near(started.x, refitted.x, 0.5) && near(started.y, refitted.y, 0.5) && near(started.scale, refitted.scale, 1e-9));
+
   // Spreading two fingers zooms in around their midpoint.
   const before = await view();
   const under = artworkUnder(before, corner.x, corner.y);

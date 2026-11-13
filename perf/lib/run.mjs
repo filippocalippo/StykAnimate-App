@@ -10,11 +10,12 @@
  * The profiled pass's own numbers are not reported, because its instruments slow what they watch.
  */
 import {performance} from 'node:perf_hooks';
+import {breakdownMegabytes} from '../../src/devtools/memory.mjs';
 import {round} from '../../src/devtools/stats.mjs';
 import {launch} from './app.mjs';
 import {createInput, paths} from './input.mjs';
 import {aggregate, captureMetrics, defaultJudge, format, judge} from './metrics.mjs';
-import {startProbes} from './probes.mjs';
+import {startProbes, threadNames} from './probes.mjs';
 import {backgroundLoad, BUSY_PERCENT} from './result.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -30,7 +31,7 @@ function within(ms, what, work) {
  * What a scenario is handed (perf/scenarios/README.md): the app, input, and the reads scenarios share. Everything a
  * scenario does to the app goes through here or through `app`.
  */
-function createContext(app, workload, facts) {
+export function createContext(app, workload, facts) {
   const context = {
     app, workload, facts, paths, sleep, input: createInput(app),
     request: (op, args, detail) => app.request(op, args, detail),
@@ -119,9 +120,29 @@ async function capture(app, scenario, context, state, {label, series, writes = f
   return {summary: stopped.summary, extra: extra ?? {}, wallMs, pages: stopped.pages};
 }
 
-/** The memory of the page, the engine and the app's processes now, in megabytes. */
-async function memoryNow(app) {
-  const [memory, processes] = await Promise.all([app.request('memory'), app.processes().catch(() => [])]);
+/**
+ * Every thread of the page as its inspector session counts it (`Runtime.getHeapUsage`): its heap in use and committed,
+ * and the array buffers it holds outside the heap (`backingStorageSize`). The names are the profiled pass's.
+ */
+export async function threadHeaps(app) {
+  const names = threadNames(app);
+  const read = async (sessionId, name) => {
+    // A worker that ends while it is asked (the drawing workers end when idle) never answers: it is left out after two seconds.
+    const usage = await Promise.race([app.inspector.send('Runtime.getHeapUsage', {}, sessionId), sleep(2000).then(() => null)]).catch(() => null);
+    return usage ? {thread: name, name: name.replace(/ \d+$/, ''), interface: sessionId === app.page, usedBytes: usage.usedSize, totalBytes: usage.totalSize, backingBytes: usage.backingStorageSize ?? null} : null;
+  };
+  return (await Promise.all([...names].map(([sessionId, name]) => read(sessionId, name)))).filter(Boolean);
+}
+
+/**
+ * The memory of the page, the engine and the app's processes now, in megabytes, with the page's memory by owner
+ * (`owners`: src/devtools/memory.mjs `breakdownMegabytes`): what every part holds and what is left unexplained.
+ */
+async function memoryNow(app, {collect = false} = {}) {
+  // Asked for, a full collection on every thread first: the checkpoint is then what is held, not what waits for a collection.
+  if (collect) await Promise.all([app.page, ...app.inspector.workersOf(app.page).map(target => target.sessionId)]
+    .map(sessionId => Promise.race([app.inspector.send('HeapProfiler.collectGarbage', {}, sessionId), sleep(5000)]).catch(() => {})));
+  const [memory, processes, threads] = await Promise.all([app.request('memory'), app.processes().catch(() => []), threadHeaps(app).catch(() => [])]);
   const byType = {};
   for (const row of processes) {
     const type = {Browser: 'browser', Tab: 'page', renderer: 'page', GPU: 'graphics'}[row.type] ?? 'other';
@@ -129,8 +150,10 @@ async function memoryNow(app) {
     if (Number.isFinite(bytes)) byType[type] = (byType[type] ?? 0) + bytes;
   }
   const total = Object.values(byType).reduce((sum, bytes) => sum + bytes, 0);
+  const split = await app.request('memory.breakdown', {threads, processBytes: byType.page ?? null}).catch(() => null);
   return {jsHeap: megabytes(memory.jsHeap?.usedBytes), engine: megabytes(memory.engine?.liveBytes), enginePeak: megabytes(memory.engine?.peakBytes), engineReserved: megabytes(memory.engineMemoryBytes),
-    frameCache: megabytes(memory.engine?.frameCacheBytes), gpu: megabytes(memory.gpuTotalBytes ?? memory.gpuBytes), page: megabytes(byType.page), graphics: megabytes(byType.graphics), browser: megabytes(byType.browser), total: total ? megabytes(total) : null};
+    frameCache: megabytes(memory.engine?.frameCacheBytes), gpu: megabytes(memory.gpuTotalBytes ?? memory.gpuBytes), page: megabytes(byType.page), graphics: megabytes(byType.graphics), browser: megabytes(byType.browser), total: total ? megabytes(total) : null,
+    ...(split ? {owners: breakdownMegabytes(split)} : {})};
 }
 
 /** The engine's threads as one row: their layers, modules and functions added up, with each thread's busy time. */
@@ -207,6 +230,9 @@ async function runScenario(app, scenario, context, {passes, profile, raw}) {
   } catch (error) {
     result.error = String(error?.message ?? error).split('\n')[0].slice(0, 500);
     await app.request('trace.stop').catch(() => {});
+    // What the app said meanwhile (its warnings and errors), so a failure can be read after the run.
+    const said = await app.request('logs', {level: 'warn', limit: 12}).catch(() => null);
+    if (said?.rows?.length) result.logs = said.rows.map(row => `${row.level} [${row.module}] ${String(row.message).slice(0, 300)}`);
   } finally {
     if (state !== undefined) await Promise.resolve(scenario.teardown?.(context, state)).catch(error => result.notes.push(`teardown: ${error.message}`));
   }
@@ -228,7 +254,7 @@ async function readTrace(app, pages) {
  * Returns {environment, workload, facts, startup, scenarios, memory, error}. Never throws for a scenario; an app that
  * cannot start or dies is `error` on the pair, with what had been measured until then.
  */
-export async function runPair({environment, workload, scenarios, open, passes = 3, profile = true, raw = false, experiment = null, parameters = null, log = () => {}}) {
+export async function runPair({environment, workload, scenarios, open, passes = 3, profile = true, raw = false, experiment = null, parameters = null, collectGarbage = false, log = () => {}}) {
   const pair = {environment: {id: environment.id, title: environment.title, description: environment.description}, workload: {id: workload.id, title: workload.title, description: workload.description, ...workload.measured},
     facts: null, startup: null, scenarios: [], memory: [], error: null};
   let app = null;
@@ -246,15 +272,17 @@ export async function runPair({environment, workload, scenarios, open, passes = 
       window: facts.window, reports: facts.navigator, asked: facts.asked, cpuSlowdown: environment.cpuSlowdown ?? 1, slowedTargets: app.slowed.length, backgroundLoadPercent: busy};
     if (experiment) pair.facts.experiment = {name: experiment.name, sha256: experiment.sha256};
     if (parameters) pair.facts.parameters = parameters;
+    if (collectGarbage) pair.facts.collectedGarbage = true;
     pair.startup = {readyMs: app.timings.readyMs, inspectorMs: app.timings.inspectorMs};
     const context = createContext(app, workload, pair.facts);
-    pair.memory.push({after: 'start', ...await memoryNow(app)});
+    pair.memory.push({after: 'start', ...await memoryNow(app, {collect: collectGarbage})});
     const list = workload.builtin || !open ? scenarios.filter(scenario => scenario !== open) : [open, ...scenarios.filter(scenario => scenario !== open)];
     for (const scenario of list) {
       const started = performance.now();
       const result = await runScenario(app, scenario, context, {passes, profile, raw});
       pair.scenarios.push(result);
-      pair.memory.push({after: scenario.id, ...await memoryNow(app).catch(() => ({}))});
+      // A checkpoint that cannot be read in half a minute is left empty: it never holds the run up.
+      pair.memory.push({after: scenario.id, ...await within(30000, 'the memory checkpoint', memoryNow(app, {collect: collectGarbage})).catch(() => ({}))});
       log(`${environment.id}/${workload.id} ${scenario.id}: ${result.error ? `FAILED ${result.error}` : result.skipped ? `skipped (${result.skipped})` : `${result.grade ?? '–'}, ${result.judged?.decided} ${format(result.judged?.decided, result.judged?.value, result.definitions)}`} (${Math.round((performance.now() - started) / 100) / 10} s)`);
       if (scenario === open && result.error) throw new Error(`The workload did not open: ${result.error}`);
       if (app.inspector.closed) throw new Error('The app closed during the run.');

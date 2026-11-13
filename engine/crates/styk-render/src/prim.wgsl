@@ -1,5 +1,6 @@
 // StykAnimate primitive shader. One instanced draw per pass covers every
-// primitive kind: the vertex stage expands a record into a quad (or triangle),
+// primitive kind (a software rasterizer draws runs of the simpler kinds with
+// `fs_flat` and `fs_vector`, below): the vertex stage expands a record into a quad (or triangle),
 // the fragment stage shades it analytically in world units. Nothing here
 // depends on the zoom level except the anti-aliasing width, so panning and
 // zooming only change the `View` uniform.
@@ -373,85 +374,209 @@ fn particle_corner(p: Prim, kind: u32, q: vec2<f32>, px: f32, r2: vec4<f32>) -> 
     return o;
 }
 
+// What every vertex entry point starts with: the record's attributes for the fragment stage and the placement of its
+// group (`gr`, zero for the root). False where the group is not drawn on this page: `out` is then off screen.
+fn vertex_start(in: VsIn, out: ptr<function, VsOut>, gr: ptr<function, Group>) -> bool {
+    (*out).head = in.head;
+    (*out).a = in.a;
+    (*out).b = in.b;
+    (*out).c = in.c;
+    (*out).uv = vec2<f32>(0.0, 0.0);
+    (*out).sampling = 0.0;
+    let g = in.head.y;
+    (*out).clip = vec4<f32>(-1e9, -1e9, 1e9, 1e9);
+    // World units per target pixel.
+    var aa = 1.0 / max(view.t.z, 1e-12);
+    if (g != 0u) {
+        *gr = group_at(g);
+        if ((*gr).page != view.dest.z) {
+            (*out).pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+            return false;
+        }
+        aa = (*gr).aa;
+        (*out).clip = (*gr).clip;
+    }
+    (*out).aa = aa;
+    return true;
+}
+
+fn vertex_prim(in: VsIn) -> Prim {
+    return Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
+}
+
+// A vertex at `world`, carried into this pass's target.
+fn placed(out: ptr<function, VsOut>, world: vec2<f32>, g: u32, gr: Group) {
+    (*out).world = world;
+    (*out).pos = clip_pos(to_target(world, g, gr));
+}
+
+// The corner `c` of a segment's or a box's quad, along it and across it with the anti-aliasing margin.
+fn segment_corner(p: Prim, aa: f32, margin: f32, c: vec2<f32>) -> vec2<f32> {
+    let p0 = p.a.xy;
+    let p1 = p.a.zw;
+    let hw = max(p.b.x, aa * 0.5);
+    var d = p1 - p0;
+    let len = length(d);
+    if (len > 1e-12) { d = d / len; } else { d = vec2<f32>(1.0, 0.0); }
+    let n = vec2<f32>(-d.y, d.x);
+    let e = hw + margin;
+    let along = mix(-e, len + e, c.x);
+    let across = mix(-e, e, c.y);
+    return p0 + d * along + n * across;
+}
+
+// The corner `c` of the box around an arc's swept part.
+fn arc_corner(p: Prim, aa: f32, margin: f32, c: vec2<f32>) -> vec2<f32> {
+    let center = p.a.xy;
+    let r = p.a.z;
+    let hw = max(p.a.w, aa * 0.5);
+    let start = p.b.x;
+    let sweep = p.b.y;
+    var lo = center + r * vec2<f32>(cos(start), sin(start));
+    var hi = lo;
+    let e2 = center + r * vec2<f32>(cos(start + sweep), sin(start + sweep));
+    lo = min(lo, e2);
+    hi = max(hi, e2);
+    for (var k = 0; k < 4; k = k + 1) {
+        let a = f32(k) * PI * 0.5;
+        if (in_sweep(a, start, sweep)) {
+            let q = center + r * vec2<f32>(cos(a), sin(a));
+            lo = min(lo, q);
+            hi = max(hi, q);
+        }
+    }
+    let e = hw + margin;
+    return mix(lo - vec2<f32>(e), hi + vec2<f32>(e), c);
+}
+
+fn polyline_corner(p: Prim, aa: f32, margin: f32, c: vec2<f32>) -> vec2<f32> {
+    let e = max(p.b.x, aa * 0.5) + margin;
+    return mix(p.a.xy - vec2<f32>(e), p.a.zw + vec2<f32>(e), c);
+}
+
+fn disc_corner(p: Prim, margin: f32, c: vec2<f32>) -> vec2<f32> {
+    let e = p.a.z + margin;
+    return p.a.xy + mix(vec2<f32>(-e), vec2<f32>(e), c);
+}
+
+fn ring_corner(p: Prim, aa: f32, margin: f32, c: vec2<f32>) -> vec2<f32> {
+    let e = p.a.z + max(p.a.w, aa * 0.5) + margin;
+    return p.a.xy + mix(vec2<f32>(-e), vec2<f32>(e), c);
+}
+
+// A lone glyph's own triangles draw only where the view gives it no mask.
+fn triangle_hidden(p: Prim) -> bool {
+    return (p.kind & F_GLYPH_VECTOR) != 0u && glyph_row(bitcast<u32>(p.b.z), 2u).w > 0.5;
+}
+
+fn triangle_corner(p: Prim, vi: u32) -> vec2<f32> {
+    if (vi == 0u) { return p.a.xy; } else if (vi == 1u) { return p.a.zw; }
+    return p.b.xy;
+}
+
+// The artboard on screen; a group's whole layer (the camera image's background): K_FILL_VIEW, K_BG_IMAGE.
+fn view_fill(out: ptr<function, VsOut>, kind: u32, g: u32, gr: Group, c: vec2<f32>) {
+    if (g == 0u) {
+        var s = mix(view.artboard.xy, view.artboard.zw, c);
+        if (view.orient_flags.x > 0.5) {
+            s = mix(mix(view.orient_quad0.xy, view.orient_quad0.zw, c.x), mix(view.orient_quad1.zw, view.orient_quad1.xy, c.x), c.y);
+        }
+        if (view.inv_t.z > 0.5) {
+            if (kind == K_BG_IMAGE || view.inv_t.w > 0.5) {
+                // One full-sample paint with independent coverage and clip
+                // masks; native artboard MSAA must not clip it a second time.
+                s = c * view.dest.xy;
+            } else {
+                // Keep the complete rotated paint quad and its ordinary
+                // native coverage; no geometric-area approximation.
+                s = mix(mix(view.paint_quad0.xy, view.paint_quad0.zw, c.x), mix(view.paint_quad1.zw, view.paint_quad1.xy, c.x), c.y);
+            }
+        }
+        (*out).world = to_world(s);
+        (*out).pos = clip_pos(s);
+    } else {
+        let s = mix(gr.clip.xy, gr.clip.zw, c);
+        (*out).world = affine_inverse(gr.m, gr.t, s);
+        (*out).pos = clip_pos(s);
+    }
+}
+
+// A picture or a drawing tile (K_IMAGE).
+fn image_vertex(out: ptr<function, VsOut>, p: Prim, g: u32, gr: Group, c: vec2<f32>) {
+    let aa = (*out).aa;
+    if ((p.kind & F_DRAWING) != 0u) {
+        // A drawing tile of display level b.w: the view shows one level per cel,
+        // floor(-log2(target pixels per cel pixel)) clamped to 0..8 (docs/engine/drawing.md).
+        let level = p.b.w;
+        let tile_pixels = length(p.a.zw) / (64.0 * aa);
+        // The equivalent interval test preserves exact power-of-two boundaries:
+        // GPU log2(0.5) can round below 1 and show the preceding level.
+        let shown = (level == 0.0 || tile_pixels <= 1.0) && (level == 8.0 || tile_pixels > 0.5);
+        if (!shown) {
+            (*out).pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+            return;
+        }
+        // In a layer the editor paints with Canvas 2D, it draws this level scaled by what
+        // remains (between 1 and 1/2) with 'high' smoothing, which Chromium samples from the
+        // level's own reductions, trilinearly, at a level of detail of log2(1 / scale) - 1/2
+        // (measured): past 2^-1/2, up to half of the next level is blended in.
+        if ((g == 0u && view.inv_t.z > 0.5) || (g != 0u && gr.canvas > 0.5)) {
+            // Exactly 1× remains bilinear, including fractional translations; any
+            // enlargement uses Mitchell (the editor's imageSmoothingQuality 'high').
+            if (tile_pixels > 1.0) {
+                (*out).sampling = -1.0;
+            } else if (p.paint != NO_PAINT) {
+                (*out).sampling = clamp(-log2(max(tile_pixels, 1e-30)) - 0.5, 0.0, 0.5);
+            }
+        }
+    }
+    (*out).uv = c;
+    placed(out, p.a.xy + p.a.zw * c.x + p.b.xy * c.y, g, gr);
+}
+
+// An isolated group's composite: the child's shown rectangle, carried into this target by the child's own map.
+fn composite_vertex(out: ptr<function, VsOut>, p: Prim, c: vec2<f32>) {
+    let child = group_at(bitcast<u32>(p.b.x));
+    if (child.page < 0.0) {
+        (*out).pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return;
+    }
+    let a = mix(child.show.xy, child.show.zw, c);
+    (*out).uv = a;
+    (*out).pos = clip_pos(affine(child.p, child.pt, a));
+}
+
+// Every kind. The simpler vertex entry points below hold the kinds of their fragment entry points (`shading.rs`): a
+// software rasterizer runs every branch of this one for each vertex, which was a third of a frame of 3,200 segments.
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
     var out: VsOut;
-    let vi = in.vertex;
-    let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
-    let kind = p.kind & 255u;
-    out.head = in.head;
-    out.a = in.a;
-    out.b = in.b;
-    out.c = in.c;
-    out.uv = vec2<f32>(0.0, 0.0);
-    out.sampling = 0.0;
-    let g = p.group;
-    out.clip = vec4<f32>(-1e9, -1e9, 1e9, 1e9);
-    // World units per target pixel.
-    var aa = 1.0 / max(view.t.z, 1e-12);
     var gr: Group;
-    if (g != 0u) {
-        gr = group_at(g);
-        if (gr.page != view.dest.z) {
-            out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
-            return out;
-        }
-        aa = gr.aa;
-        out.clip = gr.clip;
-    }
-    out.aa = aa;
+    if (!vertex_start(in, &out, &gr)) { return out; }
+    let vi = in.vertex;
+    let p = vertex_prim(in);
+    let kind = p.kind & 255u;
+    let g = p.group;
+    let aa = out.aa;
     let margin = aa * 1.5;
     let c = corner(vi);
     var world = vec2<f32>(0.0, 0.0);
     if (kind == K_CAPSULE || kind == K_BOX) {
-        let p0 = p.a.xy;
-        let p1 = p.a.zw;
-        let hw = max(p.b.x, aa * 0.5);
-        var d = p1 - p0;
-        let len = length(d);
-        if (len > 1e-12) { d = d / len; } else { d = vec2<f32>(1.0, 0.0); }
-        let n = vec2<f32>(-d.y, d.x);
-        let e = hw + margin;
-        let along = mix(-e, len + e, c.x);
-        let across = mix(-e, e, c.y);
-        world = p0 + d * along + n * across;
+        world = segment_corner(p, aa, margin, c);
     } else if (kind == K_ARC) {
-        let center = p.a.xy;
-        let r = p.a.z;
-        let hw = max(p.a.w, aa * 0.5);
-        let start = p.b.x;
-        let sweep = p.b.y;
-        var lo = center + r * vec2<f32>(cos(start), sin(start));
-        var hi = lo;
-        let e2 = center + r * vec2<f32>(cos(start + sweep), sin(start + sweep));
-        lo = min(lo, e2);
-        hi = max(hi, e2);
-        for (var k = 0; k < 4; k = k + 1) {
-            let a = f32(k) * PI * 0.5;
-            if (in_sweep(a, start, sweep)) {
-                let q = center + r * vec2<f32>(cos(a), sin(a));
-                lo = min(lo, q);
-                hi = max(hi, q);
-            }
-        }
-        let e = hw + margin;
-        world = mix(lo - vec2<f32>(e), hi + vec2<f32>(e), c);
+        world = arc_corner(p, aa, margin, c);
     } else if (kind == K_POLYLINE) {
-        let e = max(p.b.x, aa * 0.5) + margin;
-        world = mix(p.a.xy - vec2<f32>(e), p.a.zw + vec2<f32>(e), c);
+        world = polyline_corner(p, aa, margin, c);
     } else if (kind == K_DISC) {
-        let e = p.a.z + margin;
-        world = p.a.xy + mix(vec2<f32>(-e), vec2<f32>(e), c);
+        world = disc_corner(p, margin, c);
     } else if (kind == K_RING) {
-        let e = p.a.z + max(p.a.w, aa * 0.5) + margin;
-        world = p.a.xy + mix(vec2<f32>(-e), vec2<f32>(e), c);
+        world = ring_corner(p, aa, margin, c);
     } else if (kind == K_TRI) {
-        // A lone glyph's own triangles draw only where the view gives it no mask.
-        if ((p.kind & F_GLYPH_VECTOR) != 0u && glyph_row(bitcast<u32>(p.b.z), 2u).w > 0.5) {
+        if (triangle_hidden(p)) {
             out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
             return out;
         }
-        if (vi == 0u) { world = p.a.xy; } else if (vi == 1u) { world = p.a.zw; } else { world = p.b.xy; }
+        world = triangle_corner(p, vi);
         if ((p.kind & F_DEPTH) != 0u) {
             // A face of a depth run: its corner's window depth, mapped over the run's depth
             // range in this shader as the editor's mesh raster maps it (styk-draw `F_DEPTH`).
@@ -470,34 +595,8 @@ fn vs_main(in: VsIn) -> VsOut {
         out.pos.z = DEPTH_FAR;
         return out;
     } else if (kind == K_IMAGE) {
-        if ((p.kind & F_DRAWING) != 0u) {
-            // A drawing tile of display level b.w: the view shows one level per cel,
-            // floor(-log2(target pixels per cel pixel)) clamped to 0..8 (docs/engine/drawing.md).
-            let level = p.b.w;
-            let tile_pixels = length(p.a.zw) / (64.0 * aa);
-            // The equivalent interval test preserves exact power-of-two boundaries:
-            // GPU log2(0.5) can round below 1 and show the preceding level.
-            let shown = (level == 0.0 || tile_pixels <= 1.0) && (level == 8.0 || tile_pixels > 0.5);
-            if (!shown) {
-                out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
-                return out;
-            }
-            // In a layer the editor paints with Canvas 2D, it draws this level scaled by what
-            // remains (between 1 and 1/2) with 'high' smoothing, which Chromium samples from the
-            // level's own reductions, trilinearly, at a level of detail of log2(1 / scale) - 1/2
-            // (measured): past 2^-1/2, up to half of the next level is blended in.
-            if ((g == 0u && view.inv_t.z > 0.5) || (g != 0u && gr.canvas > 0.5)) {
-                // Exactly 1× remains bilinear, including fractional translations; any
-                // enlargement uses Mitchell (the editor's imageSmoothingQuality 'high').
-                if (tile_pixels > 1.0) {
-                    out.sampling = -1.0;
-                } else if (p.paint != NO_PAINT) {
-                    out.sampling = clamp(-log2(max(tile_pixels, 1e-30)) - 0.5, 0.0, 0.5);
-                }
-            }
-        }
-        world = p.a.xy + p.a.zw * c.x + p.b.xy * c.y;
-        out.uv = c;
+        image_vertex(&out, p, g, gr, c);
+        return out;
     } else if (kind == K_GLYPH) {
         // A lone glyph's mask: its texels placed in the world by this frame's table, as the
         // editor's glyph quad places its texture (`glyphTextureShape`).
@@ -533,45 +632,107 @@ fn vs_main(in: VsIn) -> VsOut {
         out.pos = clip_pos(to_target(world, g, gr));
         return out;
     } else if (kind == K_COMPOSITE) {
-        // The child's shown rectangle, carried into this target by the child's own map.
-        let child = group_at(bitcast<u32>(p.b.x));
-        if (child.page < 0.0) {
-            out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
-            return out;
-        }
-        let a = mix(child.show.xy, child.show.zw, c);
-        out.uv = a;
-        out.pos = clip_pos(affine(child.p, child.pt, a));
+        composite_vertex(&out, p, c);
         return out;
     } else if (kind == K_FILL_VIEW || kind == K_BG_IMAGE) {
-        // The artboard on screen; a group's whole layer (the camera image's background).
-        if (g == 0u) {
-            var s = mix(view.artboard.xy, view.artboard.zw, c);
-            if (view.orient_flags.x > 0.5) {
-                s = mix(mix(view.orient_quad0.xy, view.orient_quad0.zw, c.x), mix(view.orient_quad1.zw, view.orient_quad1.xy, c.x), c.y);
-            }
-            if (view.inv_t.z > 0.5) {
-                if (kind == K_BG_IMAGE || view.inv_t.w > 0.5) {
-                    // One full-sample paint with independent coverage and clip
-                    // masks; native artboard MSAA must not clip it a second time.
-                    s = c * view.dest.xy;
-                } else {
-                    // Keep the complete rotated paint quad and its ordinary
-                    // native coverage; no geometric-area approximation.
-                    s = mix(mix(view.paint_quad0.xy, view.paint_quad0.zw, c.x), mix(view.paint_quad1.zw, view.paint_quad1.xy, c.x), c.y);
-                }
-            }
-            out.world = to_world(s);
-            out.pos = clip_pos(s);
-        } else {
-            let s = mix(gr.clip.xy, gr.clip.zw, c);
-            out.world = affine_inverse(gr.m, gr.t, s);
-            out.pos = clip_pos(s);
-        }
+        view_fill(&out, kind, g, gr, c);
         return out;
     }
-    out.world = world;
-    out.pos = clip_pos(to_target(world, g, gr));
+    placed(&out, world, g, gr);
+    return out;
+}
+
+// Triangles (not of a depth run) and the view's fill.
+@vertex
+fn vs_flat(in: VsIn) -> VsOut {
+    var out: VsOut;
+    var gr: Group;
+    if (!vertex_start(in, &out, &gr)) { return out; }
+    let p = vertex_prim(in);
+    if ((p.kind & 255u) == K_FILL_VIEW) {
+        view_fill(&out, K_FILL_VIEW, p.group, gr, corner(in.vertex));
+        return out;
+    }
+    if (triangle_hidden(p)) {
+        out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return out;
+    }
+    placed(&out, triangle_corner(p, in.vertex), p.group, gr);
+    return out;
+}
+
+// Segments, discs, rings and triangles not hidden (`triangle_hidden`): the kinds of `fs_stroke` but the view's fill.
+fn stroke_corner(p: Prim, kind: u32, aa: f32, margin: f32, c: vec2<f32>, vi: u32) -> vec2<f32> {
+    if (kind == K_CAPSULE) { return segment_corner(p, aa, margin, c); }
+    if (kind == K_DISC) { return disc_corner(p, margin, c); }
+    if (kind == K_RING) { return ring_corner(p, aa, margin, c); }
+    return triangle_corner(p, vi);
+}
+
+// Those, boxes, arcs and polylines: the kinds of `fs_vector` but the view's fill.
+fn vector_corner(p: Prim, kind: u32, aa: f32, margin: f32, c: vec2<f32>, vi: u32) -> vec2<f32> {
+    if (kind == K_BOX) { return segment_corner(p, aa, margin, c); }
+    if (kind == K_ARC) { return arc_corner(p, aa, margin, c); }
+    if (kind == K_POLYLINE) { return polyline_corner(p, aa, margin, c); }
+    return stroke_corner(p, kind, aa, margin, c, vi);
+}
+
+@vertex
+fn vs_stroke(in: VsIn) -> VsOut {
+    var out: VsOut;
+    var gr: Group;
+    if (!vertex_start(in, &out, &gr)) { return out; }
+    let p = vertex_prim(in);
+    let kind = p.kind & 255u;
+    let c = corner(in.vertex);
+    if (kind == K_FILL_VIEW) {
+        view_fill(&out, K_FILL_VIEW, p.group, gr, c);
+        return out;
+    }
+    if (kind == K_TRI && triangle_hidden(p)) {
+        out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return out;
+    }
+    placed(&out, stroke_corner(p, kind, out.aa, out.aa * 1.5, c, in.vertex), p.group, gr);
+    return out;
+}
+
+@vertex
+fn vs_vector(in: VsIn) -> VsOut {
+    var out: VsOut;
+    var gr: Group;
+    if (!vertex_start(in, &out, &gr)) { return out; }
+    let p = vertex_prim(in);
+    let kind = p.kind & 255u;
+    let c = corner(in.vertex);
+    if (kind == K_FILL_VIEW) {
+        view_fill(&out, K_FILL_VIEW, p.group, gr, c);
+        return out;
+    }
+    if (kind == K_TRI && triangle_hidden(p)) {
+        out.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return out;
+    }
+    placed(&out, vector_corner(p, kind, out.aa, out.aa * 1.5, c, in.vertex), p.group, gr);
+    return out;
+}
+
+@vertex
+fn vs_image(in: VsIn) -> VsOut {
+    var out: VsOut;
+    var gr: Group;
+    if (!vertex_start(in, &out, &gr)) { return out; }
+    let p = vertex_prim(in);
+    image_vertex(&out, p, p.group, gr, corner(in.vertex));
+    return out;
+}
+
+@vertex
+fn vs_composite(in: VsIn) -> VsOut {
+    var out: VsOut;
+    var gr: Group;
+    if (!vertex_start(in, &out, &gr)) { return out; }
+    composite_vertex(&out, vertex_prim(in), corner(in.vertex));
     return out;
 }
 
@@ -818,11 +979,20 @@ fn beam_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, aa: f32) -> vec4<f32> {
     return vec4<f32>(min(vec3<f32>(1.0), rgb) * alpha, alpha);
 }
 
-fn shade_primitive(in: VsOut) -> vec4<f32> {
+// A fragment outside the clip of the group it is drawn in is not drawn.
+fn discard_outside_clip(in: VsOut) {
     let pos = in.pos.xy;
     if (pos.x < in.clip.x || pos.y < in.clip.y || pos.x > in.clip.z || pos.y > in.clip.w) {
         discard;
     }
+}
+
+fn is_vector(kind: u32) -> bool {
+    return kind == K_CAPSULE || kind == K_BOX || kind == K_ARC || kind == K_POLYLINE || kind == K_DISC || kind == K_RING || kind == K_TRI || kind == K_FILL_VIEW;
+}
+
+fn shade_primitive(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
     let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
     let kind = p.kind & 255u;
     if (kind == K_PARTICLE) {
@@ -838,37 +1008,62 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
     if (p.paint != NO_PAINT && (p.kind & F_DRAWING) == 0u) {
         base = paint_at(p.paint, w);
     }
-    if (kind == K_CAPSULE || kind == K_BOX || kind == K_ARC || kind == K_POLYLINE) {
-        var hw = p.b.x;
-        if (kind == K_ARC) { hw = p.a.w; }
-        // Hairlines keep a one-pixel footprint and fade with their width (crisp: solid).
-        var fade = 1.0;
-        if (hw < aa * 0.5) {
-            fade = select(max(hw, 0.0) * 2.0 / aa, select(0.0, 1.0, hw > 0.0), crisp());
-            hw = aa * 0.5;
+    if (is_vector(kind)) {
+        return shade_vector(p, kind, w, aa, base);
+    }
+    return shade_sampled(in, p, kind, base);
+}
+
+// Hairlines keep a one-pixel footprint and fade with their width (crisp: solid): the half width drawn, and the fade.
+fn hairline(width: f32, aa: f32) -> vec2<f32> {
+    var hw = width;
+    var fade = 1.0;
+    if (hw < aa * 0.5) {
+        fade = select(max(hw, 0.0) * 2.0 / aa, select(0.0, 1.0, hw > 0.0), crisp());
+        hw = aa * 0.5;
+    }
+    return vec2<f32>(hw, fade);
+}
+
+// A stroke at signed distance `d` from its edge, in `base` (straight alpha), premultiplied.
+fn stroked(base: vec4<f32>, d: f32, aa: f32, fade: f32) -> vec4<f32> {
+    let cov = coverage(d, aa) * fade;
+    if (cov <= 0.0) { discard; }
+    return premul(base) * cov;
+}
+
+// The shapes covered by their distance (segments, boxes, arcs, polylines, discs, rings) and the
+// flat ones (triangles, the view's fill), in `base` (straight alpha), premultiplied.
+fn shade_vector(p: Prim, kind: u32, w: vec2<f32>, aa: f32, base: vec4<f32>) -> vec4<f32> {
+    if (kind == K_BOX) {
+        let h = hairline(p.b.x, aa);
+        return stroked(base, sd_box(w, p.a.xy, p.a.zw, h.x), aa, h.y);
+    }
+    if (kind == K_POLYLINE) {
+        let h = hairline(p.b.x, aa);
+        let start = bitcast<u32>(p.b.y);
+        let count = bitcast<u32>(p.b.z);
+        var best = 1e30;
+        for (var k = 0u; k + 1u < count; k = k + 1u) {
+            best = min(best, sd_segment(w, polyline_point(start + k), polyline_point(start + k + 1u)));
         }
-        var d = 0.0;
-        if (kind == K_CAPSULE) {
-            d = sd_segment(w, p.a.xy, p.a.zw) - hw;
-        } else if (kind == K_BOX) {
-            d = sd_box(w, p.a.xy, p.a.zw, hw);
-        } else if (kind == K_POLYLINE) {
-            let start = bitcast<u32>(p.b.y);
-            let count = bitcast<u32>(p.b.z);
-            var best = 1e30;
-            for (var k = 0u; k + 1u < count; k = k + 1u) {
-                best = min(best, sd_segment(w, polyline_point(start + k), polyline_point(start + k + 1u)));
-            }
-            if ((p.kind & F_CLOSED) != 0u && count > 2u) {
-                best = min(best, sd_segment(w, polyline_point(start + count - 1u), polyline_point(start)));
-            }
-            d = best - hw;
-        } else {
-            d = sd_arc(w, p.a.xy, p.a.z, p.b.x, p.b.y) - hw;
+        if ((p.kind & F_CLOSED) != 0u && count > 2u) {
+            best = min(best, sd_segment(w, polyline_point(start + count - 1u), polyline_point(start)));
         }
-        let cov = coverage(d, aa) * fade;
-        if (cov <= 0.0) { discard; }
-        return premul(base) * cov;
+        return stroked(base, best - h.x, aa, h.y);
+    }
+    if (kind == K_ARC) {
+        let h = hairline(p.a.w, aa);
+        return stroked(base, sd_arc(w, p.a.xy, p.a.z, p.b.x, p.b.y) - h.x, aa, h.y);
+    }
+    return shade_stroke(p, kind, w, aa, base);
+}
+
+// What stick figures are drawn with: segments, discs and rings, and the flat kinds (triangles, the view's fill).
+fn shade_stroke(p: Prim, kind: u32, w: vec2<f32>, aa: f32, base: vec4<f32>) -> vec4<f32> {
+    if (kind == K_CAPSULE) {
+        let h = hairline(p.b.x, aa);
+        return stroked(base, sd_segment(w, p.a.xy, p.a.zw) - h.x, aa, h.y);
     }
     if (kind == K_DISC) {
         let cov = coverage(length(w - p.a.xy) - p.a.z, aa);
@@ -877,13 +1072,8 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
     }
     if (kind == K_RING) {
         let dist = length(w - p.a.xy);
-        var hw = p.a.w;
-        var fade = 1.0;
-        if (hw < aa * 0.5) {
-            fade = select(max(hw, 0.0) * 2.0 / aa, select(0.0, 1.0, hw > 0.0), crisp());
-            hw = aa * 0.5;
-        }
-        let ring = coverage(abs(dist - p.a.z) - hw, aa) * fade;
+        let h = hairline(p.a.w, aa);
+        let ring = coverage(abs(dist - p.a.z) - h.x, aa) * h.y;
         var out = premul(base) * ring;
         if ((p.kind & F_RING_FILL) != 0u) {
             let fill = premul(unpack(bitcast<u32>(p.b.x))) * coverage(dist - p.a.z, aa);
@@ -892,9 +1082,13 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
         if (out.a <= 0.0) { discard; }
         return out;
     }
-    if (kind == K_TRI) {
-        return premul(base);
-    }
+    // K_TRI and K_FILL_VIEW.
+    return premul(base);
+}
+
+// What samples a texture: lone glyphs, pictures and drawing tiles, the background picture, composites.
+fn shade_sampled(in: VsOut, p: Prim, kind: u32, base: vec4<f32>) -> vec4<f32> {
+    let w = in.world;
     if (kind == K_GLYPH) {
         // The mask sampled bilinearly, clamped to its own texels as an exact texture's edge
         // would be, in the text's colour and opacity (the editor's glyph shader).
@@ -905,55 +1099,7 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
         return vec4<f32>(base.rgb * alpha, alpha);
     }
     if (kind == K_IMAGE) {
-        let rect = p.c;
-        let size = vec2<f32>(textureDimensions(sprites).xy);
-        let texel = 1.0 / size;
-        let raw = mix(rect.xy, rect.zw, in.uv);
-        var tex: vec4<f32>;
-        if ((p.kind & F_DRAWING) != 0u && crisp()) {
-            // Crisp edges: the nearest texel of the tile, unfiltered.
-            let nearest = vec2<i32>(round(rect.xy * size)) + vec2<i32>(clamp(floor(in.uv * 64.0), vec2<f32>(0.0), vec2<f32>(63.0)));
-            tex = premul(textureLoad(sprites, nearest, sprite_layer(p.b.z), 0));
-        } else if ((p.kind & F_DRAWING) != 0u) {
-            // Premultiply each straight-alpha texel before filtering. Canvas enlargement
-            // uses Mitchell; other sampling is bilinear, optionally blended with a parent.
-            let t = in.uv * 64.0 - vec2<f32>(0.5);
-            let cell = floor(t);
-            let f = t - cell;
-            let start = vec2<i32>(round(rect.xy * size));
-            let origin = start + vec2<i32>(cell);
-            let layer = sprite_layer(p.b.z);
-            if (in.sampling < 0.0) {
-                tex = tile_mitchell(start, layer, t);
-            } else {
-                tex = tile_bilinear(origin, layer, f);
-            }
-            if (in.sampling > 0.0) {
-                // The parent tile: this tile is the quarter `q` of it, at half its texel density.
-                let parent = paint_row(p.paint);
-                let q = u32(parent.w);
-                let tp = in.uv * 32.0 + vec2<f32>(f32(q & 1u), f32(q >> 1u)) * 32.0 - vec2<f32>(0.5);
-                let cp = floor(tp);
-                let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), sprite_layer(parent.x), tp - cp);
-                tex = mix(tex, up, in.sampling);
-            }
-        } else {
-            // A picture of the document: from the sprite texture, or its soft copy while that is not in.
-            let layer = picture_layer(p.b.z, rect.xy);
-            if (layer < 0) {
-                tex = soft_sample(p.b.z, rect, raw);
-            } else if ((p.kind & F_SMOOTH) != 0u && !crisp()) {
-                tex = textureSampleLevel(sprites, linear_sampler, raw, layer, 0.0);
-            } else {
-                let q = clamp(raw, rect.xy + texel * 0.5, rect.zw - texel * 0.5);
-                tex = textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), layer, 0.0);
-            }
-        }
-        if ((p.kind & F_TINT) != 0u) {
-            // An onion skin's sprite: its coverage in the tint colour.
-            return vec4<f32>(base.rgb * tex.a, tex.a) * base.a;
-        }
-        return tex * base.a;
+        return shade_image(in, p, base);
     }
     if (kind == K_BG_IMAGE) {
         let rect = p.c;
@@ -968,19 +1114,74 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
         return textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), layer, 0.0) * base.a;
     }
     if (kind == K_COMPOSITE) {
-        // Bilinear, clamped to the child's own rectangle as an exact texture's edge would be
-        // (crisp edges: the nearest texel; a layer on the screen's grid is copied either way).
-        let child = group_at(bitcast<u32>(p.b.x));
-        let size = vec2<f32>(textureDimensions(layers).xy);
-        var uv = clamp(in.uv, child.clip.xy + vec2<f32>(0.5), child.clip.zw - vec2<f32>(0.5));
-        if (crisp()) { uv = floor(uv) + vec2<f32>(0.5); }
-        let tex = textureSampleLevel(layers, linear_sampler, uv / size, i32(child.page), 0.0);
-        return tex * base.a;
-    }
-    if (kind == K_FILL_VIEW) {
-        return premul(base);
+        return shade_composite(in, p, base);
     }
     return vec4<f32>(0.0);
+}
+
+// A picture of the document or a drawing tile (K_IMAGE), in `base`'s opacity (an onion skin's sprite: its tint).
+fn shade_image(in: VsOut, p: Prim, base: vec4<f32>) -> vec4<f32> {
+    let rect = p.c;
+    let size = vec2<f32>(textureDimensions(sprites).xy);
+    let texel = 1.0 / size;
+    let raw = mix(rect.xy, rect.zw, in.uv);
+    var tex: vec4<f32>;
+    if ((p.kind & F_DRAWING) != 0u && crisp()) {
+        // Crisp edges: the nearest texel of the tile, unfiltered.
+        let nearest = vec2<i32>(round(rect.xy * size)) + vec2<i32>(clamp(floor(in.uv * 64.0), vec2<f32>(0.0), vec2<f32>(63.0)));
+        tex = premul(textureLoad(sprites, nearest, sprite_layer(p.b.z), 0));
+    } else if ((p.kind & F_DRAWING) != 0u) {
+        // Premultiply each straight-alpha texel before filtering. Canvas enlargement
+        // uses Mitchell; other sampling is bilinear, optionally blended with a parent.
+        let t = in.uv * 64.0 - vec2<f32>(0.5);
+        let cell = floor(t);
+        let f = t - cell;
+        let start = vec2<i32>(round(rect.xy * size));
+        let origin = start + vec2<i32>(cell);
+        let layer = sprite_layer(p.b.z);
+        if (in.sampling < 0.0) {
+            tex = tile_mitchell(start, layer, t);
+        } else {
+            tex = tile_bilinear(origin, layer, f);
+        }
+        if (in.sampling > 0.0) {
+            // The parent tile: this tile is the quarter `q` of it, at half its texel density.
+            let parent = paint_row(p.paint);
+            let q = u32(parent.w);
+            let tp = in.uv * 32.0 + vec2<f32>(f32(q & 1u), f32(q >> 1u)) * 32.0 - vec2<f32>(0.5);
+            let cp = floor(tp);
+            let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), sprite_layer(parent.x), tp - cp);
+            tex = mix(tex, up, in.sampling);
+        }
+    } else {
+        // A picture of the document: from the sprite texture, or its soft copy while that is not in.
+        let layer = picture_layer(p.b.z, rect.xy);
+        if (layer < 0) {
+            tex = soft_sample(p.b.z, rect, raw);
+        } else if ((p.kind & F_SMOOTH) != 0u && !crisp()) {
+            tex = textureSampleLevel(sprites, linear_sampler, raw, layer, 0.0);
+        } else {
+            let q = clamp(raw, rect.xy + texel * 0.5, rect.zw - texel * 0.5);
+            tex = textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), layer, 0.0);
+        }
+    }
+    if ((p.kind & F_TINT) != 0u) {
+        // An onion skin's sprite: its coverage in the tint colour.
+        return vec4<f32>(base.rgb * tex.a, tex.a) * base.a;
+    }
+    return tex * base.a;
+}
+
+// An isolated group's layer composited into its parent (K_COMPOSITE), in `base`'s opacity.
+fn shade_composite(in: VsOut, p: Prim, base: vec4<f32>) -> vec4<f32> {
+    // Bilinear, clamped to the child's own rectangle as an exact texture's edge would be
+    // (crisp edges: the nearest texel; a layer on the screen's grid is copied either way).
+    let child = group_at(bitcast<u32>(p.b.x));
+    let size = vec2<f32>(textureDimensions(layers).xy);
+    var uv = clamp(in.uv, child.clip.xy + vec2<f32>(0.5), child.clip.zw - vec2<f32>(0.5));
+    if (crisp()) { uv = floor(uv) + vec2<f32>(0.5); }
+    let tex = textureSampleLevel(layers, linear_sampler, uv / size, i32(child.page), 0.0);
+    return tex * base.a;
 }
 
 // The explicit Canvas policy is applied only at the root owning paint or
@@ -1026,26 +1227,115 @@ fn inside_orient_artboard(p: vec2<f32>) -> bool {
     return (e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0 && e3 >= 0.0) || (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0 && e3 <= 0.0);
 }
 
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    // The scene of a rotated view stays on the artboard (backgrounds are the artboard's quad already).
+// The scene of a rotated view stays on the artboard (backgrounds are the artboard's quad already).
+fn discard_outside_orient_artboard(in: VsOut) {
     if (view.orient_flags.y > 0.5 && in.head.y == 0u) {
         let drawn = in.head.x & 255u;
         if (drawn != K_FILL_VIEW && drawn != K_BG_IMAGE && !inside_orient_artboard(in.pos.xy)) { discard; }
     }
+}
+
+// The Canvas byte mask of a root paint other than the background picture: the clip's coverage, and the view fill's own.
+fn canvas_alpha(pos: vec2<f32>, kind: u32) -> f32 {
+    var alpha = canvas_clip_alpha(pos);
+    if (kind == K_FILL_VIEW && view.inv_t.w > 0.5) {
+        alpha = floor((alpha * canvas_fill_alpha(pos) + 127.0) / 255.0);
+    }
+    return alpha;
+}
+
+// The pinned Canvas byte-mask blitter uses alpha+1 with a right shift.
+fn canvas_masked(src: vec4<f32>, alpha: f32) -> vec4<f32> {
+    let paint = floor(clamp(src, vec4<f32>(0.0), vec4<f32>(1.0)) * 255.0 + vec4<f32>(0.5));
+    return floor(paint * (alpha + 1.0) / 256.0) / 255.0;
+}
+
+// Entry points over the same functions. A fragment runs the code of every kind its shader holds where a software
+// rasterizer (SwiftShader, without a graphics card) executes both sides of a branch, so a run of records that are all of
+// the simpler kinds draws with a shader holding only theirs (`shading.rs`): `fs_flat` for flat colour (triangles, the view's
+// fill), `fs_stroke` for those and segments, discs and rings, `fs_vector` for those and the other shapes covered by distance,
+// `fs_image` for pictures and drawing tiles, `fs_composite` for isolated groups' layers, `fs_main` for everything. Each
+// simpler one has a `_plain` form for an upright view with the native painter (the stage's), which leaves out the turned
+// artboard's clip and the Canvas painter's masks: both are off there, but a software rasterizer would run their code too.
+// Their pixels are the same (tests/shading.rs).
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    discard_outside_orient_artboard(in);
     let src = shade_primitive(in);
     if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
     let kind = in.head.x & 255u;
-    var alpha = canvas_clip_alpha(in.pos.xy);
-    if (kind == K_FILL_VIEW && view.inv_t.w > 0.5) {
-        alpha = floor((alpha * canvas_fill_alpha(in.pos.xy) + 127.0) / 255.0);
-    } else if (kind == K_BG_IMAGE) {
+    if (kind == K_BG_IMAGE) {
         let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
         let bounds = canvas_image_bounds(p);
         let w = to_world(in.pos.xy);
         if (any(w < bounds.xy) || any(w >= bounds.xy + bounds.zw)) { return vec4<f32>(0.0); }
     }
-    // The pinned Canvas byte-mask blitter uses alpha+1 with a right shift.
-    let paint = floor(clamp(src, vec4<f32>(0.0), vec4<f32>(1.0)) * 255.0 + vec4<f32>(0.5));
-    return floor(paint * (alpha + 1.0) / 256.0) / 255.0;
+    return canvas_masked(src, canvas_alpha(in.pos.xy, kind));
 }
+
+// A root paint of the Canvas painter (the camera monitor's) is masked by its clip; everything else is as shaded.
+fn painted(in: VsOut, src: vec4<f32>) -> vec4<f32> {
+    if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
+    return canvas_masked(src, canvas_alpha(in.pos.xy, in.head.x & 255u));
+}
+
+fn prim_of(in: VsOut) -> Prim {
+    return Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
+}
+
+// Triangles and the view's fill in their own colour (no paint record).
+fn flat_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    return premul(unpack(in.head.z));
+}
+
+// Segments, discs, rings and the flat kinds, in their own colour.
+fn stroke_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    return shade_stroke(p, p.kind & 255u, in.world, in.aa, unpack(p.color));
+}
+
+// Segments, boxes, arcs, polylines, discs, rings, triangles and the view's fill, in their own colour.
+fn vector_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    return shade_vector(p, p.kind & 255u, in.world, in.aa, unpack(p.color));
+}
+
+// Pictures and drawing tiles (K_IMAGE without a paint record: a drawing tile's `paint` names its parent tile).
+fn image_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    return shade_image(in, p, unpack(p.color));
+}
+
+// Isolated groups' layers composited into their parents (K_COMPOSITE without a paint record).
+fn composite_color(in: VsOut) -> vec4<f32> {
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    return shade_composite(in, p, unpack(p.color));
+}
+
+@fragment
+fn fs_flat(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, flat_color(in)); }
+@fragment
+fn fs_stroke(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, stroke_color(in)); }
+@fragment
+fn fs_vector(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, vector_color(in)); }
+@fragment
+fn fs_image(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, image_color(in)); }
+@fragment
+fn fs_composite(in: VsOut) -> @location(0) vec4<f32> { discard_outside_orient_artboard(in); return painted(in, composite_color(in)); }
+
+@fragment
+fn fs_flat_plain(in: VsOut) -> @location(0) vec4<f32> { return flat_color(in); }
+@fragment
+fn fs_stroke_plain(in: VsOut) -> @location(0) vec4<f32> { return stroke_color(in); }
+@fragment
+fn fs_vector_plain(in: VsOut) -> @location(0) vec4<f32> { return vector_color(in); }
+@fragment
+fn fs_image_plain(in: VsOut) -> @location(0) vec4<f32> { return image_color(in); }
+@fragment
+fn fs_composite_plain(in: VsOut) -> @location(0) vec4<f32> { return composite_color(in); }

@@ -122,6 +122,7 @@ src/canvas-color-sample.mjs	engine	styk-render	js
 src/canvas-context-menu.mjs	ui	-	stays	
 src/canvas-guides.mjs	ui	-	stays	
 src/canvas-handle-overlay.mjs	ui	-	stays	
+src/canvas-handle-sprites.mjs	ui	-	stays	
 src/canvas-handles.mjs	ui	-	stays	
 src/canvas-interactions.mjs	engine	styk-eval::picking	partial	Rust: handle/body/closest-joint picking, origin and explicit measured-bounds marquee predicates; borrowed painter order matches 201792 queries; bounds/resource readiness and app query/gesture stream still JS
 src/canvas-pinch.mjs	ui	-	stays	
@@ -279,6 +280,8 @@ src/frame-draft-animation.mjs	engine	styk-edit	removed	deleted: only the editor'
 src/frame-ids.mjs	engine	styk-eval	js	
 src/frame-timing-history.mjs	engine	styk-edit	removed	deleted: replaying frame-timing entries of the editor's own history: the history is the session's (1326 bytes)
 src/gif-options.mjs	engine	styk-export	js	
+src/gif-encode-worker.mjs	engine	styk-export	js	
+src/gif-frames.mjs	engine	styk-export	js	
 src/gif-quantize.mjs	engine	styk-export	js	
 src/gpu-startup.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/gpu-timing.mjs	engine	styk-render	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
@@ -631,6 +634,7 @@ src/devtools/early.js	ui	-	stays	developer tools, developer launch only (docs/DE
 src/devtools/frames.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/grades.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/inspector.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
+src/devtools/memory.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/mutations.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/panels/chart.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)
 src/devtools/panels/dom.mjs	ui	-	stays	developer tools, developer launch only (docs/DEVTOOLS.md)

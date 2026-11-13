@@ -29,6 +29,12 @@ export const DRAWING_COMMITS = new Set(['commitDrawingPixels', 'resampleDrawing'
 
 const aborted = () => messageError(new DOMException('', 'AbortError'), 'errors.editor.historyChangedBeforeUndoRedoCompleted', {});
 const missing = () => messageError(new Error(''), 'errors.editorDrawing.theDrawingHistoryReferencesAMissingCel', {});
+/**
+ * What a history record tells the session when its pixels leave memory or come back. Made here, not inside the commit: a callback
+ * made there would keep the commit's whole scope, and with it the stroke's tiles, for as long as the record lives, after the history
+ * had moved them to the disk and stopped counting them (31.9 MB of 2,040 tiles after the eraser scenario, in a heap snapshot).
+ */
+const followSize = (host, record) => delta => host.adjust(record, delta);
 
 /**
  * @param {object} editor the app's Editor, owned by the engine
@@ -106,7 +112,7 @@ export function createOwnedDrawings(editor, host) {
           try { host.retract(record); } catch { /* the failure of the pixels is the error raised */ }
           throw error;
         }
-        history.track(command, delta => host.adjust(record, delta));
+        history.track(command, followSize(host, record));
         editor._invalidate({timing: false});
         host.synced([figure]);
       },

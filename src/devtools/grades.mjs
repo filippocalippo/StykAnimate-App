@@ -26,7 +26,10 @@ export function grade(value, limits, better = 'lower') {
  * What a continuous gesture is judged on: how smooth it looks (the frame time a person sees) and how closely the
  * picture follows the hand (the input delay's p95). It is as good as the worse of the two.
  */
-export const GESTURE = Object.freeze([{metric: 'frame.felt', limits: LIMITS.frame}, {metric: 'input.p95', limits: LIMITS.input}]);
+export const GESTURE = Object.freeze([{metric: 'frame.felt', limits: LIMITS.frame}, {metric: 'input.p95', limits: LIMITS.input},
+  // Where the stage's pictures are shown after the frame that asked for them (drawn on the engine's workers), the same two of the pictures
+  // themselves (capture.mjs `pictureTimes`); a capture whose pictures are drawn in their frame has neither.
+  {metric: 'picture.felt', limits: LIMITS.frame}, {metric: 'picture.input.p95', limits: LIMITS.input}]);
 
 /**
  * Judges measured values, `rows` being [{metric, limits, value, better}]: the grade is the worst row's and `decided`
@@ -43,4 +46,5 @@ export function judgeValues(rows) {
  * One capture's summary (src/devtools/capture.mjs `analyze`) judged as a gesture: the runner's rule for a gesture
  * (perf/lib/metrics.mjs `defaultJudge`), applied to one stretch instead of the median of several passes.
  */
-export const judgeCapture = summary => judgeValues([{...GESTURE[0], value: summary?.frames?.felt}, {...GESTURE[1], value: summary?.inputs?.p95}]);
+export const judgeCapture = summary => judgeValues([{...GESTURE[0], value: summary?.frames?.felt}, {...GESTURE[1], value: summary?.inputs?.p95},
+  {...GESTURE[2], value: summary?.pictures?.felt}, {...GESTURE[3], value: summary?.pictures?.input.p95}]);

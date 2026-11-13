@@ -35,7 +35,14 @@ cache is refilled through the publication protocol's resend of missing tiles. Th
 worker does the same between strokes, the history worker after every chunk. A preview worker
 keeps its source cache (it is bounded by the viewport and accounted by its client). Jobs
 themselves are bounded by the same working-memory budgets as before (`maxBytes`, the owner's
-hard budget), checked by the same code.
+hard budget), checked by the same code. Below that allowance every instance still keeps its largest
+job's working set, and a document starts several pixel workers (the pixels, decoding, thumbnails,
+previews and up to four encoders: 5 held 243 MB of the page after the drawing scenarios on the
+200,000-segment scene, 152 MB on the busy one, measured by the developer tools' memory by owner on
+2026-11-13). So a pixel worker that has had no request for `DRAWING_WORKER_IDLE_MS` (10 s) ends
+(`src/drawing-worker-client.mjs`), and the next request starts another, as after a cancellation:
+the encode cache is refilled by the resend of missing tiles, and the preview cache, which records
+the worker's `instance` with its source, sends a new worker every tile.
 
 Still JavaScript, and why: the authoritative `TileStore` on the interface thread, its memory
 accounting (`drawing-tile-memory.mjs`) and history orchestration (`drawing-history.mjs`,
@@ -164,6 +171,16 @@ tiles that changed and the stage draws those instead (`engine/engine-live-cels.m
 * A live cel draws what the published cel of the same pixels draws: the same quads, levels,
   parent records and tile order (`styk-eval/tests/drawing.rs`, `live/tests.rs`: every slot
   equals the published decode's, built in pieces, with removals). Only the atlas places differ.
+* A stroke adds tiles to its cel in nearly every frame, and an object whose length changes lays out every primitive after it anew
+  (the list is encoded whole and the renderer uploads all of it: 200,000 segments a frame on a dense scene). So a live cel's quads
+  are written in a block with room for more (`drawlist::live_room`: at least 64, doubling) and as many parent rows: the object keeps
+  its length while the block has room, the list is written over the one before it in that block alone
+  (`encode_composed_shared`), and the renderer uploads the block. A quad of the room (`drawlist::room_quad`) is a drawing tile of
+  no size at level 0, which neither renderer shows (`prim.wgsl` `image_vertex`, `styk-raster`) nor `shown_levels` counts, sampling the
+  place of the cel's first quad, so a frame waiting for pictures waits for nothing more (`styk-eval/tests/drawing.rs` holds a growing
+  cel to the list encoded whole and its changes to the block; `styk-raster/tests/drawing_sampling.rs` draws the same frame with and
+  without room on both renderers). Of the other objects the encoder keeps from frame to frame, only those that draw a cel held live are
+  encoded again, found by their figure, not by reading every item of the frame.
   A frame draws it in the figure's place among the layers, onion skins included. The effect
   bounds of a drawing still follow its published ink bounds.
 * A floating selection is a second set of tiles on the same cel (`float`) drawn through the

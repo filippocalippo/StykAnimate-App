@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {emptyDocument,createFrame,createObject} from '../src/demo.mjs';
-import {figurePalette,displayedSegmentPaint} from '../src/figure-colors.mjs';
+import {figurePalette,displayedSegmentPaint,paletteColors} from '../src/figure-colors.mjs';
 import {resolveInstanceFigure} from '../src/animation-style.mjs';
 import {storedFrameReport} from '../src/pivot-frame-draft.mjs';
 import {ownedScope} from './support/owned-scope.mjs';
@@ -170,3 +170,28 @@ test('recolored legacy instances retain their palette when copied across Pivot v
   }
 });
 
+test('the colours of many figures are the colours of each, figures alike listed once',()=>{
+  const report=emptyDocument(),figure=report.figure_types[0];
+  figure.segments=figure.segments.slice(0,3).map((s,i)=>({...s,segment_id:i+1,parent_id:i,segment_type:'line',segment_kind:'line',color_rgb:i===2?[10,20,30]:[200,40,50],secondary:i===1?{rgb:[1,2,3],a:9}:null,paint:undefined}));
+  figure.polyfills=[{polyfill_id:4,segment_ids:[0,1],color_rgb:[90,90,90],alpha_raw:0,z_order:1}];
+  const other={...structuredClone(figure),figure_type_id:figure.figure_type_id+1};other.segments.forEach(s=>{s.color_rgb=[7,7,7];});
+  const objects=[
+    createObject(figure,1,0,0,{color_override_raw:0}),createObject(figure,2,9,0,{color_override_raw:0}),
+    createObject(figure,3,0,0,{color_override_raw:0xff00ff00}),createObject(figure,4,0,0,{color_override_raw:0x80112233}),createObject(figure,5,0,0,{color_override_raw:0x80112233}),
+    createObject(other,6,0,0,{color_override_raw:0}),
+    {...createObject(figure,7,0,0,{color_override_raw:0}),_stykStyle:{outlineOpacity:.5}},
+    {...createObject(figure,8,0,0,{color_override_raw:0x80112233}),_styk:{colorMode:'segments'}},
+    createObject(figure,9,0,0,{color_override_raw:196}),
+  ];
+  const figureOf=object=>resolveInstanceFigure(object.figure_type_id===other.figure_type_id?other:figure,object);
+  const each=list=>new Set(list.flatMap(object=>figurePalette(report,figureOf(object),object).map(entry=>entry.color)));
+  for(const version of [5,4]){
+    report.version=version;
+    for(let from=0;from<objects.length;from++)for(let to=from+1;to<=objects.length;to++){
+      const list=objects.slice(from,to);
+      assert.deepEqual(paletteColors(report,list,figureOf),each(list),`version ${version}, figures ${from + 1} to ${to}`);
+    }
+  }
+  report.version=5;
+  assert.deepEqual([...paletteColors(report,objects.slice(0,2),figureOf)].sort(),['#010203','#0a141e','#5a5a5a','#c82832'],'figures alike show the colours of one');
+});

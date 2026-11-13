@@ -5,6 +5,7 @@
 //! Ported for gestures on existing figures. Movieclip frame replacements, drawing
 //! layers, new figures and reordering answer `Unported`.
 
+use styk_doc::fast::{FastMap, FastSet};
 use styk_doc::{Obj, Value};
 use styk_eval::records::snapshot_pose_frame_of;
 
@@ -74,23 +75,70 @@ fn frame_order(frame: &Value) -> Vec<f64> {
     }
 }
 
+/// Where each figure of `objects` is, by unique id: the first that has it, as a scan finds it.
+fn places(objects: &[Value]) -> FastMap<u32, usize> {
+    let mut at: FastMap<u32, usize> = FastMap::default();
+    at.reserve(objects.len());
+    for (slot, object) in objects.iter().enumerate() {
+        if let Some(id) = uid(object) {
+            at.entry(id).or_insert(slot);
+        }
+    }
+    at
+}
+
+/// Whether the pose `a` of the frame `a_objects` and the pose `b` of `b_objects` differ (`poseObjectSignature(a) !== poseObjectSignature(b)`),
+/// found without writing either signature: field by field, the first difference ends it (a gesture compares every figure it took, thousands).
+pub(crate) fn changed_pose(a: &Value, a_objects: &[Value], b: &Value, b_objects: &[Value]) -> bool {
+    let (Some(x), Some(y)) = (a.as_obj(), b.as_obj()) else { return signature(a, a_objects) != signature(b, b_objects) };
+    let kept = |(key, _): &(&std::sync::Arc<str>, &Value)| !SIGNATURE_OMITS.contains(&&***key);
+    let (mut xs, mut ys) = (x.iter().filter(kept), y.iter().filter(kept));
+    loop {
+        match (xs.next(), ys.next()) {
+            (None, None) => return false,
+            (Some((kx, vx)), Some((ky, vy))) => {
+                if kx != ky {
+                    return true;
+                }
+                let same = if &**kx == "join" && (vx.truthy() || vy.truthy()) {
+                    styk_doc::json::same_text(&signature_join(vx, a_objects), &signature_join(vy, b_objects))
+                } else {
+                    styk_doc::json::same_text(vx, vy)
+                };
+                if !same {
+                    return true;
+                }
+            }
+            _ => return true,
+        }
+    }
+}
+
+/// What a pose signature leaves out: the slot and the caches.
+const SIGNATURE_OMITS: [&str; 3] = ["runtime_segments", "_movieclipSample", "object_slot"];
+
+/// A pose's `join` as its signature has it: named by the figure it joins (its slot in `frame_objects`, else the identity it names), without the slot.
+fn signature_join(join: &Value, frame_objects: &[Value]) -> Value {
+    if !join.truthy() {
+        return join.clone();
+    }
+    let slot = num(join, "target_object_slot");
+    let target = slot.filter(|s| *s >= 0.0).and_then(|s| frame_objects.get(s as usize)).and_then(|o| o.get("unique_id").cloned()).or_else(|| join.get("target_unique_id").cloned());
+    let mut out = join.as_obj().cloned().unwrap_or_default();
+    out.remove_all(["target_object_slot", "target_unique_id"]);
+    if let Some(target) = target {
+        out.set("target_unique_id", target);
+    }
+    Value::object(out)
+}
+
 /// `poseObjectSignature(object, frame)`: a pose without its slot and caches, its
 /// join named by the figure it joins.
-pub(crate) fn signature(object: &Value, frame_objects: &[Value]) -> String {
+fn signature(object: &Value, frame_objects: &[Value]) -> String {
     let mut fields = object.as_obj().cloned().unwrap_or_default();
-    fields.remove("runtime_segments");
-    fields.remove("_movieclipSample");
-    fields.remove("object_slot");
+    fields.remove_all(SIGNATURE_OMITS);
     if let Some(join) = object.get("join").filter(|j| j.truthy()) {
-        let slot = num(join, "target_object_slot");
-        let target = slot.filter(|s| *s >= 0.0).and_then(|s| frame_objects.get(s as usize)).and_then(|o| o.get("unique_id").cloned()).or_else(|| join.get("target_unique_id").cloned());
-        let mut out = join.as_obj().cloned().unwrap_or_default();
-        out.remove("target_object_slot");
-        out.remove("target_unique_id");
-        if let Some(target) = target {
-            out.set("target_unique_id", target);
-        }
-        fields.set("join", Value::object(out));
+        fields.set("join", signature_join(join, frame_objects));
     }
     styk_doc::json::to_string(&Value::object(fields))
 }
@@ -582,27 +630,39 @@ impl Editor {
         let at_playhead = edit.key_at_playhead || self.auto_key;
         let keyed_layers = edit.key_at_playhead_layers.clone();
         let (old, current) = (objects_of(&before), objects_of(&after));
-        let find = |objects: &[Value], id: u32| objects.iter().find(|o| uid(o) == Some(id)).cloned();
+        // Where each figure is in the frame before and after, by identity (the first that has it, as a scan finds it): a gesture on thousands of
+        // figures looks each of them up several times, and a scan of the frame for each was quadratic.
+        let (old_at, current_at) = (places(&old), places(&current));
+        fn find<'a>(objects: &'a [Value], at: &FastMap<u32, usize>, id: u32) -> Option<&'a Value> {
+            at.get(&id).map(|&slot| &objects[slot])
+        }
         // A gesture can only have changed the figures it took; a command, any figure.
         let mut candidates: Vec<u32> = if transaction { old.iter().filter_map(uid).collect() } else { drag.before.iter().filter_map(uid).collect() };
         if transaction {
-            candidates.extend(current.iter().filter_map(uid).filter(|u| !candidates.contains(u)).collect::<Vec<_>>());
+            let taken: FastSet<u32> = candidates.iter().copied().collect();
+            candidates.extend(current.iter().filter_map(uid).filter(|u| !taken.contains(u)).collect::<Vec<_>>());
         }
         let scope = crate::prof::scope("commit::changed");
         let changed: Vec<u32> = candidates
             .into_iter()
-            .filter(|&id| match (find(&old, id), find(&current, id)) {
-                (Some(a), Some(b)) => signature(&a, &old) != signature(&b, &current),
+            .filter(|&id| match (find(&old, &old_at, id), find(&current, &current_at, id)) {
+                (Some(a), Some(b)) => changed_pose(a, &old, b, &current),
                 (None, None) => false,
                 _ => true,
             })
             .collect();
         drop(scope);
-        let mut ids: Vec<String> = keyed_layers;
+        // The layer of each changed figure, asked once: the layers below are keyed by them.
+        let scope = crate::prof::scope("commit::owners");
+        let mut owners: Vec<String> = Vec::with_capacity(changed.len());
         for &id in &changed {
-            let owner = self.owner(id)?;
-            if !ids.contains(&owner) {
-                ids.push(owner);
+            owners.push(self.owner(id)?);
+        }
+        drop(scope);
+        let mut ids: Vec<String> = keyed_layers;
+        for owner in &owners {
+            if !ids.contains(owner) {
+                ids.push(owner.clone());
             }
         }
         // A changed drawing order keys every layer whose own figures are drawn in another order.
@@ -641,8 +701,11 @@ impl Editor {
             return Ok(false);
         }
         // The draft stays on show after the commit unless a clip's playback changed.
-        let playback = |objects: &[Value], id: u32| json(find(objects, id).as_ref().and_then(|o| o.get("_stykMovieclip")));
-        let retain = !transaction && changed.iter().all(|&id| find(&old, id).is_some() && find(&current, id).is_some() && playback(&old, id) == playback(&current, id));
+        let retain = !transaction
+            && changed.iter().all(|&id| match (find(&old, &old_at, id), find(&current, &current_at, id)) {
+                (Some(a), Some(b)) => json(a.get("_stykMovieclip")) == json(b.get("_stykMovieclip")),
+                _ => false,
+            });
         let label = drag.label.clone();
         let selection = drag.before_selection.clone();
         let scope = crate::prof::scope("commit::planner");
@@ -664,12 +727,7 @@ impl Editor {
             // Figures that a key's movieclip replacements placed are edited in the
             // replacement they came from: the key keeps its pose and its replacements.
             let patches = items(key.as_ref().and_then(|k| k.get("movieclipPatches")));
-            let mut changed_here = Vec::new();
-            for &figure in &changed {
-                if self.owner(figure)? == *id {
-                    changed_here.push(figure);
-                }
-            }
+            let changed_here: Vec<u32> = changed.iter().zip(&owners).filter(|(_, owner)| *owner == id).map(|(&figure, _)| figure).collect();
             if let (false, Some(index), false) = (at_playhead, at_key, patches.is_empty()) {
                 let members = |patch: &Value| -> Vec<u32> {
                     patch.get("frameId").and_then(Value::as_str).and_then(|frame| self.frame_by_id(frame)).map(|frame| objects_of(&frame).iter().filter_map(uid).collect()).unwrap_or_default()
@@ -711,7 +769,7 @@ impl Editor {
             let mut membership = false;
             for object in old.iter().chain(&current).filter(|o| presence(o)) {
                 let Some(figure) = uid(object) else { continue };
-                membership |= self.owner(figure)? == *id && find(&old, figure).is_some() != find(&current, figure).is_some();
+                membership |= self.owner(figure)? == *id && old_at.contains_key(&figure) != current_at.contains_key(&figure);
             }
             let at = match &key {
                 Some(key) if hold && !membership && !at_playhead => num(key, "tick").unwrap_or(tick),
@@ -1412,6 +1470,42 @@ mod tests {
             out.set(name, value);
         }
         Value::object(out)
+    }
+
+    #[test]
+    fn a_pose_changed_is_a_pose_whose_signature_changed() {
+        // Two frames whose figures differ in each way a signature sees (a value, a key's place, a join's target) and in ways it does not
+        // (the slot, the caches, the slot a join names when it names the same figure).
+        let before = parse(r#"[
+            {"object_slot":0,"unique_id":1,"root_x":1,"angles":[0.5,1],"join":null},
+            {"object_slot":1,"unique_id":2,"root_x":2,"angles":[0.5,1],"join":{"target_object_slot":0,"target_vertex":3},"runtime_segments":[1]},
+            {"object_slot":2,"unique_id":3,"root_x":-0,"join":{"target_object_slot":1,"target_vertex":1}},
+            {"object_slot":3,"unique_id":4,"root_x":4,"scale":1,"_movieclipSample":{"a":1}},
+            {"object_slot":4,"unique_id":5,"root_x":5,"join":{"target_object_slot":9,"target_unique_id":1}},
+            {"object_slot":5,"unique_id":6,"root_x":6,"join":7},
+            {"object_slot":6,"unique_id":7,"root_x":7,"angles":[1,2]}
+        ]"#);
+        let after = parse(r#"[
+            {"object_slot":1,"unique_id":2,"root_x":2,"angles":[0.5,1],"join":{"target_object_slot":3,"target_vertex":3}},
+            {"object_slot":0,"unique_id":3,"root_x":0,"join":{"target_object_slot":1,"target_vertex":1},"runtime_segments":[2]},
+            {"object_slot":2,"unique_id":4,"scale":1,"root_x":4},
+            {"object_slot":3,"unique_id":1,"root_x":1,"angles":[0.5,1],"join":false},
+            {"object_slot":4,"unique_id":5,"root_x":5,"join":{"target_unique_id":1}},
+            {"object_slot":5,"unique_id":6,"root_x":6,"join":8},
+            {"object_slot":6,"unique_id":7,"root_x":7,"angles":[1,2.5]}
+        ]"#);
+        let (old, new) = (before.as_arr().unwrap(), after.as_arr().unwrap());
+        let mut differ = 0;
+        for a in old.iter().chain(new) {
+            for b in old.iter().chain(new) {
+                for (a_objects, b_objects) in [(old, new), (new, old), (old, old), (new, new)] {
+                    let expected = signature(a, a_objects) != signature(b, b_objects);
+                    assert_eq!(changed_pose(a, a_objects, b, b_objects), expected, "{a} against {b}");
+                    differ += usize::from(expected);
+                }
+            }
+        }
+        assert!(differ > 0 && differ < 14 * 14 * 4, "the poses compared both alike and unlike");
     }
 
     #[test]

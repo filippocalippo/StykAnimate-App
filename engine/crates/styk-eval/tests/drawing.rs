@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use styk_eval::assets::{decode_cel, Assets};
-use styk_eval::drawlist::{encode_composed, Overrides, F_DRAWING, NO_PAINT};
+use styk_eval::drawlist::{encode_composed, is_room_quad, live_room, Overrides, F_DRAWING, NO_PAINT};
 use styk_eval::geometry::build;
 
 #[test]
@@ -146,7 +146,8 @@ fn a_live_cel_replaces_the_published_one_quad_for_quad() {
     let view = LiveView { cels: &live, base: assets.pages };
     let shown = encode_composed(&prepared.doc, &assets, &scene, &Overrides { live: Some(view), ..Default::default() }, &[], None);
 
-    let drawn = |list: &styk_eval::drawlist::DrawList| list.prims.iter().filter(|p| p.kind & F_DRAWING != 0).copied().collect::<Vec<_>>();
+    // The block a live cel is drawn in has room for the tiles a stroke adds; the room draws nothing.
+    let drawn = |list: &styk_eval::drawlist::DrawList| list.prims.iter().filter(|p| p.kind & F_DRAWING != 0 && !is_room_quad(p)).copied().collect::<Vec<_>>();
     let (before, after) = (drawn(&published), drawn(&shown));
     assert_eq!(before.len(), after.len(), "a quad for every tile of every level");
     let mut parents = 0;
@@ -181,4 +182,91 @@ fn a_live_cel_replaces_the_published_one_quad_for_quad() {
         assert!((shift(base, float) - first).abs() < 1e-3, "every quad moves alike");
         assert_eq!((base.a[2], base.a[3]), (float.a[2], float.a[3]), "a translation keeps the quad's axes");
     }
+}
+
+/// The cel fixture with `before` and `after` stick figures (the figure of `painted-limbs.json`) drawn under and over it: a dense
+/// frame in miniature, whose figures an encoder keeps from one frame to the next.
+fn cel_among_figures(before: usize, after: usize) -> styk_eval::doc::Document {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drawlist");
+    let mut text = std::fs::read_to_string(root.join("drawing-cel.json")).expect("fixture");
+    let limbs = styk_doc::json::parse(&std::fs::read(root.join("painted-limbs.json")).expect("fixture")).expect("JSON");
+    let mut figure = Vec::new();
+    styk_doc::json::write(&limbs.get("figure_types").and_then(styk_doc::Value::elements).and_then(|figures| figures.iter().next()).expect("a figure"), &mut figure);
+    let figure = String::from_utf8(figure).expect("UTF-8");
+    let count = before + after;
+    let objects: Vec<String> = (1..=count)
+        .map(|slot| format!(r#"{{"object_slot":{slot},"unique_id":{},"figure_type_id":1,"root_x":{},"root_y":{},"scale":1,"color_override_raw":0,"field28":0,"angles":[0.8,2,0,2.1,1.2,3.141592653589793],"len_flag":0,"lengths":[],"bend_flag":0,"bends":[],"join":null}}"#, 100 + slot, 60 + 37 * slot, 120 + 9 * (slot % 30)))
+        .collect();
+    let order: Vec<usize> = (1..=before).chain([0]).chain(before + 1..=count).collect();
+    let uids: Vec<usize> = order.iter().map(|&slot| if slot == 0 { 1 } else { 100 + slot }).collect();
+    let list = |values: &[usize]| values.iter().map(usize::to_string).collect::<Vec<_>>().join(",");
+    for (from, to) in [
+        ("\"figure_types\":[".to_string(), format!("\"figure_types\":[{figure},")),
+        ("\"join\":null}]".to_string(), format!("\"join\":null}},{}]", objects.join(","))),
+        ("\"object_draw_order\":[0]".to_string(), format!("\"object_draw_order\":[{}]", list(&order))),
+        ("\"object_draw_order_unique_ids\":[1]".to_string(), format!("\"object_draw_order_unique_ids\":[{}]", list(&uids))),
+    ] {
+        assert_eq!(text.matches(&from).count(), 1, "the fixture holds {from} once");
+        text = text.replace(&from, &to);
+    }
+    styk_eval::open_bytes(text.as_bytes(), "json", "cel among figures").expect("the document")
+}
+
+/// A stroke adds tiles to a live cel in nearly every frame. The cel is drawn in a block with room for more, so the list keeps its
+/// layout while the block has room: each list is written over the one before it, reports the cel's block alone as changed, and is
+/// the list encoded whole; the block grows by doubling when it is full.
+#[test]
+fn a_live_cel_that_grows_is_written_over_the_list_before_it_in_its_block_alone() {
+    use styk_eval::drawlist::{encode_composed_shared, EncodeMemory};
+    use styk_eval::geometry::{build_remembering_shared, BuildMemory};
+    use styk_eval::live::{LiveCels, LiveView};
+
+    let doc = cel_among_figures(40, 40);
+    let id = doc.figures.iter().flat_map(|figure| &figure.images).find_map(|image| image.cel.as_ref()).expect("a drawing cel").id.clone();
+    let prepared = styk_eval::prepare(doc);
+    let assets = Assets::build(&prepared.doc);
+    let scene = build_remembering_shared(&prepared.doc, &prepared.evaluate(0.0), &mut BuildMemory::default());
+    assert_eq!(scene.objects.len(), 81);
+    let cel = assets.cels.values().next().expect("one cel").0.clone();
+    let tiles: Vec<_> = cel.tiles.iter().map(|(tx, ty, png)| ((*tx, *ty), Some(image::load_from_memory(png).expect("a tile").to_rgba8().into_raw()))).collect();
+    // Its tiles and their levels fill a first block and grow it.
+    assert!(tiles.len() > 32, "tiles: {}", tiles.len());
+
+    let mut live = LiveCels::default();
+    live.update(&id, false, tiles[..1].to_vec()).expect("room for the cel");
+    live.show(&id, true, false);
+    let mut memory = EncodeMemory::default();
+    let (mut written, mut grew, mut reported) = (0, 0, 0);
+    let mut room = 0;
+    for step in 1..=tiles.len() {
+        if step > 1 {
+            live.update(&id, false, vec![tiles[step - 1].clone()]).expect("room for the tile");
+        }
+        let overrides = Overrides { live: Some(LiveView { cels: &live, base: assets.pages }), ..Default::default() };
+        let (list, changes) = encode_composed_shared(&prepared.doc, &assets, &scene, &overrides, &[], None, &mut memory);
+        let whole = encode_composed(&prepared.doc, &assets, &scene, &overrides, &[], None);
+        assert_eq!((&list.prims, &list.paints, &list.points), (&whole.prims, &whole.paints, &whole.points), "step {step}: the list is the one encoded whole");
+        // The cel's block: its quads and the room after them, between the figures under it and over it.
+        let block: Vec<usize> = (0..list.prims.len()).filter(|&at| list.prims[at].kind & F_DRAWING != 0).collect();
+        let (start, end) = (block[0], block[block.len() - 1] + 1);
+        assert_eq!(end - start, block.len(), "step {step}: the block is one run");
+        let quads = block.iter().filter(|&&at| !is_room_quad(&list.prims[at])).count();
+        assert_eq!(block.len(), live_room(quads), "step {step}: the block has room for {quads} quads");
+        assert!(block[..quads].iter().all(|&at| !is_room_quad(&list.prims[at])), "step {step}: the quads come first, the room after them");
+        if block.len() != room {
+            grew += 1;
+        } else if let Some(changes) = &changes {
+            reported += 1;
+            assert!(changes.prims.iter().all(|&(a, b)| (a as usize >= start && b as usize <= end) || b as usize <= list.background_prims as usize),
+                "step {step}: only the cel's block changed: {:?} outside {start}..{end}", changes.prims);
+        }
+        room = block.len();
+        written = memory.written_over();
+        // What a renderer does once it has written the changes: it lets go of the list before.
+        drop(changes);
+    }
+    assert!(grew >= 2, "the block grew by doubling: {grew}");
+    assert!(reported + grew + 1 >= tiles.len(), "every step within the block's room reports its changes: {reported} of {}", tiles.len());
+    // After the block grows, the list before last is laid out as before: the next two lists are encoded whole.
+    assert!(written as usize + 2 * grew + 1 >= tiles.len(), "and was written over the list before last: {written} of {}", tiles.len());
 }

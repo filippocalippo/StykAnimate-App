@@ -269,6 +269,14 @@ pictures arrive. Not done.
   and the cache lacks. A frame is never short of a picture because of the budget: what it samples is kept while it
   is drawn. The preview worker's GPU device keeps the pictures it was given (`Gpu.uploaded`), so it asks the
   CPU only for the ones the device lacks; before, both kept every picture of the document.
+- **The stage drawn on the processor** (`styk_engine::stage_raster`, without a graphics card): at most three frame buffers
+  of the canvas's size (one being drawn, one finished and not yet shown, one kept for the next frame: 7.5 MB at
+  1,160 × 540 device pixels, the stage of a 1,248 × 800 window at 125%), as straight RGBA; a newer request replaces the one waiting, so a gesture never piles up
+  frames. The pictures its frames sample are the decoded images the stage takes from the engine (shared with the GPU
+  upload, not copied) in a `styk_raster::Images` under its budget (a sixteenth of the memory), the least recently used
+  dropped and decoded again from the document on a worker when a frame needs them; the live cels' slots are tiles in the
+  same set. All of it goes with the stage or when the processor is switched off, on a worker. The page holds one
+  `ImageData` of the canvas's size besides the canvas's own backing.
 - **The frame cache** stays under a sixteenth of the memory (120 MiB of 2 GiB), whatever
   `navigator.deviceMemory` says. It keeps the frames just ahead of the playhead, so a cap only changes how far ahead
   playback has frames waiting: svr_uriel played 14 s three times at each cap (a dev build, one app launch per cap):
@@ -286,6 +294,36 @@ pictures arrive. Not done.
   session keeps the scene before the one on show and the stage keeps the draw list before the one drawn, to write the next frame over them
   in place; both are let go of once the frame stays on show for 60 ms (when the stage prepares a pick), so a frame at rest holds one scene
   and one list, as before. A dense frame of 2,000 figures of 100 segments is about 70 MB of scene and 13 MB of list.
+- **A worker's spare scene** (`styk_engine::frames::Spares`, `geometry::SceneSpares`): a preparation worker keeps the buffers of the
+  scene it built last (each object's joints, lengths and segments, the scene's items, points and spans; no figure, effect or other part
+  of a document) to build the next frame in them, while it makes frame after frame. A worker's scene of the dense document above is
+  about 47 MB (232 bytes a segment: no measured primitives or angles). They are let go of when one worker's would hold more than a thirty-second of
+  the memory (64 MiB of 2 GiB) or all the workers' together more than an eighth (256 MiB, `Spares::most_held`, five such scenes): that
+  worker builds its next frame in fresh buffers, as before. They are also let go of before the worker runs any other kind of work (a
+  save's helpers, pictures, idle tasks), and once it has waited eight times in a row with nothing to do (at most 50 ms each). While
+  workers prepare frames each holds about one scene at once either way; the spares keep that memory between two of its frames, which
+  raised the engine's peak during the open of the dense document (whose first frames the workers prepare meanwhile) by about
+  150 MB in one measurement on 2026-11-13. What made that peak was the number of frames made at once, now bounded (*Frames being
+  made*, below): a worker that finds no room lets its spares go, so the spares of idle workers never sit beside the frames the others make.
+- **Frames being made** (`styk_engine::frames::Making`, `Storage::take_admitted` in `frames/cache.rs`): a frame holds its scene until
+  its draw list is made, about 60 MB at 200,000 segments, and every worker used to start one as soon as a frame was wanted. Opening the
+  dense document (the open itself peaks 73 MB over what was held: tree, normalization and typed views) was followed by eight workers
+  making its first 48 frames at once, of which the cache (a sixteenth of the memory, nine such frames) kept nine: the engine's memory
+  went from 59 MB in use to 729 MB in the two seconds after the open, and the linear memory kept 751 to 1,009 MB for the session against
+  about 280 in use once the frames were made (2026-11-13, the developer tools' memory by owner and `engine.memory()` read every 4 ms).
+  Now two things wait: a frame the cache would drop as soon as it was made (the frames kept and those on their way are at the budget and
+  this one is farther ahead of the playhead than every frame kept: it waits for a request that moves the playhead), and a frame while
+  the frames being made, at the size the last frame of the document took (its scene's buffers and its draw list), would hold more than an
+  eighth of the memory (`Making::most_bytes`, 240 MiB of 2 GiB: four such frames). One frame is always made, and the first frame of a
+  document is made alone (what one holds is not known until one was made). A worker refused for want of room lets its spares go and
+  waits; the next frame done wakes it. The count is the engine's, across the cache's publications, so frames still being made for a
+  replaced revision count until they are done, and a thread reported lost is counted out (`Engine::note_worker_lost`). Measured the same
+  day: the live peak after the open fell to 529 MB and the frames were made in under a second instead of four; the linear memory after the
+  open was 593 to 754 MB in seven runs against 783 to 1,039 in five of the build before (interleaved on a busy machine), and 798 to 926 after
+  the run's scrubbing against 1,164 to 1,168. Opening and playback were no slower in the same runs (open 1,119 to 1,130 ms against 1,217
+  to 1,499; playback delivered 99.9 to 100% of its frames against 94.9 to 99.7%). What is left: the document and the session's views, the
+  stage's scene and the one before it (about 85 MB each at 200,000 segments), the frame cache and four frames being made; the linear memory
+  is about 2.5 times what stays in use at rest.
 - **History** keeps its byte limit (`HistoryLimits`, 48 MiB by default): an entry larger than the limit
   retires the older ones (testingupload's movieclip edit weighs 100 MiB by the history's accounting and
   holds 3 MiB of memory).

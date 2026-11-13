@@ -107,3 +107,17 @@ test('zooming to a new mip level shows the nearest level until its own snapshot 
     assert.equal(cache.scratch(entry,rect,{level:2}),null);
   }finally{cache.dispose();}
 });
+
+test('a preview worker that ended is sent every tile again, not only the changed ones',async()=>{
+  const {jobs,cache,entry,finish}=fixture({budgetBytes:1024*1024});
+  const worker=cache.worker;worker.instance=1;worker.active=true;
+  entry.store.set(1,0,new Uint8ClampedArray([1,2,3,255]));
+  try{
+    cache.scratch(entry,{...rect,width:128});finish(0);await idle();
+    entry.store.set(1,0,new Uint8ClampedArray([4,5,6,255]));entry.pixelStamp++;
+    cache.scratch(entry,{...rect,width:128});assert.deepEqual([jobs[1].data.reset,jobs[1].data.tiles.length],[false,1],'the same worker gets the changed tile');finish(1);await idle();
+    // The worker ended while idle; the next one starts empty.
+    worker.instance=2;entry.store.set(1,0,new Uint8ClampedArray([7,8,9,255]));entry.pixelStamp++;
+    cache.scratch(entry,{...rect,width:128});assert.deepEqual([jobs[2].data.reset,jobs[2].data.tiles.length],[true,2]);finish(2);await idle();
+  }finally{cache.dispose();}
+});

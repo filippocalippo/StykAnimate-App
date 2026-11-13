@@ -1,28 +1,35 @@
 /**
- * The page's first script (index.html), ahead of the application (src/app.mjs): the engine's module is compiled, its
- * threads started and the scene canvas's graphics device requested while the application's own modules are still
- * arriving. The application's `loadEngine()` and `createStage()` take what this started, so a launch waits for the
- * slower of the two instead of their sum. A start that fails is reported by the application's call, which tries again.
+ * The page's first script (index.html), ahead of the application (src/app.mjs): the engine's module is compiled, and
+ * once the page has painted, the scene canvas's graphics adapter is asked for and the stage started over the canvas, all
+ * while the application's own modules are still arriving. The application's `loadEngine()` and `createStage()` take what
+ * this started, so a launch waits for the slowest of them instead of their sum. A start that fails is reported by the
+ * application's call, which tries again.
  */
 import {loadEngine, expectAdapterInfo} from './engine.mjs';
+import {askAdapterEarly} from './engine-adapter.mjs';
+
+/** The longest the stage waits for the page's first paint: a window that paints nothing yet does not hold it longer. */
+const FIRST_PAINT_MS = 300;
+
+/**
+ * Resolves after the page's first frame has been painted, or after `FIRST_PAINT_MS`. The stage's start holds this thread
+ * for parts of it (the page's first WebGPU call sets its connection up; WebGL2 waits for its shader program to link, about
+ * 1.6 s on a cold profile), which must not keep the first pixels from the screen.
+ */
+function afterFirstPaint() {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, FIRST_PAINT_MS);
+    // A task after the frame's callbacks runs after that frame's rendering.
+    requestAnimationFrame(() => setTimeout(() => { clearTimeout(timer); resolve(); }, 0));
+  });
+}
 
 const scene = document.getElementById('scene');
 if (scene) {
-  warmGraphics();
-  loadEngine().then(engine => engine.prepareStage(scene)).catch(() => {});
-}
-
-/**
- * The browser's first graphics adapter and device take most of a second in its graphics process, whoever asks, and the
- * asking thread waits while the process sets its connection up. The stage can ask only once the engine has loaded, so a
- * worker asks now, while that loads (src/engine/engine-graphics-worker.mjs), and the interface thread never waits for it.
- * The worker also reports the adapter's description, which the stage shows as the adapter's name.
- */
-function warmGraphics() {
-  if (typeof Worker !== 'function' || !globalThis.navigator?.gpu) return;
-  const worker = new Worker(new URL('./engine-graphics-worker.mjs', import.meta.url), {type: 'module', name: 'styk-graphics'});
-  expectAdapterInfo(new Promise(resolve => {
-    worker.onmessage = ({data}) => { worker.terminate(); resolve(data); };
-    worker.onerror = () => { worker.terminate(); resolve(null); };
-  }));
+  loadEngine({stage: afterFirstPaint().then(() => {
+    // The adapter takes most of a second on a first launch: asked for now, it comes back while the engine loads, and its
+    // description names the adapter in the status line.
+    expectAdapterInfo(askAdapterEarly());
+    return scene;
+  })}).catch(() => {});
 }

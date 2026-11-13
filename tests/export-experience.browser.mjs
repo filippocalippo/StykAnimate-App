@@ -62,12 +62,14 @@ try {
   await page.setViewportSize({width: 1280, height: 900});
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.screenshot({path: path.join(output, 'panel-dark.png')});
-  // Delay the real worker's frame requests so each state can be observed without
-  // substituting fake rendered frames or encoder completion messages.
+  // Delay the real workers' frame requests so each state can be observed without
+  // substituting fake rendered frames or encoder completion messages. A GIF's second
+  // pass encodes the frames its first pass kept and asks for no rendering: its encoder
+  // requests are delayed instead.
   await page.evaluate(() => {
     const original = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function(message, ...rest) {
-      if (message.operation === 'render') setTimeout(() => original.call(this, message, ...rest), 250);
+      if (message.operation === 'render' || (message.operation === 'frame' && message.retained)) setTimeout(() => original.call(this, message, ...rest), 250);
       else original.call(this, message, ...rest);
     };
   });

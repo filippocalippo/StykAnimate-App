@@ -59,7 +59,12 @@ pub(crate) struct Frame<'a> {
     /// Each group's prims: one run of the list.
     pub runs: Vec<(usize, usize)>,
     /// Each lone glyph's mask this frame, or `None` where its triangles draw.
-    pub glyphs: Vec<Option<Placed>>,
+    pub glyphs: &'a [Option<Placed>],
+    /// A turned or mirrored workspace view (`Raster::set_orientation`): the artboard's corners on screen, (x0, y0), (x1, y0),
+    /// (x1, y1), (x0, y1), which the root's fills cover and, with `clip_to_artboard`, its other primitives stay inside.
+    pub orient_quad: Option<[[f32; 2]; 4]>,
+    /// What the root's scissor clips to: the artboard, or the box around its turned quad.
+    pub artboard: [f64; 4],
     pub view: &'a ViewParams,
     pub stats: Stats,
     /// Bytes the targets being drawn hold now.
@@ -68,11 +73,12 @@ pub(crate) struct Frame<'a> {
 }
 
 impl<'a> Frame<'a> {
-    pub fn new(list: &'a DrawList, images: &'a Images, view: &'a ViewParams, size: [u32; 2], crisp: bool, glyphs: Vec<Option<Placed>>, drawing_grid: crate::DrawingGrid, paint_context: styk_render::paint::PaintContext) -> Frame<'a> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(list: &'a DrawList, images: &'a Images, view: &'a ViewParams, size: [u32; 2], crisp: bool, glyphs: &'a [Option<Placed>], drawing_grid: crate::DrawingGrid, paint_context: styk_render::paint::PaintContext, orientation: Option<Affine>) -> Frame<'a> {
         let n = list.groups.len().max(1);
         let planned = plan::plan_with_grid(
             list,
-            &plan::View { matrix: view.matrix, size, zoom: view.zoom, pan: view.pan, orient: plan::IDENTITY, stretch: view.stretch, camera_view: view.camera_view, camera_limit: view.camera_limit, max_texture: MAX_TEXTURE },
+            &plan::View { matrix: view.matrix, size, zoom: view.zoom, pan: view.pan, orient: orientation.unwrap_or(plan::IDENTITY), stretch: view.stretch, camera_view: view.camera_view, camera_limit: view.camera_limit, max_texture: MAX_TEXTURE },
             drawing_grid,
         );
         let det = view.matrix[0] * view.matrix[3] - view.matrix[1] * view.matrix[2];
@@ -122,7 +128,14 @@ impl<'a> Frame<'a> {
                 *run = (0, 0);
             }
         }
-        Frame { cancelled: &|| false, list, images, crisp, samples: if crisp { 1 } else { 4 }, layers, runs, glyphs, view, stats: Stats::default(), held: 0, paint_context }
+        // A turned view: the artboard is a quad on screen (styk-render `frame.rs`, `orient_quad0/1`), the scissor the box around it.
+        let a = view.artboard;
+        let orient_quad = orientation.map(|o| [[a[0], a[1]], [a[2], a[1]], [a[2], a[3]], [a[0], a[3]]].map(|p| apply(o, p).map(|v| v as f32)));
+        let artboard = orient_quad.map_or(a, |q| {
+            let (xs, ys) = (q.map(|p| p[0] as f64), q.map(|p| p[1] as f64));
+            [xs.into_iter().fold(f64::INFINITY, f64::min), ys.into_iter().fold(f64::INFINITY, f64::min), xs.into_iter().fold(f64::NEG_INFINITY, f64::max), ys.into_iter().fold(f64::NEG_INFINITY, f64::max)]
+        });
+        Frame { cancelled: &|| false, list, images, crisp, samples: if crisp { 1 } else { 4 }, layers, runs, glyphs, orient_quad, artboard, view, stats: Stats::default(), held: 0, paint_context }
     }
 
     /// Draws the frame: group 0 into a target of the view's size cleared to `clear`.
@@ -155,7 +168,7 @@ impl<'a> Frame<'a> {
         // The frame's figures are clipped to the artboard (the GPU's scissor); its background is not.
         let background = if g == 0 { self.list.background_prims as usize } else { 0 };
         let scissor = if g == 0 && self.view.clip_to_artboard {
-            let a = self.view.artboard;
+            let a = self.artboard;
             let (w, h) = (target.width as f64, target.height as f64);
             [a[0].clamp(0.0, w).floor() as i64, a[1].clamp(0.0, h).floor() as i64, a[2].clamp(0.0, w).ceil() as i64, a[3].clamp(0.0, h).ceil() as i64]
         } else {
@@ -169,6 +182,11 @@ impl<'a> Frame<'a> {
             if clip[2] <= clip[0] || clip[3] <= clip[1] {
                 i += 1;
                 continue;
+            }
+            // A turned view keeps the root's scene inside the artboard's quad, pixel by pixel (`discard_outside_orient_artboard` in
+            // prim.wgsl); its fills are the quad already.
+            if g == 0 && self.view.clip_to_artboard && self.orient_quad.is_some() {
+                target.quad_clip = self.orient_quad.filter(|_| !matches!(p.kind & 255, K_FILL_VIEW | K_BG_IMAGE));
             }
             match p.kind & 255 {
                 K_DEPTH_RESET => {
@@ -188,6 +206,9 @@ impl<'a> Frame<'a> {
                 _ => {}
             }
             i += 1;
+        }
+        if g == 0 {
+            target.quad_clip = None;
         }
     }
 
@@ -651,6 +672,10 @@ impl<'a> Frame<'a> {
         }
         let r = if g == 0 { self.view.artboard.map(|v| v as f32) } else { [0.0, 0.0, target.width as f32, target.height as f32] };
         let mut corners = [[r[0], r[1]], [r[2], r[1]], [r[0], r[3]], [r[2], r[3]]];
+        // A turned view: the artboard's quad on screen, in the corner order of `quad` ((0, 0), (1, 0), (0, 1), (1, 1)).
+        if let (0, Some(q)) = (g, self.orient_quad) {
+            corners = [q[0], q[1], q[3], q[2]];
+        }
         if g == 0 {
             if let styk_render::paint::PaintContext::CanvasDirect { background_bounds } = self.paint_context {
                 if p.kind & 255 == K_FILL_VIEW {
@@ -684,7 +709,19 @@ impl<'a> Frame<'a> {
         let solid = (texture.is_none() && p.paint == NO_PAINT).then(|| premul(base)).filter(|c| c[3] >= 1.0);
         let opaque = solid.map(|c| [quantize(c[0]), quantize(c[1]), quantize(c[2]), 255]);
         let full = target.full();
-        quad(corners, clip, positions(self.samples), |x, y, mask| {
+        // An upright opaque rectangle (the artboard's background): the pixels whose every sample is inside it are written
+        // at once, and only its edges go through the coverage of the quad below, which gives those inside the same colour.
+        let mut clips = [clip; 4];
+        let mut strips = 1;
+        if let (Some(px), Some(inner)) = (opaque, upright_interior(&corners, clip))
+            && target.writes_opaque_directly()
+        {
+            target.fill_opaque(inner, px);
+            // The rows above and below the interior, and the columns beside it.
+            clips = [[clip[0], clip[1], clip[2], inner[1]], [clip[0], inner[3], clip[2], clip[3]], [clip[0], inner[1], inner[0], inner[3]], [inner[2], inner[1], clip[2], inner[3]]];
+            strips = 4;
+        }
+        let mut paint = |x: i64, y: i64, mask: u8| {
             if let (Some(px), true) = (opaque, mask == full) {
                 target.set_opaque(y as usize * width + x as usize, px);
                 return;
@@ -702,8 +739,28 @@ impl<'a> Frame<'a> {
                 None => premul(self.base(p, w)),
             };
             target.blend(y as usize * width + x as usize, mask, src, false);
-        });
+        };
+        for strip in &clips[..strips] {
+            if strip[2] > strip[0] && strip[3] > strip[1] {
+                quad(corners, *strip, positions(self.samples), &mut paint);
+            }
+        }
     }
+}
+
+/// The pixels of `clip` wholly inside the upright rectangle `corners` (in `quad`'s corner order), every sample of them:
+/// a pixel from the rectangle's left edge on has its samples (an eighth of a pixel in at least) right of the edge, however
+/// the edge's vertex is snapped (to a 256th). None for a turned quad, or when no pixel is wholly inside.
+fn upright_interior(corners: &[[f32; 2]; 4], clip: [i64; 4]) -> Option<[i64; 4]> {
+    let [a, b, c, d] = *corners;
+    if !(a[1] == b[1] && c[1] == d[1] && a[0] == c[0] && b[0] == d[0]) || !corners.iter().flatten().all(|v| v.is_finite()) {
+        return None;
+    }
+    const MARGIN: f64 = 1.0 / 64.0;
+    let (x0, x1) = (a[0].min(b[0]) as f64, a[0].max(b[0]) as f64);
+    let (y0, y1) = (a[1].min(c[1]) as f64, a[1].max(c[1]) as f64);
+    let inner = [((x0 + MARGIN).ceil() as i64).max(clip[0]), ((y0 + MARGIN).ceil() as i64).max(clip[1]), ((x1 - MARGIN).floor() as i64).min(clip[2]), ((y1 - MARGIN).floor() as i64).min(clip[3])];
+    (inner[2] > inner[0] && inner[3] > inner[1]).then_some(inner)
 }
 
 /// The squared distance from `p` to the segment `a`–`b` (`sd_segment` without its square root).

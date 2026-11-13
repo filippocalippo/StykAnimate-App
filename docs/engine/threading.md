@@ -23,7 +23,14 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   [memory.md](memory.md)); the protected playhead
   and separately retained payloads prevent treating it as a physical memory cap.
   Try hidden/effects setters advance the epoch; playback retries only its latest
-  pending controls while Busy keeps it cold.
+  pending controls while Busy keeps it cold. A worker builds frame after frame in
+  the buffers the frame before it left (`frames::Spares`, `geometry::build_reusing`):
+  a dense frame's scene needs four buffers of a kilobyte or more for every figure,
+  which the allocator serves under the lock every thread shares. The spares hold no
+  part of a document, at most a thirty-second of the memory for one worker and an
+  eighth for all of them together (a worker beyond either builds as before), and are
+  let go before any other kind of work and once the worker has waited eight times in a
+  row with nothing to do ([memory.md](memory.md)).
 - Images: decoded on workers (`take_images` hands them to the renderer a few
   megabytes per frame, and only a budget of them is decoded ahead of it: [memory.md](memory.md));
   drawing cels decode one task each. The stage remembers which
@@ -43,10 +50,12 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   two workers at launch (`engine-worker.mjs`); `grow()` starts the rest, up to `navigator.hardwareConcurrency - 1` and at most 8, when a file or a
   large document opens, when playback prepares frames for someone waiting (not the idle warm-up) and when an export starts, so an empty editor holds
   two threads (about 40 MiB less than eight). Work queued meanwhile runs on the threads there are. Without cross-origin isolation the same module
-  runs without workers through `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine, has a worker (`engine-graphics-worker.mjs`) ask the browser's
-  graphics process for an adapter and a device (let go of at once: the first request is slow whoever makes it, so the stage's own meets a process
-  that is up, and the interface thread does not wait for the process to set its connection up, as it did when it asked); the worker also reports the adapter's description, which the stage shows as the adapter's name (a third request from the interface thread took about 0.6 s on a first launch) and requests the scene canvas's graphics device while the application's modules are still arriving; the application's `loadEngine()` and `createStage()` take
-  what it started (`prepareStage`, `stageHandoff`). `join` hands another thread what it needs to join the engine (the
+  runs without workers through `pump()`. `src/engine/engine-start.mjs`, the page's first script (index.html), loads the engine and, once the page has painted its first frame, asks the browser for the scene's WebGPU adapter
+  (`engine-adapter.mjs`: the answer takes most of a second on a first launch, so it comes back while the engine loads; it is handed to the
+  engine's own request with the same options, and its description is the adapter's name in the status line), and starts the
+  stage over the scene canvas as soon as the module is instantiated too, before its threads have joined (`loadEngine({stage})`); the application's
+  `loadEngine()` and `createStage()` take what it started (`stageHandoff`). The engine asks for each device's adapter once
+  (`styk-wasm` `gpu.rs`): WebGPU where the browser gives an adapter, else WebGL2, with no separate detection request. `join` hands another thread what it needs to join the engine (the
   compiled module, the memory, a stack size, the progress counter's address).
 - The export worker (`src/engine/engine-export-worker.mjs`, one per export, see
   [rendering.md](rendering.md#exports)): joins the shared memory like a preparation
@@ -88,6 +97,15 @@ How the engine runs in the app (`engine/crates/styk-engine`,
   at a time and is released after five idle minutes, as the export worker is (device
   destroyed, pending answers let through, then the thread destroyed); it is never
   terminated to cancel a preview (a cancelled request's answer is dropped), and never while inside the engine ("Ending a worker").
+- The stage on the processor (`styk_engine::stage_raster`, [rendering.md](rendering.md#the-stage-on-the-processor)): where the
+  stage's device is a software rasterizer, a stage frame is drawn by the CPU rasterizer on the preparation workers. The
+  interface's draw queues one task (`Engine::spawn`, ahead of frames) and returns; that task, on a worker, readies the
+  frame's pictures (handed over by the stage, or decoded from the document there) and glyph masks under a mutex only these
+  tasks take, then queues one task per band of 64 rows, which any worker takes; each band writes its own rows of the
+  frame's buffer. The interface learns of the end from the progress counter (each task bumps it) and copies the newest
+  finished frame onto a canvas; it never waits for one. One frame is drawn at a time and a newer request replaces the one
+  waiting; a frame let go of is cancelled between its primitives, and what the stage held is dropped on a worker. A page
+  without workers does not use it (its tasks would run on the interface thread through `pump`).
 - Frame thumbnails and the camera monitor are drawn by the stage on the interface
   thread (`styk-wasm/src/views.rs`), the only work done there being the draw itself:
   a thumbnail's frame is prepared on the preparation workers (`ExportFrames::prefetch`)

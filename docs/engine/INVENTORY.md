@@ -12,14 +12,14 @@ the old module is deleted; **stays** not engine logic. Shares are of the engine 
 | Rust owner | Modules | Source at start | js | partial | ported | verified | removed | Covered by Rust | Partly covered | Deleted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `styk-doc` | 2 | 20 KiB | 1 | 1 | 0 | 0 | 0 | 0 % | 14 % | 0 % |
-| `styk-drawing` | 36 | 164 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
-| `styk-edit` | 93 | 600 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
+| `styk-drawing` | 36 | 168 KiB | 9 | 7 | 8 | 0 | 12 | 27 % | 23 % | 4 % |
+| `styk-edit` | 93 | 601 KiB | 22 | 11 | 1 | 4 | 55 | 67 % | 9 % | 63 % |
 | `styk-engine` | 24 | 31 KiB | 6 | 0 | 0 | 0 | 18 | 56 % | 0 % | 56 % |
-| `styk-eval` | 80 | 312 KiB | 10 | 32 | 2 | 2 | 34 | 31 % | 56 % | 18 % |
-| `styk-export` | 14 | 58 KiB | 8 | 2 | 0 | 0 | 4 | 0 % | 9 % | 0 % |
+| `styk-eval` | 80 | 314 KiB | 10 | 32 | 2 | 2 | 34 | 30 % | 56 % | 18 % |
+| `styk-export` | 16 | 80 KiB | 10 | 2 | 0 | 0 | 4 | 0 % | 6 % | 0 % |
 | `styk-formats` | 55 | 711 KiB | 20 | 7 | 1 | 22 | 5 | 68 % | 8 % | 7 % |
 | `styk-render` | 51 | 76 KiB | 4 | 1 | 0 | 0 | 46 | 35 % | 29 % | 35 % |
-| **Total** | 355 | 1973 KiB | 80 | 61 | 12 | 28 | 174 | 54 % | 18 % | 27 % |
+| **Total** | 357 | 2002 KiB | 82 | 61 | 12 | 28 | 174 | 53 % | 18 % | 27 % |
 
 ## Engine modules
 
@@ -269,6 +269,8 @@ Engine logic: ported to Rust.
 | `src/export-frame-worker.mjs` | `styk-export` | removed | removed; the engine's export worker (src/engine/engine-export-worker.mjs) draws every export, and writes SVG with styk-export svg |
 | `src/export-memory.mjs` | `styk-export` | partial | Rust: engine exports bounded by 2,048-px tiles and read-back slots (styk-export); the interface keeps the allowance and tile plan it validates a request with |
 | `src/export-sampling.mjs` | `styk-export` | partial | Rust: the sampling limits mirrored in styk_export::settings; the JavaScript worker still reads these |
+| `src/gif-encode-worker.mjs` | `styk-export` | js |  |
+| `src/gif-frames.mjs` | `styk-export` | js |  |
 | `src/gif-options.mjs` | `styk-export` | js |  |
 | `src/gif-quantize.mjs` | `styk-export` | js |  |
 | `src/image-codecs.mjs` | `styk-export` | js |  |
@@ -411,8 +413,8 @@ Browser, Electron or operating-system service: stays in JS (or native), driven b
 | `desktop/rename-retry.cjs` |  | stays | Electron shell and services |
 | `desktop/samples.cjs` |  | stays | the desktop sample list and sample bytes, under the Python codec service's samples/open rules |
 | `desktop/shared-clipboard.cjs` |  | stays | Electron shell and services |
+| `desktop/stats.cjs` |  | stays | Electron shell and services |
 | `desktop/support.cjs` |  | stays | Electron shell and services |
-| `desktop/telemetry.cjs` |  | stays | Electron shell and services |
 | `desktop/updates.cjs` |  | stays | Electron shell and services |
 | `desktop/vfw-export-service.cjs` |  | stays | Electron shell and services |
 | `desktop/video-export-service.cjs` |  | stays | Electron shell and services |
@@ -471,6 +473,7 @@ Interface: stays in JS.
 | `src/canvas-context-menu.mjs` |  | stays |  |
 | `src/canvas-guides.mjs` |  | stays |  |
 | `src/canvas-handle-overlay.mjs` |  | stays |  |
+| `src/canvas-handle-sprites.mjs` |  | stays |  |
 | `src/canvas-handles.mjs` |  | stays |  |
 | `src/canvas-pinch.mjs` |  | stays |  |
 | `src/canvas-pose-input.mjs` |  | stays |  |
@@ -486,6 +489,7 @@ Interface: stays in JS.
 | `src/devtools/frames.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/grades.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/inspector.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
+| `src/devtools/memory.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/mutations.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/panels/chart.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
 | `src/devtools/panels/dom.mjs` |  | stays | developer tools, developer launch only (docs/DEVTOOLS.md) |
@@ -665,24 +669,25 @@ Telemetry, support, updates: stays in JS.
 
 | Module | Rust owner | Status | Notes |
 | --- | --- | --- | --- |
-| `src/feedback-ui.mjs` |  | stays | telemetry, support, updates |
-| `src/privacy-ui.mjs` |  | stays | telemetry, support, updates |
-| `src/release-notes.mjs` |  | stays | telemetry, support, updates |
-| `src/support-center.mjs` |  | stays | telemetry, support, updates |
-| `src/support-contract.mjs` |  | stays | telemetry, support, updates |
-| `src/support-desktop-ui.mjs` |  | stays | telemetry, support, updates |
-| `src/support-live-client.mjs` |  | stays | telemetry, support, updates |
-| `src/support-localization.mjs` |  | stays | telemetry, support, updates |
-| `src/support-media.mjs` |  | stays | telemetry, support, updates |
-| `src/support-ui.mjs` |  | stays | telemetry, support, updates |
-| `src/telemetry-core.mjs` |  | stays | telemetry, support, updates |
-| `src/telemetry-measurements.mjs` |  | stays | telemetry, support, updates |
-| `src/telemetry-performance-schema.mjs` |  | stays | telemetry, support, updates |
-| `src/telemetry-performance.mjs` |  | stays | telemetry, support, updates |
-| `src/telemetry-schema.mjs` |  | stays | telemetry, support, updates |
-| `src/telemetry-workload.mjs` |  | stays | telemetry, support, updates |
+| `src/feedback-ui.mjs` |  | stays | support, updates |
+| `src/privacy-settings.mjs` |  | stays | statistics |
+| `src/release-notes.mjs` |  | stays | support, updates |
+| `src/stats/collector.mjs` |  | stays | statistics |
+| `src/stats/files.mjs` |  | stays | statistics |
+| `src/stats/frames.mjs` |  | stays | statistics |
+| `src/stats/problems.mjs` |  | stays | statistics |
+| `src/stats/schema.mjs` |  | stays | statistics |
+| `src/stats/session.mjs` |  | stays | statistics |
+| `src/stats/stack.mjs` |  | stays | statistics |
+| `src/support-center.mjs` |  | stays | support, updates |
+| `src/support-contract.mjs` |  | stays | support, updates |
+| `src/support-desktop-ui.mjs` |  | stays | support, updates |
+| `src/support-live-client.mjs` |  | stays | support, updates |
+| `src/support-localization.mjs` |  | stays | support, updates |
+| `src/support-media.mjs` |  | stays | support, updates |
+| `src/support-ui.mjs` |  | stays | support, updates |
 | `src/trace.mjs` |  | stays | the instrumentation layer: spans, counters and live parameters (docs/DEVTOOLS.md) |
-| `src/update-ui.mjs` |  | stays | telemetry, support, updates |
+| `src/update-ui.mjs` |  | stays | support, updates |
 
 ## Tools of removed subsystems
 

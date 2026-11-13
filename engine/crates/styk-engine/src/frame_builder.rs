@@ -7,7 +7,7 @@ use styk_eval::drawlist::{
     EncodeMemory, Ghost, Overrides, encode_composed, encode_composed_remembering,
 };
 use styk_eval::geometry::{
-    BuildMemory, Scene, build, build_remembering_plain, build_remembering_plain_over,
+    BuildMemory, Scene, SceneSpares, build, build_remembering_plain, build_remembering_plain_over, build_reusing,
 };
 use styk_eval::onion::{GhostPlace, compose};
 
@@ -81,21 +81,30 @@ impl FrameBuilder {
         clock: impl Fn() -> f64,
         cancelled: impl Fn() -> bool,
     ) -> Option<FrameData> {
-        self.prepare_inner(generation, tick, options, &clock, &cancelled, true)
+        self.prepare_inner(generation, tick, options, &clock, &cancelled, true, None)
     }
 
+    /// A frame made from nothing kept, but for the buffers of a scene a frame before it left on this thread (`spares`): its scene is built
+    /// in them ([`styk_eval::geometry::build_reusing`], the same scene) and gives them back once its list is made.
     pub(crate) fn prepare_fresh(
         generation: &Generation,
         tick: f64,
         options: &Options,
         clock: std::sync::Arc<dyn Fn() -> f64 + Send + Sync>,
+        mut spares: Option<&mut SceneSpares>,
     ) -> FrameData {
         // The existing synchronous worker entry is never cancelled.
-        Self::default()
-            .prepare_inner(generation, tick, options, &|| clock(), &|| false, false)
-            .expect("uncancelled preparation")
+        let mut builder = Self::default();
+        let data = builder
+            .prepare_inner(generation, tick, options, &|| clock(), &|| false, false, spares.as_deref_mut())
+            .expect("uncancelled preparation");
+        if let (Some(spares), Some(scene)) = (spares, builder.scene.take()) {
+            spares.recycle(scene);
+        }
+        data
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prepare_inner(
         &mut self,
         generation: &Generation,
@@ -104,6 +113,7 @@ impl FrameBuilder {
         clock: &impl Fn() -> f64,
         cancelled: &impl Fn() -> bool,
         reuse: bool,
+        spares: Option<&mut SceneSpares>,
     ) -> Option<FrameData> {
         if cancelled() {
             return None;
@@ -133,7 +143,10 @@ impl FrameBuilder {
                 None => self.scene = Some(build_remembering_plain(doc, &frame, &mut self.memory)),
             }
         } else {
-            self.scene = Some(build(doc, &frame));
+            self.scene = Some(match spares {
+                Some(spares) => build_reusing(doc, &frame, spares),
+                None => build(doc, &frame),
+            });
         }
         let scene = self.scene.as_ref()?;
         if cancelled() {

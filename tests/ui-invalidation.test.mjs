@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createInvalidator, UI_REASONS} from '../src/ui/ui-invalidation.mjs';
-import {setAttr, setFlag, setHidden, setMarkup, setProp, setText, setVar} from '../src/ui/dom-write.mjs';
+import {setAttr, setCanvasSize, setFlag, setHidden, setMarkup, setProp, setStyle, setText, setVar} from '../src/ui/dom-write.mjs';
 
 function harness({playing = false} = {}) {
   const frames = [], timers = [], log = [];
@@ -209,4 +209,21 @@ test('dom-write writes only what differs', () => {
   assert.equal(setMarkup(node, '<svg></svg>'), false);
   assert.equal(setText(null, 'x'), false);
   assert.deepEqual(node.writes, ['text', '@aria-pressed', '@disabled', '-@disabled', '.active', 'hidden', 'style --x', 'unstyle --x', 'html']);
+});
+
+test('setCanvasSize writes only the dimension that changed, as each write clears the canvas', () => {
+  const writes = [];
+  let width = 300, height = 150;
+  const canvas = {get width() { return width; }, set width(value) { writes.push(`width ${value}`); width = value; },
+    get height() { return height; }, set height(value) { writes.push(`height ${value}`); height = value; }};
+  assert.equal(setCanvasSize(canvas, 300, 150), false, 'the size it has');
+  assert.equal(setCanvasSize(canvas, 640, 150), true);
+  assert.equal(setCanvasSize(canvas, 640, 480), true);
+  assert.equal(setCanvasSize(canvas, 800, 600), true);
+  assert.equal(setCanvasSize(null, 1, 1), false);
+  assert.deepEqual(writes, ['width 640', 'height 480', 'width 800', 'height 600'], 'a resize along one axis leaves the other alone');
+  const node = element();
+  assert.equal(setStyle(node, 'left', '12px'), true);
+  assert.equal(setStyle(node, 'left', '12px'), false);
+  assert.equal(setVar, setStyle, 'a custom property is the same write');
 });

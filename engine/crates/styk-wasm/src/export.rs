@@ -18,8 +18,10 @@ use styk_eval::doc::Camera;
 use styk_export::resident::{self, Resident};
 use styk_export::{CpuExport, GpuExport, Settings, Smoothing};
 use styk_render::{wgpu, Edges, Renderer};
+
 use wasm_bindgen::prelude::*;
 
+use crate::gpu::adapter_options;
 use crate::{clock, js_error};
 
 /// Decoded pictures uploaded per call at most, so a document with many pictures
@@ -47,25 +49,20 @@ pub struct ExportDevice {
     polled: bool,
 }
 
-fn adapter_options<'a, 'b>(surface: Option<&'a wgpu::Surface<'b>>) -> wgpu::RequestAdapterOptions<'a, 'b> {
-    wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, compatible_surface: surface, ..Default::default() }
-}
 
 #[wasm_bindgen]
 impl ExportDevice {
     /// WebGPU in this worker, else WebGL2 on `canvas`. Fails when neither gives a device.
     pub async fn create(canvas: Option<web_sys::OffscreenCanvas>) -> Result<ExportDevice, JsError> {
         let started = clock();
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        descriptor.backends = wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL;
-        let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
-        let (adapter, surface) = match instance.request_adapter(&adapter_options(None)).await {
-            Ok(adapter) => (adapter, None),
-            Err(first) => {
-                let canvas = canvas.ok_or_else(|| js_error(format!("no GPU adapter in this worker ({first})")))?;
+        let (_instance, adapter, surface) = match crate::gpu::webgpu_adapter().await {
+            Some((instance, adapter)) => (instance, adapter, None),
+            None => {
+                let canvas = canvas.ok_or_else(|| js_error("no GPU adapter in this worker (no WebGPU adapter, and no canvas for WebGL2)"))?;
+                let instance = crate::gpu::webgl_instance();
                 let surface = instance.create_surface(wgpu::SurfaceTarget::OffscreenCanvas(canvas)).map_err(js_error)?;
                 let adapter = instance.request_adapter(&adapter_options(Some(&surface))).await.map_err(|e| js_error(format!("no GPU adapter in this worker ({e})")))?;
-                (adapter, Some(surface))
+                (instance, adapter, Some(surface))
             }
         };
         let info = adapter.get_info();

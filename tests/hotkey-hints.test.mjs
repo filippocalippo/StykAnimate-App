@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {HotkeyManager} from '../src/hotkeys.mjs';
 import {hotkeyCommandId, refreshHotkeyHints} from '../src/hotkey-hints.mjs';
 import {tooltipContent} from '../src/ui/ui-tooltip.mjs';
+import {localizedAttribute} from '../src/localization-bindings.mjs';
 
 /** Just enough of an element for the hint writer and the tooltip's content rule. */
 class Node {
@@ -75,4 +76,28 @@ test('the tooltip names a control by data-tooltip, data-hotkey-title or aria-lab
   assert.equal(tooltipContent(new Node({'aria-label': 'Scene properties', title: 'Scene properties'})), null, 'no second tooltip over a native title');
   assert.equal(tooltipContent(new Node({'aria-label': 'Save'}, {text: 'Save'})), null, 'a visible word with no shortcut adds nothing');
   assert.equal(tooltipContent(new Node({'data-tooltip': ''})), null, 'an empty data-tooltip opts out');
+});
+
+test('translating a shortcut control again writes nothing; a new name writes its name', () => {
+  // The tool rail translates its buttons on every chrome update (rail.mjs syncRail): the name it already shows is not written.
+  class Counted extends Node {
+    constructor(...args) {
+      super(...args);
+      const node = this, data = this.dataset;
+      this.writes = [];
+      this.dataset = new Proxy({}, {get: (target, key) => data[key], set: (target, key, value) => { node.writes.push(`data ${String(key)}`); data[key] = value; return true; }});
+    }
+    setAttribute(name, value) { this.writes.push(name); super.setAttribute(name, value); }
+    removeAttribute(name) { this.writes.push(`-${name}`); super.removeAttribute(name); }
+  }
+  const tool = new Counted({'data-tool': 'select', 'data-hotkey-hint': 'V', 'aria-label': 'Select'});
+  localizedAttribute(tool, 'title', 'common.undo');
+  localizedAttribute(tool, 'aria-label', 'common.undo');
+  assert.deepEqual([tool.dataset.hotkeyTitle, tool.getAttribute('aria-label'), tool.getAttribute('title')], ['Undo', 'Undo', null], 'the name, without a native title');
+  tool.writes.length = 0;
+  for (let pass = 0; pass < 3; pass++) { localizedAttribute(tool, 'title', 'common.undo'); localizedAttribute(tool, 'aria-label', 'common.undo'); }
+  assert.deepEqual(tool.writes, []);
+  localizedAttribute(tool, 'title', 'common.save');
+  assert.deepEqual(tool.writes, ['data-i18n-title', 'data-hotkey-title']);
+  assert.equal(tool.dataset.hotkeyTitle, 'Save');
 });

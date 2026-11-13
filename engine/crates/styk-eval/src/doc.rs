@@ -528,6 +528,18 @@ impl Keyframe {
     pub fn object(&self, uid: u32) -> Option<&Arc<Object>> {
         self.slot_of.get(&uid).map(|&s| &self.objects[s as usize])
     }
+    /// [`Keyframe::object`], looking at `slot` first: where the object of `uid` usually is in a pose of the same scene, which a tween
+    /// reads four of for every object. When every object has an id of its own (an entry each in [`Keyframe::slot_of`]), the object at
+    /// `slot` is the one if it has that id, and the id is not hashed.
+    pub fn object_near(&self, uid: u32, slot: usize) -> Option<&Arc<Object>> {
+        if self.slot_of.len() == self.objects.len()
+            && let Some(object) = self.objects.get(slot)
+            && object.uid == uid
+        {
+            return Some(object);
+        }
+        self.object(uid)
+    }
     pub fn reindex(&mut self) {
         self.slot_of = self.objects.iter().enumerate().map(|(i, o)| (o.uid, i as u32)).collect();
         self.has_vfx = self.vfx.is_some() || self.objects.iter().any(|object| object.vfx.is_some());

@@ -5,7 +5,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MENUBAR_FOLD, collectBandWidths} from '../src/shell/topbar.mjs';
+import {MENUBAR_FOLD, collectBandWidths, rangeCoversText} from '../src/shell/topbar.mjs';
 import {BAND_FOLDS, resolveTiers} from '../src/shell/layout-solver.mjs';
 
 // A band whose steps free these widths; the menubar is 300px.
@@ -57,4 +57,16 @@ test('the solver folds the fewest measured steps, and the menubar only where non
   assert.equal(folded.bandStep, true);
   // With the menubar folded the band needs far fewer steps.
   assert.deepEqual(folded.band, ['state']);
+});
+
+test('a font subset refits the band only when it covers a character the band shows', () => {
+  const latin = 'U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC';
+  const cyrillic = 'U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116';
+  assert.equal(rangeCoversText(latin, 'Animate · Untitled'), true);
+  assert.equal(rangeCoversText(cyrillic, 'Animate · Untitled'), false, 'another script loaded for text elsewhere');
+  assert.equal(rangeCoversText(cyrillic, 'Анимация'), true);
+  assert.equal(rangeCoversText('U+4E??', '\u4e00'), true, 'a wildcard range');
+  assert.equal(rangeCoversText('U+4E??', 'A'), false);
+  assert.equal(rangeCoversText('', 'A'), true, 'no range: every character');
+  assert.equal(rangeCoversText('not a range', 'A'), true, 'a range it cannot read refits as before');
 });

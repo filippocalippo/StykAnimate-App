@@ -6,7 +6,7 @@ import {ownedScope} from './support/owned-scope.mjs';
 
 const open = ownedScope();
 
-function fixture() {
+function fixture(options = {}) {
   const report = emptyDocument(), [a, b, c] = [17, 300, 900].map(defaultFigure);
   a.segments.forEach(segment => { segment.segment_id *= 11; segment.parent_id *= 11; });
   report.figure_types = [a, b, c];
@@ -15,7 +15,7 @@ function fixture() {
   objects[2].join = {target_object_slot: 0, target_unique_id: 1011, target_handle_id: 33};
   report.keyframes = [createFrame(objects)];
   setOrder(report.keyframes[0], [9, 707, 1011, 500003, 40]);
-  const editor = open({demo: false}); editor.load(report); return editor;
+  const editor = open({demo: false, ...options}); editor.load(report); return editor;
 }
 const ids = editor => [...editor.selectedUids];
 
@@ -98,4 +98,30 @@ test('selection changes preserve redo and invalid marquee mode leaves selection 
   editor.selectSameDefinition(); editor.invertSelection(); editor.selectMarquee([40]);
   assert.equal(editor._redo[0], redo); assert.equal(editor.canUndo, false); assert.equal(editor.dirty, false);
   editor.redo(); assert.equal(editor.frame.objects[0].root_x, 210);
+});
+
+test('moving many selected figures is one entry: undo and redo give back exactly the document before and after it', () => {
+  for (const options of [{}, {layerTimeline: true, propertyChannels: true}]) {
+    const editor = fixture(options), label = JSON.stringify(options);
+    // Every figure but one, the joined figure with the figure it hangs from.
+    editor.selectMany([1011, 40, 707, 9]);
+    const roots = () => new Map(editor.evaluatedFrame.objects.map(object => [object.unique_id, [object.root_x, object.root_y]]));
+    const start = roots(), before = JSON.stringify(editor.report);
+    assert.equal(editor.beginTranslationDrag('Move connected figures'), true, label);
+    editor.moveSelection(25, -10, {fromStart: true});
+    assert.equal(editor.commitDrag(), true, label);
+    const moved = roots(), after = JSON.stringify(editor.report);
+    for (const uid of [1011, 40, 9]) assert.deepEqual(moved.get(uid), [start.get(uid)[0] + 25, start.get(uid)[1] - 10], `${label}: figure ${uid} moved`);
+    assert.deepEqual(moved.get(500003), start.get(500003), `${label}: the figure not selected stays`);
+    assert.notEqual(after, before, label);
+    assert.equal(editor.undoLabel, 'Move connected figures', label);
+    editor.undo();
+    assert.equal(JSON.stringify(editor.report), before, `${label}: undo gives the document back`);
+    assert.deepEqual(roots(), start, label);
+    editor.redo();
+    assert.equal(JSON.stringify(editor.report), after, `${label}: redo gives the move back`);
+    assert.deepEqual(roots(), moved, label);
+    editor.undo();
+    assert.equal(editor.canUndo, false, `${label}: the move was one entry`);
+  }
 });

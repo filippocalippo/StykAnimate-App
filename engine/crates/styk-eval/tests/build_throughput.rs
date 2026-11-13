@@ -62,6 +62,36 @@ fn a_frame_built_one_object_at_a_time_is_the_frame_built_in_parallel() {
     assert!(streamed_any, "some frame has no joins (the streamed build is the one made)");
 }
 
+/// A worker builds frame after frame in the buffers of the scene before (`build_reusing`): the same scenes as a fresh build, whatever the
+/// spares held (more parts or fewer, another document's figures), and the spares hold what the last scene had room for.
+#[test]
+fn a_frame_built_in_the_buffers_of_the_scene_before_it_is_the_frame_built_fresh() {
+    let mut spares = geometry::SceneSpares::default();
+    let mut lent = 0;
+    // One worker for every document in turn: a document's first frame is built in the last one's buffers.
+    for name in FIXTURES {
+        let prepared = prepared(name);
+        let assets = Assets::build(&prepared.doc);
+        let mut sequence = ticks(&prepared);
+        sequence.extend(ticks(&prepared).into_iter().rev());
+        for (step, tick) in sequence.into_iter().enumerate() {
+            let frame = prepared.evaluate(tick);
+            let what = format!("{name}@{tick} (step {step})");
+            let whole = geometry::build(&prepared.doc, &frame);
+            lent += usize::from(!spares.is_empty());
+            for stream in [true, false] {
+                let reused = geometry::build_spared(&prepared.doc, &frame, &mut spares, stream);
+                same(&reused, &whole, &format!("{what}, streamed {stream}"));
+                let (a, b) = (encode_composed(&prepared.doc, &assets, &reused, &Overrides::default(), &[], None), encode_composed(&prepared.doc, &assets, &whole, &Overrides::default(), &[], None));
+                assert_eq!(format!("{:?}", a.prims), format!("{:?}", b.prims), "{what}, streamed {stream}: draw list");
+                spares.recycle(reused);
+                assert!(spares.bytes() > 0 || frame.objects.is_empty(), "{what}: the spares hold the scene's buffers");
+            }
+        }
+    }
+    assert!(lent > 0, "frames were built in lent buffers");
+}
+
 #[test]
 fn a_seek_builds_every_figure_again_in_the_buffers_of_its_last_build() {
     let mut recycled = 0;

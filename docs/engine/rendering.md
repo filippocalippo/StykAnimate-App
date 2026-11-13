@@ -37,7 +37,8 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 
 | Module | Holds |
 | --- | --- |
-| `pipeline.rs` | the one WGSL pipeline (`prim.wgsl`) for every kind, bind layouts ([D8](decisions/0008-renderer-without-storage-buffers.md)) |
+| `pipeline.rs` | the one WGSL shader (`prim.wgsl`) for every kind and its pipelines, bind layouts ([D8](decisions/0008-renderer-without-storage-buffers.md)) |
+| `shading.rs` | which of the shader's fragment entry points draws each run of primitives on a software rasterizer ([Without a graphics card](#without-a-graphics-card), [D20](decisions/0020-software-rasterizer-shading-runs.md)) |
 | `frame.rs` | one frame: isolation layer passes by round and depth, each depth's effect stacks after its passes, then the frame pass (MSAA ×4, resolved once) |
 | `isolation.rs` | the layer atlas (8 pages of at least the frame's size, grown for larger effect layers, two for depth parity) and `plan_rounds`: layers that do not fit render in full-resolution rounds, the frame drawn between rounds |
 | `images.rs`, `pictures.rs` | the sprite atlas (texture array of 4,096² pages laid out by `styk_eval::assets`: shelves, and the free space an earlier page left before a new page opens), uploads of decoded images (in bands of rows) and drawing tiles; the table that maps a layout page to its layer for drawing cel tiles, and the picture table (a hash table of which pictures are in the sprite texture, in which layer) with the soft atlas (a texel to 8 of the page's, 20 MiB for 116 large pictures) that a picture not in it is drawn from: a renderer holding the whole layout has every picture in, the stage's, for a document with more pages than it keeps, does not ([memory.md](memory.md#pages-kept-against-a-budget-soft-copies-in-their-place)) |
@@ -167,7 +168,9 @@ mask bilinearly, clamped to its own texels, times the record's colour and opacit
 Invariants: no per-frame allocation in steady state; the no-effect path draws
 one pass per depth and round and creates no effect resource; a list without 3D
 faces creates no depth buffer and a list without additive records no additive
-pipeline, and either draws one instanced draw per pass; the material atlas is a
+pipeline, and either draws one instanced draw per pass (on a software rasterizer, one per run
+of primitives a simpler fragment shader holds, at most 64 runs besides the background's:
+[Without a graphics card](#without-a-graphics-card)); the material atlas is a
 placeholder texel until a list names a row, and the glyph atlas until a list has a
 lone glyph; glyph masks are filled only when first needed; WebGL2 limits (no storage buffers, one sampler
 per texture, array textures of at least two layers, [D11](decisions/0011-array-textures-two-layers.md)).
@@ -225,6 +228,144 @@ same output as before the warming; native wgpu gave the same bytes in 3,200 rend
 thin triangles by a sample against Vulkan and Chromium's WebGPU. The test draws thousands of thin triangles on Direct3D 12 (FXC)
 and on Vulkan and requires equal frames. Native hosts take Direct3D 12 with FXC first on Windows and fall back to the other
 backends (`styk_render::native_gpu`). What is left against Chromium's frames, and how it was measured: `docs/native/frame-parity.md`.
+
+### Without a graphics card
+
+Where there is no usable graphics card Chromium draws WebGL2 on the processor with SwiftShader, which runs a quad of
+fragments through both sides of every branch of a shader with the lanes masked: each pixel pays for the code of every kind
+the fragment function holds, whatever the primitive drawn. Through the one general function the document's background (one
+rectangle over the frame) cost 61 of a 78 ms frame on the small scene, and an early return for its kind gained nothing.
+
+So `prim.wgsl` has fragment entry points over the same functions, each holding fewer kinds: `fs_flat` (triangles and the
+view's fill in their own colour), `fs_stroke` (those and segments, discs and rings: what stick figures are drawn with),
+`fs_vector` (those and the other shapes covered by distance: boxes, arcs, polylines), `fs_image` (pictures and drawing
+tiles), `fs_composite` (isolated groups' layers composited into their parents: translucent figures, onion skins, effects)
+and `fs_main` (every kind). Each simpler one has a `_plain` form for an upright view with the native painter, the stage's,
+which leaves out the turned artboard's clip and the Canvas painter's masks: both are off there, but a software rasterizer
+ran their code for every fragment all the same. The vertex stage is split the same way (`vs_flat`, `vs_stroke`,
+`vs_vector`, `vs_image`, `vs_composite` beside `vs_main`, over shared corner functions): with every primitive off screen
+the 3,200-segment scene still took 41 of its 60 ms a frame, a third of the frame running every kind's vertex code. On a software rasterizer (`wgpu::DeviceType::Cpu`, which wgpu reports for
+SwiftShader and llvmpipe from the WebGL renderer string, and for lavapipe and WARP) a pass draws each run of primitives with
+the simplest one that holds every kind in it (`shading.rs`): a paint record (a gradient), a face of a depth run, an additive
+record, lone glyphs, the background picture and generated effects take `fs_main`, and so does a run that mixes the kinds of
+two simpler ones (a picture and a segment). The root's background is a run of its own; the other runs of a
+list are at most 64, the shortest drawn with the shader their neighbours need when a list's kinds alternate. The runs are
+worked out when a list is set (`Renderer::derive`), again where a list drawn over the one before changes a primitive's
+shader, and shared with each frame without a copy. Each simpler pipeline is made with the first frame that draws with it.
+
+On a graphics card every primitive draws with `fs_main`, one draw a pass, as before: the general function is as fast
+there, and one shader keeps a frame the same whatever compiler builds it (on Direct3D 12 with FXC one pixel of the Canvas
+painter moved by one level between the two shaders). `Renderer::set_shading_runs` overrides the device's choice; in the
+app the developer tools' live parameter `stage.shadingRuns` does (1 on, 0 off, -1 the device's choice), and the stage's
+stats say which is in use (`shadingRuns`). Decision: [D20](decisions/0020-software-rasterizer-shading-runs.md).
+
+`tests/shading.rs` draws every vector kind over opaque, translucent and no backgrounds and six repository documents (gradients,
+text, isolated groups with effects, 3D faces, generated effects, a drawing cel) in six
+views (fitted, the canvas smaller than the view, partly off screen, through the camera, turned and mirrored, the Canvas
+painter), smooth and crisp, with the runs on and off, and requires the same bytes on each software rasterizer and on a
+graphics card's Vulkan; a second test changes a primitive's kind in a list drawn over the one before.
+
+Measured 2026-11-13 in the desktop app without a graphics card (`--disable-gpu`, SwiftShader; the machine 87–100% busy with
+other work, so read the ratios), playing three seconds in one launch with `stage.shadingRuns` 0 and then the device's
+choice, frame time seen: the small scene (240 segments) 109 → 24 ms, the busy one (3,200) 165 → 48 ms, with a moving
+camera 139 → 39 ms, translucent filled shapes 241 → 71 ms, labels 294 → 124 ms, pictures on the limbs 173 → 107 ms; the
+effects scene stays over a second (its filter passes, `passes.wgsl`, are the cost). The stage's picture was the same
+with the runs on and off in all 28 views compared (seven scenes, four views, device pixels of the composited page). What
+was measured on the way: on the busy scene the segments' draw was 40 of 71 ms, of which a constant-colour fragment shader
+saved 10 and sending every vertex off screen showed the vertex shader at about a third of the frame; turning
+multisampling off changed nothing measurable.
+
+### The stage on the processor
+
+Even with the narrower shaders a busy scene stayed at 36 to 52 ms a frame on SwiftShader, and the interface thread spent
+most of that inside the browser's own rendering step, waiting: with software compositing a WebGL canvas is read back
+into a bitmap for the compositor every frame, and the page's thread is held until SwiftShader has rasterized it. So on a
+stage whose device is a software rasterizer (the same detection, `Renderer::shading_runs`) and whose engine has worker
+threads, the stage's frames are drawn by the CPU rasterizer on the engine's workers instead, and shown from a bitmap
+([D21](decisions/0021-processor-stage.md)):
+
+- **Every draw goes through the stage as before.** `Stage::draw` takes the same list, view, pictures, live cels and
+  orientation for an edit frame, a prepared playback or scrub frame, onion skins, the camera view, effects, pictures and
+  drawing cels; only its last step changes: with `Stage::set_processor` on it asks `styk_engine::stage_raster` for the
+  frame instead of drawing it on the device, and returns true (asked). A frame the stage cannot draw yet is a condition of
+  the frame as before ([Every document](#every-document)), never an empty picture.
+- **The frame is drawn in bands on the workers** (`styk_engine::stage_raster`): a job readies what the frame needs (the
+  decoded pictures the stage took from the engine for its atlas, shared, not copied; any picture the frame samples that is
+  not held, decoded there from the document; the live cels' slots; the lone glyphs' masks, `Raster::bands`), then queues a
+  task per band of 64 rows. Each band is the same view moved up by its first row (`styk_raster::Bands::render`, as an
+  export's tiles are drawn), each layer cropped to the band, and writes its rows, straight RGBA, into the frame's buffer.
+- **The page shows the newest finished frame** (`src/engine/engine-stage-processor.mjs`): it copies the frame out of the
+  engine's memory into an `ImageData` and puts it on a 2D canvas laid over the scene canvas (`putImageData`: shown with the
+  next frame. Through `createImageBitmap` and `transferFromImageBitmap` each frame reached its canvas 1.5 to 1.8 ms later at
+  the median, up to 3.3 ms at the 95th percentile, and the interface thread did a little more a frame: 6.3 against 4.9 ms
+  dragging a joint on the busy scene). It looks when the engine's progress counter moves (`whenProgress`, D7); the picture on show stays
+  meanwhile. One frame is drawn at a time; a newer request replaces the one waiting for it (a gesture never piles up
+  frames), and a frame let go of (the stage freed, the processor switched off) ends between its primitives.
+- **What a picture shown later means for the measurements.** The draw's span (`stage draw`, `stage draw prepared`) is the
+  interface's part and says `drawn: 'asked'`; the picture has a span of its own from the draw that asked for it to its
+  showing (`stage picture`, `stage picture prepared`). The capture's `shown` series, playback's delivered frames and the
+  developer tools' `settle` count pictures shown; gestures are judged on the pictures too (`picture.felt`,
+  `picture.input.p95`, [PERFORMANCE.md](../PERFORMANCE.md#metrics-and-grades)).
+- **What does not change.** The device and its renderer stay: the stage keeps uploading pictures and live cels to it, so
+  `pictures_pending`, residency and the soft copies work as before and the device draws again at once when the processor is
+  switched off. The camera monitor and thumbnails on a WebGL2 stage were drawn on the CPU in their workers already.
+  Picking was always the CPU rasterizer's. The quality ladder's edge sampling (`set_multisampled`) does not apply: the
+  processor always draws four samples a pixel.
+- **The fallback is the device.** Without engine threads (a page that is not cross-origin isolated) the processor is not
+  used, because its tasks would run on the interface thread; when a frame's job cannot hold a picture it samples (the
+  memory is full) the stage switches to the device for good (`Stage::processor_failed`) and says so in the console. The
+  live parameter `stage.processor` (developer tools: 1 on, 0 off, -1 the device's choice) switches between the two so they
+  can be compared in the app; the stage's stats report the processor's frame (`engine.processor`: its time from request to
+  last band, its work, its bands and buffers).
+
+Bounded: at most three frame buffers of the canvas's size (the one being drawn, one finished and not yet shown, one kept
+for the next frame), the page's one `ImageData` and the canvas's own backing; the pictures the job holds stay within
+`styk_raster::Images`' budget (a sixteenth of the memory), least recently used first out; all of it is let go of with the
+stage, on a worker ([memory.md](memory.md#what-is-bounded-now)).
+
+The pictures are the CPU rasterizer's ([CPU](#cpu-styk-raster)), held to the GPU renderer's by D13 for exports already.
+The stage adds paint contexts of its own; each is covered: the canvas background drawn directly and the view's fill
+(`K_FILL_VIEW` on the root), the artboard's edge and clip, device-pixel ratio, pan and zoom (the view matrix), the
+destination drawing grid of edit frames (`set_drawing_grid`), the scene camera, and the turned or mirrored Draw view,
+which the CPU rasterizer follows as the GPU does (`Raster::set_orientation`: the artboard's quad, its fills and the
+root's per-pixel clip; `styk-raster/tests/bands.rs` against the GPU renderer: 0 solid pixels, mean at most 0.004).
+`styk-raster/tests/bands.rs` draws seven repository documents in bands of several heights against the whole frame (at
+most one level on a few edge pixels, where a band's moved view rounds a vertex differently in single precision);
+`styk-engine/tests/stage_raster.rs` draws them on real worker threads against the whole frame, and checks the queue, the
+buffers and the live cels' slots.
+
+Measured 2026-11-13 in the desktop app (`npm run perf`, the busy scene of 3,200 segments a frame unless said; before: the
+WebGL2 stage of `perf/speed`, after: this; the machine's other load 6 to 15% for these pairs), the frame time seen and, after,
+the picture's own (`picture.felt`, input to picture at the 95th percentile):
+
+| Without a graphics card | Before | After |
+| --- | --- | --- |
+| Playing, delivered | 88.2% | 100% |
+| Step, key press to picture (p95) | 45 ms (poor) | 13.6 ms |
+| Scrub, the picture behind the pointer (p95) | 84.5 ms | 26.4 ms |
+| Pan, frame / picture | 41.2 ms | 7.1 / 8.9 ms |
+| Zoom, input to frame / picture | 96.5 ms | 27.1 / 24.8 ms (picture seen 17.8 ms: fair) |
+| Drag a joint, frame / input to picture | 36.0 / 63.6 ms | 7.2 / 12.8 ms |
+| Move many, inspector drag | 41 to 43 ms frames | 7 to 9 ms frames, pictures within 15 ms |
+| The small scene (240 segments) | fair to poor | every core scenario good |
+| Pictures on the limbs, playing / step | 40.8% / 93.5 ms | 100% / 13.9 ms |
+| Effects on every figure, playing / step | 4.1% / 1,184 ms | 100% / 59.9 ms |
+| A brush stroke, busy scene | 39.4 ms frames (poor) | 11.2 ms, picture within 24 ms |
+
+The browser's own rendering step on the interface thread fell from 33 to about 2 ms a frame (dragging a joint), the page's
+copy and `putImageData` of a frame take about 0.5 ms, and the engine's workers spend a few milliseconds a frame between them.
+On a graphics card (`gpu`, `webgl`) nothing changed: the processor is never used there and every scenario stayed within
+its noise. The start without a graphics card is no slower (1,057 ms, 1,020 to 1,124, against 1,487 before on a busier machine).
+
+The old-laptop environment (`low-end`: the page and its two engine threads four times slower) gains less and loses in places:
+playing 99.7% (99.4% with the device in the same build), moving a figure or many and stepping become fair (from poor), and
+the frame time of every gesture falls, but a zoom's pictures stand still 37 ms (poor, against a fair 26.6 ms frame with the
+device), a step's picture comes within 92 ms (the device's frame within 132 ms but its seek within 76) and the scrub trails by
+111 ms (98). Two things limit it: the interface thread's own work, about 50 ms a frame in an inspector drag whichever draws (31
+of them the browser's style, layout and paint of the interface), and the picture's way through two slowed threads (25 to 34
+ms from request to showing for the small scene, a few of them drawing). The environment cannot slow the graphics process, so
+there SwiftShader keeps the machine's full speed while the processor renderer runs slowed: on a real slow computer, where
+SwiftShader is slowed too, the processor stage gains more than this says.
 
 ## Text
 
@@ -532,6 +673,35 @@ Measured on 2,000 figures of 100 segments in the desktop app (2026-11-11, median
 about 41 ms to about 6 ms of the interface thread (the stage's part from about 33 ms to about 3.4 ms), a figure move frame from about 18 ms to
 about 4 ms; natively (`styk-engine/tests/dense_bench.rs`) the drag step's session frame fell from 21 ms to under 1 ms, its geometry read from
 6 ms to under 0.1 ms and its list from 19 ms to under 1 ms.
+
+## A frame drawn in a part of the one before it
+
+A stroke changes the frame where its tiles are: the cel's slots the frame samples, and the cel's quads when it gains tiles (a live cel's
+quads are written in a block with room for more, so the list keeps its layout: [drawing.md](drawing.md#live-cels)). Without a graphics
+card every pixel of the frame was shaded again for each of them, and in software compositing the browser reads the stage's picture back
+on the interface thread, so that time was the frame's: a cel painted over the canvas cost about 58 ms a stroke frame.
+
+The stage's renderer keeps each frame (`Renderer::set_keep_frames`: the frame pass stores its multisampled picture instead of discarding it
+after the resolve), and the stage says where the next edit frame differs from it (`Renderer::redraw_within`): around the drawing tiles whose
+slot or parent's slot was written since the frame on show and the primitives the list differs in, before and after (`styk_engine::LiveWrites`,
+filled by `Stage::flush_live`; `None`, the whole frame, when a changed primitive is anything but a drawing tile of the root). The renderer
+draws that part alone where it can: over a frame it kept, of the same view, size, sample count, orientation, painter, shading and background,
+with no picture uploaded or table replaced since (each of those forgets the kept frame), for a list with no isolation groups, effects, faces,
+added light or glyphs, cleared to transparency. Then the frame pass loads the kept samples, draws a triangle over the target that writes
+transparency under the part's scissor, and draws the background and every primitive under the same scissor, in their order. Each pixel of the
+part takes all its samples as the whole frame gives them, and every pixel outside keeps the ones it had, which the whole frame would give it
+too; the resolve covers the whole target. Anything else draws the whole frame, as before; prepared frames always do. A tile of a level
+the view does not show draws nothing and adds nothing to the part (a moved floating selection's upper levels are many times its size). On a
+software rasterizer, which sets up every triangle it is given wherever the scissor lets it draw, the part is drawn from the primitives that can
+reach it alone, in their order: those whose rectangle (`drawlist::prim_bounds`, the culling's own) grown by the antialiasing fringe meets
+it, and every one whose reach is not known; a graphics card is given them all, since a pass over a dense frame's primitives on the
+interface thread would cost more than the GPU saves.
+`styk-raster/tests/drawing_sampling.rs` draws frames in a part and whole and compares them byte for byte (four samples and one, three views, the simpler shaders on and off, segments across the part, at its edge and far from it,
+moved and removed tiles; on Vulkan, Direct3D 12 and GL), and that another view, a picture uploaded since and a renderer that keeps no frame
+draw it whole; `styk-engine`'s `images::tests` hold the part to the quads written and changed. The stage counts the frames drawn in a part
+(`partFrames` in `Stage::stats`). Where a list's drawing tiles lie is kept while the lists drawn keep their layout (`styk_engine::DrawingRuns`:
+for a list encoded over the one they were found in, while its changes lie in them), so the part and the levels a frame shows
+(`styk_eval::live::shown_levels_in`) read the cel's block, not the 200,000 segments of a dense frame.
 
 ## In the app
 
@@ -905,8 +1075,9 @@ fixture 1,035 ms).
 For a document the engine draws, export frames (PNG, PNG and JPEG sequences, GIF, APNG and
 video frames) come from the engine: the frame the stage would show at that tick, through the
 scene camera, at the export's size and sampling, without onion skins. The encoders (the PNG,
-GIF, APNG and ZIP writers, WebCodecs, FFmpeg, the audio mix) are unchanged and receive the
-same canvases and PNG frames as before. SVG is the engine's too (below): the frame's draw list written as
+GIF, APNG and ZIP writers, WebCodecs, FFmpeg, the audio mix) receive canvases and PNG frames,
+and the GIF writers the frame's RGBA pixels, read from the worker's canvas and transferred
+(`renderPixelsTick`: the values a canvas consumer reads back, [GIF export](../gif-export.md)). SVG is the engine's too (below): the frame's draw list written as
 vector artwork. A page without the engine's worker threads cannot export.
 
 Composited No smoothing frames preserve the editor's existing `exportSVG` fallback

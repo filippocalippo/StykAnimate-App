@@ -94,11 +94,96 @@
     counter(name, value) { if (Number.isFinite(value)) push(name, 0, now(), -2, 0, value, null); },
     /** The live parameter `name` (src/trace.mjs `tuned`): its current value, registering it with its default the first time. */
     parameter(name, fallback, spec) { return parameters.read(name, fallback, spec); },
+    /** A memory owner (src/trace.mjs `traceMemory`): `read(target)` says the bytes `target` holds; returns the function that removes it. */
+    memory(owner, target, read, kind) { return memory.register(String(owner), target, read, kind); },
   };
   const threadId = (name) => {
     let id = ring.threads.indexOf(name);
     if (id < 0) { if (ring.threads.length >= 255) return 0; id = ring.threads.push(name) - 1; }
     return id;
+  };
+
+  // --- memory by owner ---------------------------------------------------------------------------------------------
+  /**
+   * Who holds the page's memory outside the engine's memory and the JavaScript heap (src/trace.mjs `traceMemory`): an
+   * owner registers a read of the bytes it holds, and the tools call the reads when they take a memory checkpoint, never
+   * on the app's paths. Owners are held by weak references, so one that nothing else holds drops out and the tools never
+   * keep one alive. Built in, with no line in the app: every canvas that was given a context (width × height × 4 bytes,
+   * where the browser keeps a canvas of its kind: `where`), and the image bitmaps the page made itself.
+   */
+  const MAX_TRACKED = 8192;
+  const owners = new Map(), canvases = new Set(), canvasSeen = new WeakSet(), bitmaps = new Set();
+  /** Drops what was collected from a set of weak entries once it reaches its bound: a page that makes many canvases or bitmaps keeps the live ones. */
+  const prune = (set, live) => { if (set.size >= MAX_TRACKED) for (const entry of set) if (!live(entry)) set.delete(entry); };
+  /** Where a canvas's pixels are kept: a 2D canvas read often in this process, other 2D canvases and the graphics contexts in the graphics process (in this process when nothing is accelerated). */
+  const canvasKind = (type, context) => {
+    if (type === '2d') return context.getContextAttributes?.()?.willReadFrequently ? ['canvases: 2D, read often', 'page'] : ['canvases: 2D', 'graphics'];
+    if (type === 'webgpu' || type === 'webgl' || type === 'webgl2') return [`canvases: ${type === 'webgpu' ? 'WebGPU' : 'WebGL'}`, 'graphics'];
+    return [`canvases: ${type}`, 'page'];
+  };
+  const memory = {
+    register(name, target, read, kind = 'buffers') {
+      if (typeof read !== 'function' || target === null || (typeof target !== 'object' && typeof target !== 'function')) return () => {};
+      let list = owners.get(name);
+      if (!list) owners.set(name, list = new Set());
+      const entry = {ref: new WeakRef(target), read, kind: kind === 'pixels' || kind === 'graphics' ? kind : 'buffers'};
+      list.add(entry);
+      return () => { list.delete(entry); };
+    },
+    canvas(canvas, type, context) {
+      if (context && !canvasSeen.has(canvas)) {
+        canvasSeen.add(canvas);
+        prune(canvases, entry => entry.canvas.deref() !== undefined);
+        canvases.add({canvas: new WeakRef(canvas), type, context: new WeakRef(context), offscreen: typeof OffscreenCanvas === 'function' && canvas instanceof OffscreenCanvas});
+      }
+      return context;
+    },
+    bitmap(bitmap) {
+      prune(bitmaps, ref => (ref.deref()?.width ?? 0) > 0);
+      bitmaps.add(new WeakRef(bitmap));
+      return bitmap;
+    },
+    /**
+     * Every owner's bytes now, heaviest first: [{owner, bytes, count, where, error?}]. `count` is the owner's own count
+     * (tiles, entries) or its instances; `where` is `page` (this process) or `graphics` (the graphics process).
+     */
+    read() {
+      const rows = [];
+      for (const [owner, list] of owners) {
+        let bytes = 0, count = 0, error = null, instances = 0, kind = 'buffers';
+        for (const entry of list) {
+          const target = entry.ref.deref();
+          if (target === undefined) { list.delete(entry); continue; }
+          instances++; kind = entry.kind;
+          try {
+            const value = entry.read(target);
+            const held = typeof value === 'number' ? value : value?.bytes;
+            if (Number.isFinite(held)) bytes += held;
+            count += Number.isFinite(value?.count) ? value.count : 1;
+          } catch (failure) { error = String(failure?.message ?? failure); }
+        }
+        if (!list.size) { owners.delete(owner); continue; }
+        rows.push({owner, bytes, count, instances, kind: kind === 'graphics' ? 'pixels' : kind, where: kind === 'graphics' ? 'graphics' : 'page', ...(error ? {error} : {})});
+      }
+      const kinds = new Map();
+      for (const entry of canvases) {
+        const canvas = entry.canvas.deref(), context = entry.context.deref();
+        if (!canvas || !context) { canvases.delete(entry); continue; }
+        const [owner, where] = canvasKind(entry.type, context), row = kinds.get(owner) ?? {owner, bytes: 0, count: 0, attached: 0, kind: 'pixels', where};
+        row.bytes += canvas.width * canvas.height * 4; row.count++;
+        if (!entry.offscreen && canvas.isConnected) row.attached++;
+        kinds.set(owner, row);
+      }
+      rows.push(...kinds.values());
+      let bitmapBytes = 0, bitmapCount = 0;
+      for (const ref of bitmaps) {
+        const bitmap = ref.deref();
+        if (!bitmap || !bitmap.width) { bitmaps.delete(ref); continue; }
+        bitmapBytes += bitmap.width * bitmap.height * 4; bitmapCount++;
+      }
+      if (bitmapCount) rows.push({owner: 'image bitmaps made in the page', bytes: bitmapBytes, count: bitmapCount, kind: 'pixels', where: 'page'});
+      return rows.sort((a, b) => b.bytes - a.bytes);
+    },
   };
 
   // --- frames ------------------------------------------------------------------------------------------------------
@@ -241,6 +326,47 @@
     }, {capture: true, passive: true});
   }
 
+  // --- graphics calls ----------------------------------------------------------------------------------------------
+  /**
+   * The page's requests to the browser's graphics process, timed where the browser answers them: the adapter, the device,
+   * a canvas's WebGPU or WebGL context, and the render pipelines (`createRenderPipeline` returns at once, the compile
+   * follows in the graphics process). The start of the app waits for these (docs/APP-START.md); the engine asks for
+   * them from WebAssembly, so the spans name what no span of the app can. Thread `graphics calls`.
+   */
+  const timeAsync = (target, method, name) => {
+    const native = target?.[method];
+    if (typeof native !== 'function') return;
+    target[method] = function (...args) {
+      const started = now(), answer = native.apply(this, args), sync = now() - started;
+      const done = (value) => { trace.complete(name, started, now() - started, {answered: value != null, syncMs: sync}, 'graphics calls'); return value; };
+      return answer && typeof answer.then === 'function' ? answer.then(done, (error) => { trace.complete(name, started, now() - started, {failed: String(error?.message ?? error)}, 'graphics calls'); throw error; }) : done(answer);
+    };
+  };
+  timeAsync(globalThis.GPU?.prototype, 'requestAdapter', 'gpu: requestAdapter');
+  timeAsync(globalThis.GPUAdapter?.prototype, 'requestDevice', 'gpu: requestDevice');
+  timeAsync(globalThis.GPUDevice?.prototype, 'createRenderPipeline', 'gpu: createRenderPipeline');
+  // WebGL2's calls that wait for the graphics process (a shader's or program's status, a parameter): a span when one waits 2 ms or more.
+  for (const method of ['getProgramParameter', 'getShaderParameter', 'getParameter', 'getExtension', 'getSupportedExtensions', 'getError', 'readPixels', 'clientWaitSync']) {
+    const native = globalThis.WebGL2RenderingContext?.prototype?.[method];
+    if (typeof native !== 'function') continue;
+    WebGL2RenderingContext.prototype[method] = function (...args) {
+      const started = now(), answer = native.apply(this, args), took = now() - started;
+      if (took >= 2) trace.complete(`gl: ${method}`, started, took, null, 'graphics calls');
+      return answer;
+    };
+  }
+  const nativeContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+    if (type !== 'webgpu' && type !== 'webgl2' && type !== 'webgl') return memory.canvas(this, type, nativeContext.call(this, type, ...rest));
+    const started = now(), context = nativeContext.call(this, type, ...rest);
+    trace.complete(`canvas: getContext ${type}`, started, now() - started, {answered: context != null}, 'graphics calls');
+    return memory.canvas(this, type, context);
+  };
+  const nativeOffscreenContext = globalThis.OffscreenCanvas?.prototype?.getContext;
+  if (typeof nativeOffscreenContext === 'function') OffscreenCanvas.prototype.getContext = function (type, ...rest) { return memory.canvas(this, type, nativeOffscreenContext.call(this, type, ...rest)); };
+  const nativeBitmap = globalThis.createImageBitmap;
+  if (typeof nativeBitmap === 'function') globalThis.createImageBitmap = function createImageBitmap(...args) { return nativeBitmap.apply(this ?? window, args).then(memory.bitmap); };
+
   // --- logs --------------------------------------------------------------------------------------------------------
   const LOGS = 4096;
   const logs = {rows: [], dropped: 0, sequence: 0};
@@ -381,6 +507,6 @@
   else announce();
 
   globalThis.__stykTrace = trace;
-  globalThis.__stykDevtoolsEarly = {ring, frames, watchFrames, logs, log, LEVELS, workers, browser, parameters, listeners, PROFILE_KEY, environment, startedAt: now()};
+  globalThis.__stykDevtoolsEarly = {ring, frames, watchFrames, logs, log, LEVELS, workers, browser, parameters, memory, listeners, PROFILE_KEY, environment, startedAt: now()};
   log('info', 'devtools', 'Developer build: tools ready (Ctrl+Shift+D opens them, Ctrl+Shift+O the performance overlay).');
 })();

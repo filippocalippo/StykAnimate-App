@@ -2,10 +2,10 @@
 // drawing and picking share under it, and the engine's geometry groups, built only when something reads them.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DENSE_HANDLE_BUDGET, definitionHandleCount, denseHandles, frameHandleCount, getPivotHandles, pickCanvasHandle, pickCanvasSegment, rescalePivotHandles} from '../src/canvas-interactions.mjs';
+import {DENSE_HANDLE_BUDGET, PIVOT_HANDLE_COLORS, definitionHandleCount, denseHandles, frameHandleCount, getPivotHandles, pickCanvasHandle, pickCanvasSegment, rescalePivotHandles, selectedOriginsOnly} from '../src/canvas-interactions.mjs';
 import {createDemo, createFrame, createObject} from '../src/demo.mjs';
 import {isStatic} from '../src/pivot/read-view.mjs';
-import {engineBuilt} from './support/engine-node.mjs';
+import {engineBindings, engineBuilt} from './support/engine-node.mjs';
 import {ownedEditor} from './support/owned-editor.mjs';
 import {shownLimits} from '../src/engine/engine-shown.mjs';
 
@@ -151,6 +151,85 @@ test('with the figures not selected showing their origin only, a selected figure
   } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
 });
 
+test('a selection too large for the budget keeps the joints of the figure pressed, then of those selected last, as far as the budget reaches', () => {
+  const joints = new Map([[1, 40], [2, 40], [3, 40], [4, 40], [5, 40], [6, 200]]), jointsOf = uid => joints.get(uid) ?? 0;
+  // Within the budget nothing changes.
+  assert.equal(selectedOriginsOnly(new Set([1, 2, 3]), 3, jointsOf, 120), null);
+  assert.equal(selectedOriginsOnly(new Set(), null, jointsOf, 120), null);
+  // Selected in the order 1…5, figure 2 pressed: 2 first, then 5 and 4; 3 does not fit, so it and everything before it show their origin.
+  assert.deepEqual([...selectedOriginsOnly(new Set([1, 2, 3, 4, 5]), 2, jointsOf, 120)].sort(), [1, 3]);
+  // The order is strict: once one figure does not fit, the figures selected before it show their origin even when one would fit.
+  assert.deepEqual([...selectedOriginsOnly(new Set([1, 6, 5]), 5, jointsOf, 120)].sort(), [1, 6]);
+  // The figure pressed keeps its joints even when it alone exceeds the budget; it is the one being posed.
+  assert.deepEqual([...selectedOriginsOnly(new Set([1, 6]), 6, jointsOf, 120)], [1]);
+  // Without a primary among the selected (none pressed), the most recent first.
+  assert.deepEqual([...selectedOriginsOnly(new Set([1, 2, 3, 4]), null, jointsOf, 120)], [1]);
+});
+
+test('selected figures beyond the budget show their origin as selected, picking finds what is drawn, and a selection within it is unchanged', {skip: !engineBuilt}, async () => {
+  // Small documents, read as a dense frame is: built on first read.
+  shownLimits.eagerSegments = 0;
+  const {editor, owner} = await ownedEditor({demo: false}, crowd(5));
+  try {
+    editor.seek(1);
+    const walker = editor.report.figure_types[0], moving = definitionHandleCount(walker), selected = new Set([1, 2, 3, 4]);
+    const geometry = editor.geometry, frame = editor.evaluatedFrame;
+    const options = {frame, selectedUid: 2, selectedUids: selected, showUnselected: false, viewScale: 1};
+    // A budget of three figures' joints: 2 (pressed), then 4 and 3; figure 1 shows its origin, as figure 5 (not selected) does.
+    const originsOnlyUids = selectedOriginsOnly(selected, 2, () => 1 + moving, 3 * (1 + moving));
+    assert.deepEqual([...originsOnlyUids], [1]);
+    const handles = getPivotHandles(geometry, {...options, originsOnlyUids});
+    const of = uid => handles.filter(handle => handle.uid === uid);
+    for (const uid of [2, 3, 4]) assert.equal(of(uid).length, 1 + moving, `figure ${uid} shows every joint`);
+    const [origin] = of(1);
+    assert.equal(of(1).length, 1); assert.equal(origin.kind, 'origin');
+    assert.equal(origin.selected, true); assert.equal(origin.color, PIVOT_HANDLE_COLORS.origin, 'its origin is drawn as a selected figure\'s');
+    assert.equal(origin.action, 'move', 'its origin moves the selection');
+    assert.deepEqual(of(5).map(handle => handle.kind), ['origin']); assert.equal(of(5)[0].color, PIVOT_HANDLE_COLORS.unselectedOrigin);
+    const group = uid => [...geometry.objects.values()].find(item => item.obj.unique_id === uid);
+    assert.ok(!built(group(1)), 'a selected figure showing its origin only is not built');
+    // Picking reads the same list: figure 1's joints are not there to grab, its origin is.
+    const whole = getPivotHandles(freshRead(editor), {...options, showUnselected: true});
+    const joint = whole.find(item => item.uid === 1 && item.kind === 'segment' && Math.hypot(item.point.x - group(1).root.x, item.point.y - group(1).root.y) > 20);
+    assert.notEqual(pickCanvasHandle(geometry, joint.point, {handles})?.uid, 1, 'a joint not drawn is not picked');
+    assert.equal(pickCanvasHandle(geometry, group(1).root, {handles})?.uid, 1);
+    assert.equal(pickCanvasHandle(geometry, group(1).root, {handles}).kind, 'origin');
+    // A selection within the budget: the same list as without the rule.
+    const fits = selectedOriginsOnly(selected, 2, () => 1 + moving, 4 * (1 + moving));
+    assert.equal(fits, null);
+    const strip = list => list.map(({g, ...handle}) => ({...handle, g: g.obj.unique_id}));
+    assert.deepEqual(strip(getPivotHandles(geometry, {...options, originsOnlyUids: fits})), strip(getPivotHandles(geometry, options)));
+  } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
+});
+
+test('the joints of many selected figures shown light are built with one request of the session, as each would be built alone', {skip: !engineBuilt}, async () => {
+  // Small documents, read as a dense frame is: built on first read.
+  shownLimits.eagerSegments = 0;
+  const {EditSession} = await engineBindings();
+  const {editor, owner} = await ownedEditor({demo: false}, crowd(6));
+  const original = EditSession.prototype.query_packet, asked = [];
+  EditSession.prototype.query_packet = function counted(kind, ...rest) { asked.push(kind); return original.call(this, kind, ...rest); };
+  try {
+    editor.seek(1);
+    const walker = editor.report.figure_types[0], selected = new Set([2, 3, 5]);
+    editor.selectMany([...selected]);
+    const geometry = editor.geometry, frame = editor.evaluatedFrame;
+    asked.length = 0;
+    const handles = getPivotHandles(geometry, {frame, selectedUid: 5, selectedUids: selected, showUnselected: false, viewScale: 1});
+    assert.deepEqual(asked, ['geometryGroups'], 'one request for the selected figures');
+    for (const uid of [1, 2, 3, 4, 5, 6])
+      assert.equal(handles.filter(handle => handle.uid === uid).length, selected.has(uid) ? 1 + definitionHandleCount(walker) : 1, `figure ${uid}: its joints`);
+    for (const group of geometry.objects.values()) assert.equal(built(group), selected.has(group.obj.unique_id), `figure ${group.obj.unique_id} is built only when selected`);
+    // The same groups as built one by one, each with a request of its own.
+    const alone = freshRead(editor);
+    for (const [slot, group] of geometry.objects) if (selected.has(group.obj.unique_id)) { void alone.objects.get(slot).segments; sameGroup(group, alone.objects.get(slot), `slot ${slot}`); }
+    // Built groups ask nothing more.
+    asked.length = 0;
+    getPivotHandles(geometry, {frame, selectedUid: 5, selectedUids: selected, showUnselected: false, viewScale: 1});
+    assert.deepEqual(asked, []);
+  } finally { EditSession.prototype.query_packet = original; owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
+});
+
 test('a zoom resizes the descriptors to what they would be built as at the new scale', {skip: !engineBuilt}, async () => {
   // Small documents, read as a dense frame is: built on first read.
   shownLimits.eagerSegments = 0;
@@ -179,3 +258,4 @@ test('a zoom resizes the descriptors to what they would be built as at the new s
     assert.ok(reads.length > 0);
   } finally { owner.release(); shownLimits.eagerSegments = EAGER_SEGMENTS; }
 });
+

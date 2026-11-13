@@ -206,6 +206,36 @@ test('a cold undo loads its record from the disk first, and fails or cancels wit
   } finally { await dispose(); }
 });
 
+/** A full collection, which a test's process may ask for (`--expose-gc` set at run time; nothing else in the process changes). */
+const collect = (() => {
+  let gc = null;
+  return async () => {
+    if (!gc) { const v8 = await import('node:v8'), vm = await import('node:vm'); v8.setFlagsFromString('--expose-gc'); gc = vm.runInNewContext('gc'); }
+    // Weak references are kept until the job that made them ends: a turn of the event loop first.
+    await new Promise(resolve => setImmediate(resolve));
+    gc();
+  };
+})();
+
+test('the pixels of a stroke the history moved to the disk are let go of', {skip: !engineBuilt}, async () => {
+  const {editor, history, target, dispose} = await painting();
+  try {
+    // What the cel held before the stroke lives only in the stroke's record: once the record is on the disk, nothing holds it.
+    let tiles = [tile(0, 0, 1, new Uint8ClampedArray(TILE_BYTES).fill(5)), tile(1, 0, 2, new Uint8ClampedArray(TILE_BYTES).fill(6))];
+    const list = new WeakRef(tiles), before = new WeakRef(tiles[0].before);
+    editor.commitDrawingPixels(target, tiles, 'Brush stroke');
+    tiles = null;
+    await history.pumping;
+    assert.equal(history.residentBytes, 0, 'the record went to the disk');
+    await collect();
+    assert.equal(before.deref(), undefined, 'the pixels the disk holds are not kept in memory as well');
+    assert.equal(list.deref(), undefined);
+    // They come back from the disk for the undo.
+    assert.equal(await editor.undo(), true);
+    assert.equal(await editor.redo(), true);
+  } finally { await dispose(); }
+});
+
 test('an edit made while a cold undo loads prevents it from moving the newer history', {skip: !engineBuilt}, async () => {
   const {editor, owner, history, disk, target, surface, dispose} = await painting();
   try {

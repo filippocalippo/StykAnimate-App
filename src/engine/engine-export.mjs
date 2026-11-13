@@ -291,7 +291,7 @@ export class EngineExportFrames {
     return this.canvas;
   }
 
-  async _render({tick, frame, svg = false, native = false, preserveAlpha = false}) {
+  async _render({tick, frame, svg = false, native = false, preserveAlpha = false, pixels = false}) {
     this._check();
     if (!this.loaded) throw messageError(new Error(''), 'errors.exportFrameRenderer.loadTheAnimationBeforeExporting', {});
     if (this.busy) throw messageError(new Error(''), 'errors.exportFrameRenderer.exportFramesMustBeRenderedSequentially', {});
@@ -304,7 +304,7 @@ export class EngineExportFrames {
         await this._chunks({keyframes: [frame]}, 'frame-chunk');
       };
       await sendFrame();
-      const payload = {tick, override: Boolean(frame), svg, native, preserveAlpha};
+      const payload = {tick, override: Boolean(frame), svg, native, preserveAlpha, ...(pixels ? {pixels} : {})};
       // Retry ladder: resource failures halve the render tile to a 32px floor,
       // then rebuild the worker once and try again. Output pixels are identical;
       // only the amount of frame held in memory per pass changes.
@@ -342,6 +342,17 @@ export class EngineExportFrames {
         this.onFrame?.({stage: 'rendered', tick});
         return output;
       }
+      if (pixels) {
+        this._check();
+        const output = result.pixels;
+        if (!(output?.data instanceof Uint8ClampedArray) || output.width !== this.width || output.height !== this.height ||
+            output.data.length !== this.width * this.height * 4)
+          throw messageError(new Error(''), 'errors.exportFrameRenderer.theExportRendererReturnedAnIncompleteFrame', {});
+        Object.assign(this.stats, result.stats);
+        this.stats.renderedFrames++;
+        this.onFrame?.({stage: 'rendered', tick});
+        return output;
+      }
       if (svg) {
         this._check();
         Object.assign(this.stats, result.stats);
@@ -358,6 +369,14 @@ export class EngineExportFrames {
 
   renderTick(tick) {
     return this._render({tick});
+  }
+
+  /**
+   * `tick`'s RGBA pixels, {data, width, height}: the caller owns `data` (transferred from the worker,
+   * no canvas of the interface touched). The next frame may be asked for while this one is encoded.
+   */
+  renderPixelsTick(tick) {
+    return this._render({tick, pixels: true});
   }
 
   renderNativeTick(tick, {preserveAlpha = false} = {}) {

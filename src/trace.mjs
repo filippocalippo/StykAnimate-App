@@ -67,6 +67,21 @@ export function traceInstant(name, args) { if (sink !== null) sink.instant(name,
 export function traceCounter(name, value) { if (sink !== null) sink.counter(name, value); }
 
 /**
+ * Memory an owner holds outside the engine's memory and the JavaScript heap (pixels in array buffers, canvases, image
+ * bitmaps), so the developer tools can say who holds the page's memory (docs/DEVTOOLS.md "Memory by owner"). `read(target)`
+ * returns the bytes `target` holds now: a number, or `{bytes, count}`. The tools call it when they take a memory checkpoint,
+ * never on the app's own paths, so it reads a count the owner keeps or walks a short list. `target` is held weakly, so an
+ * owner nothing else holds drops out by itself: `read` takes it as its argument and must not capture it. Returns the
+ * function that removes the registration (call it when the owner is disposed). `kind` says what the bytes are:
+ * `buffers` (typed arrays and array buffers), `pixels` (canvases, image bitmaps the browser keeps in this process) or
+ * `graphics` (kept in the graphics process). The shipping build registers nothing.
+ *
+ *   traceMemory('drawing: tiles', this, resources => resources.residentMemory().bytes);
+ */
+export function traceMemory(owner, target, read, kind = 'buffers') { return sink === null ? untraced : sink.memory(owner, target, read, kind); }
+const untraced = () => {};
+
+/**
  * A live parameter: the value worth tuning at `name`, read where it is used. The developer build lets the panel, the
  * control channel or a saved profile change it while the app runs; the shipping build always returns `fallback`.
  * `spec`: {min, max, step, options, description}.

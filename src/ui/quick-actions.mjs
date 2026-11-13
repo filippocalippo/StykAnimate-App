@@ -37,6 +37,7 @@ import {t as interfaceText, messageText} from '../localization.mjs';
  * (the inspector kit's `.ui-quick` slot, or a row of its own).
  */
 import {installRovingFocus} from './roving-focus.mjs';
+import {setFlag} from './dom-write.mjs';
 
 export const QUICK_LIMITS = Object.freeze({defaults: 5, slots: 6, groups: 3});
 /** The group pinned commands form, after the defaults. */
@@ -311,8 +312,9 @@ export function createQuickActions({host = null, context = null, label = null, e
   const controller = new AbortController(), {signal} = controller;
   const created = !host;
   const element = host ?? doc.createElement('div');
-  element.classList.add('ui-quick');
-  element.setAttribute('role', 'toolbar');
+  // The inspector hands back the same host on each render: it is marked once.
+  setFlag(element, 'ui-quick', true);
+  setAttribute(element, 'role', 'toolbar');
   let current = {context: context ?? element.dataset.quickContext ?? null, label, pins: [...(pins ?? [])], entries};
   let resolved = null, key = '';
 

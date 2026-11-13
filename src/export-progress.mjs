@@ -20,14 +20,16 @@ export class ExportProgress {
   }
   snapshot() {
     const work = this.frames * this.passes;
-    const pass = Math.min(this.passes, Math.floor(this.active / this.frames) + 1);
-    const rendered = Math.min(this.frames, Math.max(0, this.rendered - (pass - 1) * this.frames));
+    // A GIF whose encoder kept the first pass's frames draws none in the second: its frames encoded count as its frames.
+    const active = Math.max(this.active, this.completed - 1), delivered = Math.max(this.rendered, this.completed);
+    const pass = Math.min(this.passes, Math.floor(active / this.frames) + 1);
+    const rendered = Math.min(this.frames, Math.max(0, delivered - (pass - 1) * this.frames));
     const elapsed = Math.max(0, (this.now() - this.started) / 1000);
     const done = this.completed;
     const rate = elapsed >= 1 && done > 0 ? done / elapsed : null;
     const finalizing = ['encoding', 'saving'].includes(this.phase);
     return {phase: this.phase, pass, passes: this.passes, rendered, remaining: this.frames - rendered,
-      frames: this.frames, frame: Math.min(this.frames, this.active % this.frames + 1), sourceFrame: (this.tick ?? this.start) + 1,
+      frames: this.frames, frame: Math.min(this.frames, active % this.frames + 1), sourceFrame: (this.tick ?? this.start) + 1,
       elapsed, rate, eta: rate && done >= 3 && done < work ? (work - done) / rate : null,
       // Reserve the final portion for container finalization and the actual save.
       percent: this.phase === 'saving' ? 98 : finalizing ? 95 : Math.min(95, Math.floor(done / work * 95))};

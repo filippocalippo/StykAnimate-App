@@ -59,6 +59,7 @@ export function overview(result) {
     }
     const memory = pair.memory.at(-1);
     if (memory?.total) lines.push(`   memory at the end: ${memory.total} MB in all (page ${memory.page ?? '–'}, graphics ${memory.graphics ?? '–'}); engine ${memory.engine ?? '–'} MB in use, JavaScript ${memory.jsHeap ?? '–'} MB`);
+    if (memory?.owners) lines.push(`   the page by owner: ${OWNER_PARTS.filter(([key]) => Number.isFinite(memory.owners[key])).map(([key, name]) => `${name} ${Math.round(memory.owners[key])}`).join(', ')} MB (npm run perf -- memory ${result.label})`);
     lines.push('');
   }
   lines.push('Grades: GOOD, FAIR, POOR, BAD against fixed limits (docs/PERFORMANCE.md). One scenario in full: npm run perf -- show <run> <scenario>.');
@@ -84,6 +85,10 @@ export function explain(pair, scenario) {
     lines.push('', `Frames (first pass): ${frames.count} at ${frames.perSecond}/s against a ${frames.periodMs?.toFixed(2)} ms display period; ${frames.late} late, ${frames.over16} over 16.7 ms, ${frames.over33} over 33.3 ms, ${frames.over100} over 100 ms`,
       `  interface thread per frame: mean ${frames.work.mean} ms, p95 ${frames.work.p95} ms (${Math.round((frames.work.budgetShare ?? 0) * 100)}% of the period), worst ${frames.work.worst} ms`,
       ...Object.entries(frames.phases).map(([phase, value]) => `    ${pad(phase, 9)} mean ${value.mean} ms, p95 ${value.p95} ms, ${Math.round((value.share ?? 0) * 100)}% of the work`));
+  }
+  if (detail?.phases?.length) {
+    lines.push('', 'The start, step by step (first launch; ms from the launch):', ...detail.phases.map(step => `  ${pad(step.name, 44)} at ${pad(step.startMs, 7)} ${step.ms} ms`));
+    if (detail.marks?.length) lines.push('', 'Spans until ready (first launch; ms from the launch):', ...detail.marks.map(mark => `  ${pad(`${mark.name} (${mark.thread})`.slice(0, 60), 60)} at ${pad(mark.startMs, 7)} ${mark.ms} ms`));
   }
   if (detail?.spans?.length) {
     lines.push('', 'Spans of the interface (first pass), heaviest first:', `  ${pad('span', 44)} ${pad('count', 6)} ${pad('total ms', 9)} ${pad('p50', 8)} ${pad('p95', 8)} worst`,
@@ -118,5 +123,39 @@ export function explain(pair, scenario) {
     if (attribution.processes.length) lines.push('  Processor time by process: ' + attribution.processes.map(row => `${row.type} ${row.cpuMs} ms`).join(', '));
   }
   if (scenario.notes.length) lines.push('', 'Notes:', ...scenario.notes.map(note => `  ${note}`));
+  return `${lines.join('\n')}\n`;
+}
+
+/** The columns of the memory table: a checkpoint's own numbers, then the page split by owner (`owners`, src/devtools/memory.mjs). */
+const MEMORY_COLUMNS = [['total', 'all'], ['page', 'page'], ['graphics', 'graphics'], ['engineReserved', 'eng.res'], ['engine', 'eng.use'], ['jsHeap', 'js']];
+const OWNER_PARTS = [['engine memory', 'engine'], ['JavaScript heap', 'heap'], ['array buffers', 'buffers'], ['pictures', 'pictures'], ['workers', 'workers'], ['unexplained', 'unexpl.']];
+
+/**
+ * A run's memory checkpoints as text (`npm run perf -- memory`): per pair, the memory after every scenario in megabytes,
+ * the page split by owner beside it, and with `detail` what each part of the last checkpoint (or of `after`) holds.
+ */
+export function memoryText(result, {env = null, workload = null, after = null, detail = false} = {}) {
+  const lines = [`Memory of ${result.label} (megabytes; the page split by owner: docs/DEVTOOLS.md "Memory by owner")`, ''];
+  const cell = value => pad(Number.isFinite(value) ? Math.round(value) : '–', 8);
+  for (const pair of result.pairs) {
+    if ((env && pair.environment.id !== env) || (workload && pair.workload.id !== workload) || !pair.memory?.length) continue;
+    lines.push(`${pair.environment.id} / ${pair.workload.id}`,
+      `  ${pad('after', 26)} ${MEMORY_COLUMNS.map(([, name]) => pad(name, 8)).join(' ')} | ${OWNER_PARTS.map(([, name]) => pad(name, 8)).join(' ')}`);
+    for (const point of pair.memory) {
+      lines.push(`  ${pad(point.after.slice(0, 26), 26)} ${MEMORY_COLUMNS.map(([key]) => cell(point[key])).join(' ')} | ${OWNER_PARTS.map(([key]) => cell(point.owners?.[key])).join(' ')}`);
+    }
+    const chosen = after ? pair.memory.find(point => point.after === after) : pair.memory.at(-1);
+    if (detail && chosen?.owners) {
+      lines.push('', `  After ${chosen.after}, by owner:`);
+      for (const [part] of OWNER_PARTS) {
+        const rows = chosen.owners.rows?.[part];
+        if (chosen.owners[part] === undefined) continue;
+        lines.push(`    ${pad(part, 24)} ${cell(chosen.owners[part])}`);
+        for (const row of rows ?? []) lines.push(`      ${pad(`${row.name}${row.count ? ` (${row.count})` : ''}`.slice(0, 48), 48)} ${Number.isFinite(row.mb) ? row.mb.toFixed(1) : '–'}`);
+      }
+      if (chosen.owners.graphics?.length) lines.push(`    in the graphics process: ${chosen.owners.graphics.map(row => `${row.name} ${row.mb} (${row.count})`).join(', ')}`);
+    }
+    lines.push('');
+  }
   return `${lines.join('\n')}\n`;
 }

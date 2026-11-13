@@ -30,7 +30,7 @@ import {polygonSurfaceView} from './builder-surface-ui.mjs';
 import {rigIKAllowed} from './rig-constraints.mjs';
 import {cameraMotionView, parallaxView} from './camera-motion-ui.mjs';
 import {paintCSS} from './paint.mjs';
-import {figurePalette, displayedSegmentPaint, displayedColor} from './figure-colors.mjs';
+import {figurePalette, displayedSegmentPaint, displayedColor, paletteColors} from './figure-colors.mjs';
 import {isStatic} from './pivot/read-view.mjs';
 import {cameraValues} from './pivot/model.mjs';
 import {builderDrawables} from './editor-builder-style.mjs';
@@ -308,9 +308,12 @@ function layerDescriptor(editor) {
 function selectionDescriptor(editor, number, {bounds: b, selectionCount, range, scope}) {
   const objects = editor.selectedObjects ?? [editor.object], object = editor.object;
   const opacities = new Set(objects.map(item => item.field28 || 0));
-  const figureOf = item => resolveInstanceFigure(findFigureType(editor.report.figure_types, item.figure_type_id), item);
-  const colours = new Set(objects.flatMap(item => figurePalette(editor.report, figureOf(item), item).map(entry => entry.color)));
-  const joined = objects.some(item => item.join) || editor.selectionFrame.objects.some(part => part.join && objects.some(item => item.object_slot === part.join.target_object_slot));
+  // Each definition is found once and each kind of figure listed once: a selection can hold thousands of figures of a few kinds.
+  const definitions = new Map(), definition = id => { if (!definitions.has(id)) definitions.set(id, findFigureType(editor.report.figure_types, id)); return definitions.get(id); };
+  const figureOf = item => resolveInstanceFigure(definition(item.figure_type_id), item);
+  const colours = paletteColors(editor.report, objects, figureOf);
+  const slots = objects.some(item => item.join) ? null : new Set(objects.map(item => item.object_slot));
+  const joined = !slots || editor.selectionFrame.objects.some(part => part.join && slots.has(part.join.target_object_slot));
   const align = [messageTuple(['left', 'align-left', interfaceText("inspectorView.alignLeft")], {2: {key: "inspectorView.alignLeft", params: {}}}), messageTuple(['center-x', 'align-horizontal-center', interfaceText("inspectorView.alignCenter")], {2: {key: "inspectorView.alignCenter", params: {}}}), messageTuple(['right', 'align-right', interfaceText("inspectorView.alignRight")], {2: {key: "inspectorView.alignRight", params: {}}}),
     messageTuple(['top', 'align-top', interfaceText("inspectorView.alignTop")], {2: {key: "inspectorView.alignTop", params: {}}}), messageTuple(['center-y', 'align-vertical-center', interfaceText("inspectorView.alignMiddle")], {2: {key: "inspectorView.alignMiddle", params: {}}}), messageTuple(['bottom', 'align-bottom', interfaceText("inspectorView.alignBottom")], {2: {key: "inspectorView.alignBottom", params: {}}})];
   return {kind: 'figures', target: {name: interfaceText('inspectorView.selectedFigures', {count: selectionCount}), nameKey:'inspectorView.selectedFigures', nameParams:{count:selectionCount}}, quick: {context: 'figures'}, scope, sections: [

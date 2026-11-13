@@ -13,7 +13,7 @@ npm run perf -- list                      the benchmarks, with the layer each ex
 
 `engine` writes `artifacts/perf/engine/<label>/` (`result.json`, `summary.txt`, schema `styk-perf-engine/1`) and prints
 the summary. `--scale` runs the scaling sizes instead of the workloads (both with `--workload`). `--benchmark` takes ids or
-layers (`edit` is both drags). `engine-compare` says what changed between two runs beyond their own noise, with the rule of
+layers (`edit` is the three edits). `engine-compare` says what changed between two runs beyond their own noise, with the rule of
 `compare` (`perf/lib/compare.mjs`); the head defaults to the latest run.
 
 **Every number is one thread's.** Node runs the engine without its worker threads: what the engine queues runs on the
@@ -31,6 +31,7 @@ rate here as what each worker adds, and a time as what one thread spends.
 | `reads` | interface reads | What the interface reads after a seek (`editor.evaluatedFrame`, `editor.geometry`, `src/engine/engine-shown.mjs`), whole and inside the engine. |
 | `edit.pose` | edit session | A pose drag through the owner: begin, 60 steps, commit, undo, redo; each call inside the engine and whole, the answer's size, the geometry read after a step. |
 | `edit.move` | edit session | The same for moving a figure (`beginTranslationDrag`, `moveSelection` from the start). |
+| `edit.move-many` | edit session | Every figure selected (`selectMany`) and moved as the canvas moves them: `beginTranslationDrag`, one `moveSelection` at the release, commit, undo, redo; and the geometry read after the commit with every selected figure's joints, with the number of engine calls it took. |
 | `save` | files | `save_project` through `makeProjectFile`: the `.styk` file with its phases (lift, check, sections, assemble) and its size. |
 | `export` | files | `export_document` as the Pivot export asks (`output: 'codec'`): the document as opened (its keyframes kept), and a copy edited once, which bakes every tick into a stored frame, per baked frame. |
 | `raster` | CPU rasterizer | `ExportRenderer.create_cpu`: a frame prepared, drawn tile by tile and read out, at 1280×720 and 1920×1080. |

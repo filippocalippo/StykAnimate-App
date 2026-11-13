@@ -35,7 +35,7 @@ import { VfwExportControls } from "./vfw-export-controls.mjs";
 import { getExportCapabilities, exportFormat } from "./export-capabilities.mjs";
 import { audioState, audibleClips } from "./audio-model.mjs";
 import { openExportSink } from "./export-sink.mjs";
-import { exportAnimation } from "./image-export.mjs";
+import { exportAnimation, prewarmImageExport } from "./image-export.mjs";
 import { defaultGIFDither } from "./gif-options.mjs";
 import { createExportFrameRenderer, prewarmExportRenderer } from "./engine/engine-export.mjs";
 import { exportProgressMarkup, mountExportProgress } from "./export-progress.mjs";
@@ -315,6 +315,7 @@ export function createExportFlow(ctx) {
             onProgress,
             sink,
             renderFrame: (index) => renderer.renderTick(index + options.start),
+            renderPixels: (index) => renderer.renderPixelsTick(index + options.start),
             renderPNGFrame: (index) => renderer.renderNativeTick(index + options.start, {preserveAlpha: true}),
             renderSVGFrame: (index) =>
               renderer.renderSVGTick(index + options.start),
@@ -418,6 +419,7 @@ export function createExportFlow(ctx) {
     sheet?.close();
     // The engine's export worker and its GPU device start while the choices are made.
     prewarmExportRenderer({ stage: state.renderer });
+    prewarmImageExport();
     const report = editor.report, audio = audioState(report), clips = audibleClips(audio);
     const fps = report.frame_delay_ms ? 1000 / report.frame_delay_ms : report.fps;
     const opened = sheet = openExportSheet({

@@ -28,6 +28,9 @@ export const METRICS = Object.freeze({
   'work.render': {title: 'Browser style, layout and paint per frame', unit: 'ms', better: 'lower', digits: 2},
   'input.p50': {title: 'Input to frame, median', unit: 'ms', better: 'lower', digits: 1},
   'input.p95': {title: 'Input to frame, 95th percentile', short: 'input to frame', unit: 'ms', better: 'lower', digits: 1},
+  'picture.felt': {title: 'Stage picture time as seen, where pictures come after their frame', short: 'picture seen', unit: 'ms', better: 'lower', digits: 1},
+  'picture.input.p95': {title: 'Input to stage picture, 95th percentile, where pictures come after their frame', short: 'input to picture', unit: 'ms', better: 'lower', digits: 1},
+  'picture.input.p50': {title: 'Input to stage picture, median, where pictures come after their frame', unit: 'ms', better: 'lower', digits: 1},
   'paints.perSecond': {title: 'Stage redraws per second', unit: '/s', better: 'higher', digits: 1},
   'longTasks.count': {title: 'Long tasks (over 50 ms)', unit: '', better: 'lower', digits: 0},
   'longTasks.longest': {title: 'Longest task', unit: 'ms', better: 'lower', digits: 0},
@@ -67,6 +70,7 @@ export function captureMetrics(summary) {
     if (frames.lateShare !== null) values['frames.late'] = frames.lateShare * 100;
   }
   if (inputs?.count) Object.assign(values, {'input.p50': inputs.p50, 'input.p95': inputs.p95});
+  if (summary.pictures) Object.assign(values, {'picture.felt': summary.pictures.felt ?? NaN, 'picture.input.p50': summary.pictures.input.p50, 'picture.input.p95': summary.pictures.input.p95});
   if (seconds > 0) values['paints.perSecond'] = (span('paint')?.count ?? 0) / seconds;
   const longTasks = span('long task');
   values['longTasks.count'] = longTasks?.count ?? 0;

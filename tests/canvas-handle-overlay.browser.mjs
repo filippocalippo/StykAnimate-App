@@ -1,4 +1,5 @@
-// The joint overlay's pixels in a real browser canvas: pans against a full repaint (tests/canvas-handle-overlay-fixture.mjs).
+// The joint overlay's pixels in a real browser canvas (tests/canvas-handle-overlay-fixture.mjs): pose damage and pans against
+// a full repaint, a selection dragged as a layer of its own, and the stamped handles against the paths they are pictures of.
 // Needs the development server (npm run serve) or STYK_URL.
 import {chromium} from './support/playwright.mjs';
 import assert from 'node:assert/strict';
@@ -8,9 +9,12 @@ try {
   const page = await browser.newPage();
   await page.goto(process.env.STYK_URL || 'http://127.0.0.1:47831');
   const result = await page.evaluate(async () => {
-    const {verifyCanvasHandlePans} = await import('/tests/canvas-handle-overlay-fixture.mjs');
-    try { return {checks: verifyCanvasHandlePans().length}; } catch (error) { return {error: error.message}; }
+    const fixture = await import('/tests/canvas-handle-overlay-fixture.mjs');
+    try {
+      return {damage: fixture.verifyCanvasHandleOverlay().length, pans: fixture.verifyCanvasHandlePans().length, moves: fixture.verifyCanvasHandleMoves().length, stamps: fixture.verifyCanvasHandleStamps()};
+    } catch (error) { return {error: error.message}; }
   });
   assert.equal(result.error, undefined, result.error);
-  console.log(`PASS joint overlay pans (${result.checks} pictures compared with a full repaint)`);
+  console.log(JSON.stringify(result.stamps));
+  console.log(`PASS joint overlay (${result.damage} pose-damage, ${result.pans} pan and ${result.moves} moving-selection pictures compared with a full repaint)`);
 } finally { await browser.close(); }

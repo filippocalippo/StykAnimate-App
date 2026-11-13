@@ -74,6 +74,13 @@ fn world_rect(matrix: &[f64; 6], canvas: [u32; 2], margin: f64) -> Option<[f64; 
     [min[0], min[1], max[0], max[1]].iter().all(|v| v.is_finite()).then_some([min[0], min[1], max[0], max[1]])
 }
 
+/// The world rectangle (x0, y0, x1, y1) a primitive covers before antialiasing, or `None` for the kinds whose reach is not known here
+/// (fills, composites, polylines, particles, beams, glyph masks, depth-tested faces): a primitive whose rectangle a target region does not
+/// meet (grown by the antialiasing fringe) draws nothing there.
+pub fn prim_bounds(p: &Prim) -> Option<[f64; 4]> {
+    bounds(p)
+}
+
 fn meets(b: [f64; 4], rect: [f64; 4]) -> bool {
     b[2] >= rect[0] && b[3] >= rect[1] && b[0] <= rect[2] && b[1] <= rect[3]
 }

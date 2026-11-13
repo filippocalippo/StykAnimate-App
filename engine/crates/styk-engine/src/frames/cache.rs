@@ -155,7 +155,8 @@ impl Work {
         true
     }
 
-    pub(crate) fn step(&self, engine: &Engine) -> bool {
+    /// Prepares the next wanted frame, if any, in what the frame before it left (`spares`).
+    pub(crate) fn step(&self, engine: &Engine, spares: &mut Spares) -> bool {
         let mut storage = self.storage.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some((control, changed)) = self.apply(engine, &mut storage) else { return false; };
         if !control.allow_frames { return changed; }
@@ -164,11 +165,22 @@ impl Work {
             let state = engine.inner.state.lock();
             if !self.current(&state) || state.frames.epoch != control.epoch { return true; }
         }
-        let Some(tick) = storage.take_wanted() else { return changed; };
+        let making = &engine.inner.making;
+        let tick = match storage.take_admitted(making, generation.lineage) {
+            Taken::Tick(tick) => tick,
+            // Nothing wanted, or the cache would drop the next wanted frame as soon as it was made: the worker waits for work.
+            Taken::Nothing | Taken::Kept => return changed,
+            // The frames other workers are making hold the memory frames may take: this worker does not keep its spares beside them.
+            Taken::Crowded => { drop(storage); spares.release(); return changed; }
+        };
         drop(storage);
-        let data = produce(generation, tick.time(), &control.hidden, control.effects, true, engine.inner.clock.clone());
+        let data = produce_reusing(generation, tick.time(), &control.hidden, control.effects, true, engine.inner.clock.clone(), Some(spares));
+        // What making it held: its scene's buffers (now the worker's spares, or let go) and its draw list.
+        making.done(generation.lineage, spares.last_scene_bytes().saturating_add(data.list.bytes()));
         // Returned/ignored and stale data all remain owned outside State.
         self.finish(engine, tick, control.epoch, &control.hidden, control.effects, data, false);
+        // A worker that found no room for a frame waits for work: it is told that a frame was done.
+        if making.take_refused() { engine.inner.state.notify_all(); }
         true
     }
 
@@ -205,6 +217,19 @@ impl Work {
 pub(super) struct Entry {
     pub(super) data: Arc<FrameData>,
     bytes: usize,
+}
+
+/// What [`Storage::take_admitted`] gave a worker.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Taken {
+    /// A tick to make.
+    Tick(Sample),
+    /// Nothing is wanted.
+    Nothing,
+    /// The next wanted frame would be dropped as soon as it was made.
+    Kept,
+    /// The frames being made hold what frames may.
+    Crowded,
 }
 
 pub(super) struct Storage {
@@ -252,7 +277,35 @@ impl Storage {
         self.inflight.clear();
     }
 
-    /// The next tick a worker should prepare, marked as in progress.
+    /// The next tick a worker should prepare, if it should start one now (marked as in progress, and counted among the frames
+    /// being made). Two things wait:
+    /// - a frame the cache would drop as soon as it is made: the frames kept and those on their way fill the budget, and this one
+    ///   is farther ahead of the playhead than every frame kept (`Kept`). A request that moves the playhead makes room;
+    /// - a frame while the frames being made would hold more than [`Making::most_bytes`] with it (`Crowded`). Each holds its scene
+    ///   until its draw list is made (tens of megabytes on a dense document), so the workers of a large machine making frames at
+    ///   once took the memory to three times what the document keeps, which the memory keeps for the session.
+    pub(crate) fn take_admitted(&mut self, making: &Making, lineage: u64) -> Taken {
+        let Some(at) = self.wanted.iter().position(|tick| !self.entries.contains_key(tick) && !self.inflight.contains(tick)) else { return Taken::Nothing };
+        let tick = self.wanted[at];
+        if self.dropped_at_once(tick) { return Taken::Kept; }
+        if !making.start(lineage) { return Taken::Crowded; }
+        self.wanted.drain(..=at);
+        self.inflight.insert(tick);
+        Taken::Tick(tick)
+    }
+
+    /// Whether the cache would drop a frame of `tick` as soon as it is made: the frames kept and the frames on their way (at the
+    /// size of those kept) are over the budget, and `tick` is not nearer the playhead than the farthest frame kept.
+    fn dropped_at_once(&self, tick: Sample) -> bool {
+        let Some(each) = self.bytes.checked_div(self.entries.len()) else { return false };
+        if self.bytes.saturating_add((self.inflight.len() + 1).saturating_mul(each)) <= self.budget { return false; }
+        let total = self.total.max(1);
+        let farthest = self.entries.keys().map(|kept| kept.ahead(self.playhead, total)).fold(f64::NEG_INFINITY, f64::max);
+        tick.ahead(self.playhead, total) >= farthest
+    }
+
+    /// The next tick a worker should prepare, marked as in progress, whatever the cache and the memory say (the tests of what is wanted).
+    #[cfg(test)]
     pub fn take_wanted(&mut self) -> Option<Sample> {
         let at = self.wanted.iter().position(|tick| !self.entries.contains_key(tick) && !self.inflight.contains(tick))?;
         let tick = self.wanted[at];

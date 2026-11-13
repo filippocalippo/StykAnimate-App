@@ -43,6 +43,7 @@ import {SHELL_METRICS} from './layout-solver.mjs';
 import {MENUBAR_FOLD, watchBand} from './topbar.mjs';
 import {COLLECTIONS} from './dock-keyboard.mjs';
 import {groupHeaderAt} from './dock-tabs.mjs';
+import {setAttr, setFlag, setHidden} from '../ui/dom-write.mjs';
 
 const DEFAULT_ROOTS = Object.freeze({properties: '#properties-panel', vfx: '#vfx-panel', library: '#user-library',
   structure: '#builder-outliner', timeline: '#animation-timeline'});
@@ -118,18 +119,16 @@ export function createDockHost({document: doc = globalThis.document, window: win
   const islands = new Map(), strips = new Map(), dividerEls = new Map();
   const tabElements = new Map([...doc.querySelectorAll('[role="tab"][data-panel]')].map(tab => [tab.dataset.panel, tab]));
   const written = new WeakMap();
-  /** Writes a style property only when it changes. */
+  /**
+   * Writes a style property only when it differs from what this host wrote last. It remembers its writes instead of
+   * reading the style back: a shorthand it writes (`inset` before `top`) reads back differently once a longhand follows.
+   */
   const setStyle = (element, name, value) => {
     let map = written.get(element);
     if (!map) written.set(element, map = new Map());
     if (map.get(name) === value) return;
     map.set(name, value);
     if (value === null) element.style.removeProperty(name); else element.style.setProperty(name, value);
-  };
-  const setAttr = (element, name, value) => {
-    if (value === null || value === false) { if (element.hasAttribute(name)) element.removeAttribute(name); return; }
-    const text = value === true ? '' : String(value);
-    if (element.getAttribute(name) !== text) element.setAttribute(name, text);
   };
   let solution = null, override = null, frame = 0, destroyed = false, origin = {x: 0, y: 0};
   let flyout = null;          // {group, panel, invoker}
@@ -304,7 +303,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
     }
     localizedAttribute(tab, 'title', 'dockHost.dragToMovePanelRightClickForLayout', {});
     const target = rootOf(id);
-    if (target?.id) tab.setAttribute('aria-controls', target.id);
+    if (target?.id) setAttr(tab, 'aria-controls', target.id);
     return tab;
   }
 
@@ -326,17 +325,17 @@ export function createDockHost({document: doc = globalThis.document, window: win
     const tabs = withTabs ? ids.map(tabOf) : [];
     order(tablist, tabs);
     for (const tab of [...tablist.children]) if (!tabs.includes(tab)) parking.append(tab);
-    tablist.hidden = !tabs.length;
-    tablist.setAttribute('aria-label', ids.map(title).join(', '));
-    island.setAttribute('aria-label', ids.map(title).join(', '));
+    setHidden(tablist, !tabs.length);
+    setAttr(tablist, 'aria-label', ids.map(title).join(', '));
+    setAttr(island, 'aria-label', ids.map(title).join(', '));
     for (const id of withTabs ? ids : []) {
       const tab = tabOf(id), selected = id === active;
-      tab.hidden = false;
+      setHidden(tab, false);
       setAttr(tab, 'aria-selected', String(selected));
-      tab.tabIndex = selected ? 0 : -1;
+      setAttr(tab, 'tabindex', selected ? '0' : '-1');
     }
     if (roots) order(island, ids.map(rootOf).filter(Boolean), 1);
-    island.dataset.panels = ids.join(' ');
+    setAttr(island, 'data-panels', ids.join(' '));
   }
 
   function stripFor(id) {
@@ -370,12 +369,9 @@ export function createDockHost({document: doc = globalThis.document, window: win
         mirror.addEventListener('click', () => source.click(), {signal});
         const copy = () => {
           const name = source.getAttribute('aria-label') || source.textContent.trim();
-          mirror.setAttribute('aria-label', name);
-          mirror.dataset.tooltip = name;
-          for (const attribute of MIRRORED) {
-            if (source.hasAttribute(attribute)) mirror.setAttribute(attribute, source.getAttribute(attribute));
-            else mirror.removeAttribute(attribute);
-          }
+          setAttr(mirror, 'aria-label', name);
+          setAttr(mirror, 'data-tooltip', name);
+          for (const attribute of MIRRORED) setAttr(mirror, attribute, source.getAttribute(attribute));
           const glyph = source.querySelector('svg')?.outerHTML ?? '';
           if (mirror.innerHTML !== glyph) localizedMarkup(mirror, glyph);
         };
@@ -400,9 +396,9 @@ export function createDockHost({document: doc = globalThis.document, window: win
         button.setAttribute('aria-haspopup', 'dialog');
         localizedMarkup(button, icon(descriptor(id)?.icon ?? 'panel-right'));
       }
-      if (descriptor(id)?.titleKey) localizedAttribute(button, 'aria-label', descriptor(id).titleKey); else button.setAttribute('aria-label', title(id));
-      button.dataset.tip = title(id);
-      button.dataset.group = group;
+      if (descriptor(id)?.titleKey) localizedAttribute(button, 'aria-label', descriptor(id).titleKey); else setAttr(button, 'aria-label', title(id));
+      setAttr(button, 'data-tip', title(id));
+      setAttr(button, 'data-group', group);
       return [button, ...stripActions(id)];
     });
     order(strip, buttons);
@@ -456,7 +452,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
         show(timeline);
         setAttr(timeline, 'data-group', group.id);
         setAttr(timeline, 'data-state', group.state === 'header' ? 'strip' : 'docked');
-        timeline.classList.add('shell-placed');
+        setFlag(timeline, 'shell-placed', true);
         place(timeline, group.rect);
         parked.delete('timeline');
         continue;
@@ -478,7 +474,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
       setAttr(island, 'data-side', group.side);
       setAttr(island, 'data-floating', null);
       setAttr(island, 'role', 'region');
-      island.hidden = false;
+      setHidden(island, false);
       const docked = group.state === 'docked';
       fill(island, group.tabs, group.active, {roots: docked});
       if (docked) for (const id of group.tabs) { parked.delete(id); prepare(id, island); }
@@ -492,7 +488,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
       setAttr(island, 'data-state', float.collapsed ? 'header' : 'docked');
       setAttr(island, 'data-floating', float.id);
       setAttr(island, 'role', 'dialog');
-      island.hidden = false;
+      setHidden(island, false);
       fill(island, float.tabs, float.active, {roots: !float.collapsed});
       if (!float.collapsed) for (const id of float.tabs) { parked.delete(id); prepare(id, island); }
       let grip = island.querySelector(':scope > .shell-float-grip');
@@ -502,7 +498,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
         grip.setAttribute('aria-hidden', 'true');
         appendLocalized(island, grip);
       } else if (island.lastElementChild !== grip) island.append(grip);
-      grip.hidden = float.collapsed;
+      setHidden(grip, float.collapsed);
       place(island, float.rect);
     }
     // The open flyout keeps its panel; a flyout whose group is no longer folded closes.
@@ -517,8 +513,8 @@ export function createDockHost({document: doc = globalThis.document, window: win
       // A header keeps its tabs and shows which one is open.
       if (group.state === 'header') fill(islands.get(group.id), group.tabs, flyout.panel, {roots: false});
       for (const id of group.tabs) { parked.delete(id); prepare(id, element); }
-      element.dataset.group = group.id;
-      element.dataset.side = group.side;
+      setAttr(element, 'data-group', group.id);
+      setAttr(element, 'data-side', group.side);
       placeFlyout(group);
     }
     // The sheet: every panel the window folded there.
@@ -539,7 +535,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
       const inUse = tab && s.groups.some(group => group.tabs.includes(id) && group.state === 'header') || s.floats.some(float => float.tabs.includes(id));
       if (tab && !inUse && tab.parentElement !== parking && !tab.closest('.shell-flyout, .shell-sheet')) parking.append(tab);
       if (id === 'timeline') {
-        timeline.classList.remove('shell-placed');
+        setFlag(timeline, 'shell-placed', false);
         setAttr(timeline, 'data-state', 'hidden');
       }
     }
@@ -581,7 +577,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
   /** A panel root that moves into an island: the timeline loses its own island look there. */
   function prepare(id, island) {
     if (id !== 'timeline') return;
-    timeline.classList.remove('shell-placed');
+    setFlag(timeline, 'shell-placed', false);
     setAttr(timeline, 'data-state', 'docked');
     setAttr(timeline, 'data-group', island.dataset.group ?? null);
     for (const name of ['position', 'left', 'top', 'width', 'height']) setStyle(timeline, name, null);
@@ -595,7 +591,7 @@ export function createDockHost({document: doc = globalThis.document, window: win
     if (!folded && body.hasAttribute('popover')) body.removeAttribute('popover');
     if (bodyButton) {
       if (bodyButton.hidden !== !folded) bodyButton.hidden = !folded;
-      bodyButton.setAttribute('aria-expanded', String(bodyOpen));
+      setAttr(bodyButton, 'aria-expanded', String(bodyOpen));
     }
     if (bodyOpen) placeBody();
   }
@@ -604,12 +600,12 @@ export function createDockHost({document: doc = globalThis.document, window: win
     if (sheetButton) {
       const none = !s.sheet.length;
       if (sheetButton.hidden !== none) sheetButton.hidden = none;
-      sheetButton.setAttribute('aria-expanded', String(sheet.open));
-      if (sheet.element) sheetButton.setAttribute('aria-controls', sheet.element.id);
+      setAttr(sheetButton, 'aria-expanded', String(sheet.open));
+      if (sheet.element) setAttr(sheetButton, 'aria-controls', sheet.element.id);
     }
     if (expandButton) {
       const tall = isTall();
-      expandButton.setAttribute('aria-pressed', String(tall));
+      setAttr(expandButton, 'aria-pressed', String(tall));
       localizedAttribute(expandButton, 'aria-label', tall ? 'dockHost.restoreTimelineHeight' : 'dockHost.expandTimeline', {});
     }
     for (const strip of strips.values()) {
@@ -651,8 +647,8 @@ export function createDockHost({document: doc = globalThis.document, window: win
         dividerEls.set(divider.key, el);
         workspace.insertBefore(el, parking);
       }
-      el.hidden = false;
-      el.dataset.axis = divider.axis;
+      setHidden(el, false);
+      setAttr(el, 'data-axis', divider.axis);
       setAttr(el, 'aria-orientation', divider.axis === 'row' ? 'vertical' : 'horizontal');
       setAttr(el, 'aria-valuemin', String(divider.min));
       setAttr(el, 'aria-valuemax', String(divider.max));
@@ -1313,39 +1309,55 @@ export function createDockHost({document: doc = globalThis.document, window: win
   });
   if (band) resizeObserver.observe(band);
   const rail = workspace.querySelector('.shell-rail');
+  /**
+   * The rail's tools take two columns where one column of them is taller than the rail's place (the solution's rail
+   * rectangle), and always in Build. Its content's height (`railNatural`: the tools, their gaps, the rail's padding and its
+   * other parts) does not depend on that place, so it is measured only when the rail or one of its parts changes size
+   * (the observer below, after layout); a solve decides the columns from it without reading layout. Measuring right
+   * after a commit's writes forced a style and layout pass inside every commit of a divider drag or a window resize.
+   *
+   * Until the observer has reported once, every solve measures: the rail's tools are still arriving while the app
+   * starts, and columns decided from a first, early measurement gave the stage a clearance that changed a frame later,
+   * after the view had been fitted to it.
+   */
+  let railNatural = null, railObserved = false;
+  const railColumnsFit = () => {
+    let columns = railColumns;
+    if (solution?.rail?.orientation === 'horizontal') columns = 1;
+    else if (railNatural && solution?.rail?.rect) columns = mode() === 'rig' || railNatural.items > 1 && railNatural.height > solution.rail.rect.height + 0.5 ? 2 : 1;
+    if (columns === railColumns) return;
+    railColumns = columns;
+    rail.toggleAttribute('data-columns', columns === 2);
+    schedule();
+  };
   const railFit = () => {
     const dock = rail.querySelector(':scope > .tool-dock');
-    if (solution?.rail?.orientation === 'horizontal') {
-      if (railColumns !== 1) { railColumns = 1; rail.toggleAttribute('data-columns', false); schedule(); }
-    } else if (dock && solution?.rail?.rect) {
+    const horizontal = solution?.rail?.orientation === 'horizontal';
+    if (!horizontal && dock) {
       const items = [...dock.children].filter(node => node.offsetParent !== null);
       const box = win.getComputedStyle(rail), gap = parseFloat(win.getComputedStyle(dock).rowGap) || 0;
       const add = dock.querySelector(':scope > .rail-add');
       const apart = add && add.offsetParent !== null ? parseFloat(win.getComputedStyle(add).marginBlockEnd) || 0 : 0;
-      const natural = items.reduce((sum, node) => sum + node.offsetHeight, 0) + gap * Math.max(0, items.length - 1)
+      const height = items.reduce((sum, node) => sum + node.offsetHeight, 0) + gap * Math.max(0, items.length - 1)
         + (parseFloat(box.paddingTop) || 0) + (parseFloat(box.paddingBottom) || 0) + apart
         + [...rail.children].filter(node => node !== dock && node.offsetParent !== null).reduce((sum, node) => {
           const style = win.getComputedStyle(node);
           return sum + node.offsetHeight + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
         }, 0);
-      const columns = mode() === 'rig' || items.length > 1 && natural > solution.rail.rect.height + 0.5 ? 2 : 1;
-      if (columns !== railColumns) {
-        railColumns = columns;
-        rail.toggleAttribute('data-columns', columns === 2);
-        schedule();
-      }
+      railNatural = {items: items.length, height};
     }
-    const horizontal = solution?.rail?.orientation === 'horizontal';
+    railColumnsFit();
     const more = !horizontal && rail.scrollHeight - rail.scrollTop - rail.clientHeight > 1;
     if (rail.hasAttribute('data-more-below') !== more) rail.toggleAttribute('data-more-below', more);
     const after = horizontal && rail.scrollWidth - rail.scrollLeft - rail.clientWidth > 1;
     if (rail.hasAttribute('data-more-after') !== after) rail.toggleAttribute('data-more-after', after);
   };
-  const railObserver = rail ? new win.ResizeObserver(railFit) : null;
+  const railObserver = rail ? new win.ResizeObserver(() => { railObserved = true; railFit(); }) : null;
   if (rail) {
     for (const element of [rail, ...rail.children]) railObserver.observe(element);
     rail.addEventListener('scroll', railFit, {passive: true, signal});
-    listeners.solve.add(() => railFit());
+    // Whether the rail scrolls changes only with its size, which the observer sees; before its first report a solve fits it in full.
+    listeners.solve.add(() => (railObserved ? railColumnsFit() : railFit()));
   }
   const bandWatch = band ? watchBand(band, {window: win, document: doc, storage: browserStorage(win), start: ready, onChange: () => schedule()}) : null;
   const modeObserver = new win.MutationObserver(modeChanged);

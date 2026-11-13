@@ -243,13 +243,28 @@ impl Editor {
         match (&self.authored, &self.retained) {
             (Some(edit), _) => Some(edit.frame.clone()),
             (None, Some(frame)) => Some(frame.clone()),
-            (None, None) => {
-                let editor_native = !self.sheet();
-                let cache = self.eval.borrow();
-                cache.report.as_ref().filter(|held| held.same_node(&self.report))?;
-                cache.frames.iter().find(|(at, clips, editor, _)| *at == self.tick.to_bits() && *clips && *editor == editor_native).map(|(.., frame)| frame.clone())
-            }
+            (None, None) => self.held_evaluation(),
         }
+    }
+
+    /// The document's frame at the playhead when it is what is on show (no preview, draft or retained frame over it) and the editor
+    /// holds it evaluated: `None` when something else is on show or only evaluating would answer.
+    pub(crate) fn document_frame_ready(&self) -> Option<Value> {
+        if self.property_preview().is_some() || self.authored.is_some() || self.retained.is_some() {
+            return None;
+        }
+        if self.eval.borrow().committed_preview.as_ref().is_some_and(|(report, tick, _)| report.same_node(&self.report) && *tick == self.tick.to_bits()) {
+            return None;
+        }
+        self.held_evaluation()
+    }
+
+    /// The evaluation the editor holds for the playhead over views of the document as it is now.
+    fn held_evaluation(&self) -> Option<Value> {
+        let editor_native = !self.sheet();
+        let cache = self.eval.borrow();
+        cache.report.as_ref().filter(|held| held.same_node(&self.report))?;
+        cache.frames.iter().find(|(at, clips, editor, _)| *at == self.tick.to_bits() && *clips && *editor == editor_native).map(|(.., frame)| frame.clone())
     }
 
     /// Takes the frame on show a worker made of `report` (the document as it is now) at `tick` with [`editor_frame`],

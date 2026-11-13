@@ -155,7 +155,7 @@ test('every engine benchmark has what the runner and the reports need, and is ch
   assert.ok(SCALING_BENCHMARKS.every(benchmark => BENCHMARKS.includes(benchmark) && Object.values(benchmark.metrics).some(metric => metric.scale)));
   for (const wanted of CAPACITY) assert.ok(SCALING_BENCHMARKS.find(benchmark => benchmark.id === wanted.benchmark)?.metrics[wanted.metric]?.scale, `${wanted.benchmark} ${wanted.metric} is scaled`);
   assert.deepEqual(select([]).map(benchmark => benchmark.id), BENCHMARKS.map(benchmark => benchmark.id));
-  assert.deepEqual(select(['edit']).map(benchmark => benchmark.id), ['edit.pose', 'edit.move']);
+  assert.deepEqual(select(['edit']).map(benchmark => benchmark.id), ['edit.pose', 'edit.move', 'edit.move-many']);
   assert.deepEqual(select(['files', 'frame']).map(benchmark => benchmark.id), ['frame', 'save', 'export']);
   assert.throws(() => select(['frames']), /No engine benchmark matches "frames"/);
 });

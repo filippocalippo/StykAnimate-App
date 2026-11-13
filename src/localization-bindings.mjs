@@ -17,6 +17,7 @@ const textBindings = new WeakMap();
 const runtimeParameters = new WeakMap();
 const escape = value => String(value).replace(/[&<>"']/g, character => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'})[character]);
 
+/** Writes an attribute only when it differs: translating again an element that already shows its text writes nothing. */
 function bindingAttribute(element, name, value) {
   if (element.getAttribute(name) !== value) element.setAttribute(name, value);
 }
@@ -160,15 +161,15 @@ function translateElement(element, localization) {
         continue;
       }
       if (attribute === 'aria-label' && element.dataset.hotkeyHint !== undefined && element.dataset.hotkeyTitle === element.getAttribute('aria-label'))
-        element.dataset.hotkeyTitle = text;
+        bindingAttribute(element, 'data-hotkey-title', text);
       if (attribute === 'title' && element.dataset.hotkeyHint !== undefined) {
         // A shortcut control (hotkey-hints.mjs): the tooltip shows this name and
         // the shortcut, so no native title. A name derived from it follows it.
         const base = text.replace(/\s*·.*$/, ''), previous = element.dataset.hotkeyTitle;
-        element.dataset.hotkeyTitle = base;
-        element.removeAttribute('title');
+        bindingAttribute(element, 'data-hotkey-title', base);
+        if (element.hasAttribute('title')) element.removeAttribute('title');
         if (!element.hasAttribute('data-i18n-aria-label') && previous !== undefined && element.getAttribute('aria-label') === previous)
-          element.setAttribute('aria-label', base);
+          bindingAttribute(element, 'aria-label', base);
         continue;
       }
       if (element.getAttribute(attribute) !== text) element.setAttribute(attribute, text);
