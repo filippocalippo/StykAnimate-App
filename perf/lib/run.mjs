@@ -31,7 +31,7 @@ function within(ms, what, work) {
  * What a scenario is handed (perf/scenarios/README.md): the app, input, and the reads scenarios share. Everything a
  * scenario does to the app goes through here or through `app`.
  */
-function createContext(app, workload, facts) {
+export function createContext(app, workload, facts) {
   const context = {
     app, workload, facts, paths, sleep, input: createInput(app),
     request: (op, args, detail) => app.request(op, args, detail),

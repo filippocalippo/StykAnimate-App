@@ -9,6 +9,7 @@ import {processAttribution, profileAttribution, traceAttribution} from '../perf/
 import {change, compare} from '../perf/lib/compare.mjs';
 import {experimentLine, parseParameters, withParameters} from '../perf/lib/experiment.mjs';
 import {paths} from '../perf/lib/input.mjs';
+import {Inspector} from '../perf/lib/inspector.mjs';
 import {seekLatency, shownTicks} from '../perf/lib/latency.mjs';
 import {displayName, layerOf, LAYERS, rustModule} from '../perf/lib/layers.mjs';
 import {aggregate, captureMetrics, defaultJudge, format, grade, judge, LIMITS} from '../perf/lib/metrics.mjs';
@@ -234,4 +235,19 @@ test('a run\'s memory prints every checkpoint with the page split by owner, and 
   assert.match(text, /StykAnimate drawing pixels \(1\)\s+50\.0/);
   assert.match(text, /drawing: cel tiles \(768\)\s+12\.0/);
   assert.equal(memoryText(result, {workload: 'medium'}).includes('gpu / stress'), false, 'a pair not asked for is left out');
+});
+
+test('a request to an inspector target that goes away fails instead of waiting for good', async () => {
+  const {EventEmitter} = await import('node:events');
+  const socket = Object.assign(new EventEmitter(), {sent: [], send(text) { this.sent.push(JSON.parse(text)); }, close() {}});
+  const inspector = new Inspector(socket, {Browser: 'test'});
+  const deliver = message => socket.emit('message', JSON.stringify(message));
+  deliver({method: 'Target.attachedToTarget', params: {sessionId: 'worker-1', targetInfo: {type: 'worker', title: 'StykAnimate drawing pixels', url: 'x'}}, sessionId: 'page'});
+  const asked = inspector.send('Runtime.getHeapUsage', {}, 'worker-1'), other = inspector.send('Runtime.getHeapUsage', {}, 'page');
+  deliver({method: 'Target.detachedFromTarget', params: {sessionId: 'worker-1'}});
+  await assert.rejects(asked, /went away \(StykAnimate drawing pixels\)/);
+  // What was asked of another target still waits for its answer.
+  const id = socket.sent.find(message => message.sessionId === 'page' && message.method === 'Runtime.getHeapUsage').id;
+  deliver({id, result: {usedSize: 1}});
+  assert.deepEqual(await other, {usedSize: 1});
 });
