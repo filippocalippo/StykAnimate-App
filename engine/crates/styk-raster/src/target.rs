@@ -171,6 +171,28 @@ impl Target {
         }
     }
 
+    /// Whether an opaque write may go straight into the pixels (no per-paint clip or quad clip decides it).
+    pub fn writes_opaque_directly(&self) -> bool {
+        self.canvas_clip.is_none() && self.quad_clip.is_none()
+    }
+
+    /// Every sample of the pixels of `rect` (x0, y0, x1, y1, exclusive, inside the target) set to the opaque colour `px`:
+    /// what [`Target::set_opaque`] does to each.
+    pub fn fill_opaque(&mut self, rect: [i64; 4], px: Px) {
+        debug_assert!(self.writes_opaque_directly());
+        for y in rect[1].max(0) as usize..(rect[3].max(0) as usize).min(self.height) {
+            let row = y * self.width;
+            let (from, to) = (row + (rect[0].max(0) as usize).min(self.width), row + (rect[2].max(0) as usize).min(self.width));
+            self.pixels[from..to].fill(px);
+            for at in &mut self.index[from..to] {
+                if *at != 0 {
+                    self.free.push(*at - 1);
+                    *at = 0;
+                }
+            }
+        }
+    }
+
     /// Bytes this target holds.
     pub fn bytes(&self) -> usize {
         self.pixels.len() * 8 + self.split.len() * 16

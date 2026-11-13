@@ -75,3 +75,21 @@ fn adjacent_triangles_of_different_colours_leave_no_seam() {
     }
     assert!(mixed > 20, "the shared edge mixes the two colours ({mixed} pixels)");
 }
+
+#[test]
+fn an_upright_background_is_covered_as_its_two_triangles_are() {
+    // The artboard's background fills the pixels wholly inside it at once and leaves its edges to the quad's coverage:
+    // the same pixels as the rectangle drawn as two triangles by the samples alone, at fractional and whole-pixel edges.
+    use styk_draw::K_FILL_VIEW;
+    for artboard in [[3.3, 2.7, 61.6, 40.2], [4.0, 3.0, 60.0, 41.0], [0.0, 0.0, 64.0, 48.0], [-5.5, 10.125, 70.0, 20.0078125], [10.2, 10.2, 10.9, 30.0]] {
+        let a = artboard.map(|v| v as f32);
+        let background = Prim { kind: K_FILL_VIEW, group: 0, color: 0xff20_80c0, paint: NO_PAINT, a: [0.0; 4], b: [0.0; 4], c: [0.0; 4] };
+        let filled = DrawList { background_prims: 1, ..list(vec![background]) };
+        let view = ViewParams { artboard, ..view(64.0, 48.0) };
+        let fill = styk_raster::render(&filled, &Images::default(), &view, [64, 48], Edges::Smooth).pixels;
+        let corners = [[a[0], a[1]], [a[2], a[1]], [a[0], a[3]], [a[2], a[3]]];
+        let triangles = list(vec![tri([corners[0], corners[1], corners[2]], 0xff20_80c0), tri([corners[2], corners[1], corners[3]], 0xff20_80c0)]);
+        let drawn = styk_raster::render(&triangles, &Images::default(), &view, [64, 48], Edges::Smooth).pixels;
+        assert_eq!(fill, drawn, "the background over {artboard:?}");
+    }
+}

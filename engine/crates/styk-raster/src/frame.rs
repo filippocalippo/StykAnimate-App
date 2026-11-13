@@ -709,7 +709,19 @@ impl<'a> Frame<'a> {
         let solid = (texture.is_none() && p.paint == NO_PAINT).then(|| premul(base)).filter(|c| c[3] >= 1.0);
         let opaque = solid.map(|c| [quantize(c[0]), quantize(c[1]), quantize(c[2]), 255]);
         let full = target.full();
-        quad(corners, clip, positions(self.samples), |x, y, mask| {
+        // An upright opaque rectangle (the artboard's background): the pixels whose every sample is inside it are written
+        // at once, and only its edges go through the coverage of the quad below, which gives those inside the same colour.
+        let mut clips = [clip; 4];
+        let mut strips = 1;
+        if let (Some(px), Some(inner)) = (opaque, upright_interior(&corners, clip))
+            && target.writes_opaque_directly()
+        {
+            target.fill_opaque(inner, px);
+            // The rows above and below the interior, and the columns beside it.
+            clips = [[clip[0], clip[1], clip[2], inner[1]], [clip[0], inner[3], clip[2], clip[3]], [clip[0], inner[1], inner[0], inner[3]], [inner[2], inner[1], clip[2], inner[3]]];
+            strips = 4;
+        }
+        let mut paint = |x: i64, y: i64, mask: u8| {
             if let (Some(px), true) = (opaque, mask == full) {
                 target.set_opaque(y as usize * width + x as usize, px);
                 return;
@@ -727,8 +739,28 @@ impl<'a> Frame<'a> {
                 None => premul(self.base(p, w)),
             };
             target.blend(y as usize * width + x as usize, mask, src, false);
-        });
+        };
+        for strip in &clips[..strips] {
+            if strip[2] > strip[0] && strip[3] > strip[1] {
+                quad(corners, *strip, positions(self.samples), &mut paint);
+            }
+        }
     }
+}
+
+/// The pixels of `clip` wholly inside the upright rectangle `corners` (in `quad`'s corner order), every sample of them:
+/// a pixel from the rectangle's left edge on has its samples (an eighth of a pixel in at least) right of the edge, however
+/// the edge's vertex is snapped (to a 256th). None for a turned quad, or when no pixel is wholly inside.
+fn upright_interior(corners: &[[f32; 2]; 4], clip: [i64; 4]) -> Option<[i64; 4]> {
+    let [a, b, c, d] = *corners;
+    if !(a[1] == b[1] && c[1] == d[1] && a[0] == c[0] && b[0] == d[0]) || !corners.iter().flatten().all(|v| v.is_finite()) {
+        return None;
+    }
+    const MARGIN: f64 = 1.0 / 64.0;
+    let (x0, x1) = (a[0].min(b[0]) as f64, a[0].max(b[0]) as f64);
+    let (y0, y1) = (a[1].min(c[1]) as f64, a[1].max(c[1]) as f64);
+    let inner = [((x0 + MARGIN).ceil() as i64).max(clip[0]), ((y0 + MARGIN).ceil() as i64).max(clip[1]), ((x1 - MARGIN).floor() as i64).min(clip[2]), ((y1 - MARGIN).floor() as i64).min(clip[3])];
+    (inner[2] > inner[0] && inner[3] > inner[1]).then_some(inner)
 }
 
 /// The squared distance from `p` to the segment `a`–`b` (`sd_segment` without its square root).
