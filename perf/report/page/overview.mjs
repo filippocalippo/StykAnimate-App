@@ -1,8 +1,8 @@
 // The overview: the sections a person reads first, most important first. Each section is a function of the report's
 // data and the current view ({columns, rows, open}) that returns its panel, or null when the runs hold nothing for it,
 // so a new kind of result (the engine's own benchmarks, say) is one more function in SECTIONS.
-import {lineChart, bullet, legend, timeline} from './charts.mjs';
-import {capital, facts, h, mb, ms, number, panel, table, tableView, words} from './dom.mjs';
+import {bars, lineChart, bullet, legend, timeline} from './charts.mjs';
+import {capital, facts, h, mb, ms, number, panel, subhead, table, tableView, words} from './dom.mjs';
 import {chip, glyph, limitsText, metric, short, word} from './grades.mjs';
 
 /** "Graphics card · Stress scene": a column's name. */
@@ -155,8 +155,44 @@ function trust(model, view) {
     h('p', {class: 'chart-note'}, `Page made ${new Date(model.generated).toLocaleString('en-GB', {dateStyle: 'medium', timeStyle: 'short'})} from ${model.runs.map(run => run.label).join(', ')}.`));
 }
 
+/**
+ * 6. The engine by itself (perf/engine/): how large a scene one thread builds in a frame's time, what each engine
+ * operation costs per thousand segments, how costs grow with the scene, and the benchmarks on each workload.
+ */
+function engine(model) {
+  const run = model.engine;
+  if (!run) return null;
+  const whole = value => number(value, 0);
+  const reach = row => (row.segments ? `up to ${whole(row.segments.median)} segments (${whole(row.segments.min)} to ${whole(row.segments.max)} over the rounds)`
+    : row.bound === 'above' ? 'beyond the largest scene measured' : row.bound === 'below' ? 'not at the smallest scene measured' : 'not measured');
+  const costs = [...new Set(run.capacity.map(row => row.what))];
+  const rates = [...new Set(run.capacity.map(row => row.rate))];
+  const scaling = run.scaling, sloped = scaling?.rows.filter(row => Number.isFinite(row.perThousand)) ?? [];
+  return panel('engine', 'The engine alone',
+    `The engine by itself on one thread, with no window and no graphics card (run "${run.label}", ${run.rounds} rounds${run.busy ? '; the machine was busy with other work, so these are slower and noisier than they would be' : ''}). `
+      + 'What each part of the engine costs, how that grows with the scene, and how large a scene one thread builds in a frame\'s time. The app spreads playback, opening and saving over its worker threads.',
+    costs.length ? h('div', {class: 'block'}, subhead('How large a scene fits in a frame', 'one thread, figures of 50 segments'),
+      table([{label: 'What'}, ...rates.map(rate => ({label: `Within ${(1000 / rate).toFixed(1)} ms (${rate} frames a second)`}))],
+        costs.map(what => [capital(what), ...rates.map(rate => { const row = run.capacity.find(found => found.what === what && found.rate === rate); return row ? reach(row) : '–'; })]))) : null,
+    sloped.length ? h('div', {class: 'block'}, subhead('What a thousand segments cost', 'the slope of each cost against the size of the scene'),
+      bars(sloped.map(row => ({label: row.title, value: row.perThousand, text: `${number(row.perThousand, 2)} ms`, slot: 1})))) : null,
+    scaling ? h('div', {class: 'block'}, subhead('How each cost grows with the scene', 'median milliseconds at each size'),
+      lineChart({labels: scaling.sizes.map(whole), text: ms, height: 240, xTitle: 'segments a frame',
+        series: scaling.rows.map((row, index) => ({name: row.name, slot: index % 8 + 1, values: row.points}))}),
+      table([{label: 'Cost'}, ...scaling.sizes.map(size => ({label: whole(size), numeric: true})), {label: 'Per 1,000', numeric: true}, {label: 'Growth'}],
+        scaling.rows.map(row => [row.title, ...row.points.map(value => number(value, value < 10 ? 2 : 1)), Number.isFinite(row.perThousand) ? `${number(row.perThousand, 2)} ms` : '–',
+          row.verdict ? `${row.verdict}${row.exponent === null ? '' : ` (exponent ${number(row.exponent, 2)})`}` : '–']))) : null,
+    run.workloads.map(workload => h('div', {class: 'block'},
+      subhead(`${workload.title ?? workload.id}: ${whole(workload.segmentsPerFrame)} segments a frame`, `${whole(workload.figures)} figures, ${whole(workload.frames)} frames${Number.isFinite(workload.openMB) ? `; the engine holds ${mb(workload.openMB)} once it is open` : ''}`),
+      table([{label: 'Benchmark'}, {label: 'Part of the engine'}, {label: 'Median', numeric: true}, {label: 'Spread', numeric: true}, {label: 'Its parts'}, {label: 'Peak memory', numeric: true}],
+        workload.benchmarks.map(benchmark => (benchmark.error
+          ? [benchmark.title, benchmark.layer, 'failed', '', benchmark.error, '']
+          : [h('span', {title: benchmark.description}, benchmark.title), benchmark.layer, benchmark.cells[0]?.text ?? '–', benchmark.cells[0] ? `±${benchmark.cells[0].spread}` : '',
+            benchmark.cells.slice(1).map(cell => `${cell.key} ${cell.text}`).join(' · '), Number.isFinite(benchmark.peakMB) ? mb(benchmark.peakMB) : '–']))))));
+}
+
 /** The overview's sections, in the order of the page. */
-export const SECTIONS = [glance, needsWork, startup, memory, trust];
+export const SECTIONS = [glance, needsWork, startup, memory, engine, trust];
 
 /** Draws the overview into `root` for `view`. */
 export function renderOverview(root, model, view) {

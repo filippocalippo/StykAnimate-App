@@ -79,11 +79,12 @@ function notesSection(notes, source) {
 
 /**
  * The page for `runs` (results as perf/lib/result.mjs `read` returns them, in the order named) as HTML text.
- * `notes` is Markdown shown at the top; `notesName` says where it came from; `generated` dates the page.
+ * `notes` is Markdown shown at the top; `notesName` says where it came from; `generated` dates the page; `engine` is an
+ * engine run (perf/engine/) shown in a section of its own.
  */
-export async function buildReport(runs, {notes = null, notesName = null, generated} = {}) {
+export async function buildReport(runs, {notes = null, notesName = null, generated, engine = null} = {}) {
   if (!runs.length) throw new Error('A report needs at least one run.');
-  const model = reportModel(runs, {generated});
+  const model = reportModel(runs, {generated, engine});
   const title = `Performance · ${runs.map(run => run.label).join(' → ')}`;
   const parts = {
     title: escapeHtml(title),

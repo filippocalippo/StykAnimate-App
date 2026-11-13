@@ -15,7 +15,7 @@
  * Nothing here knows a scenario, an environment or a metric by name: the page renders whatever a result holds.
  */
 import {compare} from '../lib/compare.mjs';
-import {GRADES, judge, METRICS} from '../lib/metrics.mjs';
+import {format, GRADES, judge, METRICS} from '../lib/metrics.mjs';
 import {BUSY_PERCENT} from '../lib/result.mjs';
 import {whereLine} from '../lib/summary.mjs';
 
@@ -134,10 +134,34 @@ function limitsOf(pairs, columns) {
 }
 
 /**
+ * An engine run (perf/engine/, schema `styk-perf-engine/1`) as the page shows it: how large a scene one thread builds in
+ * a frame's time, how each cost grows with the scene, and per workload each benchmark with its headline numbers already
+ * written as text by the runner's own `format`. Null when the report has no engine run.
+ */
+export function engineModel(engine) {
+  if (!engine) return null;
+  const scaling = engine.scaling;
+  return {
+    label: engine.label, at: engine.at, rounds: engine.rounds, seconds: engine.seconds, commit: engine.build?.commit ?? null, engineBuild: engine.build?.engine?.sha256 ?? null,
+    busy: Math.max(engine.load?.beforePercent ?? 0, engine.load?.afterPercent ?? 0) > BUSY_PERCENT, load: engine.load ?? null,
+    capacity: (scaling?.capacity ?? []).map(row => ({what: row.what, rate: row.rate, limit: row.limit, bound: row.bound, segments: row.segments ? {median: row.segments.median, min: row.segments.min, max: row.segments.max} : null})),
+    scaling: scaling ? {sizes: scaling.sizes, rows: scaling.rows.map(row => ({name: `${row.benchmark} ${row.metric}`, title: row.title, unit: row.unit, points: row.points.map(point => point.median),
+      perThousand: row.growth?.slope ?? null, verdict: row.growth?.verdict ?? null, exponent: row.growth?.exponent ?? null}))} : null,
+    workloads: engine.workloads.filter(workload => !workload.scaling).map(workload => ({id: workload.id, title: workload.title, figures: workload.figures, segmentsPerFrame: workload.segmentsPerFrame, frames: workload.frames,
+      jsonMB: workload.jsonMB, openMB: workload.memory?.openMB ?? null,
+      benchmarks: workload.benchmarks.map(benchmark => ({id: benchmark.id, layer: benchmark.layer, title: benchmark.title, description: benchmark.description ?? '', error: benchmark.error ?? null,
+        cells: (benchmark.headline ?? []).filter(key => benchmark.metrics?.[key]).map(key => ({key, title: benchmark.definitions?.[key]?.title ?? key,
+          text: format(key, benchmark.metrics[key].median, benchmark.definitions), spread: format(key, benchmark.metrics[key].mad, benchmark.definitions)})),
+        peakMB: benchmark.metrics?.['memory.peak']?.median ?? null}))})),
+  };
+}
+
+/**
  * The page's data from `runs` (results as `read` returns them, in the order named: the first is the baseline of a pair
  * a later run measured again). A run's folder is left out: it is a path on this machine and the page is meant to be shared.
+ * `engine` is an engine run to show beside them (`--engine`).
  */
-export function reportModel(results, {generated = new Date().toISOString()} = {}) {
+export function reportModel(results, {generated = new Date().toISOString(), engine = null} = {}) {
   const runs = results.map(run => ({...run, pairs: run.pairs.map(pair => ({...pair, scenarios: pair.scenarios.map(readable)}))}));
   const pairs = runs.flatMap((run, index) => run.pairs.map(pair => ({run: index, ...pair, busy: (pair.facts?.backgroundLoadPercent ?? 0) > BUSY_PERCENT,
     scenarios: pair.scenarios.map(scenario => ({...scenario, status: statusOf(scenario), where: whereLine(scenario)}))})));
@@ -146,6 +170,6 @@ export function reportModel(results, {generated = new Date().toISOString()} = {}
     schema: REPORT_SCHEMA, generated,
     runs: runs.map(({pairs: list, folder: _folder, ...run}) => ({...run, pairCount: list.length})),
     pairs, columns, rows: rowsOf(pairs, columns), ranking: ranking(pairs, columns), limits: limitsOf(pairs, columns),
-    statuses: STATUSES, busyPercent: BUSY_PERCENT,
+    statuses: STATUSES, busyPercent: BUSY_PERCENT, engine: engineModel(engine),
   };
 }

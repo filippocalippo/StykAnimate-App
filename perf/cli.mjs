@@ -5,7 +5,7 @@
 //   npm run perf -- list                       scenarios, workloads, environments, suites and engine benchmarks
 //   npm run perf -- show [run] [scenario] [--env <id>] [--workload <id>]
 //   npm run perf -- compare <base run> [head run] [--all] [--fail-on-worse]
-//   npm run perf -- report [run …] [--notes <file.md>] [--out <file.html>]
+//   npm run perf -- report [run …] [--engine <engine run>] [--notes <file.md>] [--out <file.html>]
 //   npm run perf -- engine [--workload small,medium,large,stress] [--scale] [--benchmark open,frame] [--rounds 5] [--label <name>]
 //   npm run perf -- engine-compare <base engine run> [head engine run] [--all] [--fail-on-worse]
 //
@@ -17,8 +17,8 @@
 // `compare` says what changed between two runs beyond their own noise (the head defaults to the latest run).
 // `report` writes one HTML page of one or more runs (perf/report/): the grades of every scenario on every pair, what most
 // needs work, each scenario in full, memory and startup; several runs side by side, the first named the baseline of a
-// pair a later one measured again. --notes puts an analysis (Markdown) at its top. It defaults to report.html in the
-// last run's folder.
+// pair a later one measured again. --notes puts an analysis (Markdown) at its top; --engine adds an engine run's
+// capacity, scaling and benchmarks. It defaults to report.html in the last run's folder.
 // `engine` is the engine tier (perf/engine/README.md): the engine by itself in Node on one thread, no window, an answer in
 // seconds; it writes artifacts/perf/engine/<label>/. `engine-compare` is `compare` for two of those.
 // A run is `latest`, a label, or a folder. Exit codes: 0 done, 1 a scenario failed, a pair did not complete, or
@@ -142,9 +142,10 @@ async function report(argv) {
   if (options.notes) {
     try { notes = readFileSync(path.resolve(options.notes), 'utf8'); } catch (error) { throw new Usage(`--notes: ${error.code === 'ENOENT' ? `no file at ${path.resolve(options.notes)}` : error.message}`); }
   }
+  const engine = options.engine ? read(options.engine, {root: ENGINE_RUNS, schema: ENGINE_SCHEMA}) : null;
   const out = path.resolve(options.out ?? path.join(runs.at(-1).folder, 'report.html'));
   mkdirSync(path.dirname(out), {recursive: true});
-  writeFileSync(out, await buildReport(runs, {notes, notesName: options.notes ? path.basename(options.notes) : null}));
+  writeFileSync(out, await buildReport(runs, {notes, notesName: options.notes ? path.basename(options.notes) : null, engine}));
   console.log(`Written to ${out}`);
   return 0;
 }
