@@ -138,8 +138,10 @@ export function lineChart({labels, series, text, height = 200, xTitle = ''}) {
     const y = value => top + plotHeight - value / max * plotHeight;
     const svg = s('svg', {width, height, viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': `Line chart of ${series.map(line => line.name).join(', ')}`});
     svg.append(grid(ticks, y, left, left + plotWidth));
+    // A label gets the room between two points (about 6 px a character), or 18 characters when the labels are slanted.
+    const room = flat ? Math.max(6, Math.floor((labels.length > 1 ? plotWidth / (labels.length - 1) : plotWidth) / 6.4)) : 18;
     labels.forEach((label, index) => {
-      const shown = String(label).length > 18 ? `${String(label).slice(0, 17)}…` : String(label);
+      const shown = String(label).length > room ? `${String(label).slice(0, room - 1)}…` : String(label);
       svg.append(flat ? s('text', {class: 'x-label', x: x(index), y: top + plotHeight + 15, 'text-anchor': 'middle'}, shown)
         : s('text', {class: 'x-label', 'text-anchor': 'end', transform: `translate(${x(index) + 3} ${top + plotHeight + 10}) rotate(-38)`}, shown));
     });
@@ -182,7 +184,7 @@ export function dotPlot({rows, bands = null, text}) {
       const from = x(band.from ?? 0), to = x(Math.min(band.to ?? max, max));
       if (to - from < .5) continue;
       svg.append(s('rect', {class: `wash st-${band.status}`, x: from, y: top, width: to - from, height: rows.length * rowHeight}));
-      if (band.to !== null && band.to < max) svg.append(s('text', {class: 'band-label', x: to, y: top - 5, 'text-anchor': 'middle'}, tick(band.to)));
+      if (band.to !== null && band.to < max) svg.append(s('text', {class: 'band-label', x: to, y: top - 5, 'text-anchor': 'middle'}, text(band.to)));
     }
     ticks.forEach(value => svg.append(s('text', {class: 'x-label', x: x(value), y: height - 6, 'text-anchor': 'middle'}, tick(value))));
     svg.append(s('line', {class: 'baseline', x1: left, x2: left + plotWidth, y1: top + rows.length * rowHeight, y2: top + rows.length * rowHeight}));

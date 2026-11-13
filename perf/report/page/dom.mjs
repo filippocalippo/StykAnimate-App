@@ -49,7 +49,7 @@ export function table(columns, rows, {limit = Infinity, caption = null, classNam
   draw(limit);
   const more = rows.length > limit ? h('button', {class: 'more', type: 'button', onclick: event => { draw(rows.length); event.currentTarget.remove(); }}, `Show all ${rows.length} rows`) : null;
   return h('div', {class: `table-block ${className}`},
-    h('div', {class: 'table-wrap'}, h('table', {}, caption ? h('caption', {}, caption) : null,
+    h('div', {class: 'table-wrap'}, h('table', {style: `--columns:${columns.length}`}, caption ? h('caption', {}, caption) : null,
       h('thead', {}, h('tr', {}, columns.map(column => h('th', {class: column.numeric ? 'num' : null, scope: 'col'}, column.label)))), body)), more);
 }
 

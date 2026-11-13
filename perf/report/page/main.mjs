@@ -55,9 +55,14 @@ function close() {
   Object.assign(state, overviewFilters, {scenario: ''});
   writeAddress(true);
 }
-/** The scenarios before and after `id` in the overview's order (the filtered list, or all when it is filtered out). */
+/**
+ * The scenarios before and after `id` in the overview's order (its filtered list, or all when the filter hides `id`),
+ * among those the pair on show ran: stepping through scenarios stays on one pair.
+ */
 function neighbours(id) {
-  const rows = currentView().rows.some(row => row.id === id) ? currentView().rows : model.rows;
+  const column = model.columns[wantedColumn()], filtered = currentView().rows;
+  const ran = row => row.id === id || !column || model.pairs[column.pair].scenarios.some(scenario => scenario.id === row.id);
+  const rows = (filtered.some(row => row.id === id) ? filtered : model.rows).filter(ran);
   const index = rows.findIndex(row => row.id === id);
   return [rows[index - 1] ?? null, rows[index + 1] ?? null];
 }
@@ -134,7 +139,12 @@ function drawControls() {
   Object.assign(controls, {env, workload, query, needsWork});
   env.addEventListener('change', () => { state.env = env.value; writeAddress(false); });
   workload.addEventListener('change', () => { state.workload = workload.value; writeAddress(false); });
-  query.addEventListener('input', () => { state.query = query.value; if (state.scenario) close(); else show(); });
+  // The overview redraws once typing pauses: a page of fifty scenarios on ten pairs takes about 0.1 s to redraw.
+  let pause = 0;
+  query.addEventListener('input', () => {
+    clearTimeout(pause);
+    pause = setTimeout(() => { state.query = query.value; if (state.scenario) close(); else show(); }, 120);
+  });
   needsWork.addEventListener('change', () => { state.needsWork = needsWork.checked; if (!state.scenario) show(); });
   document.getElementById('controls').replaceChildren(
     h('label', {class: 'field search', for: 'filter-query'}, h('span', {}, 'Find'), query), envField, workloadField,
