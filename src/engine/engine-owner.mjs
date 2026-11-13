@@ -333,21 +333,30 @@ export function installEngineOwner(editor, {start = openingSession, verify = fal
     if (!editor._drag?.engine) {
       const source = base ?? baseFrame();
       editor._authoredPoseEdit = answer.draft ? {frame: {...source, objects: source.objects.slice()}, source, owned: new Set(), tick: editor.tick, engine: true} : null;
+      // The figures the gesture took, as the frame on show has them: the records themselves, which nothing writes in place (the session
+      // edits the document, D19), so they stay as the gesture found them without a copy of each (thousands of figures at a press).
       const taken = new Set(drag.before);
       editor._drag = {engine: true, serial: drag.serial, label: drag.label, scope: drag.translation ? 'translation' : 'selection', authored: Boolean(answer.draft), index: editor.frameIndex,
-        before: source.objects.filter(object => taken.has(object.unique_id)).map(object => structuredClone(object)), beforeSelection: editor._selectionState(), changed: false};
+        before: source.objects.filter(object => taken.has(object.unique_id)), beforeSelection: editor._selectionState(), changed: false};
     }
     editor._drag.label = drag.label; editor._drag.scope = drag.translation ? 'translation' : 'selection';
     const edit = editor._authoredPoseEdit;
     if (edit && answer.draftFields) edit.frame = {...edit.frame, ...answer.draftFields};
     if (edit && answer.draft?.length) {
       const objects = edit.frame.objects;
+      // Where each figure of the draft is, found once for the whole answer (the first figure with an identity, as a scan finds it): an answer
+      // can send thousands of figures, and a scan of the draft for each was quadratic. A figure added shifts the slots after it.
+      let slots = null;
+      const slotOf = uid => {
+        if (!slots) { slots = new Map(); objects.forEach((object, slot) => { if (!slots.has(object.unique_id)) slots.set(object.unique_id, slot); }); }
+        return Number.isNaN(uid) ? -1 : slots.get(uid) ?? -1;
+      };
       for (const figure of answer.draft) {
-        const slot = objects.findIndex(object => object.unique_id === figure.unique_id);
+        const slot = slotOf(figure.unique_id);
         // A figure the gesture added (drawing a new figure while posing) joins the draft.
         if (slot < 0) {
           const at = Number.isInteger(figure.object_slot) && figure.object_slot <= objects.length ? figure.object_slot : objects.length;
-          objects.splice(at, 0, figure); edit.owned.add(at);
+          objects.splice(at, 0, figure); edit.owned.add(at); slots = null;
           continue;
         }
         if (objects[slot]._movieclipSample !== undefined) figure._movieclipSample = objects[slot]._movieclipSample;
