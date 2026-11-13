@@ -100,7 +100,7 @@ fn depth_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthStencilAtt
 /// of the flat and vector fragment shaders and the list's runs of prims each draws (`crate::shading`).
 struct Shaders {
     full: wgpu::RenderPipeline,
-    runs: Option<([wgpu::RenderPipeline; 2], Arc<[(u32, u32, Shading)]>)>,
+    runs: Option<([Option<wgpu::RenderPipeline>; 4], Arc<[(u32, u32, Shading)]>)>,
 }
 
 impl Shaders {
@@ -116,11 +116,8 @@ impl Shaders {
             if start >= range.end {
                 break;
             }
-            pass.set_pipeline(match shading {
-                Shading::Flat => &simpler[0],
-                Shading::Vector => &simpler[1],
-                Shading::Full => &self.full,
-            });
+            // Every simpler shader a run names has its pipeline (`Renderer::shading_pipelines`).
+            pass.set_pipeline(shading.simpler().and_then(|i| simpler[i].as_ref()).unwrap_or(&self.full));
             pass.draw(0..6, start.max(range.start)..end.min(range.end));
         }
     }

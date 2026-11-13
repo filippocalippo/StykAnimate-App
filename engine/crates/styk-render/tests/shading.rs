@@ -1,6 +1,6 @@
 //! Runs of primitives draw with the simplest fragment shader that holds their kinds (`src/shading.rs`): the frame is the
 //! same, byte for byte, as when every primitive draws with the general shader, for every kind, background (opaque,
-//! translucent, a gradient), view (fitted, the canvas smaller than the view, partly off screen, through the camera,
+//! translucent, a gradient), drawing tiles, isolated groups, view (fitted, the canvas smaller than the view, partly off screen, through the camera,
 //! turned and mirrored), paint context and edge mode. Compared on every adapter that draws one frame the same way twice
 //! (Direct3D 12 multisampling on some drivers does not: docs/native/frame-parity.md); at least one must.
 
@@ -145,6 +145,7 @@ fn every_run_draws_what_the_general_shader_draws() {
             ("engine/crates/styk-eval/tests/fixtures/vfx/pose-native.json", 6.0),
             ("engine/crates/styk-eval/tests/fixtures/spatial/mesh-instances.json", 1.0),
             ("engine/crates/styk-eval/tests/fixtures/generators/smoke.json", 12.0),
+            ("engine/crates/styk-eval/tests/fixtures/drawlist/drawing-cel.json", 0.0),
         ] {
             let (list, world, camera, doc) = document(file, tick);
             lists.push((file.rsplit('/').next().unwrap().to_string(), Arc::new(list), world, Some((doc, camera))));
@@ -156,6 +157,7 @@ fn every_run_draws_what_the_general_shader_draws() {
     assert!(lists.iter().any(|(_, list, _, _)| list.prims.iter().any(|p| p.paint != NO_PAINT)), "a gradient");
     assert!(lists.iter().any(|(_, list, _, _)| list.prims.iter().any(|p| p.kind & 255 == K_COMPOSITE)), "an isolated group");
     assert!(lists.iter().any(|(_, list, _, _)| list.prims.iter().any(|p| p.kind & F_DEPTH != 0)), "a depth run");
+    assert!(lists.iter().any(|(_, list, _, _)| list.prims.iter().any(|p| p.kind & 255 == K_IMAGE && p.kind & F_DRAWING != 0)), "a drawing tile");
 
     // Where the runs are used (a software rasterizer: WARP, llvmpipe, lavapipe, SwiftShader), and a graphics card's Vulkan
     // compiler beside them. Direct3D 12's compiler on a graphics card moved one pixel of the Canvas painter by a level

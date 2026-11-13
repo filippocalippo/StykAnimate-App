@@ -23,13 +23,13 @@ tiles, glyphs, gradients, composites and generated effects. Measured in the app,
 
 ## Decision
 
-- The shader keeps one source and gets three fragment entry points over the same functions: `fs_flat` (triangles and the
+- The shader keeps one source and gets five fragment entry points over the same functions: `fs_flat` (triangles and the
   view's fill in their own colour), `fs_vector` (those and the shapes covered by distance: segments, boxes, arcs,
-  polylines, discs, rings) and `fs_main` (everything, as before). Each holds the code of fewer kinds, so a software
-  rasterizer runs only that code.
+  polylines, discs, rings), `fs_image` (pictures and drawing tiles), `fs_composite` (isolated groups' layers) and
+  `fs_main` (everything, as before). Each holds the code of fewer kinds, so a software rasterizer runs only that code.
 - On a software rasterizer a pass draws each run of primitives with the simplest entry point that holds every kind in
-  it (`styk-render/src/shading.rs`): a paint record (a gradient), a face of a depth run, an additive record or any kind
-  that samples a texture takes `fs_main`. The root's background is a run of its own (it was its own draw call already).
+  it (`styk-render/src/shading.rs`): a paint record (a gradient), a face of a depth run, an additive record, a lone glyph,
+  the background picture, a generated effect, or a run mixing the kinds of two simpler ones takes `fs_main`. The root's background is a run of its own (it was its own draw call already).
   A list whose kinds alternate is merged into at most 64 other runs, the shortest drawn with the shader their
   neighbours need, so the draw calls stay bounded.
 - Only where the device is a software rasterizer: `wgpu::DeviceType::Cpu`, which wgpu reports for SwiftShader and
@@ -40,8 +40,8 @@ tiles, glyphs, gradients, composites and generated effects. Measured in the app,
 
 ## Evidence
 
-- Pixels: `styk-render/tests/shading.rs` draws every vector kind over opaque, translucent and no backgrounds, and five
-  repository documents (gradients, outlined text, isolated groups with effects, 3D faces, generated effects), each in
+- Pixels: `styk-render/tests/shading.rs` draws every vector kind over opaque, translucent and no backgrounds, and six
+  repository documents (gradients, outlined text, isolated groups with effects, 3D faces, generated effects, a drawing cel), each in
   six views (fitted, the canvas smaller than the view, partly off screen, through the camera, turned and mirrored, the
   Canvas painter of the camera monitor), smooth and crisp, with the runs on and off: byte for byte the same on Vulkan
   (RTX 4070 SUPER) and on WARP. On Direct3D 12 with FXC on the graphics card one pixel of the Canvas painter moved by one
@@ -54,8 +54,8 @@ tiles, glyphs, gradients, composites and generated effects. Measured in the app,
 ## Consequences
 
 - A frame on a software device costs several draw calls instead of one a pass (the background, then usually one or two
-  runs), and two more pipelines are built with the first frame that needs them.
-- Pictures, drawing tiles, composites (translucent figures, onion skins), glyphs and gradients still draw with the general
-  shader on a software device: the next step if their per-pixel cost matters there is another entry point beside these.
+  runs), and up to four more pipelines are built, each with the first frame that needs it.
+- Glyphs, gradients, the background picture and generated effects still draw with the general shader on a software
+  device: the next step if their per-pixel cost matters there is another entry point beside these.
 - The live parameter `stage.shadingRuns` (developer tools) turns the runs on (1) or off (0) over the device's choice, so
   the two can be measured and compared in the app.

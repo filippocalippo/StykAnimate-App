@@ -188,10 +188,10 @@ pub struct Renderer {
     /// Ranges of the current list's prims that are depth-tested faces; empty when it has none.
     pub(crate) depth_faces: Vec<(u32, u32)>,
     /// Of the current list: the runs of prims and the fragment shader each draws with ([`shading`]), and the pipelines of the
-    /// simpler shaders (flat, vector), created with the first frame that draws with them. Off ([`Renderer::set_shading_runs`]:
+    /// simpler shaders (`shading::Shading::SIMPLER`), each created with the first frame that draws with it. Off ([`Renderer::set_shading_runs`]:
     /// the default but on a software rasterizer), every prim draws with the general one.
     pub(crate) shading_runs: Arc<[(u32, u32, shading::Shading)]>,
-    pub(crate) shading_pipelines: Option<[wgpu::RenderPipeline; 2]>,
+    pub(crate) shading_pipelines: [Option<wgpu::RenderPipeline>; 4],
     pub(crate) shading_on: bool,
     pub(crate) prim_shader: wgpu::ShaderModule,
     pub(crate) prim_layout: wgpu::PipelineLayout,

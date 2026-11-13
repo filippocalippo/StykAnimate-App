@@ -928,55 +928,7 @@ fn shade_sampled(in: VsOut, p: Prim, kind: u32, base: vec4<f32>) -> vec4<f32> {
         return vec4<f32>(base.rgb * alpha, alpha);
     }
     if (kind == K_IMAGE) {
-        let rect = p.c;
-        let size = vec2<f32>(textureDimensions(sprites).xy);
-        let texel = 1.0 / size;
-        let raw = mix(rect.xy, rect.zw, in.uv);
-        var tex: vec4<f32>;
-        if ((p.kind & F_DRAWING) != 0u && crisp()) {
-            // Crisp edges: the nearest texel of the tile, unfiltered.
-            let nearest = vec2<i32>(round(rect.xy * size)) + vec2<i32>(clamp(floor(in.uv * 64.0), vec2<f32>(0.0), vec2<f32>(63.0)));
-            tex = premul(textureLoad(sprites, nearest, sprite_layer(p.b.z), 0));
-        } else if ((p.kind & F_DRAWING) != 0u) {
-            // Premultiply each straight-alpha texel before filtering. Canvas enlargement
-            // uses Mitchell; other sampling is bilinear, optionally blended with a parent.
-            let t = in.uv * 64.0 - vec2<f32>(0.5);
-            let cell = floor(t);
-            let f = t - cell;
-            let start = vec2<i32>(round(rect.xy * size));
-            let origin = start + vec2<i32>(cell);
-            let layer = sprite_layer(p.b.z);
-            if (in.sampling < 0.0) {
-                tex = tile_mitchell(start, layer, t);
-            } else {
-                tex = tile_bilinear(origin, layer, f);
-            }
-            if (in.sampling > 0.0) {
-                // The parent tile: this tile is the quarter `q` of it, at half its texel density.
-                let parent = paint_row(p.paint);
-                let q = u32(parent.w);
-                let tp = in.uv * 32.0 + vec2<f32>(f32(q & 1u), f32(q >> 1u)) * 32.0 - vec2<f32>(0.5);
-                let cp = floor(tp);
-                let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), sprite_layer(parent.x), tp - cp);
-                tex = mix(tex, up, in.sampling);
-            }
-        } else {
-            // A picture of the document: from the sprite texture, or its soft copy while that is not in.
-            let layer = picture_layer(p.b.z, rect.xy);
-            if (layer < 0) {
-                tex = soft_sample(p.b.z, rect, raw);
-            } else if ((p.kind & F_SMOOTH) != 0u && !crisp()) {
-                tex = textureSampleLevel(sprites, linear_sampler, raw, layer, 0.0);
-            } else {
-                let q = clamp(raw, rect.xy + texel * 0.5, rect.zw - texel * 0.5);
-                tex = textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), layer, 0.0);
-            }
-        }
-        if ((p.kind & F_TINT) != 0u) {
-            // An onion skin's sprite: its coverage in the tint colour.
-            return vec4<f32>(base.rgb * tex.a, tex.a) * base.a;
-        }
-        return tex * base.a;
+        return shade_image(in, p, base);
     }
     if (kind == K_BG_IMAGE) {
         let rect = p.c;
@@ -991,16 +943,74 @@ fn shade_sampled(in: VsOut, p: Prim, kind: u32, base: vec4<f32>) -> vec4<f32> {
         return textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), layer, 0.0) * base.a;
     }
     if (kind == K_COMPOSITE) {
-        // Bilinear, clamped to the child's own rectangle as an exact texture's edge would be
-        // (crisp edges: the nearest texel; a layer on the screen's grid is copied either way).
-        let child = group_at(bitcast<u32>(p.b.x));
-        let size = vec2<f32>(textureDimensions(layers).xy);
-        var uv = clamp(in.uv, child.clip.xy + vec2<f32>(0.5), child.clip.zw - vec2<f32>(0.5));
-        if (crisp()) { uv = floor(uv) + vec2<f32>(0.5); }
-        let tex = textureSampleLevel(layers, linear_sampler, uv / size, i32(child.page), 0.0);
-        return tex * base.a;
+        return shade_composite(in, p, base);
     }
     return vec4<f32>(0.0);
+}
+
+// A picture of the document or a drawing tile (K_IMAGE), in `base`'s opacity (an onion skin's sprite: its tint).
+fn shade_image(in: VsOut, p: Prim, base: vec4<f32>) -> vec4<f32> {
+    let rect = p.c;
+    let size = vec2<f32>(textureDimensions(sprites).xy);
+    let texel = 1.0 / size;
+    let raw = mix(rect.xy, rect.zw, in.uv);
+    var tex: vec4<f32>;
+    if ((p.kind & F_DRAWING) != 0u && crisp()) {
+        // Crisp edges: the nearest texel of the tile, unfiltered.
+        let nearest = vec2<i32>(round(rect.xy * size)) + vec2<i32>(clamp(floor(in.uv * 64.0), vec2<f32>(0.0), vec2<f32>(63.0)));
+        tex = premul(textureLoad(sprites, nearest, sprite_layer(p.b.z), 0));
+    } else if ((p.kind & F_DRAWING) != 0u) {
+        // Premultiply each straight-alpha texel before filtering. Canvas enlargement
+        // uses Mitchell; other sampling is bilinear, optionally blended with a parent.
+        let t = in.uv * 64.0 - vec2<f32>(0.5);
+        let cell = floor(t);
+        let f = t - cell;
+        let start = vec2<i32>(round(rect.xy * size));
+        let origin = start + vec2<i32>(cell);
+        let layer = sprite_layer(p.b.z);
+        if (in.sampling < 0.0) {
+            tex = tile_mitchell(start, layer, t);
+        } else {
+            tex = tile_bilinear(origin, layer, f);
+        }
+        if (in.sampling > 0.0) {
+            // The parent tile: this tile is the quarter `q` of it, at half its texel density.
+            let parent = paint_row(p.paint);
+            let q = u32(parent.w);
+            let tp = in.uv * 32.0 + vec2<f32>(f32(q & 1u), f32(q >> 1u)) * 32.0 - vec2<f32>(0.5);
+            let cp = floor(tp);
+            let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), sprite_layer(parent.x), tp - cp);
+            tex = mix(tex, up, in.sampling);
+        }
+    } else {
+        // A picture of the document: from the sprite texture, or its soft copy while that is not in.
+        let layer = picture_layer(p.b.z, rect.xy);
+        if (layer < 0) {
+            tex = soft_sample(p.b.z, rect, raw);
+        } else if ((p.kind & F_SMOOTH) != 0u && !crisp()) {
+            tex = textureSampleLevel(sprites, linear_sampler, raw, layer, 0.0);
+        } else {
+            let q = clamp(raw, rect.xy + texel * 0.5, rect.zw - texel * 0.5);
+            tex = textureSampleLevel(sprites, linear_sampler, texel_centre(q, size), layer, 0.0);
+        }
+    }
+    if ((p.kind & F_TINT) != 0u) {
+        // An onion skin's sprite: its coverage in the tint colour.
+        return vec4<f32>(base.rgb * tex.a, tex.a) * base.a;
+    }
+    return tex * base.a;
+}
+
+// An isolated group's layer composited into its parent (K_COMPOSITE), in `base`'s opacity.
+fn shade_composite(in: VsOut, p: Prim, base: vec4<f32>) -> vec4<f32> {
+    // Bilinear, clamped to the child's own rectangle as an exact texture's edge would be
+    // (crisp edges: the nearest texel; a layer on the screen's grid is copied either way).
+    let child = group_at(bitcast<u32>(p.b.x));
+    let size = vec2<f32>(textureDimensions(layers).xy);
+    var uv = clamp(in.uv, child.clip.xy + vec2<f32>(0.5), child.clip.zw - vec2<f32>(0.5));
+    if (crisp()) { uv = floor(uv) + vec2<f32>(0.5); }
+    let tex = textureSampleLevel(layers, linear_sampler, uv / size, i32(child.page), 0.0);
+    return tex * base.a;
 }
 
 // The explicit Canvas policy is applied only at the root owning paint or
@@ -1069,11 +1079,12 @@ fn canvas_masked(src: vec4<f32>, alpha: f32) -> vec4<f32> {
     return floor(paint * (alpha + 1.0) / 256.0) / 255.0;
 }
 
-// Three entry points shade the same records with the same functions. A fragment runs the code of every kind its
+// Five entry points shade the same records with the same functions. A fragment runs the code of every kind its
 // shader holds where a software rasterizer (SwiftShader, without a graphics card) executes both sides of a branch, so
-// a run of records that are all of the simpler kinds draws with a shader holding only theirs (`Shading` in
-// frame.rs): `fs_flat` for flat colour (triangles, the view's fill), `fs_vector` for those and the shapes covered by
-// distance, `fs_main` for everything. Their pixels are the same (tests/shading.rs).
+// a run of records that are all of the simpler kinds draws with a shader holding only theirs (`shading.rs`): `fs_flat`
+// for flat colour (triangles, the view's fill), `fs_vector` for those and the shapes covered by distance, `fs_image` for
+// pictures and drawing tiles, `fs_composite` for isolated groups' layers, `fs_main` for everything. Their pixels are
+// the same (tests/shading.rs).
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
@@ -1100,6 +1111,28 @@ fn fs_vector(in: VsOut) -> @location(0) vec4<f32> {
     let src = shade_vector(p, kind, in.world, in.aa, unpack(p.color));
     if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
     return canvas_masked(src, canvas_alpha(in.pos.xy, kind));
+}
+
+// Pictures and drawing tiles (K_IMAGE without a paint record: a drawing tile's `paint` names its parent tile).
+@fragment
+fn fs_image(in: VsOut) -> @location(0) vec4<f32> {
+    discard_outside_orient_artboard(in);
+    discard_outside_clip(in);
+    let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
+    let src = shade_image(in, p, unpack(p.color));
+    if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
+    return canvas_masked(src, canvas_alpha(in.pos.xy, K_IMAGE));
+}
+
+// Isolated groups' layers composited into their parents (K_COMPOSITE without a paint record).
+@fragment
+fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
+    discard_outside_orient_artboard(in);
+    discard_outside_clip(in);
+    let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
+    let src = shade_composite(in, p, unpack(p.color));
+    if (view.inv_t.z < 0.5 || in.head.y != 0u) { return src; }
+    return canvas_masked(src, canvas_alpha(in.pos.xy, K_COMPOSITE));
 }
 
 // Triangles and the view's fill in their own colour (no paint record).

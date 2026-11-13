@@ -3,43 +3,78 @@
 //! `prim.wgsl` shades every kind in one function. A software rasterizer (SwiftShader, which Chromium draws WebGL2 with
 //! where there is no usable graphics card) runs a fragment through both sides of every branch, so each pixel of a solid
 //! rectangle paid for pictures, glyphs, gradients and generated effects: the document's background alone cost 61 ms of a
-//! 78 ms frame. So the shader has three entry points over the same functions (`fs_flat`, `fs_vector`, `fs_main`), each
-//! holding the code of fewer kinds, and a pass draws each run of primitives with the simplest one that holds all of the
-//! run's kinds. The pixels are the same whichever draws them (`tests/shading.rs`).
+//! 78 ms frame. So the shader has five entry points over the same functions (`fs_flat`, `fs_vector`, `fs_image`,
+//! `fs_composite`, `fs_main`), each holding the code of fewer kinds, and a pass draws each run of primitives with the
+//! simplest one that holds all of the run's kinds. The pixels are the same whichever draws them (`tests/shading.rs`).
 
 use styk_draw::*;
 
-/// A fragment entry point of `prim.wgsl`; each holds the kinds of the ones before it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// A fragment entry point of `prim.wgsl`, by the kinds it holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Shading {
     /// `fs_flat`: triangles and the view's fill in their own colour.
     Flat,
     /// `fs_vector`: those and the shapes covered by their distance (segments, boxes, arcs, polylines, discs, rings).
     Vector,
+    /// `fs_image`: pictures and drawing tiles.
+    Image,
+    /// `fs_composite`: isolated groups' layers composited into their parents.
+    Composite,
     /// `fs_main`: every kind.
     Full,
 }
 
 impl Shading {
+    /// The simpler entry points, in the order a renderer keeps their pipelines.
+    pub(crate) const SIMPLER: [Shading; 4] = [Shading::Flat, Shading::Vector, Shading::Image, Shading::Composite];
+
     /// The entry point's name in `prim.wgsl`.
     pub(crate) fn entry(self) -> &'static str {
         match self {
             Shading::Flat => "fs_flat",
             Shading::Vector => "fs_vector",
+            Shading::Image => "fs_image",
+            Shading::Composite => "fs_composite",
             Shading::Full => "fs_main",
+        }
+    }
+
+    /// Where its pipeline is in [`Shading::SIMPLER`]; `None` for the general one.
+    pub(crate) fn simpler(self) -> Option<usize> {
+        Shading::SIMPLER.iter().position(|&s| s == self)
+    }
+
+    /// Whether this entry point holds every kind `other` holds.
+    pub(crate) fn holds(self, other: Shading) -> bool {
+        self == other || self == Shading::Full || (self == Shading::Vector && other == Shading::Flat)
+    }
+
+    /// The simplest entry point that holds the kinds of both.
+    pub(crate) fn join(self, other: Shading) -> Shading {
+        if self.holds(other) {
+            self
+        } else if other.holds(self) {
+            other
+        } else {
+            Shading::Full
         }
     }
 }
 
 /// The simplest shader that draws `p` as `fs_main` does. A paint record (a gradient), a face of a depth run and a
-/// record that adds light need the general one; so does every kind that samples a texture.
+/// record that adds light need the general one; so do lone glyphs, the background picture and generated effects. A
+/// drawing tile's `paint` names its parent tile, not a paint record.
 pub(crate) fn shading(p: &Prim) -> Shading {
-    if p.paint != NO_PAINT || p.kind & (F_DEPTH | F_ADD) != 0 {
+    let kind = p.kind & 255;
+    let painted = p.paint != NO_PAINT && !(kind == K_IMAGE && p.kind & F_DRAWING != 0);
+    if painted || p.kind & (F_DEPTH | F_ADD) != 0 {
         return Shading::Full;
     }
-    match p.kind & 255 {
+    match kind {
         K_TRI | K_FILL_VIEW => Shading::Flat,
         K_CAPSULE | K_BOX | K_ARC | K_POLYLINE | K_DISC | K_RING => Shading::Vector,
+        K_IMAGE => Shading::Image,
+        K_COMPOSITE => Shading::Composite,
         _ => Shading::Full,
     }
 }
@@ -75,7 +110,7 @@ pub(crate) fn runs(prims: &[Prim], background: std::ops::Range<u32>) -> Vec<(u32
                         }
                         let before = i.checked_sub(1).map(|j| runs[j].2);
                         let after = runs.get(i + 1).map(|run| run.2);
-                        shader.max(before.unwrap_or(shader)).max(after.unwrap_or(shader))
+                        shader.join(before.unwrap_or(shader)).join(after.unwrap_or(shader))
                     })
                     .collect();
                 let mut joined: Vec<(u32, u32, Shading)> = Vec::with_capacity(runs.len());
@@ -114,17 +149,39 @@ mod tests {
         for kind in [K_CAPSULE, K_BOX, K_ARC, K_POLYLINE | F_CLOSED, K_DISC, K_RING | F_RING_FILL] {
             assert_eq!(shading(&prim(kind)), Shading::Vector, "kind {kind}");
         }
-        for kind in [K_IMAGE, K_IMAGE | F_DRAWING, K_GLYPH, K_COMPOSITE, K_BG_IMAGE, K_PARTICLE, K_BEAM, K_DEPTH_RESET, K_TRI | F_DEPTH, K_PARTICLE | F_ADD] {
+        for kind in [K_IMAGE, K_IMAGE | F_DRAWING, K_IMAGE | F_TINT | F_SMOOTH] {
+            assert_eq!(shading(&prim(kind)), Shading::Image, "kind {kind}");
+        }
+        assert_eq!(shading(&prim(K_COMPOSITE)), Shading::Composite);
+        for kind in [K_GLYPH, K_BG_IMAGE, K_PARTICLE, K_BEAM, K_DEPTH_RESET, K_TRI | F_DEPTH, K_PARTICLE | F_ADD] {
             assert_eq!(shading(&prim(kind)), Shading::Full, "kind {kind}");
         }
         let painted = Prim { paint: 0, ..prim(K_FILL_VIEW) };
         assert_eq!(shading(&painted), Shading::Full, "a gradient needs the general shader");
+        assert_eq!(shading(&Prim { paint: 0, ..prim(K_IMAGE) }), Shading::Full, "and so does a painted picture");
+        assert_eq!(shading(&Prim { paint: 7, ..prim(K_IMAGE | F_DRAWING) }), Shading::Image, "a drawing tile's paint is its parent tile");
+    }
+
+    #[test]
+    fn a_join_holds_both() {
+        use Shading::*;
+        let all = [Flat, Vector, Image, Composite, Full];
+        for a in all {
+            for b in all {
+                let j = a.join(b);
+                assert!(j.holds(a) && j.holds(b), "{a:?} {b:?} -> {j:?}");
+                assert_eq!(j, b.join(a));
+            }
+        }
+        assert_eq!(Flat.join(Vector), Vector);
+        assert_eq!(Vector.join(Image), Full);
+        assert_eq!(Image.join(Composite), Full);
     }
 
     #[test]
     fn runs_cover_the_list_in_order_and_keep_the_background_apart() {
-        let prims = [prim(K_FILL_VIEW), prim(K_CAPSULE), prim(K_DISC), prim(K_TRI), prim(K_IMAGE), prim(K_CAPSULE)];
-        assert_eq!(runs(&prims, 0..1), vec![(0, 1, Shading::Flat), (1, 3, Shading::Vector), (3, 4, Shading::Flat), (4, 5, Shading::Full), (5, 6, Shading::Vector)]);
+        let prims = [prim(K_FILL_VIEW), prim(K_CAPSULE), prim(K_DISC), prim(K_TRI), prim(K_IMAGE), prim(K_GLYPH), prim(K_CAPSULE)];
+        assert_eq!(runs(&prims, 0..1), vec![(0, 1, Shading::Flat), (1, 3, Shading::Vector), (3, 4, Shading::Flat), (4, 5, Shading::Image), (5, 6, Shading::Full), (6, 7, Shading::Vector)]);
         // A background whose kind is the scene's is still its own run.
         let prims = [prim(K_CAPSULE), prim(K_CAPSULE)];
         assert_eq!(runs(&prims, 0..1), vec![(0, 1, Shading::Vector), (1, 2, Shading::Vector)]);
@@ -137,7 +194,7 @@ mod tests {
         // A picture after every three segments: hundreds of runs become a few, each drawn with a shader that holds its kinds.
         let mut prims = vec![prim(K_FILL_VIEW)];
         for i in 0..2000 {
-            prims.push(prim(if i % 4 == 3 { K_IMAGE } else { K_CAPSULE }));
+            prims.push(prim(match i % 8 { 3 => K_IMAGE, 7 => K_COMPOSITE, _ => K_CAPSULE }));
         }
         prims.extend((0..500).map(|_| prim(K_CAPSULE)));
         let runs = runs(&prims, 0..1);
@@ -148,7 +205,7 @@ mod tests {
         for &(start, end, shader) in &runs {
             assert_eq!(start, at, "runs are contiguous");
             assert!(end > start);
-            assert!(prims[start as usize..end as usize].iter().all(|p| shading(p) <= shader), "a run's shader holds every kind in it");
+            assert!(prims[start as usize..end as usize].iter().all(|p| shader.holds(shading(p))), "a run's shader holds every kind in it");
             at = end;
         }
         assert_eq!(at, prims.len() as u32);

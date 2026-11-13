@@ -35,7 +35,7 @@ impl Renderer {
         self.samples = samples;
         self.pipeline = prim_pipeline(&self.device, &self.prim_layout, &self.prim_shader, None, false, self.samples);
         self.pipeline_add = None;
-        self.shading_pipelines = None;
+        self.shading_pipelines = Default::default();
         self.depth_pipelines = None;
         self.msaa_main = None;
         self.msaa_layer = None;
@@ -172,7 +172,7 @@ impl Renderer {
             depth_layer: None,
             depth_faces: Vec::new(),
             shading_runs: std::sync::Arc::from(Vec::new()),
-            shading_pipelines: None,
+            shading_pipelines: Default::default(),
             // Only a software rasterizer runs every branch of a fragment shader: on a graphics card the general shader is as
             // fast and one shader keeps the frame the same whatever compiler builds it (Direct3D 12's moved a pixel by a level).
             shading_on: device.adapter_info().device_type == wgpu::DeviceType::Cpu,
@@ -300,11 +300,22 @@ impl Renderer {
         })
     }
 
-    /// The pipelines of the flat and vector fragment shaders ([`crate::shading`]), created with the first frame that draws
-    /// with them.
-    pub(crate) fn shading_pipelines(&mut self) -> [wgpu::RenderPipeline; 2] {
+    /// The pipelines of the simpler fragment shaders the current list's runs draw with ([`crate::shading`]), each created
+    /// with the first frame that draws with it; `None` for those the list does not use.
+    pub(crate) fn shading_pipelines(&mut self) -> [Option<wgpu::RenderPipeline>; 4] {
         let (device, layout, shader, samples) = (&self.device, &self.prim_layout, &self.prim_shader, self.samples);
-        self.shading_pipelines.get_or_insert_with(|| [Shading::Flat, Shading::Vector].map(|s| shaded_pipeline(device, layout, shader, None, false, samples, s))).clone()
+        let mut used = [false; 4];
+        for &(_, _, shading) in self.shading_runs.iter() {
+            if let Some(i) = shading.simpler() {
+                used[i] = true;
+            }
+        }
+        std::array::from_fn(|i| {
+            if !used[i] {
+                return None;
+            }
+            Some(self.shading_pipelines[i].get_or_insert_with(|| shaded_pipeline(device, layout, shader, None, false, samples, Shading::SIMPLER[i])).clone())
+        })
     }
 
     /// The additive pipeline, created with the first list that adds light.
