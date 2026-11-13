@@ -27,6 +27,15 @@ function strip(shift, length, across, vertical, dpr) {
   const rect = vertical ? {px: 0, py: start, pw: across, ph: span} : {px: start, py: 0, pw: span, ph: across};
   return Object.assign(rect, {x: rect.px / dpr, y: rect.py / dpr, width: rect.pw / dpr, height: rect.ph / dpr});
 }
+/** The delta every translated figure moves by, or null when there are none or they move by different deltas. */
+function sharedDelta(translations) {
+  let shared = null;
+  for (const delta of translations?.values() ?? []) {
+    if (!shared) shared = delta;
+    else if (delta.x !== shared.x || delta.y !== shared.y) return null;
+  }
+  return shared;
+}
 /** Retains the single overlay surface. Unchanged descriptor groups reuse projected handles; pose edits clear affected pixels
  * and repaint every overlapping group in native order. A pan (only the projection's translation changed) moves the pixels
  * already painted and paints only the strips that came into view; view/order/style changes use a full pass. Every handle
@@ -43,23 +52,30 @@ function strip(shift, length, across, vertical, dpr) {
  * pan places each centre at another quarter of a backing pixel), so after any pan `draw` answers `settle: true`; a draw
  * with `rest` at the same translation (the caller asks for one once the view has rested a moment) repaints in full: the
  * picture at rest is always a full repaint's.
+ *
+ * `translations` (figure id → world delta) leave those figures out of the surface for the gesture. When they all move by
+ * one delta, they are a second retained layer (`moving`, sharing the atlas) whose translation is the view's and the
+ * delta's, so a drag is a pan of that layer, with the same settling; otherwise they are stamped over the picture each pass.
+ * `zooming` stamps each handle at `quantizedRadius` and asks to settle; the next pass that is not zooming repaints exact.
  */
 export class CanvasHandleOverlay {
   /** `panShiftFrom`: the handles on the surface from which a pan moves the pixels; with fewer, repainting them costs less. */
-  constructor(surface, {panShiftFrom = 0} = {}) {
+  constructor(surface, {panShiftFrom = 0, sprites = null} = {}) {
     this.surface = surface;
     this.panShiftFrom = panShiftFrom;
     this.context = surface.getContext('2d');
     // The handles' pictures, in an atlas made like the surface so both paint the same way.
-    this.sprites = new HandleSprites((width, height) => {
+    this.sprites = sprites ?? new HandleSprites((width, height) => {
       const canvas = new surface.constructor(width, height);
       canvas.getContext('2d', this.context.getContextAttributes?.());
       return canvas;
     });
+    /** The figures a translation moves, on a layer of their own (`draw`), made at the first such gesture. */
+    this.moving = null;
     this.run = {handles: [], xs: new Float64Array(64), ys: new Float64Array(64), count: 0};
     this.clear();
   }
-  clear() { this.groups = []; this.key = null; this.at = null; this.requested = null; this.moved = false; }
+  clear() { this.groups = []; this.key = null; this.at = null; this.requested = null; this.moved = false; this.moving?.clear(); }
   /** Adds a handle centred at canvas units `x, y` to the run `stamp` paints next. */
   queue(handle, x, y) {
     const run = this.run;
@@ -71,19 +87,22 @@ export class CanvasHandleOverlay {
   }
   /** Paints the queued handles on `into` (only the backing pixels `crop`, if given), in the order queued, and empties
    * the run; answers how many there were. */
-  stamp(into, dpr, outline, crop = null) {
+  stamp(into, dpr, outline, crop = null, quantize = false) {
     const run = this.run, count = run.count;
-    this.sprites.paint(into, run.handles, run.xs, run.ys, count, {dpr, outline, crop});
+    this.sprites.paint(into, run.handles, run.xs, run.ys, count, {dpr, outline, crop, quantize});
     run.handles.fill(undefined, 0, count); run.count = 0;
     return count;
   }
-  draw(target, handles, {project, matrix, projectionKey, width, height, dpr = 1, translations, outline = false, rest = false}) {
+  draw(target, handles, {project, matrix, projectionKey, width, height, dpr = 1, translations, outline = false, rest = false, zooming = false}) {
     const surface = this.surface, context = this.context;
     const [a, b, c, d, tx, ty] = matrix ?? [1, 0, 0, 1, 0, 0];
     const linear = matrix ? null : project;
-    // A matrix probed from a projection carries rounding in its last bits that changes with the translation: not a new view.
-    const key = `${projectionKey}|${matrix ? [a, b, c, d].map(value => value.toPrecision(12)).join() : ''}|${width}|${height}|${dpr}|${outline}|${[...(translations?.keys() ?? [])].join(',')}`;
     const groups = handles.groups ?? [{uid: null, handles}];
+    // The figures a translation moves all by one delta are a retained layer of their own, panned by the delta (`moving`).
+    const delta = matrix && handles.groups ? sharedDelta(translations) : null;
+    // A matrix probed from a projection carries rounding in its last bits that changes with the translation: not a new view.
+    // A zooming pass paints quantised sizes (`HandleSprites.paint`): the next one that is not repaints in full.
+    const key = `${projectionKey}|${matrix ? [a, b, c, d].map(value => value.toPrecision(12)).join() : ''}|${width}|${height}|${dpr}|${outline}|${zooming}|${[...(translations?.keys() ?? [])].join(',')}`;
     let full = this.key !== key || groups.length !== this.groups.length ||
       groups.some((group, i) => group.uid !== this.groups[i]?.uid);
     const physicalWidth = Math.round(width * dpr), physicalHeight = Math.round(height * dpr);
@@ -168,7 +187,7 @@ export class CanvasHandleOverlay {
           if (x + radius > left && x - radius < right && y + radius > top && y - radius < bottom) this.queue(handle, x, y);
         }
       }
-      return this.stamp(context, dpr, outline, crop);
+      return this.stamp(context, dpr, outline, crop, zooming);
     };
     let visible = this.visible ?? 0;
     if (full) { context.setTransform(dpr, 0, 0, dpr, 0, 0); context.clearRect(0, 0, width, height); visible = paint(null); }
@@ -194,9 +213,27 @@ export class CanvasHandleOverlay {
     this.moved = !full && (this.moved || Boolean(shiftX || shiftY) || paintX !== tx || paintY !== ty);
     this.at = {x: paintX, y: paintY}; this.requested = {x: tx, y: ty};
     target.drawImage(surface, 0, 0, width, height);
-    // Keep translated figures in the existing foreground pass. The retained
-    // layer excludes them for the whole gesture, so moving only updates these.
-    if (translations) {
+    // The retained layer excludes translated figures for the whole gesture. Moved all by one delta (a selection dragged by
+    // an origin), they are a layer of their own whose translation is the view's and the delta's: moving them is a pan of that
+    // layer, its pixels moved and only the strips brought into view stamped, painted afresh when the gesture rests.
+    let settle = this.moved || zooming, shown = null;
+    if (delta) {
+      if (!this.moving) {
+        // Made like the surface, so both paint the same way.
+        const layer = new surface.constructor(1, 1);
+        layer.getContext('2d', context.getContextAttributes?.());
+        this.moving = new CanvasHandleOverlay(layer, {panShiftFrom: this.panShiftFrom, sprites: this.sprites});
+      }
+      const moving = this.moving;
+      shown = moving.draw(target, {groups: groups.filter(group => translations.has(group.uid))}, {matrix: [a, b, c, d, tx + a * delta.x + c * delta.y, ty + b * delta.x + d * delta.y],
+        projectionKey, width, height, dpr, outline, rest, zooming});
+      settle ||= shown.settle;
+    } else if (this.moving && this.moving.key !== null) {
+      // The gesture is over: the layer's pixels go, and the next gesture paints it afresh.
+      this.moving.clear(); this.moving.surface.width = this.moving.surface.height = 1;
+    }
+    // Translated figures moved by different deltas are stamped over the picture each pass.
+    if (translations && !delta) {
       for (const handle of handles) {
         const delta = translations.get(handle.uid);
         if (!delta) continue;
@@ -205,9 +242,9 @@ export class CanvasHandleOverlay {
         const radius = handle.screenRadius + 1;
         if (x + radius > 0 && x - radius < width && y + radius > 0 && y - radius < height) this.queue(handle, x, y);
       }
-      this.stamp(target, dpr, outline);
+      this.stamp(target, dpr, outline, null, zooming);
     }
-    return {full, regions: full ? 1 : merged.length + strips.length, visible, shifted: Boolean(shiftX || shiftY), settle: this.moved};
+    return {full, regions: full ? 1 : merged.length + strips.length, visible, shifted: Boolean(shiftX || shiftY), settle, moving: shown};
   }
   /** The handles on the surface at translation `x, y`. */
   count(groups, x, y, width, height) {

@@ -221,3 +221,69 @@ export function verifyCanvasHandleStamps() {
       `${name}: ${apart} and ${far} of ${covered} (${control.apart} and ${control.far}), coverage ${coverage.toFixed(4)}`).join('\n')}`);
   return checks;
 }
+
+/** A selection dragged by one delta is a layer of its own, panned by the delta: its pixels must be a full repaint of the moving
+ * figures at the translation the layer says it painted at (strips and rests), or the picture before moved (whole-pixel steps),
+ * and the stationary layer must stay the full repaint of the others, untouched by the drag. */
+export function verifyCanvasHandleMoves() {
+  const check = (condition, message) => { if (!condition) throw new Error(message); };
+  const checks = [];
+  let seed = 11;
+  const random = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+  const colors = ['#ff0000', '#ff8800', '#0000ff', '#ffffff'];
+  const groups = Array.from({length: 18}, (_, g) => {
+    const cx = random() * 420 - 90, cy = random() * 300 - 80;
+    return {uid: g + 1, handles: Array.from({length: 12}, () => ({uid: g + 1, point: {x: cx + random() * 50 - 25, y: cy + random() * 50 - 25},
+      screenRadius: 2 + random() * 4, color: colors[Math.floor(random() * colors.length)], connector: random() < .1, ik: random() < .1}))};
+  });
+  const grouped = list => { const handles = list.flatMap(group => group.handles); Object.defineProperty(handles, 'groups', {value: list}); return handles; };
+  const selected = groups.filter(group => group.uid % 2), others = groups.filter(group => !(group.uid % 2));
+  for (const dpr of [1, 1.5, 2]) for (const outline of [false, true]) for (const linear of [[1, 0, 0, 1], [.8, .3, -.3, .8]]) {
+    const width = 240, height = 140, w = Math.round(width * dpr), h = Math.round(height * dpr);
+    const target = readable(w, h), context = target.getContext('2d'), reference = readable(w, h), expected = reference.getContext('2d');
+    const overlay = new CanvasHandleOverlay(readable(1, 1));
+    const view = {x: 3, y: 2};
+    const fresh = (list, at) => {
+      expected.setTransform(dpr, 0, 0, dpr, 0, 0); expected.clearRect(0, 0, width, height);
+      const shown = [];
+      for (const group of list) for (const handle of group.handles) {
+        const p = handle.point, px = linear[0] * p.x + linear[2] * p.y + at.x, py = linear[1] * p.x + linear[3] * p.y + at.y, radius = handle.screenRadius + 1;
+        if (px + radius > 0 && px - radius < width && py + radius > 0 && py - radius < height) shown.push([handle, {x: px, y: py}]);
+      }
+      stamps(expected, shown, dpr, outline, overlay.sprites);
+      return expected.getImageData(0, 0, w, h).data;
+    };
+    const same = (actual, source, name, offset = null) => {
+      for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+        const strip = offset && ((offset.x > 0 ? px < offset.x : px >= w + offset.x) || (offset.y > 0 ? py < offset.y : py >= h + offset.y));
+        const i = 4 * (py * w + px), j = offset && !strip ? 4 * ((py - offset.y) * w + px - offset.x) : i, from = offset && !strip ? source.before : source.full;
+        for (let k = 0; k < 4; k++) check(actual[i + k] === from[j + k], `${name}, DPR ${dpr}, outline ${outline}, linear ${linear}: pixel ${px},${py} channel ${k} (${actual[i + k]} vs ${from[j + k]})`);
+      }
+    };
+    const translations = new Map(selected.map(group => [group.uid, {x: 0, y: 0}]));
+    let before = null, delta = {x: 0, y: 0};
+    const draw = (name, {rest = false, moved = true} = {}) => {
+      for (const uid of translations.keys()) translations.set(uid, delta);
+      const from = overlay.moving?.at;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0); context.clearRect(0, 0, width, height);
+      const stats = overlay.draw(context, grouped(groups), {matrix: [...linear, view.x, view.y], projectionKey: 'view', width, height, dpr, outline, translations, rest});
+      const layer = overlay.moving, at = layer.at, actual = layer.context.getImageData(0, 0, w, h).data;
+      const wanted = {x: view.x + linear[0] * delta.x + linear[2] * delta.y, y: view.y + linear[1] * delta.x + linear[3] * delta.y};
+      check(Math.abs(at.x - wanted.x) * dpr <= .5 + 1e-9 && Math.abs(at.y - wanted.y) * dpr <= .5 + 1e-9, `${name}: the layer is within half a backing pixel of the drag`);
+      check(stats.settle || at.x === wanted.x && at.y === wanted.y, `${name}: a draw that does not ask to settle is exactly where the drag is`);
+      const offset = moved && from && !stats.moving.full ? {x: Math.round((at.x - from.x) * dpr), y: Math.round((at.y - from.y) * dpr)} : null;
+      same(actual, {full: fresh(selected, at), before}, name, offset);
+      same(overlay.context.getImageData(0, 0, w, h).data, {full: fresh(others, view)}, `${name}: the stationary layer`);
+      before = actual;
+      checks.push({name, dpr, outline, linear, ...stats});
+      return stats;
+    };
+    draw('press', {moved: false});
+    for (const [dx, dy, name] of [[4 / dpr, 0, 'whole backing pixels'], [-6 / dpr, 5 / dpr, 'diagonal'], [7, -3, 'CSS pixels'], [2.3, 1.7, 'fractional'], [-5.1, .4, 'fractional back']]) {
+      delta = {x: delta.x + dx, y: delta.y + dy};
+      draw(name);
+    }
+    check(draw('the drag rests', {rest: true, moved: false}).settle === false, 'Once the drag rests the moving figures are a full repaint, exactly where dragged');
+  }
+  return checks;
+}

@@ -197,9 +197,20 @@ multi-figure, joining and tablet browser tests. Performance: the selection scena
 ## Joints in dense frames
 
 When the frame on show has more than 12,000 joints, figures that are not selected show their origin joint only, exactly
-as with Settings → **Show unselected figures** off. A selected figure always shows all its joints, and figures joined to
-another keep theirs (they have no origin of their own). Drawing and picking read one list of joints, so a joint that is not
-drawn cannot be grabbed; select a figure (click its artwork or its origin) to pose it.
+as with Settings → **Show unselected figures** off. A selected figure shows all its joints, and figures joined to another
+keep theirs (they have no origin of their own). Drawing and picking read one list of joints, so a joint that is not drawn
+cannot be grabbed; select a figure (click its artwork or its origin) to pose it.
+
+When the selected figures alone would show more joints than that, they keep all their joints only as far as the budget
+reaches, in this order: the figure pressed or selected last (the editor's primary figure, `editor.selectedUid`) first,
+then the others most recently selected first (the selection's own order, `editor.selectedUids`: Ctrl+A and a rectangle
+add figures in the frame's order, a click or Shift-click adds the figure clicked). From the first figure that does not
+fit, the selected figures show their origin only, drawn as a selected figure's: pressing one moves the whole selection
+as every origin does, and makes that figure the primary one, so it shows its joints from then on. The primary figure keeps
+its joints even when it alone has more than the budget: it is the figure being posed. A selection that fits behaves as
+before (`selectedOriginsOnly` in `src/canvas-interactions.mjs`; `tests/dense-handles.test.mjs`,
+`tests/dense-handles.browser.mjs`). Selecting all 2,000 figures of 100 segments painted 200,000 joints a frame while
+dragging them; now about 14,000.
 
 The count is every joint the frame would show with all figures' shown (each free figure's origin and the moving joints of
 its definition), over the whole frame, not only what is in view, so panning and zooming never change it; hidden and locked
@@ -212,8 +223,15 @@ above it the canvas's own cost per joint climbs steeply (8 µs a joint at 200,00
 The joint overlay keeps what it painted (`src/canvas-handle-overlay.mjs`). With at least 500 joints on the surface, a pan
 moves those pixels by whole backing pixels and paints only the strips that came into view, and the joints are painted afresh
 once the view rests, so the picture at rest is always a full repaint's; with fewer, repainting them is cheaper and a pan does
-that, as before. A zoom resizes the joints' descriptors instead of building them again, and when the zoom
-makes every joint the smallest (or largest) size the segments' lengths are not read at all.
+that, as before. A selection dragged by an origin (every figure moved by the same delta) is a layer of its own, panned
+the same way by the delta: its joints are stamped once at the press and then only where the drag brings new ones into
+view, and painted afresh once the drag rests a moment and when it ends; figures moved by different deltas are stamped over
+the picture every frame. A zoom resizes the joints' descriptors instead of building them again, and when the zoom makes every joint the smallest (or largest)
+size the segments' lengths are not read at all. While a zoom is in progress (the view's scale changes again less than
+150 ms after its last change, `ZOOM_REST_MS` in `src/canvas-handles.mjs`; a single change such as fitting the view is
+painted exact at once), each joint is stamped at its size rounded down to half a backing pixel,
+so a zoom paints a few pictures instead of a hundred new ones each frame, and a joint is never drawn larger than where a
+click finds it; once the scale has been still that long, the joints are painted at their exact sizes.
 
 Each joint is a stamp, not a path (`src/canvas-handle-sprites.mjs`). Two paths a joint, a fill and an outline, kept the
 graphics process busy rasterising: 3,200 joints held a busy scene at 30 frames a second while scrubbing. Each look (shape,

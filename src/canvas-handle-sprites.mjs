@@ -7,6 +7,11 @@ const SHIFT = Math.log2(STEPS);
  * doubles once (16 MB) when one pass needs more (many sizes of joint, large handles at a high device-pixel ratio). */
 const ATLAS_SIZE = 1024, ATLAS_LIMIT = 2048;
 
+/** A handle's radius (canvas units) at `dpr` backing pixels per unit, rounded down to a half backing pixel: while a zoom
+ * changes every handle's size each frame, a few sizes a look are painted instead of new ones every frame, and a handle is
+ * never drawn larger than where a click finds it. */
+export const quantizedRadius = (radius, dpr) => Math.max(.5 / dpr, Math.floor(radius * dpr * 2) / (2 * dpr));
+
 /** The colour a handle's outline is stroked in, or `null` when it has none. */
 export const handleStroke = (handle, outline) => handle.ik ? '#0d99ff' : outline ? '#000000' : null;
 
@@ -55,8 +60,8 @@ export class HandleSprites {
   }
   /** The look of `handle`: found by its size, then its colour, then its shape and outline, with no key to build (a
    * pass asks once per handle, thousands of times). */
-  look(handle, outline) {
-    const radius = handle.screenRadius, connector = Boolean(handle.connector), stroke = handleStroke(handle, outline);
+  look(handle, outline, quantize = false) {
+    const radius = quantize ? quantizedRadius(handle.screenRadius, this.dpr) : handle.screenRadius, connector = Boolean(handle.connector), stroke = handleStroke(handle, outline);
     let colors = this.looks.get(radius);
     if (!colors) this.looks.set(radius, colors = new Map());
     let kinds = colors.get(handle.color);
@@ -95,9 +100,10 @@ export class HandleSprites {
    * Paints `count` handles, `handles[i]` centred at canvas units `xs[i], ys[i]`, in order, on `context` (its transform
    * and styles are restored). `dpr` is the context's backing pixels per canvas unit. With `crop` (`{x, y, width, height}`
    * in whole backing pixels) only those pixels are painted: each stamp is cut to them, so they are a full repaint's exactly
-   * (a clip, even on whole pixels, blends through its coverage and moves some pixels a level).
+   * (a clip, even on whole pixels, blends through its coverage and moves some pixels a level). With `quantize` each handle is
+   * the picture of `quantizedRadius` (a zoom in progress).
    */
-  paint(context, handles, xs, ys, count, {dpr, outline = false, crop = null}) {
+  paint(context, handles, xs, ys, count, {dpr, outline = false, crop = null, quantize = false}) {
     if (!count) return;
     if (dpr !== this.dpr) this.reset(dpr);
     if (!this.atlas) {
@@ -112,12 +118,12 @@ export class HandleSprites {
     // have the graphics process copy it.
     // A full atlas starts again once a pass (a zoom makes new sizes every frame); what one pass alone cannot fit is a path.
     const held = this.shelves.length > 0;
-    let fits = this.resolve(handles, xs, ys, count, outline);
-    if (!fits && held) { this.reset(); fits = this.resolve(handles, xs, ys, count, outline); }
+    let fits = this.resolve(handles, xs, ys, count, outline, quantize);
+    if (!fits && held) { this.reset(); fits = this.resolve(handles, xs, ys, count, outline, quantize); }
     if (!fits && this.size < this.limit) {
       // Resizing a canvas empties it.
       this.size = Math.min(this.limit, 2 * this.size); this.atlas.width = this.atlas.height = this.size;
-      this.reset(); this.resolve(handles, xs, ys, count, outline);
+      this.reset(); this.resolve(handles, xs, ys, count, outline, quantize);
     }
     this.render();
     const atlas = this.atlas, size = this.size, cellOf = this.cellOf, looks = this.lastLooks, dxs = this.dx, dys = this.dy;
@@ -144,12 +150,12 @@ export class HandleSprites {
     context.restore();
   }
   /** Finds or allocates each handle's cell; false when the atlas ran out (those handles have -1). */
-  resolve(handles, xs, ys, count, outline) {
+  resolve(handles, xs, ys, count, outline, quantize) {
     const dpr = this.dpr, cellOf = this.cellOf, dxs = this.dx, dys = this.dy, looks = this.lastLooks = this.lastLooks?.length >= count ? this.lastLooks : new Array(count);
     let fits = true;
     this.missing.length = 0;
     for (let i = 0; i < count; i++) {
-      const look = this.look(handles[i], outline);
+      const look = this.look(handles[i], outline, quantize);
       looks[i] = look;
       // The centre in quarters of a backing pixel, rounded: its whole pixel places the stamp, its fraction picks the picture.
       const X = Math.floor(xs[i] * dpr * STEPS + .5), Y = Math.floor(ys[i] * dpr * STEPS + .5);

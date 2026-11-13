@@ -225,6 +225,29 @@ export function frameHandleCount(frame, figureOf, {hiddenUids, lockedUids} = {})
 export function denseHandles(count, wasDense = false, budget = DENSE_HANDLE_BUDGET) {
   return count > (wasDense ? budget * DENSE_HANDLE_RELEASE : budget);
 }
+/**
+ * The selected figures that show their origin only, or `null` when every selected figure shows all its joints
+ * (docs/SCENE-EDITING.md, "Joints in dense frames"). `selected` is the selection in the order its figures were selected
+ * (a `Set`'s order), `primary` the figure pressed or selected last, `jointsOf(uid)` the joints a figure shows whole. When
+ * the selection's joints exceed `budget`, the primary figure keeps its joints, then the others most recently selected
+ * first as long as they fit; from the first that does not, the rest show their origin only. The primary keeps its joints
+ * even when it alone exceeds the budget: it is the figure being posed.
+ */
+export function selectedOriginsOnly(selected, primary, jointsOf, budget = DENSE_HANDLE_BUDGET) {
+  if (!selected?.size) return null;
+  let total = 0;
+  for (const uid of selected) total += jointsOf(uid);
+  if (total <= budget) return null;
+  const order = [...selected].reverse(), beyond = new Set();
+  let used = selected.has(primary) ? jointsOf(primary) : 0, full = true;
+  for (const uid of order) {
+    if (uid === primary) continue;
+    const joints = jointsOf(uid);
+    if (full && used + joints <= budget) used += joints;
+    else { full = false; beyond.add(uid); }
+  }
+  return beyond;
+}
 
 /** Native painter-order descriptors, shared by drawing and pointer picking.
  * Pass frame for exact ordering even when a figure has no visible artwork.
@@ -232,7 +255,7 @@ export function denseHandles(count, wasDense = false, budget = DENSE_HANDLE_BUDG
  * priority of reverse figures, reverse segment order, then each free origin.
  */
 export function getPivotHandles(geometry, {
-  frame, selectedUid = null, selectedUids, selectedJoint = -1, selectedHandleIds, selectedBranch = false, builder = false, hiddenUids, lockedUids,
+  frame, selectedUid = null, selectedUids, originsOnlyUids, selectedJoint = -1, selectedHandleIds, selectedBranch = false, builder = false, hiddenUids, lockedUids,
   showUnselected = true, showStatic = false, attaching = false, allowStaticManipulation = false,
   selectStatic = false, joinTargetUids, spatialMode = 'pose', showDetailed = false,
   viewScale = 1, autoSize = true, minDiameter = 4, maxDiameter = 10, descriptorCache,
@@ -249,12 +272,15 @@ export function getPivotHandles(geometry, {
   Object.defineProperty(result,'groups',{value:groups});
   const options = { viewScale, autoSize, minDiameter, maxDiameter }, scale = Math.max(1e-9, Math.abs(viewScale));
   const pinned = pinnedHandleRadius(viewScale, minDiameter, maxDiameter);
+  // A selected figure shows all its joints unless the selection is too large for them all (`selectedOriginsOnly`).
+  const isSelected = uid => uid === selectedUid || Boolean(selectedUids?.has(uid));
+  const whole = uid => isSelected(uid) && !originsOnlyUids?.has(uid);
   // The figures whose every joint is read below are built at once, with one request of the engine for all of them (a selection of
   // thousands on a dense frame asked for each figure alone).
   geometry.build?.(objects.filter(g => {
     const uid = g?.obj.unique_id;
     if (!g || hiddenUids?.has(uid) || lockedUids?.has(uid) || (attaching && joinTargetUids && !joinTargetUids.has(uid))) return false;
-    return uid === selectedUid || Boolean(selectedUids?.has(uid)) || showUnselected || Boolean(g.obj.join) || attaching || selectStatic || Boolean(targets.get(g.slot ?? g.obj.object_slot)?.size);
+    return whole(uid) || showUnselected || Boolean(g.obj.join) || attaching || selectStatic || Boolean(targets.get(g.slot ?? g.obj.object_slot)?.size);
   }));
   const settingsKey = [topologyEpoch,spatialMode,showUnselected,showStatic,showDetailed,attaching,allowStaticManipulation,selectStatic,viewScale,autoSize,minDiameter,maxDiameter,builder,selectedJoint,selectedBranch,[...(selectedHandleIds??[])].join(',')].join('|');
   if(descriptorCache && descriptorCache.key!==settingsKey){descriptorCache.key=settingsKey;descriptorCache.objects=new WeakMap();}
@@ -263,10 +289,10 @@ export function getPivotHandles(geometry, {
     const uid = g.obj.unique_id;
     if (hiddenUids?.has(uid) || lockedUids?.has(uid)) continue;
     if (attaching && joinTargetUids && !joinTargetUids.has(uid)) continue;
-    const selected = uid === selectedUid || Boolean(selectedUids?.has(uid));
-    const allEndpoints = selected || showUnselected || Boolean(g.obj.join) || attaching;
+    const selected = isSelected(uid), originOnly = selected && !whole(uid);
+    const allEndpoints = (selected && !originOnly) || showUnselected || Boolean(g.obj.join) || attaching;
     const joinedVertices = targets.get(g.slot ?? g.obj.object_slot);
-    const objectKey = joinedVertices ? `${selected}|${uid===selectedUid}|${[...joinedVertices].join(',')}` : selected ? uid === selectedUid ? 'true|true|' : 'true|false|' : 'false|false|';
+    const objectKey = (originOnly ? 'o|' : '') + (joinedVertices ? `${selected}|${uid===selectedUid}|${[...joinedVertices].join(',')}` : selected ? uid === selectedUid ? 'true|true|' : 'true|false|' : 'false|false|');
     const cached=descriptorCache?.objects.get(g);
     if(cached?.key===objectKey){groups.push({uid,offset:result.length,handles:cached.handles});for(const handle of cached.handles)result.push(handle);continue;}
     const first=result.length;
