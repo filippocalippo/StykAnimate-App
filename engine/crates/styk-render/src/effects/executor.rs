@@ -1,8 +1,11 @@
 //! Effect executor: runs effect stacks on layers of the isolation atlas. A layer is copied into a texture, filtered through
 //! fragment passes (the recipe's [`Step`]s) and copied back in place.
 //!
-//! **Pipelines** are one per operation family (`shaders/`), each a small shader created the first time a frame needs it, so a
-//! document never compiles what its effects do not use.
+//! **Pipelines** are one per operation and the options its shader branches on ([`Variant`]): the family's shader (`shaders/`)
+//! with those fixed as constants, so each compiles only its own code. A pipeline is created the first time a frame needs it, so a
+//! document never compiles what its effects do not use. On WebGL2 the browser compiles on the interface thread, tens of
+//! milliseconds a pipeline: there a frame may create only a few ([`Executor::set_compile_limit`]), its other filtered layers drawn
+//! unfiltered until a later frame has their pipelines ([`Executor::pending`]).
 //!
 //! **Precision**: images between passes (`Texel::Work`) are half floats where the device renders to and filters them
 //! (WebGPU and native always; WebGL2 when the host says its context can, [`Executor::new`]), else eight bits, dithered by the
@@ -20,7 +23,7 @@ use std::sync::Arc;
 use styk_eval::vfx::Effect;
 
 pub use super::recipe::{Frame, Run, Step};
-use super::recipe::{record, Family, Placement, Texel, Uniform, BLANK, INPUT, INPUTS, UNIFORM_BYTES};
+use super::recipe::{record, Family, Placement, Texel, Uniform, Variant, BLANK, INPUT, INPUTS, UNIFORM_BYTES};
 
 const COLOR8: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const HALF: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -33,9 +36,9 @@ const SEEDS_BINDING: u32 = INPUTS as u32;
 const SAMPLER_BINDING: u32 = INPUTS as u32 + 1;
 const UNIFORM_BINDING: u32 = INPUTS as u32 + 2;
 
-/// The shader of each family: the shared prelude, the helpers it uses, then the family's fragment stage.
-fn source(family: Family) -> String {
-    let (helpers, own) = match family {
+/// The shader of a variant: its constants, the shared prelude, the helpers its family uses, then the family's fragment stage.
+pub fn source(variant: &Variant) -> String {
+    let (helpers, own) = match Family::of(variant.op) {
         Family::Reduce => ("", include_str!("shaders/reduce.wgsl")),
         Family::Convolve => ("", include_str!("shaders/convolve.wgsl")),
         Family::Expand => ("", include_str!("shaders/expand.wgsl")),
@@ -51,7 +54,7 @@ fn source(family: Family) -> String {
         Family::Warp => ("", include_str!("shaders/warp.wgsl")),
         Family::Cells => ("", include_str!("shaders/cells.wgsl")),
     };
-    format!("{}\n{helpers}\n{own}", include_str!("shaders/common.wgsl"))
+    format!("{}{}\n{helpers}\n{own}", variant.constants(), include_str!("shaders/common.wgsl"))
 }
 
 /// A texture of the pool.
@@ -68,7 +71,15 @@ struct Pooled {
 pub struct Executor {
     layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
-    pipelines: HashMap<(Family, wgpu::TextureFormat), wgpu::RenderPipeline>,
+    /// Pipelines created, by variant and target format (an index into `compiled`).
+    pipelines: HashMap<(Variant, wgpu::TextureFormat), usize>,
+    compiled: Vec<wgpu::RenderPipeline>,
+    /// Pipelines a frame may create (`None`: every one it needs).
+    compile_limit: Option<u32>,
+    /// The device compiles on the thread that draws (WebGL2, GL).
+    slow_compiles: bool,
+    /// For each run of the frame, the pipeline of each pass, or `None` while one is still to be created.
+    passes: Vec<Option<Vec<usize>>>,
     sampler: wgpu::Sampler,
     uniforms: wgpu::Buffer,
     uniform_slots: u64,
@@ -96,6 +107,8 @@ pub struct Stats {
     pub slot_bytes: u64,
     /// Effect pipelines created so far.
     pub pipelines: u32,
+    /// Runs of the frame drawn unfiltered because a pipeline they need is still to be created.
+    pub waiting: u32,
 }
 
 /// Whether a device renders to and filters half-float colour: WebGPU and the native backends always do; WebGL2 only with
@@ -165,6 +178,10 @@ impl Executor {
             layout,
             pipeline_layout,
             pipelines: HashMap::new(),
+            compiled: Vec::new(),
+            compile_limit: None,
+            slow_compiles: device.adapter_info().backend == wgpu::Backend::Gl,
+            passes: Vec::new(),
             sampler,
             uniforms: device.create_buffer(&wgpu::BufferDescriptor { label: Some("styk effect passes"), size: UNIFORM_STRIDE * 64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }),
             uniform_slots: 64,
@@ -184,6 +201,23 @@ impl Executor {
     /// Whether working images are half floats.
     pub fn float(&self) -> bool {
         self.float
+    }
+
+    /// Whether the device compiles a pipeline on the thread that draws (WebGL2: the interface thread), so that a frame should
+    /// create few ([`Executor::set_compile_limit`]).
+    pub fn slow_compiles(&self) -> bool {
+        self.slow_compiles
+    }
+
+    /// Limits the pipelines a frame creates to `limit` (`None`: every one it needs). A run whose pipelines are not all there
+    /// yet is not encoded: its layer stays as drawn, unfiltered, and [`Executor::pending`] says to draw again.
+    pub fn set_compile_limit(&mut self, limit: Option<u32>) {
+        self.compile_limit = limit;
+    }
+
+    /// Whether the frame prepared last drew a filtered layer unfiltered because its pipelines were still to be created.
+    pub fn pending(&self) -> bool {
+        self.stats.waiting > 0
     }
 
     fn format(&self, texel: Texel) -> wgpu::TextureFormat {
@@ -246,7 +280,10 @@ impl Executor {
         }
         self.pool = kept;
         self.placed = placement.images.iter().map(|images| images.iter().map(|&t| t as usize).collect()).collect();
+        let mut budget = self.compile_limit.unwrap_or(u32::MAX);
+        self.passes.clear();
         for (run, placed) in runs.iter().zip(&self.placed) {
+            let mut passes = Some(Vec::with_capacity(run.steps.len()));
             for step in &run.steps {
                 let record = &mut records[step.uniform as usize];
                 for (k, &image) in step.inputs.iter().enumerate() {
@@ -258,13 +295,28 @@ impl Executor {
                 }
                 let target = self.format(run.images[step.target as usize].texel);
                 record.dither = if target == COLOR8 { 1.0 } else { 0.0 };
-                let family = Family::of(step.op);
-                if !self.pipelines.contains_key(&(family, target)) {
-                    let pipeline = self.pipeline(device, family, target);
-                    self.pipelines.insert((family, target), pipeline);
-                    self.stats.pipelines += 1;
+                let key = (Variant::of(step.op, record), target);
+                let pipeline = match self.pipelines.get(&key) {
+                    Some(&index) => Some(index),
+                    None if budget > 0 => {
+                        budget -= 1;
+                        let pipeline = self.pipeline(device, &key.0, target);
+                        self.compiled.push(pipeline);
+                        self.pipelines.insert(key, self.compiled.len() - 1);
+                        self.stats.pipelines += 1;
+                        Some(self.compiled.len() - 1)
+                    }
+                    None => None,
+                };
+                match (pipeline, &mut passes) {
+                    (Some(index), Some(passes)) => passes.push(index),
+                    _ => passes = None,
                 }
             }
+            if passes.is_none() {
+                self.stats.waiting += 1;
+            }
+            self.passes.push(passes);
         }
         let work = work_bytes(self.float);
         self.stats.slot_bytes = self.pool.iter().chain(&self.retired).map(|p| p.size[0] as u64 * p.size[1] as u64 * super::recipe::texel_bytes(p.texel, work)).sum();
@@ -289,8 +341,8 @@ impl Executor {
         }
     }
 
-    fn pipeline(&self, device: &wgpu::Device, family: Family, target: wgpu::TextureFormat) -> wgpu::RenderPipeline {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("styk effects"), source: wgpu::ShaderSource::Wgsl(source(family).into()) });
+    fn pipeline(&self, device: &wgpu::Device, variant: &Variant, target: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("styk effects"), source: wgpu::ShaderSource::Wgsl(source(variant).into()) });
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("styk effects"),
             layout: Some(&self.pipeline_layout),
@@ -341,18 +393,20 @@ impl Executor {
     }
 
     /// Encodes run `index` of the prepared frame on the layer at `place` (its top-left texel on an atlas page): the layer copied
-    /// into its input texture, the passes, the result copied back in place.
-    pub fn encode(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, index: usize, run: &Run, place: wgpu::TexelCopyTextureInfo<'_>) {
+    /// into its input texture, the passes, the result copied back in place. Whether it was filtered: not when the run has no
+    /// passes or its pipelines are still to be created ([`Executor::set_compile_limit`]).
+    pub fn encode(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, index: usize, run: &Run, place: wgpu::TexelCopyTextureInfo<'_>) -> bool {
         if run.steps.is_empty() {
-            return;
+            return false;
         }
+        let Some(passes) = self.passes[index].clone() else { return false };
         let placed = self.placed[index].clone();
         let extent = wgpu::Extent3d { width: run.size[0], height: run.size[1], depth_or_array_layers: 1 };
         encoder.copy_texture_to_texture(place, self.pool[placed[INPUT as usize]].texture.as_image_copy(), extent);
-        for step in &run.steps {
+        for (step, &pipeline) in run.steps.iter().zip(&passes) {
             let bind = self.bind(device, step.inputs.map(|image| (image != BLANK).then(|| placed[image as usize])));
             let image = run.images[step.target as usize];
-            let pipeline = &self.pipelines[&(Family::of(step.op), self.format(image.texel))];
+            let pipeline = &self.compiled[pipeline];
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("styk effect pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -374,6 +428,7 @@ impl Executor {
             self.stats.passes += 1;
         }
         encoder.copy_texture_to_texture(self.pool[placed[run.result as usize]].texture.as_image_copy(), place, extent);
+        true
     }
 }
 

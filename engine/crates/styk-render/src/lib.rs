@@ -252,6 +252,12 @@ impl Renderer {
         }
     }
 
+    /// Whether the last frame drew a filtered layer unfiltered because its effect pipelines were still to be created (on WebGL2 a
+    /// frame creates one: `effects::executor`). The host draws again until it is false.
+    pub fn effects_pending(&self) -> bool {
+        self.executor.as_ref().is_some_and(|e| e.pending())
+    }
+
     /// Rotates and mirrors the workspace view: `orientation` maps the neutral view's screen pixels
     /// to the shown ones (the editor rotates the Draw view about the artboard's centre and mirrors
     /// it, `cameraMatrix` in renderer-geometry.mjs). `ViewParams::matrix` must already include it;

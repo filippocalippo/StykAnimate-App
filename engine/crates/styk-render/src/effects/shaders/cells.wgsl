@@ -7,7 +7,7 @@
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let p = params.p;
   let q = params.q;
-  if (params.operation == 96) {
+  if (OP == 96) {
     let at = pos.xy;
     let cell = vec2i(floor((globalAt(at) - p.zw) / p.xy) - q.xy);
     let size = vec2i(params.inputs[0].zw);

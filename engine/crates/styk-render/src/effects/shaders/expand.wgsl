@@ -6,6 +6,6 @@
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let coarser = spline0(mapped(0u, pos.xy));
   let fine = sample1(mapped(1u, pos.xy));
-  if (params.operation == 21) { return finish(coarser * params.p.x + fine * params.p.y, pos.xy); }
+  if (OP == 21) { return finish(coarser * params.p.x + fine * params.p.y, pos.xy); }
   return finish(strengthen(coarser, fine), pos.xy);
 }

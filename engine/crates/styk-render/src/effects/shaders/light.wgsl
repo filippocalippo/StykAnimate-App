@@ -11,7 +11,7 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let at = pos.xy;
   let p = params.p;
   let b = brush(at);
-  if (params.operation == 31) {
+  if (OP == 31) {
     let front = sample1(mapped(1u, at));
     let c = read0(at) * p.y;
     let top = max(front.a, c.a);
@@ -23,27 +23,26 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let m = read0(at - q.xy);
   var glow = b.rgb;
   var reach = b.a;
-  if (q.z > 0.) {
+  if (ARTWORK) {
     glow = clamp(straight(read3(at - q.xy)), vec3f(0.), vec3f(1.));
     reach = 1.;
   }
-  let modes = i32(p.z);
   var pixel = front;
-  if ((modes & 1) != 0) {
+  if ((PLACEMENT & 1) != 0) {
     let inner = select(1. - m.a, m.r, q.w > 0.);
     let a = clamp(pow(max(inner, 0.), p.y) * p.x * reach, 0., 1.);
     var rgb = mix(front.rgb, glow * front.a, vec3f(a));
-    if (p.w == 1.) { rgb = min(front.rgb + glow * front.a * a, vec3f(front.a)); }
-    if (p.w == 2.) { rgb = front.rgb + glow * a * (front.a - front.rgb); }
+    if (MODE == 1) { rgb = min(front.rgb + glow * front.a * a, vec3f(front.a)); }
+    if (MODE == 2) { rgb = front.rgb + glow * a * (front.a - front.rgb); }
     pixel = vec4f(rgb, front.a);
   }
-  if ((modes & 2) != 0) {
+  if ((PLACEMENT & 2) != 0) {
     let a = clamp(pow(max(m.a, 0.), p.y) * p.x * reach, 0., 1.);
     let under = vec4f(glow * a, a);
     let top = max(pixel.a, a);
-    if (p.w == 1.) {
+    if (MODE == 1) {
       pixel = vec4f(min(pixel.rgb + under.rgb, vec3f(top)), top);
-    } else if (p.w == 2.) {
+    } else if (MODE == 2) {
       pixel = vec4f(pixel.rgb + under.rgb - pixel.rgb * under.rgb, top);
     } else {
       pixel = pixel + under * (1. - pixel.a);

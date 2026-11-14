@@ -3,6 +3,13 @@
 // stage, compiled the first time a frame needs it. Keep shaders small and free of long fixed loops: on WebGL2 the browser
 // compiles a pipeline on the interface thread (FXC on Windows unrolls fixed loops and inlines every call).
 //
+// Each pipeline is one operation with its options fixed: the executor puts these constants before the prelude
+// (`recipe::Variant`), so a pipeline compiles only its own code (what a constant turns off is dropped before compiling):
+//   OP the operation; GRADIENT the brush is a gradient (else one colour); SMOOTH input 0 (and 3) is a halved image, read with
+//   the cubic B-spline; ARTWORK a glow coloured by the artwork; PLACEMENT a glow's or shadow's (1 inner, 2 outer, 3 both);
+//   MODE a blend (a glow's: normal, add, screen; a tint's: normal, multiply, screen, overlay, colour, add), or a noise's
+//   channels (1, 3).
+//
 // Coordinates are texel positions with y down: texel m spans [m, m + 1), its centre at m + .5 (`@builtin(position)` gives the
 // target's). Input k is read at `mapped(k, at)`, its image's own texel position; images sit in the corner of pooled textures,
 // so reads clamp to the image's texels (`inputs[k]`: one over the texture's size, the image's size).
@@ -87,11 +94,11 @@ fn spline3(t: vec2f) -> vec4f {
 }
 // Input 0 at a level-0 target's texel position: smooth when it is a halved image, else bilinear.
 fn read0(at: vec2f) -> vec4f {
-  if (params.maps[0].x < 1.) { return spline0(mapped(0u, at)); }
+  if (SMOOTH) { return spline0(mapped(0u, at)); }
   return sample0(mapped(0u, at));
 }
 fn read3(at: vec2f) -> vec4f {
-  if (params.maps[3].x < 1.) { return spline3(mapped(3u, at)); }
+  if (SMOOTH) { return spline3(mapped(3u, at)); }
   return sample3(mapped(3u, at));
 }
 
@@ -103,17 +110,22 @@ fn globalAt(at: vec2f) -> vec2f { return params.origin + at; }
 fn finish(c: vec4f, at: vec2f) -> vec4f {
   if (params.dither == 0.) { return c; }
   let n = fract(52.9829189 * fract(dot(floor(at), vec2f(.06711056, .00583715))));
-  // Strictly within half a level: 0 and 1 stay exact.
-  return c + vec4f((n - .5) * .998 / 255.);
+  // Rounded here to whole levels, which the eight-bit write keeps exactly: GPUs round their own conversion differently (one
+  // measured rounds 0.06 of a level low, which a wide, faint glow adds up to a twentieth of its light). The dither is strictly
+  // within half a level: 0 and 1 stay exact.
+  return floor(c * 255. + .5 + (n - .5) * .998) / 255.;
 }
 
 // The effect's result over its base by the effect's strength (s.w).
 fn strengthen(result: vec4f, base: vec4f) -> vec4f { return mix(base, result, params.s.w); }
 
-fn stopOffset(i: i32) -> f32 { return params.stopOffsets[u32(i) >> 2u][u32(i) & 3u]; }
+// The four lanes of a vector as weights picking lane `i % 4`: a vector read by a loop's counter would make FXC (WebGL2 on
+// Windows) unroll the whole loop to resolve the lane; a dot product keeps it a loop.
+fn lane(i: u32) -> vec4f { let k = i & 3u; return vec4f(f32(k == 0u), f32(k == 1u), f32(k == 2u), f32(k == 3u)); }
+fn stopOffset(i: i32) -> f32 { return dot(params.stopOffsets[u32(i) >> 2u], lane(u32(i))); }
 // The brush at a full-size target's texel position: a solid colour or a gradient over the effect's domain.
 fn brush(at: vec2f) -> vec4f {
-  if (params.paintType == 0) { return params.stops[0]; }
+  if (!GRADIENT) { return params.stops[0]; }
   var pos = globalAt(at) / params.outputSize - vec2f(.5);
   let cs = cos(params.paintAngle);
   let sn = sin(params.paintAngle);
@@ -122,15 +134,16 @@ fn brush(at: vec2f) -> vec4f {
   if (params.paintType == 2) { t = length(pos) * 2.; }
   if (params.paintType == 3) { t = fract(atan2(pos.y, pos.x) / (2. * PI) + 1.); }
   if (params.paintType == 4) { t = (abs(pos.x) + abs(pos.y)) * 2.; }
-  var a = params.stops[0];
-  var offset = stopOffset(0);
+  // Walking the stops: each segment before `t` takes its end's colour whole, the one holding `t` its share, those after none
+  // (no return inside the loop: a compiler can keep it a loop).
+  var colour = params.stops[0];
+  var previous = stopOffset(0);
   for (var i = 1; i < params.stopCount; i++) {
     let next = stopOffset(i);
-    if (t < next) { return mix(a, params.stops[u32(i)], clamp((t - offset) / max(.00001, next - offset), 0., 1.)); }
-    a = params.stops[u32(i)];
-    offset = next;
+    colour = mix(colour, params.stops[u32(i)], clamp((t - previous) / max(.00001, next - previous), 0., 1.));
+    previous = next;
   }
-  return a;
+  return colour;
 }
 
 // Unpremultiplied colour.

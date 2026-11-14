@@ -5,7 +5,7 @@
 use std::sync::{Arc, OnceLock};
 
 use styk_draw::{DrawList, EffectLayer, Effects, Group, LayerKind, Pass, Prim, K_COMPOSITE, K_TRI, NO_LAYER, NO_PAINT};
-use styk_eval::vfx::registry::{Blur, Params, Tint};
+use styk_eval::vfx::registry::{Blur, BlurMode, Outline, Params, Pixelate, Tint};
 use styk_eval::vfx::{Color, Effect};
 use styk_raster::{Edges, Images, ViewParams};
 
@@ -191,4 +191,291 @@ fn a_neutral_scene_stack_draws_the_scene_as_it_is() {
             }
         }
     }
+}
+
+// ---- The filter core: what each operation draws -----------------------------------------------------------------------
+
+/// Colours of the shapes the tests draw (the draw list's packed RGBA: alpha, blue, green, red from the top byte).
+const RED: u32 = 0xff00_00ff;
+
+/// Opaque rectangles (x0, y0, x1, y1 in world units, a colour) in one group filtered by `effects`: an entry layer whose
+/// effect domain is the rectangles' bounds, grown by the stack's padding.
+fn shapes(rects: &[([f32; 4], u32)], effects: Vec<Effect>) -> DrawList {
+    let mut prims = Vec::new();
+    for &(r, color) in rects {
+        let tri = |a: [f32; 2], b: [f32; 2], c: [f32; 2]| Prim { kind: K_TRI, group: 1, color, paint: NO_PAINT, a: [a[0], a[1], b[0], b[1]], b: [c[0], c[1], 0.0, 0.0], c: [0.0; 4] };
+        prims.push(tri([r[0], r[1]], [r[2], r[1]], [r[2], r[3]]));
+        prims.push(tri([r[0], r[1]], [r[2], r[3]], [r[0], r[3]]));
+    }
+    let domain = rects.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, (r, _)| [b[0].min(r[0] as f64), b[1].min(r[1] as f64), b[2].max(r[2] as f64), b[3].max(r[3] as f64)]);
+    let stack: Vec<Arc<Effect>> = effects.into_iter().map(Arc::new).collect();
+    let pad = styk_eval::vfx::padding(&stack, 1.0, 0.0) + 3.0;
+    let bounds = [domain[0] - pad, domain[1] - pad, domain[2] - domain[0] + 2.0 * pad, domain[3] - domain[1] + 2.0 * pad];
+    let count = prims.len() as u32;
+    prims.push(Prim { kind: K_COMPOSITE, group: 0, color: 0xffff_ffff, paint: NO_PAINT, a: [0.0; 4], b: [f32::from_bits(1), 0.0, 0.0, 0.0], c: [0.0; 4] });
+    let effects: Effects = Arc::new(stack);
+    DrawList {
+        prims,
+        groups: vec![
+            Group { parent: 0, depth: 0, opacity: 1.0, bounds: [-1e5, -1e5, 1e5, 1e5], layer: NO_LAYER },
+            Group { parent: 0, depth: 1, opacity: 1.0, bounds: [bounds[0] as f32, bounds[1] as f32, (bounds[0] + bounds[2]) as f32, (bounds[1] + bounds[3]) as f32], layer: 0 },
+        ],
+        passes: vec![Pass { depth: 1, start: 0, end: count }, Pass { depth: 0, start: count, end: count + 1 }],
+        layers: vec![EffectLayer { effects: Some(effects), kind: LayerKind::Entry { bounds, domain: [domain[0], domain[1], domain[2] - domain[0], domain[3] - domain[1]], scale: 1.0, padding: pad, single_drawing: false } }],
+        ..Default::default()
+    }
+}
+
+/// A view of `size` pixels at `zoom` pixels a world unit, on a transparent clear.
+fn zoomed(size: [u32; 2], zoom: f64) -> ViewParams {
+    ViewParams { matrix: [zoom, 0.0, 0.0, zoom, 0.0, 0.0], artboard: [0.0, 0.0, size[0] as f64, size[1] as f64], clip_to_artboard: false, clear: [0.0; 4], zoom, pan: [0.0; 2], stretch: 1.0, camera_view: false, camera_limit: 2048.0 }
+}
+
+fn effect(params: Params) -> Effect {
+    Effect { id: Arc::from("e"), enabled: true, params }
+}
+
+/// The normal distribution's cumulative function (Abramowitz and Stegun 7.1.26, within 1.5e-7).
+fn phi(x: f64) -> f64 {
+    let z = x.abs() / std::f64::consts::SQRT_2;
+    let t = 1.0 / (1.0 + 0.327_591_1 * z);
+    let erf = 1.0 - t * (0.254_829_592 + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429)))) * (-z * z).exp();
+    if x >= 0.0 { 0.5 * (1.0 + erf) } else { 0.5 * (1.0 - erf) }
+}
+
+fn alpha_row(pixels: &[u8], width: u32, y: u32) -> Vec<f64> {
+    (0..width).map(|x| pixel(pixels, width, x, y)[3] as f64).collect()
+}
+
+/// A blur is the Gaussian of its radius (σ = 0.57735 × radius pixels), at every size: across the straight edge of a large
+/// shape, the blurred alpha is the normal distribution's cumulative function, to a few levels, wherever the blur halves the
+/// layer (radii 25 and 60 do; 4 and 10 do not). (Below a σ of about 2 pixels any kernel on pixels departs from the continuous
+/// curve; that a tiny radius is a tiny blur is `a_blur_grows_continuously_with_its_radius`'s.)
+#[test]
+fn a_blur_is_the_gaussian_of_its_radius() {
+    let size = [760, 440];
+    for radius in [4.0, 10.0, 25.0, 60.0] {
+        let sigma = 0.57735 * radius;
+        let list = shapes(&[([300.0, 20.0, 700.0, 420.0], RED)], vec![effect(Params::Blur(Blur { radius, ..Default::default() }))]);
+        for (renderer, pixels) in draw_both(&list, &zoomed(size, 1.0), size) {
+            let row = alpha_row(&pixels, size[0], 220);
+            let (mut worst, mut total, mut n) = (0.0f64, 0.0, 0.0);
+            let reach = (3.5 * sigma).ceil() as i64 + 2;
+            for x in 300 - reach..300 + reach {
+                let expected = 255.0 * phi((x as f64 + 0.5 - 300.0) / sigma);
+                let error = (row[x as usize] - expected).abs();
+                worst = worst.max(error);
+                total += error;
+                n += 1.0;
+            }
+            eprintln!("{renderer} radius {radius}: worst {worst:.2} levels, mean {:.2}", total / n);
+            assert!(worst <= 4.0 && total / n <= 1.5, "{renderer} radius {radius}: the edge is the Gaussian's to {worst:.1} levels (mean {:.2})", total / n);
+        }
+    }
+}
+
+/// A blur grows continuously with its radius, through the sizes at which it halves the layer once more (radii 5.2, 10.4,
+/// 20.8, 41.6), and a radius of a fraction of a pixel is a fraction of a pixel's blur. Renders 121 radii on both renderers:
+/// about two seconds.
+#[test]
+fn a_blur_grows_continuously_with_its_radius() {
+    let size = [480, 320];
+    let probes = [(185u32, "outside"), (196, "near outside"), (204, "near inside")];
+    let mut previous: Vec<Option<Vec<f64>>> = vec![None, None];
+    let mut largest = [0.0f64; 2];
+    for step in 0..=120 {
+        let radius = step as f64 * 0.5;
+        let list = shapes(&[([200.0, 20.0, 420.0, 300.0], RED)], if radius == 0.0 { vec![] } else { vec![effect(Params::Blur(Blur { radius, ..Default::default() }))] });
+        for (k, (renderer, pixels)) in draw_both(&list, &zoomed(size, 1.0), size).into_iter().enumerate() {
+            let values: Vec<f64> = probes.iter().map(|&(x, _)| pixel(&pixels, size[0], x, 160)[3] as f64).collect();
+            if let Some(before) = &previous[k] {
+                for (i, (&now, &was)) in values.iter().zip(before).enumerate() {
+                    let jump = (now - was).abs();
+                    largest[k] = largest[k].max(jump);
+                    assert!(jump <= 6.0, "{renderer}: radius {} to {radius}: the {} probe jumps {jump} levels", radius - 0.5, probes[i].1);
+                }
+            }
+            previous[k] = Some(values);
+        }
+    }
+    eprintln!("largest step between radii 0.5 apart: {largest:?} levels");
+    // A tenth of a pixel's radius: the edge moves by a level or two, not by a pixel's blur.
+    let plain = shapes(&[([200.0, 20.0, 420.0, 300.0], RED)], vec![]);
+    let tiny = shapes(&[([200.0, 20.0, 420.0, 300.0], RED)], vec![effect(Params::Blur(Blur { radius: 0.2, ..Default::default() }))]);
+    for ((renderer, a), (_, b)) in draw_both(&plain, &zoomed(size, 1.0), size).into_iter().zip(draw_both(&tiny, &zoomed(size, 1.0), size)) {
+        let (outside, inside) = (pixel(&b, size[0], 199, 160)[3], pixel(&b, size[0], 200, 160)[3]);
+        assert_eq!(pixel(&a, size[0], 199, 160)[3], 0);
+        assert!(outside <= 12 && inside >= 243, "{renderer}: a 0.2 radius blurs the edge by a few levels: {outside} outside, {inside} inside");
+    }
+}
+
+/// A one-pixel line blurred far keeps its energy (every source pixel counts when the layer is halved) and holds still when it
+/// moves by fractions of a pixel (nothing aliases). Blurred this far the line is a level or three of alpha, which the dither
+/// spreads over neighbouring levels: the row measured is the average of the 200 middle rows. (Not at exactly half a pixel: the
+/// layer is then drawn half a pixel off the frame's grid, and its composite rounds the ties of two neighbouring levels, which
+/// on some GPUs all go one way.)
+#[test]
+fn a_thin_line_keeps_its_energy_and_holds_still_when_blurred() {
+    let size = [480, 440];
+    let mut sums = Vec::new();
+    for offset in [0.0f32, 0.25, 0.4, 0.75] {
+        let x0 = 240.0 + offset;
+        let list = shapes(&[([x0, 20.0, x0 + 1.0, 420.0], RED)], vec![effect(Params::Blur(Blur { radius: 60.0, ..Default::default() }))]);
+        for (renderer, pixels) in draw_both(&list, &zoomed(size, 1.0), size) {
+            let rows = 120..320;
+            let mut row = vec![0.0; size[0] as usize];
+            for y in rows.clone() {
+                for (total, value) in row.iter_mut().zip(alpha_row(&pixels, size[0], y)) {
+                    *total += value / rows.len() as f64;
+                }
+            }
+            let sum = row.iter().sum::<f64>() / 255.0;
+            let peak = row.iter().cloned().fold(0.0, f64::max);
+            eprintln!("{renderer} at +{offset}: sum {sum:.4}, peak {peak:.2}");
+            assert!((sum - 1.0).abs() <= 0.02, "{renderer} at +{offset}: the blurred line holds {sum:.3} of its one pixel's energy");
+            sums.push((renderer, offset, sum, peak));
+        }
+    }
+    for &(renderer, offset, sum, peak) in &sums {
+        let (_, _, first, first_peak) = sums.iter().find(|s| s.0 == renderer).copied().unwrap();
+        assert!((sum - first).abs() <= 0.01 && (peak - first_peak).abs() <= 0.25, "{renderer}: moved by {offset} the line's blur changes ({sum:.3} against {first:.3}, peak {peak:.2} against {first_peak:.2})");
+    }
+}
+
+/// The sum of the blue channel along a row, in pixels of full coverage.
+fn blue_width(pixels: &[u8], width: u32, y: u32, from: u32, to: u32) -> f64 {
+    (from..to).map(|x| pixel(pixels, width, x, y)[2] as f64 / 255.0).sum()
+}
+
+/// An outline is as wide in scene units at every density, fractional widths included: drawn under the artwork, its blue
+/// coverage along a row from the artwork's edge outward adds up to the width. (At densities 0.71 and 1.41 the layer is drawn
+/// at 0.84 and 1.41 pixels a unit, so the edge falls inside a pixel.)
+#[test]
+fn an_outline_has_its_width_at_every_density() {
+    let outline = |width: f64| effect(Params::Outline(Outline { color: Color::Rgb(0x0000ff), width, ..Default::default() }));
+    for zoom in [0.71, 1.0, 1.41, 2.0] {
+        for width in [0.5, 1.5, 3.0] {
+            let list = shapes(&[([100.0, 60.0, 200.0, 300.0], RED)], vec![outline(width)]);
+            let size = [(320.0 * zoom) as u32, (360.0 * zoom) as u32];
+            for (renderer, pixels) in draw_both(&list, &zoomed(size, zoom), size) {
+                let y = (180.0 * zoom) as u32;
+                let edge = (200.0 * zoom).floor() as u32;
+                let measured = blue_width(&pixels, size[0], y, edge.saturating_sub(2), edge + (12.0 * zoom) as u32) / zoom;
+                assert!((measured - width).abs() <= 0.12, "{renderer} at density {zoom}: an outline of {width} measures {measured:.3}");
+                if width == 0.5 && zoom == 1.0 {
+                    let darkest = (edge - 2..edge + 4).map(|x| pixel(&pixels, size[0], x, y)[2]).max().unwrap();
+                    assert!(darkest < 200, "{renderer}: half a pixel of outline covers no pixel whole ({darkest})");
+                }
+            }
+        }
+    }
+}
+
+/// Each pixelate cell shows the average of what it covers: a one-pixel line through 16-pixel cells makes cells of 1/16.
+#[test]
+fn pixelate_cells_average_what_they_cover() {
+    let size = [256, 128];
+    let list = shapes(&[([100.0, 16.0, 101.0, 80.0], RED)], vec![effect(Params::Pixelate(Pixelate { size: 16.0, ..Default::default() }))]);
+    for (renderer, pixels) in draw_both(&list, &zoomed(size, 1.0), size) {
+        // The cells are on the effect's grid, from the domain's corner (100, 16): the line's cells are x 100–116.
+        for y in [20u32, 40, 60, 75] {
+            for x in [100u32, 104, 108, 115] {
+                let a = pixel(&pixels, size[0], x, y)[3];
+                assert!((14..=18).contains(&a), "{renderer}: ({x}, {y}) is {a}, a cell 1/16 covered is 16");
+            }
+            assert_eq!(pixel(&pixels, size[0], 120, y)[3], 0, "{renderer}: the next cell is empty");
+        }
+    }
+}
+
+/// A long directional blur of a small bright spot is one unbroken streak of even strength, not copies of the spot.
+#[test]
+fn a_long_directional_blur_is_one_unbroken_streak() {
+    let size = [640, 200];
+    let list = shapes(&[([320.0, 100.0, 322.0, 102.0], RED)], vec![effect(Params::Blur(Blur { mode: BlurMode::Directional, radius: 100.0, ..Default::default() }))]);
+    for (renderer, pixels) in draw_both(&list, &zoomed(size, 1.0), size) {
+        let row = alpha_row(&pixels, size[0], 100);
+        for x in 226..416 {
+            assert!((1.0..=5.0).contains(&row[x]), "{renderer}: the streak at x {x} is {} (two pixels spread over 201 are 2.5 levels)", row[x]);
+        }
+        let sum = row.iter().sum::<f64>() / 255.0;
+        assert!((sum - 2.0).abs() <= 0.25, "{renderer}: the streak holds the spot's two pixels ({sum:.2})");
+    }
+}
+
+/// A zoom blur grows with the distance from its centre and is nothing at the centre.
+#[test]
+fn a_zoom_blur_leaves_its_centre_sharp() {
+    let size = [400, 400];
+    // Vertical stripes four units wide, every other one red, over 98–302 on both axes: the centre (200, 200) is in a stripe.
+    let stripes: Vec<([f32; 4], u32)> = (0..26).map(|i| ([98.0 + i as f32 * 8.0, 98.0, 102.0 + i as f32 * 8.0, 302.0], RED)).collect();
+    let zoom = vec![effect(Params::Blur(Blur { mode: BlurMode::Zoom, radius: 40.0, ..Default::default() }))];
+    let (plain, list) = (shapes(&stripes, vec![]), shapes(&stripes, zoom));
+    for ((renderer, a), (_, b)) in draw_both(&plain, &zoomed(size, 1.0), size).into_iter().zip(draw_both(&list, &zoomed(size, 1.0), size)) {
+        for (x, y) in [(199, 199), (200, 200), (199, 201), (200, 199)] {
+            let (sharp, zoomed_at) = (pixel(&a, size[0], x, y)[3] as i32, pixel(&b, size[0], x, y)[3] as i32);
+            assert!((sharp - zoomed_at).abs() <= 3, "{renderer}: at the centre ({x}, {y}) the stripes stay sharp: {zoomed_at} against {sharp}");
+        }
+        // Near the corner the blur runs along the diagonal, across the stripes: they average out.
+        let corner = pixel(&b, size[0], 114, 114)[3];
+        assert!((60..=200).contains(&corner), "{renderer}: near the corner the stripes are blurred together ({corner})");
+    }
+}
+
+/// On WebGL2 the browser compiles a pipeline on the interface thread, so there a frame creates few
+/// (`Executor::set_compile_limit`): a layer whose pipelines are not all there yet is left as it is, unfiltered, and the
+/// executor says to draw again; the frames after create the rest, and the layer then looks as it does without a limit.
+#[test]
+fn a_frame_that_creates_one_pipeline_filters_its_layer_over_the_frames_after() {
+    use styk_eval::vfx::registry::Glow;
+    use styk_render::effects::executor::{Executor, Frame};
+    use styk_render::wgpu;
+    let Some((device, queue)) = gpu() else { eprintln!("skipped: no graphics adapter"); return };
+    let size = [96u32, 64];
+    let pixels: Vec<u8> = (0..size[0] * size[1]).flat_map(|i| if (30..66).contains(&(i % size[0])) && (20..44).contains(&(i / size[0])) { [255, 0, 0, 255] } else { [0; 4] }).collect();
+    let layer = || {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(texture.as_image_copy(), &pixels, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size[0] * 4), rows_per_image: None }, texture.size());
+        texture
+    };
+    let stack = vec![
+        Arc::new(effect(Params::Glow(Glow { radius: 12.0, ..Default::default() }))),
+        Arc::new(effect(Params::Outline(Outline { width: 2.0, ..Default::default() }))),
+    ];
+    // Draws one frame of the layer; whether it was filtered, and its pixels.
+    let draw = |executor: &mut Executor| {
+        let run = executor.record(&stack, Frame { scale: 1.0, origin: [0.0; 2], output_size: size.map(f64::from) }, size);
+        executor.prepare_own(device, queue, &[&run]);
+        let texture = layer();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let filtered = executor.encode(device, &mut encoder, 0, &run, texture.as_image_copy());
+        queue.submit([encoder.finish()]);
+        (filtered, styk_render::read_frame(device, queue, &texture).2)
+    };
+    let mut unlimited = Executor::new(device, true);
+    let (filtered, expected) = draw(&mut unlimited);
+    assert!(filtered && !unlimited.pending());
+    let needed = unlimited.stats.pipelines;
+    assert!(needed > 2, "the stack needs several pipelines ({needed})");
+
+    let mut limited = Executor::new(device, true);
+    limited.set_compile_limit(Some(1));
+    for frame in 1..needed {
+        let (filtered, drawn) = draw(&mut limited);
+        assert!(!filtered && limited.pending(), "frame {frame} of {needed}: the layer waits for its pipelines");
+        assert_eq!(drawn, pixels, "frame {frame}: a waiting layer is drawn as it is");
+        assert_eq!(limited.stats.pipelines, frame);
+    }
+    let (filtered, drawn) = draw(&mut limited);
+    assert!(filtered && !limited.pending(), "with its last pipeline the layer is filtered");
+    assert_eq!(drawn, expected, "as a frame without a limit filters it");
 }

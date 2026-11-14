@@ -31,17 +31,17 @@ fn blended(rgb: vec3f, b: vec3f, mode: i32) -> vec3f {
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let at = pos.xy;
-  let operation = params.operation;
   let p = params.p;
   let q = params.q;
   let c = sample0(mapped(0u, at));
   let base = sample1(mapped(1u, at));
+  // One brush for every operation (the grade ignores it): its code is written once.
+  let b = brush(at);
   var rgb = straight(c);
   var out = c;
-  if (operation == 70) {
-    let b = brush(at);
-    out = vec4f(mix(rgb, blended(rgb, b.rgb, i32(p.y)), vec3f(p.x * b.a)) * c.a, c.a);
-  } else if (operation == 71) {
+  if (OP == 70) {
+    out = vec4f(mix(rgb, blended(rgb, b.rgb, MODE), vec3f(p.x * b.a)) * c.a, c.a);
+  } else if (OP == 71) {
     rgb *= exp2(p.x);
     rgb = (rgb - vec3f(.5)) * p.y + vec3f(.5);
     let l = dot(rgb, vec3f(.2126, .7152, .0722));
@@ -57,19 +57,17 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     rgb += vec3f(q.y * pow(1. - clamp(l, 0., 1.), 2.) * .4 + q.z * pow(clamp(l, 0., 1.), 2.) * .4);
     rgb = pow(max(rgb, vec3f(0.)), vec3f(1. / q.w));
     out = vec4f(clamp(rgb, vec3f(0.), vec3f(1.)) * c.a, c.a);
-  } else if (operation == 72) {
+  } else if (OP == 72) {
     var xy = (globalAt(at) / params.outputSize - q.xy) * 2.;
     xy.x /= q.z;
     let distance = mix(max(abs(xy.x), abs(xy.y)), length(xy) / 1.41421356237, q.w) / p.z;
     let dark = smoothstep(1. - p.y, 1., distance) * p.x;
-    let b = brush(at);
     out = vec4f(mix(c.rgb, b.rgb * c.a, vec3f(dark * b.a)), c.a);
-  } else if (operation == 73) {
+  } else if (OP == 73) {
     let xy = globalAt(at) / params.outputSize - vec2f(.5);
     let position = dot(xy, vec2f(cos(p.y), sin(p.y))) + .5;
     let distance = abs(position - p.x) * 2. / p.z;
     let light = 1. - smoothstep(1. - p.w, 1., distance);
-    let b = brush(at);
     out = vec4f(clamp(c.rgb + b.rgb * b.a * light * q.x * c.a, vec3f(0.), vec3f(c.a)), c.a);
   }
   return finish(strengthen(out, base), at);

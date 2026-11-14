@@ -2,7 +2,9 @@
 // the layer's texel positions in eighths of a pixel (x, y), its strength (z, 0–65535) and whether there is one (w).
 //   SEED (40): from input 1's alpha. The edge is where the alpha crosses 1/2: a pixel on one side of it next to a pixel on the
 //     other is on the edge, its point where the 1/2 contour of a straight edge through it with that coverage passes, along the
-//     alpha's gradient (Gustavson and Strand's anti-aliased distance), so distances are exact to a fraction of a pixel. A faint
+//     alpha's gradient (Gustavson and Strand's anti-aliased distance), so distances are exact to a fraction of a pixel. A whole
+//     pixel (alpha 0 or 1) beside a partly covered one across the edge is not on it: its coverage cannot say where in that
+//     pixel the edge runs, so it would put the edge on their shared side, up to half a pixel off. A faint
 //     line that never reaches 1/2 (a thin stroke seen small) is on the edge along its ridge, with the strength of its coverage
 //     (twice its alpha), so it keeps a faint outline instead of none.
 //   JUMP (41): the nearest of the seeds p.x pixels away in the eight directions and here, by straight distance or (p.y) by the
@@ -27,6 +29,11 @@ fn edgeDistance(g: vec2f, a: f32) -> f32 {
   return -.5 * (gx + gy) + sqrt(2. * gx * gy * (1. - a));
 }
 
+// Whether a neighbour of alpha `n` is across the edge from a pixel (`inside`) and partly covered.
+fn partlyAcross(n: f32, inside: bool) -> bool {
+  return (n >= .5) != inside && n > 0. && n < 1.;
+}
+
 fn packed(e: vec2f, strength: f32) -> vec4u {
   let at = vec2u(clamp(round(e * 8.), vec2f(0.), vec2f(65535.)));
   return vec4u(at, u32(round(clamp(strength, 0., 1.) * 65535.)), 1u);
@@ -46,6 +53,8 @@ fn seed(pos: vec2f) -> vec4u {
   let inside = a >= .5;
   let across = (l >= .5) != inside || (r >= .5) != inside || (u >= .5) != inside || (d >= .5) != inside;
   if (across) {
+    let whole = a <= 0. || a >= 1.;
+    if (whole && (partlyAcross(l, inside) || partlyAcross(r, inside) || partlyAcross(u, inside) || partlyAcross(d, inside))) { return vec4u(0u); }
     // The alpha's gradient (Sobel), towards the artwork.
     let g = vec2f((ur + 2. * r + dr) - (ul + 2. * l + dl), (dl + 2. * d + dr) - (ul + 2. * u + ur));
     let length_g = length(g);
@@ -85,6 +94,6 @@ fn jump(pos: vec2f) -> vec4u {
 
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4u {
-  if (params.operation == 40) { return seed(pos.xy); }
+  if (OP == 40) { return seed(pos.xy); }
   return jump(pos.xy);
 }

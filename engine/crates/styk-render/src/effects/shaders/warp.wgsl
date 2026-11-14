@@ -16,22 +16,21 @@ fn atGlobal(g: vec2f) -> vec4f {
 @fragment
 fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let at = pos.xy;
-  let operation = params.operation;
   let p = params.p;
   let q = params.q;
   let xy = globalAt(at);
   var out: vec4f;
-  if (operation == 90) {
+  if (OP == 90) {
     let delta = vec2f(cos(p.y), sin(p.y)) * p.x;
     let red = atGlobal(xy + delta * q.x);
     let green = atGlobal(xy + delta * q.y);
     let blue = atGlobal(xy + delta * q.z);
     out = vec4f(red.r, green.g, blue.b, max(red.a, max(green.a, blue.a)));
-  } else if (operation == 91) {
+  } else if (OP == 91) {
     let axis = vec2f(cos(p.z), sin(p.z));
     let wave = sin(dot(xy, axis) * 2. * PI / p.y + p.w);
     out = atGlobal(xy + vec2f(-axis.y, axis.x) * wave * p.x);
-  } else if (operation == 92) {
+  } else if (OP == 92) {
     let delta = xy - q.xy * params.outputSize;
     let distance = length(delta);
     let ring = (distance - p.x) / p.y;

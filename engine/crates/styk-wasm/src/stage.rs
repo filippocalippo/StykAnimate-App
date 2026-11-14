@@ -492,9 +492,10 @@ impl Stage {
     }
 
     /// Whether the last edit frame's generated effects still lack some of their targets'
-    /// earlier positions (they used the current pose): the interface draws again.
+    /// earlier positions (they used the current pose), or it drew a filtered layer unfiltered
+    /// while its effect's shaders compile (WebGL2 compiles one a frame): the interface draws again.
     pub fn refining(&self) -> bool {
-        self.edit.refining()
+        self.edit.refining() || self.renderer.effects_pending()
     }
 
     /// Whether the last frame drawn lacked pictures that are still to come: 0 when it had

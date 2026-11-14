@@ -12,6 +12,9 @@ use crate::resources::{buffer, GpuGroup, GpuView};
 use crate::shading::Shading;
 use crate::{Renderer, Stats, ViewParams, FORMAT, UNIFORM_STRIDE};
 
+/// Effect pipelines a frame on WebGL2 creates (each compiles on the interface thread, tens of milliseconds).
+const EFFECT_COMPILES_PER_FRAME: u32 = 1;
+
 /// One effect run of a frame: a filtered group's layer at `at` on `page` of its depth's atlas.
 struct Work {
     group: usize,
@@ -546,6 +549,10 @@ impl Renderer {
         if !work.is_empty() || self.executor.is_some() {
             let float = self.float_effects;
             let executor = self.executor.get_or_insert_with(|| Executor::new(&self.device, float));
+            // On WebGL2 a pipeline compiles on the interface thread: the stage creates one a frame, drawing the layers still
+            // without theirs unfiltered and asking for the next frame (`Renderer::effects_pending`). An export has them all.
+            let limit = (executor.slow_compiles() && !self.exact_sizes).then_some(EFFECT_COMPILES_PER_FRAME);
+            executor.set_compile_limit(limit);
             executor.prepare(&self.device, &self.queue, records, &work.iter().map(|w| &w.run).collect::<Vec<_>>());
         }
         // Each group's prims are one run inside its depth's pass (the encoder emits them by group).
@@ -735,9 +742,9 @@ impl Renderer {
                     for (index, w) in work.iter().enumerate().filter(|(_, w)| w.round == r && w.depth == depth) {
                         debug_assert_eq!(w.size, w.run.size);
                         let place = wgpu::TexelCopyTextureInfo { texture: atlas, mip_level: 0, origin: wgpu::Origin3d { x: w.at[0], y: w.at[1], z: w.page }, aspect: wgpu::TextureAspect::All };
-                        executor.encode(&self.device, encoder, index, &w.run, place);
+                        let filtered = executor.encode(&self.device, encoder, index, &w.run, place);
                         if let Some(sources) = &mut gpu_sources {
-                            sources[w.group] |= !w.run.steps.is_empty();
+                            sources[w.group] |= filtered;
                         }
                     }
                 }

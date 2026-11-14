@@ -513,6 +513,12 @@ fn flood(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
                 let inside = a >= 0.5;
                 let across = (l >= 0.5) != inside || (r >= 0.5) != inside || (up >= 0.5) != inside || (d >= 0.5) != inside;
                 if across {
+                    // A whole pixel beside a partly covered one across the edge leaves the edge to that one.
+                    let partly = |n: f32| (n >= 0.5) != inside && n > 0.0 && n < 1.0;
+                    if (a <= 0.0 || a >= 1.0) && (partly(l) || partly(r) || partly(up) || partly(d)) {
+                        data.push(None);
+                        continue;
+                    }
                     let g = [(ur + 2.0 * r + dr) - (ul + 2.0 * l + dl), (dl + 2.0 * d + dr) - (ul + 2.0 * up + ur)];
                     let length = (g[0] * g[0] + g[1] * g[1]).sqrt();
                     let n = if length > 0.000001 { [g[0] / length, g[1] / length] } else { [0.0; 2] };
@@ -581,22 +587,21 @@ fn distance_pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Im
             }
             let b = brush(u, at);
             let opacity = p[3] * b[3];
-            let outer = if p[0] > 0.0 { ((p[0] - d) / p[2] + 0.5).clamp(0.0, 1.0) * strength } else { 0.0 };
-            let inner = if p[1] > 0.0 { ((p[1] + d) / p[2] + 0.5).clamp(0.0, 1.0) } else { 0.0 };
+            // Each band's coverage: the artwork grown by the width less the artwork, the artwork less the artwork shrunk by it.
+            let outer = if p[0] > 0.0 { (((p[0] - d) / p[2] + 0.5).clamp(0.0, 1.0) * strength - front[3]).max(0.0) } else { 0.0 };
+            let inner = if p[1] > 0.0 { (front[3] - ((-p[1] - d) / p[2] + 0.5).clamp(0.0, 1.0)).max(0.0) } else { 0.0 };
             let pixel = if q[0] > 0.0 {
-                let ring = ((outer - front[3]).max(0.0) + inner * front[3]).clamp(0.0, 1.0) * opacity;
+                let ring = (outer + inner).clamp(0.0, 1.0) * opacity;
                 [b[0] * ring, b[1] * ring, b[2] * ring, ring]
             } else {
-                let mut pixel = front;
-                if p[1] > 0.0 {
-                    let k = (inner * opacity).clamp(0.0, 1.0);
-                    pixel = [mix(front[0], b[0] * front[3], k), mix(front[1], b[1] * front[3], k), mix(front[2], b[2] * front[3], k), front[3]];
-                }
-                if p[0] > 0.0 {
-                    let ring = outer * opacity;
-                    pixel = add(pixel, [b[0] * ring, b[1] * ring, b[2] * ring, ring], 1.0 - pixel[3]);
-                }
-                pixel
+                let share = (inner / front[3].max(0.000001) * opacity).clamp(0.0, 1.0);
+                let ring = outer * opacity;
+                [
+                    mix(front[0], b[0] * front[3], share) + b[0] * ring,
+                    mix(front[1], b[1] * front[3], share) + b[1] * ring,
+                    mix(front[2], b[2] * front[3], share) + b[2] * ring,
+                    front[3] + ring,
+                ]
             };
             data.push(mix4(front, pixel, u.s[3]));
         }

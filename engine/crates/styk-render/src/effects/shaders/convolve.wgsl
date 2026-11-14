@@ -9,7 +9,8 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let count = i32(params.seed.x);
   for (var i = 0; i < count; i++) {
     let k = u32(i);
-    sum += sample0(c + axis * params.taps[k >> 2u][k & 3u]) * params.weights[k >> 2u][k & 3u];
+    let pick = lane(k);
+    sum += sample0(c + axis * dot(params.taps[k >> 2u], pick)) * dot(params.weights[k >> 2u], pick);
   }
   if (params.p.z > 0.) { sum = strengthen(sum, sample1(mapped(1u, pos.xy))); }
   return finish(sum, pos.xy);

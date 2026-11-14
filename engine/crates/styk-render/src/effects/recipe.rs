@@ -166,6 +166,46 @@ pub struct Uniform {
     pub stop_offsets: [f32; 32],
 }
 
+/// What a pipeline is fixed to (`shaders/common.wgsl`): the operation and the options its shader branches on, read from the
+/// pass's record. Passes that agree share a pipeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Variant {
+    pub op: i32,
+    pub gradient: bool,
+    pub smooth: bool,
+    pub artwork: bool,
+    pub placement: i32,
+    pub mode: i32,
+}
+
+impl Variant {
+    /// The variant of a pass of `op` with record `u`.
+    pub fn of(op: i32, u: &Uniform) -> Variant {
+        let light = op == op::LIGHT;
+        Variant {
+            op,
+            gradient: u.paint_type != 0,
+            smooth: matches!(op, op::LIGHT | op::BLOOM) && u.maps[0][0] < 1.0,
+            artwork: light && u.q[2] > 0.0,
+            placement: if light { u.p[2] as i32 } else { 0 },
+            mode: match op {
+                op::LIGHT => u.p[3] as i32,
+                op::TINT => u.p[1] as i32,
+                op::GRAIN | op::CLOUDS => u.seed[3] as i32,
+                _ => 0,
+            },
+        }
+    }
+
+    /// The WGSL constants that fix a shader to the variant, put before its prelude.
+    pub fn constants(&self) -> String {
+        format!(
+            "const OP: i32 = {};\nconst GRADIENT: bool = {};\nconst SMOOTH: bool = {};\nconst ARTWORK: bool = {};\nconst PLACEMENT: i32 = {};\nconst MODE: i32 = {};\n",
+            self.op, self.gradient, self.smooth, self.artwork, self.placement, self.mode
+        )
+    }
+}
+
 /// Bytes of a [`Uniform`].
 pub const UNIFORM_BYTES: usize = 1024;
 const _: () = assert!(std::mem::size_of::<Uniform>() == UNIFORM_BYTES);
@@ -670,7 +710,7 @@ impl Recorder<'_> {
                 let roll = (p.phase * 1024.0).floor() as u64 + (p.speed * time).floor().max(0.0) as u64;
                 let seed = (p.seed as u64).wrapping_add(roll) as u32;
                 let size = (p.size * scale).max(1.0);
-                let n = Numbers { p: [p.amount, size, p.contrast, p.softness], q: [p.colored as u8 as f64, p.phase + p.speed * time * CLOUDS_RATE, 0.0, 0.0], seed: [seed, p.seed, 0, 0], ..Default::default() };
+                let n = Numbers { p: [p.amount, size, p.contrast, p.softness], q: [p.colored as u8 as f64, p.phase + p.speed * time * CLOUDS_RATE, 0.0, 0.0], seed: [seed, p.seed, CLOUD_OCTAVES, if p.colored { 3 } else { 1 }], ..Default::default() };
                 let op = if p.pattern == styk_eval::vfx::registry::NoisePattern::Clouds { op::CLOUDS } else { op::GRAIN };
                 self.simple(op, base, strength, n)
             }
@@ -876,6 +916,8 @@ const BLOOM_SIGMA: f64 = 1.5;
 pub fn bloom_weight(level: u32, sigma: f64) -> f64 {
     (BLOOM_SIGMA * 2f64.powi(level as i32 - 1) / sigma.max(1e-9)).min(1.0)
 }
+/// Octaves of the clouds.
+const CLOUD_OCTAVES: u32 = 4;
 /// How far the clouds evolve a frame at speed 1 (lattice steps of their third dimension).
 pub const CLOUDS_RATE: f64 = 0.25;
 
