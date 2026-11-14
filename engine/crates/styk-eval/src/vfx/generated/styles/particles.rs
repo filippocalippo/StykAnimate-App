@@ -188,10 +188,10 @@ fn input<'a>(p: &'a Particles, ctx: &Context) -> In<'a> {
 /// that paints, a paler centre, and light around them.
 fn soft_glow(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
-    let ramp = i.ramp(stops(&[(col, 1.0), (deep(col, 0.15), 1.0), (deep(col, 0.3), 1.0)]));
+    let ramp = i.ramp(stops(&[(deep(col, 0.2), 1.0), (deep(col, 0.3), 1.0), (deep(col, 0.4), 1.0)]));
     let s = Spec {
         shape: DISC, softness: 0.9, core: 0.6, rotate: ROTATE_FIXED,
-        emissive: Some(Curve::three(0.35, 0.5, 0.3, 0.25)), blend: i.blend(AUTO),
+        emissive: Some(Curve::three(0.25, 0.5, 0.2, 0.15)), blend: i.blend(AUTO),
         halo: i.halo(Halo { scale: 2.4, alpha: 0.35 }),
         hue_jitter: 0.02, value_jitter: 0.06,
         ..i.base.clone()
@@ -234,10 +234,10 @@ fn star(i: &In<'_>) -> Vec<Spec> {
 /// Bokeh: out-of-focus discs of light with brighter rims, drifting slowly, fading in and out.
 fn bokeh(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
-    let ramp = i.ramp(stops_with(&[(hot(col, 0.35), 1.0, 0.7), (col, 1.0, 0.65), (deep(col, 0.15), 1.0, 0.55)]));
+    let ramp = i.ramp(stops_with(&[(deep(col, 0.2), 1.0, 0.6), (deep(col, 0.3), 1.0, 0.55), (deep(col, 0.4), 1.0, 0.45)]));
     let s = Spec {
         material: m("bokeh"), rotate: ROTATE_FIXED,
-        emissive: Some(Curve::three(0.6, 0.5, 0.55, 0.5)), blend: i.blend(AUTO),
+        emissive: Some(Curve::three(0.4, 0.5, 0.35, 0.3)), blend: i.blend(AUTO),
         hue_jitter: 0.03, value_jitter: 0.1,
         ..i.base.clone()
     };
@@ -303,7 +303,7 @@ fn smoke(i: &In<'_>) -> Vec<Spec> {
     let s = Spec {
         material: m("smoke"), rotate: i.rotate(ROTATE_UPRIGHT),
         erosion: Some(Erosion { from: 0.0, to: 0.5, power: 1.3, edge: 0.5, ..Default::default() }),
-        shade: 0.55 * i.p.shading, blend: i.blend(NORMAL), alpha: 0.7, value_jitter: 0.06,
+        shade: 0.9 * i.p.shading, blend: i.blend(NORMAL), alpha: 0.75, value_jitter: 0.06,
         ..i.base.clone()
     };
     vec![layer(i.sized(s, 1.0, Curve::three(0.45, 0.5, mix(0.45, i.end(), 0.5), i.end())), ramp)]
@@ -312,11 +312,11 @@ fn smoke(i: &In<'_>) -> Vec<Spec> {
 /// Wisp: ghostly streams that curl and drift, pale at their heart, fading as they stretch out.
 fn wisp(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
-    let ramp = i.ramp(stops(&[(hot(col, 0.5), 1.0), (col, 1.0), (deep(col, 0.3), 1.0)]));
+    let ramp = i.ramp(stops(&[(deep(col, 0.25), 1.0), (deep(col, 0.4), 1.0), (deep(col, 0.55), 1.0)]));
     let s = Spec {
         material: m("wisp"), rotate: i.rotate(ROTATE_MOTION), frame_rate: 3.0,
         erosion: Some(Erosion { from: 0.05, to: 0.6, power: 1.2, edge: 0.35, ..Default::default() }),
-        shade: 0.5 * i.p.shading, emissive: Some(Curve::three(0.45, 0.5, 0.35, 0.25)), blend: i.blend(AUTO),
+        shade: 0.6 * i.p.shading, emissive: Some(Curve::three(0.3, 0.5, 0.25, 0.2)), blend: i.blend(AUTO),
         halo: if i.p.glow > 0.0 { i.base.halo } else { None },
         ..i.base.clone()
     };
@@ -455,7 +455,15 @@ fn cartoon_flame(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
     let ramp = i.ramp(stops(&[(tone(col, 0.65, [1.0, 0.95, 0.45]), 1.0), (tone(col, 0.3, [1.0, 0.85, 0.3]), 1.0), (col, 1.0), (deep(col, 0.25), 1.0)]));
     let s = Spec { material: m("toonFlame"), rotate: i.rotate(ROTATE_MOTION), aspect: 1.25, blend: i.blend(NORMAL), ..i.base.clone() };
-    vec![layer(i.sized(s, 1.0, Curve::four(0.3, 0.15, 1.0, 0.6, mix(1.0, i.end(), 0.4), i.end())), ramp)]
+    let curve = Curve::four(0.3, 0.15, 1.0, 0.6, mix(1.0, i.end(), 0.4), i.end());
+    let outer = layer(i.sized(s.clone(), 1.0, curve), ramp);
+    // The yellow heart of the fire: smaller, slower, shorter-lived, no ink, over the flames' roots.
+    let heart = Spec {
+        outline: None, speed_min: s.speed_min * 0.6, speed_max: s.speed_max * 0.7, life_min: s.life_min * 0.6, life_max: s.life_max * 0.7,
+        ..s
+    };
+    let heart = layer(i.share(i.sized(heart, 0.5, curve), 0.8), stops(&[(tone(col, 0.7, [1.0, 0.97, 0.6]), 1.0), (tone(col, 0.45, [1.0, 0.9, 0.35]), 1.0)]));
+    vec![outer, heart]
 }
 
 /// Cartoon star: flat stars that pop out spinning and fall away.
