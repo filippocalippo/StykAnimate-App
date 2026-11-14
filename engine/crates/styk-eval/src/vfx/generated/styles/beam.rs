@@ -58,7 +58,7 @@ fn energy(p: &Beam, ctx: &Context, strands: bool, firing_at_once: bool) -> Vec<S
     // The orb in the hand: a white-hot heart in a ball of the colour with a deep rim, swelling as it
     // charges, and its light.
     let orb = |size: f64, softness: f64, ramp: Ramp, emissive: f64, alpha: f64, blend: u8| layer(Spec {
-        start: ctx.start, emit_dur: (fire_end - ctx.start).max(1.0), rate: 1.5, life_min: 6.0, life_max: 8.0, emit_radius: 0.6 * r,
+        start: ctx.start, emit_dur: (fire_end - ctx.start).max(1.0), rate: 1.0, life_min: 6.0, life_max: 8.0, emit_radius: 0.6 * r,
         softness, size0: size, size_over_life: Some(Curve::three(0.88, 0.5, 1.0, 0.92)), size_jitter: 0.1,
         alpha_over_life: Some(Curve::three(0.0, 0.2, alpha, 0.0)),
         clip_fade_in: charge.max(1.0), clip_fade_out: if ctx.timed { 8.0 } else { 0.0 },

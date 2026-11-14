@@ -69,10 +69,10 @@ fn aura_fire(a: &AuraInput) -> AuraParts {
         // Its light: a tall glow on the figure and around it.
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 3.0, life_min: 14.0, life_max: 20.0, emit_shape: BODY, emit_radius: 4.0,
+                placement: Placement::Behind, rate: 1.5, life_min: 14.0, life_max: 20.0, emit_shape: BODY, emit_radius: 4.0,
                 speed_min: 0.2, speed_max: 0.6, angle: UP, spread: 0.6, gravity: -0.02, softness: 1.8, rotate: ROTATE_FIXED, aspect: 1.5,
                 size0: 46.0 * s, size_over_life: Some(Curve::three(0.75, 0.4, 1.0, 1.15)), size_jitter: 0.15,
-                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.32 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.45 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
                 ..base.clone()
             },
             stops(&[(heat, 1.0), (col, 1.0)]),
@@ -165,18 +165,18 @@ fn aura_electric(a: &AuraInput) -> AuraParts {
         // Its cold light on the figure and around it, flickering with the strikes.
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 4.0, life_min: 6.0, life_max: 10.0, emit_shape: BODY, emit_radius: 4.0,
+                placement: Placement::Behind, rate: 2.0, life_min: 6.0, life_max: 10.0, emit_shape: BODY, emit_radius: 4.0,
                 speed_min: 0.1, speed_max: 0.4, spread: TAU, softness: 1.9, rotate: ROTATE_FIXED, aspect: 1.45,
                 size0: 44.0 * s, size_over_life: Some(Curve::three(0.85, 0.4, 1.0, 1.1)), size_jitter: 0.15, flicker: 0.45,
                 // Mostly light; a little paint, so a cold haze shows on a white page too.
-                alpha_over_life: Some(Curve::three(0.0, 0.3, 0.32 * li, 0.0)), emissive: Some(Curve::three(light(0.8), 0.5, light(0.8), light(0.8))),
+                alpha_over_life: Some(Curve::three(0.0, 0.3, 0.45 * li, 0.0)), emissive: Some(Curve::three(light(0.8), 0.5, light(0.8), light(0.8))),
                 ..base.clone()
             },
             stops(&[(pale, 1.0), (col, 1.0)]),
         ),
         main: vec![
             // Bolts behind the figure, reaching out of it.
-            bolts(62.0, 5.0, 1.3, 1.5, Placement::Behind),
+            bolts(62.0, 4.0, 1.3, 1.5, Placement::Behind),
             // A few short ones crawling over it, thin enough to leave it readable.
             bolts(30.0, 2.0, 0.75, 1.1, Placement::Front),
         ],
@@ -229,10 +229,10 @@ fn aura_shadow(a: &AuraInput) -> AuraParts {
         // The colour's light behind the figure, which the darkness stands out against on a dark page.
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 3.0, life_min: 14.0, life_max: 22.0, emit_shape: BODY, emit_radius: 4.0,
+                placement: Placement::Behind, rate: 1.5, life_min: 14.0, life_max: 22.0, emit_shape: BODY, emit_radius: 4.0,
                 speed_min: 0.2, speed_max: 0.6, angle: UP, spread: 0.6, gravity: -0.02, softness: 1.8, rotate: ROTATE_FIXED, aspect: 1.55,
                 size0: 52.0 * s, size_over_life: Some(Curve::three(0.8, 0.4, 1.0, 1.1)), size_jitter: 0.15,
-                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.45 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.63 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
                 ..base.clone()
             },
             stops(&[(rim, 1.0), (col, 1.0)]),
@@ -302,10 +302,10 @@ fn aura_holy(a: &AuraInput) -> AuraParts {
         // The figure lit from within.
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 3.0, life_min: 16.0, life_max: 24.0, emit_shape: BODY, emit_radius: 4.0,
+                placement: Placement::Behind, rate: 1.5, life_min: 16.0, life_max: 24.0, emit_shape: BODY, emit_radius: 4.0,
                 speed_min: 0.1, speed_max: 0.4, angle: UP, spread: 0.6, gravity: -0.01, softness: 2.0, rotate: ROTATE_FIXED, aspect: 1.6,
                 size0: 44.0 * s, size_over_life: Some(Curve::three(0.85, 0.4, 1.0, 1.1)), size_jitter: 0.12,
-                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.16 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.22 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
                 ..base.clone()
             },
             stops(&[(WHITE, 1.0), (soft, 1.0)]),
@@ -374,10 +374,10 @@ fn aura_ice(a: &AuraInput) -> AuraParts {
         )],
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 3.0, life_min: 14.0, life_max: 22.0, emit_shape: BODY, emit_radius: 4.0,
+                placement: Placement::Behind, rate: 1.5, life_min: 14.0, life_max: 22.0, emit_shape: BODY, emit_radius: 4.0,
                 speed_min: 0.1, speed_max: 0.4, spread: TAU, softness: 1.9, rotate: ROTATE_FIXED, aspect: 1.5,
                 size0: 44.0 * s, size_over_life: Some(Curve::three(0.85, 0.4, 1.0, 1.1)), size_jitter: 0.12,
-                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.26 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.36 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
                 ..base.clone()
             },
             stops(&[(frost, 1.0), (col, 1.0)]),
@@ -453,10 +453,10 @@ fn aura_wind(a: &AuraInput) -> AuraParts {
         )],
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 3.0, life_min: 12.0, life_max: 20.0, emit_shape: BODY, emit_radius: 4.0,
+                placement: Placement::Behind, rate: 1.5, life_min: 12.0, life_max: 20.0, emit_shape: BODY, emit_radius: 4.0,
                 speed_min: 0.1, speed_max: 0.4, spread: TAU, softness: 2.0, rotate: ROTATE_FIXED, aspect: 1.5,
                 size0: 40.0 * s, size_over_life: Some(Curve::three(0.85, 0.4, 1.0, 1.1)),
-                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.16 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.22 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
                 ..base.clone()
             },
             stops(&[(pale, 1.0), (col, 1.0)]),
@@ -505,9 +505,9 @@ fn aura_toon(a: &AuraInput) -> AuraParts {
         )],
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 3.0, life_min: 12.0, life_max: 18.0, emit_shape: BODY, emit_radius: 4.0,
+                placement: Placement::Behind, rate: 1.5, life_min: 12.0, life_max: 18.0, emit_shape: BODY, emit_radius: 4.0,
                 speed_min: 0.2, speed_max: 0.6, angle: UP, spread: 0.6, softness: 1.6, rotate: ROTATE_FIXED, aspect: 1.5,
-                size0: 44.0 * s, alpha_over_life: Some(Curve::three(0.0, 0.4, 0.22 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+                size0: 44.0 * s, alpha_over_life: Some(Curve::three(0.0, 0.4, 0.31 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
                 ..base.clone()
             },
             stops(&[(light_c, 1.0), (col, 1.0)]),
@@ -579,10 +579,10 @@ fn aura_spirit(a: &AuraInput) -> AuraParts {
         ],
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 3.0, life_min: 10.0, life_max: 16.0, emit_shape: BODY, emit_radius: 4.0,
+                placement: Placement::Behind, rate: 1.5, life_min: 10.0, life_max: 16.0, emit_shape: BODY, emit_radius: 4.0,
                 speed_min: 0.2, speed_max: 0.6, angle: UP, spread: 0.6, gravity: -0.03, softness: 1.8, rotate: ROTATE_FIXED, aspect: 1.6,
                 size0: 50.0 * s, size_over_life: Some(Curve::three(0.8, 0.4, 1.0, 1.15)), size_jitter: 0.12, flicker: 0.2,
-                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.42 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.59 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
                 ..base.clone()
             },
             stops(&[(pale, 1.0), (col, 1.0)]),
