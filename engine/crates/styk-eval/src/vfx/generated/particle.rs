@@ -294,7 +294,11 @@ impl<'a> Evaluator<'a> {
             vy = up / l;
         }
         if s.radial != 0.0 {
-            let (rx, ry) = (px - ax, py - ay);
+            let (cx, cy) = match s.radial_above {
+                Some(h) => (ax, r[row::GROUND] as f64 - h * scale),
+                None => (ax, ay),
+            };
+            let (rx, ry) = (px - cx, py - cy);
             let rl = fm::hypot(rx, ry);
             if rl > 1e-3 {
                 let sg = s.radial.signum();

@@ -274,6 +274,9 @@ pub struct Spec {
     pub drag: f64,
     /// Bends the launch away from (+) or toward (−) the emitter's centre.
     pub radial: f64,
+    /// Bends it from a point this far above the target's lowest point instead (units of the layer, so
+    /// scaled like its sizes): an aura's flames all lean in to a point above the head.
+    pub radial_above: Option<f64>,
     pub turb: f64,
     pub turb_scale: f64,
     pub spin: f64,
@@ -391,6 +394,7 @@ impl Default for Spec {
             wind: 0.0,
             drag: 0.0,
             radial: 0.0,
+            radial_above: None,
             turb: 0.0,
             turb_scale: 0.01,
             spin: 0.0,

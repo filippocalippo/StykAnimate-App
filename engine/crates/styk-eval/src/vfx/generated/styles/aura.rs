@@ -18,6 +18,8 @@ struct AuraParts {
 }
 
 struct AuraInput {
+    /// The effect colour: a colour or a gradient.
+    color: crate::vfx::Color,
     col: [f64; 3],
     /// The effect colour's own ramp when it is a gradient.
     paint: Option<Ramp>,
@@ -31,21 +33,37 @@ struct AuraInput {
 fn aura_fire(a: &AuraInput) -> AuraParts {
     let AuraInput { col, i, s, t, ref base, .. } = *a;
     let li = i.min(1.0);
+    let white_hot = tone(col, 0.2, [1.0, 0.97, 0.82]);
     let heat = tone(col, 0.55, [1.0, 0.95, 0.72]);
     // Whatever the colour, fire cools through orange to ember red: the colour leads, the warm end follows.
     let orange = tone(col, 0.55, [1.0, 0.42, 0.08]);
     let ember = tone(col, 0.35, [0.62, 0.1, 0.04]);
-    // Flames burn white-hot at the body, through the colour to ember red at their tips.
-    let flame = a.paint.unwrap_or_else(|| stops(&[(tone(col, 0.3, [1.0, 0.92, 0.55]), 1.0), (col, 1.0), (tone(col, 0.5, orange), 1.0), (orange, 1.0), (tone(orange, 0.5, ember), 1.0), (ember, 1.0)]));
-    // Tongues of flame licking up from the whole body, shrinking and breaking up as they rise.
+    let deep = tone(ember, 0.4, [0.3, 0.03, 0.02]);
+    let light = |auto: f64| match base.blend {
+        ADD => 1.0,
+        NORMAL => 0.0,
+        _ => auto,
+    };
+    // Three flames inside one another, as fire is: white-hot along the body, the colour around it,
+    // and an outer flame of orange cooling to deep red that gives the aura its silhouette and a
+    // darker edge on a light page. A gradient runs from the heart of the fire to its edge.
+    let (outer, middle, inner) = match a.paint {
+        Some(_) => (gradient_part(&a.color, 0.55, 1.0), gradient_part(&a.color, 0.25, 0.75), gradient_part(&a.color, 0.0, 0.45)),
+        None => (
+            stops(&[(orange, 1.0), (tone(orange, 0.5, ember), 1.0), (ember, 1.0), (deep, 1.0)]),
+            stops(&[(col, 1.0), (tone(col, 0.5, orange), 1.0), (orange, 1.0), (ember, 1.0)]),
+            stops(&[(white_hot, 1.0), (heat, 1.0), (tone(heat, 0.5, col), 1.0), (col, 1.0)]),
+        ),
+    };
+    // Tongues of flame born along the whole body, licking up and leaning in to a point above the head:
+    // together they draw a flame the figure stands in, wider than the body.
+    let apex = 160.0 + 70.0 * s;
     let tongues = Spec {
-        emit_shape: BODY, emit_radius: 9.0, angle: UP, spread: 0.25, radial: 0.3, speed_min: 1.2 * s, speed_max: 2.8 * s, drag: 0.03, gravity: -0.07 * s,
-        curl: 8.0 * t, curl_scale: 0.014, inherit: 0.5,
-        material: m("flame"), rotate: ROTATE_MOTION, frame_rate: 2.0, aspect: 1.35,
-        size_over_life: Some(Curve::four(0.55, 0.3, 1.0, 0.7, 0.75, 0.4)), size_jitter: 0.35,
-        erosion: Some(Erosion { from: 0.18, to: 0.72, power: 1.4, edge: 0.04, rim: 1.0, rim_width: 0.32, rim_color: tone(orange, 0.6, ember) }),
-        alpha_over_life: Some(Curve::four(0.0, 0.06, 1.0, 0.85, 1.0, 0.0)), shade: 0.9,
-        emissive: Some(Curve::three(0.3, 0.5, 0.15, 0.05)), hue_jitter: 0.012, value_jitter: 0.04,
+        emit_shape: BODY, angle: UP, spread: 0.18, radial_above: Some(apex), drag: 0.02,
+        curl: 8.0 * t, curl_scale: 0.012, inherit: 0.5,
+        material: m("flame"), rotate: ROTATE_MOTION, frame_rate: 2.0, aspect: 1.6,
+        size_jitter: 0.35, shade: 0.9, hue_jitter: 0.012, value_jitter: 0.05,
+        alpha_over_life: Some(Curve::four(0.0, 0.14, 1.0, 0.8, 1.0, 0.0)),
         ..base.clone()
     };
     AuraParts {
@@ -63,30 +81,64 @@ fn aura_fire(a: &AuraInput) -> AuraParts {
             },
             stops(&[(tone([0.42, 0.36, 0.33], 0.25, col), 1.0), ([0.5, 0.47, 0.45], 1.0)]),
         )],
-        // Its light on the figure and around it.
+        // Its light: a tall glow on the figure and around it.
         glow: layer(
             Spec {
-                placement: Placement::Behind, rate: 4.0, life_min: 12.0, life_max: 18.0, emit_shape: BODY, emit_radius: 6.0,
-                speed_min: 0.2, speed_max: 0.8, angle: UP, spread: 1.0, gravity: -0.02, softness: 1.8,
-                size0: 34.0 * s, size_over_life: Some(Curve::three(0.7, 0.4, 1.0, 1.2)),
-                alpha_over_life: Some(Curve::three(0.0, 0.35, 0.3 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+                placement: Placement::Behind, rate: 3.0, life_min: 14.0, life_max: 20.0, emit_shape: BODY, emit_radius: 4.0,
+                speed_min: 0.2, speed_max: 0.6, angle: UP, spread: 0.6, gravity: -0.02, softness: 1.8, rotate: ROTATE_FIXED, aspect: 1.5,
+                size0: 46.0 * s, size_over_life: Some(Curve::three(0.75, 0.4, 1.0, 1.15)), size_jitter: 0.15,
+                alpha_over_life: Some(Curve::three(0.0, 0.4, 0.32 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
                 ..base.clone()
             },
             stops(&[(heat, 1.0), (col, 1.0)]),
         ),
         main: vec![
-            // The great flames behind the figure.
-            layer(Spec { placement: Placement::Behind, rate: 11.0, life_min: 16.0, life_max: 26.0, size0: 30.0 * (0.7 + 0.3 * s), ..tongues.clone() }, flame),
-            // A few smaller licks in front of it.
-            layer(Spec { placement: Placement::Front, rate: 1.6, life_min: 10.0, life_max: 15.0, size0: 14.0, speed_min: 1.2 * s, speed_max: 2.2 * s, emit_radius: 2.0, ..tongues.clone() }, flame),
+            // The outer flame, behind the figure: wide, reaching up past the head, cooling to deep red
+            // and tearing apart at its tips.
+            layer(Spec {
+                placement: Placement::Behind, rate: 4.5, life_min: 16.0, life_max: 26.0, emit_radius: 36.0, squash: 0.4, radial: -0.55,
+                speed_min: 2.4 * s, speed_max: 3.6 * s, gravity: -0.06 * s,
+                size0: 40.0 * (0.7 + 0.3 * s), size_over_life: Some(Curve::four(0.55, 0.25, 1.0, 0.65, 0.8, 0.3)),
+                erosion: Some(Erosion { from: 0.28, to: 0.85, power: 1.0, edge: 0.03, rim: 1.0, rim_width: 0.25, rim_color: deep }),
+                emissive: Some(Curve::three(light(0.1), 0.5, light(0.05), 0.0)),
+                ..tongues.clone()
+            }, outer),
+            // The flame of the colour inside it.
+            layer(Spec {
+                placement: Placement::Behind, rate: 4.5, life_min: 12.0, life_max: 18.0, emit_radius: 14.0, squash: 0.5, radial: -0.45,
+                speed_min: 2.4 * s, speed_max: 3.8 * s, gravity: -0.06 * s,
+                size0: 32.0 * (0.7 + 0.3 * s), size_over_life: Some(Curve::four(0.55, 0.25, 1.0, 0.65, 0.8, 0.3)),
+                erosion: Some(Erosion { from: 0.25, to: 0.85, power: 1.0, edge: 0.04, rim: 0.7, rim_width: 0.2, rim_color: orange }),
+                emissive: Some(Curve::three(light(0.25), 0.5, light(0.15), light(0.05))),
+                ..tongues.clone()
+            }, middle),
+            // White-hot along the body.
+            layer(Spec {
+                placement: Placement::Behind, rate: 5.0, life_min: 7.0, life_max: 11.0, emit_radius: 4.0, squash: 0.6, radial: -0.3,
+                speed_min: 2.6 * s, speed_max: 4.2 * s, gravity: -0.06 * s,
+                size0: 22.0 * (0.7 + 0.3 * s), size_over_life: Some(Curve::four(0.6, 0.25, 1.0, 0.7, 0.8, 0.35)),
+                erosion: Some(Erosion { from: 0.2, to: 0.8, power: 1.2, edge: 0.05, rim: 0.5, rim_width: 0.2, rim_color: col }),
+                emissive: Some(Curve::three(light(0.5), 0.5, light(0.35), light(0.2))),
+                ..tongues.clone()
+            }, inner),
+            // A few small licks in front, at the body's edges, that leave the figure readable.
+            layer(Spec {
+                placement: Placement::Front, rate: 0.8, life_min: 7.0, life_max: 11.0, emit_radius: 20.0, squash: 0.45, radial: -0.4,
+                speed_min: 2.0 * s, speed_max: 3.2 * s, gravity: -0.06 * s,
+                size0: 14.0, size_over_life: Some(Curve::four(0.5, 0.3, 1.0, 0.7, 0.7, 0.3)),
+                erosion: Some(Erosion { from: 0.25, to: 0.85, power: 1.2, edge: 0.05, rim: 1.0, rim_width: 0.3, rim_color: ember }),
+                alpha_over_life: Some(Curve::four(0.0, 0.1, 0.9, 0.7, 0.9, 0.0)),
+                emissive: Some(Curve::three(light(0.5), 0.5, light(0.35), light(0.2))),
+                ..tongues.clone()
+            }, middle),
         ],
         // Embers flying up and swirling away.
         particles: layer(
             Spec {
-                rate: 3.5, life_min: 26.0, life_max: 46.0, emit_shape: BODY, emit_radius: 18.0, speed_min: 1.0, speed_max: 2.8 * s,
-                angle: UP, spread: 1.0, gravity: -0.04, drag: 0.02, curl: 18.0 * t, curl_scale: 0.02, flicker: 0.5,
-                shape: SPARK, rotate: ROTATE_MOTION, aspect: 1.8, size0: 1.3, size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.2)), size_jitter: 0.5,
-                emissive: Some(Curve::three(0.6, 0.5, 0.5, 0.4)), alpha_over_life: Some(Curve::four(0.0, 0.1, 1.0, 0.7, 0.85, 0.0)),
+                rate: 3.0, life_min: 26.0, life_max: 46.0, emit_shape: BODY, emit_radius: 28.0, squash: 0.5, speed_min: 1.4, speed_max: 3.4 * s,
+                angle: UP, spread: 0.9, gravity: -0.04, drag: 0.02, curl: 18.0 * t, curl_scale: 0.02, flicker: 0.5,
+                shape: SPARK, rotate: ROTATE_MOTION, aspect: 1.8, size0: 1.6, size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.2)), size_jitter: 0.5,
+                emissive: Some(Curve::three(light(0.6), 0.5, light(0.5), light(0.4))), alpha_over_life: Some(Curve::four(0.0, 0.1, 1.0, 0.7, 0.85, 0.0)),
                 ..base.clone()
             },
             stops(&[([1.0, 0.9, 0.55], 1.0), (heat, 1.0), (orange, 1.0), (ember, 1.0)]),
@@ -305,6 +357,18 @@ fn aura_spirit(a: &AuraInput) -> AuraParts {
     }
 }
 
+/// The part of a gradient from `from` to `to` (0–1) as a ramp: a gradient gives each of a style's
+/// nested layers its own stretch, from the heart of the effect to its edge.
+fn gradient_part(color: &crate::vfx::Color, from: f64, to: f64) -> Ramp {
+    let mut r = Ramp { colors: [[0.0; 4]; COLOR_STOPS], opacity: [0.0; COLOR_STOPS] };
+    for k in 0..COLOR_STOPS {
+        let (c, o) = paint::sample_color(color, from + (to - from) * k as f64 / (COLOR_STOPS - 1) as f64);
+        r.colors[k] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0];
+        r.opacity[k] = o;
+    }
+    r
+}
+
 pub(super) fn aura(p: &Aura, ctx: &Context) -> Vec<Spec> {
     let style: fn(&AuraInput) -> AuraParts = match p.style.index() {
         1 => aura_electric,
@@ -331,7 +395,7 @@ pub(super) fn aura(p: &Aura, ctx: &Context) -> Vec<Spec> {
         ..Spec::default()
     };
     let paint = paint::is_gradient(&p.color).then(|| paint_ramp(&p.color, 1.0));
-    let parts = style(&AuraInput { col: paint_color(&p.color), paint, i: p.intensity, s: p.height, t: p.turbulence, sc, base });
+    let parts = style(&AuraInput { color: p.color.clone(), col: paint_color(&p.color), paint, i: p.intensity, s: p.height, t: p.turbulence, sc, base });
     let mut out = Vec::new();
     if p.dust {
         out.extend(parts.ground);
