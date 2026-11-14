@@ -50,6 +50,19 @@ pub(super) fn glow_blend(blend: GeneratorBlend) -> u8 {
     }
 }
 
+/// Size over life of a shape that pops in, holds and shrinks away (a cartoon flame, a star, a glint).
+pub(super) const POP: Curve = Curve::four(0.25, 0.12, 1.0, 0.75, 1.0, 0.0);
+
+/// How much light a layer gives off for blend `blend`: Glow is all light, Solid all paint, Auto the
+/// style's own share `auto`.
+pub(super) fn light_share(blend: u8, auto: f64) -> f64 {
+    match blend {
+        ADD => 1.0,
+        NORMAL => 0.0,
+        _ => auto,
+    }
+}
+
 /// Figures are authored at many scales; auras follow the target's size (`Anchor::measure`,
 /// which its pose does not change): the scale of a layer with `body_scaled` at a birth.
 pub fn body_scale(measure: f64) -> f64 {
