@@ -53,8 +53,8 @@ function previewTick(effects,duration){
 async function renderPreview(mode,key){
  const effects=previewEffects(mode,key);if(!effects)return null;
  const duration=48,beam=effects.some(([type])=>type==='beam'),tick=previewTick(effects,duration),generated=effects.some(([type])=>isGeneratorType(type));
- // Camera effects (a vignette, scanlines, a shockwave) belong to the scene.
- const scene=effects.some(([type])=>VFX_REGISTRY[type]?.scene||type==='vignette');
+ // Camera effects (a vignette, scanlines, a shockwave) belong to the scene, and so does a preset made for it (rain).
+ const scene=(mode==='presets'&&VFX_PRESETS[key]?.target==='scene')||effects.some(([type])=>VFX_REGISTRY[type]?.scene||type==='vignette');
  const report=emptyDocument(),figure=report.figure_types[0];Object.assign(report,{canvas_width:STAGE.width,canvas_height:STAGE.height});
  for(const segment of figure.segments)segment.color_rgb=FIGURE;
  // The timeline runs to the preview's tick: its last keyframe is exposed for one tick, so a second ends it.

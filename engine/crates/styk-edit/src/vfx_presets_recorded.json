@@ -1,0 +1,414 @@
+{
+ "Power up": [
+  [
+   "glow",
+   {
+    "color": {
+     "type": "linear",
+     "angle": 90,
+     "stops": [
+      {
+       "offset": 0,
+       "color": [
+        80,
+        150,
+        255
+       ],
+       "opacity": 1
+      },
+      {
+       "offset": 1,
+       "color": [
+        160,
+        60,
+        255
+       ],
+       "opacity": 1
+      }
+     ]
+    },
+    "radius": 20,
+    "intensity": 1.5,
+    "spread": 2,
+    "coreColor": 16777215,
+    "coreMix": 0.25
+   }
+  ],
+  [
+   "wave",
+   {
+    "strength": 2,
+    "wavelength": 80
+   }
+  ]
+ ],
+ "Teleport": [
+  [
+   "dissolve",
+   {
+    "progress": 0.4,
+    "color": {
+     "type": "linear",
+     "angle": 90,
+     "stops": [
+      {
+       "offset": 0,
+       "color": [
+        30,
+        240,
+        255
+       ],
+       "opacity": 1
+      },
+      {
+       "offset": 1,
+       "color": [
+        100,
+        80,
+        255
+       ],
+       "opacity": 1
+      }
+     ]
+    },
+    "edge": 0.12
+   }
+  ],
+  [
+   "glow",
+   {
+    "color": 4840703,
+    "intensity": 1.4,
+    "radius": 10
+   }
+  ]
+ ],
+ "Impact": [
+  [
+   "tint",
+   {
+    "color": 16777215,
+    "mix": 0.6
+   }
+  ],
+  [
+   "rgbSplit",
+   {
+    "amount": 8,
+    "angle": 15
+   }
+  ],
+  [
+   "blur",
+   {
+    "mode": 1,
+    "radius": 3,
+    "angle": 15
+   }
+  ]
+ ],
+ "Hologram": [
+  [
+   "tint",
+   {
+    "color": 3268607,
+    "mix": 0.8
+   }
+  ],
+  [
+   "rgbSplit",
+   {
+    "amount": 2
+   }
+  ],
+  [
+   "noise",
+   {
+    "amount": 0.08,
+    "colored": 1
+   }
+  ],
+  [
+   "glow",
+   {
+    "color": 3002367,
+    "radius": 8,
+    "intensity": 0.8
+   }
+  ]
+ ],
+ "Ice": [
+  [
+   "tint",
+   {
+    "color": {
+     "type": "linear",
+     "angle": 90,
+     "stops": [
+      {
+       "offset": 0,
+       "color": [
+        60,
+        135,
+        255
+       ],
+       "opacity": 1
+      },
+      {
+       "offset": 1,
+       "color": [
+        210,
+        255,
+        255
+       ],
+       "opacity": 1
+      }
+     ]
+    },
+    "mix": 0.8
+   }
+  ],
+  [
+   "outline",
+   {
+    "color": 12252671,
+    "width": 2
+   }
+  ],
+  [
+   "lightSweep",
+   {
+    "intensity": 0.7
+   }
+  ]
+ ],
+ "Poison": [
+  [
+   "tint",
+   {
+    "color": {
+     "type": "linear",
+     "angle": 90,
+     "stops": [
+      {
+       "offset": 0,
+       "color": [
+        170,
+        255,
+        50
+       ],
+       "opacity": 1
+      },
+      {
+       "offset": 1,
+       "color": [
+        60,
+        150,
+        20
+       ],
+       "opacity": 1
+      }
+     ]
+    },
+    "mix": 0.8
+   }
+  ],
+  [
+   "glow",
+   {
+    "color": 9174818,
+    "radius": 14,
+    "intensity": 1.2
+   }
+  ],
+  [
+   "wave",
+   {
+    "strength": 2,
+    "wavelength": 60
+   }
+  ]
+ ],
+ "Neon": [
+  [
+   "outline",
+   {
+    "color": {
+     "type": "linear",
+     "angle": 90,
+     "stops": [
+      {
+       "offset": 0,
+       "color": [
+        255,
+        50,
+        150
+       ],
+       "opacity": 1
+      },
+      {
+       "offset": 1,
+       "color": [
+        70,
+        200,
+        255
+       ],
+       "opacity": 1
+      }
+     ]
+    },
+    "width": 3,
+    "only": 1
+   }
+  ],
+  [
+   "glow",
+   {
+    "color": 15352063,
+    "radius": 16,
+    "intensity": 1.2
+   }
+  ]
+ ],
+ "Golden hour": [
+  [
+   "grade",
+   {
+    "temperature": 0.5,
+    "shadows": 0.15,
+    "highlights": -0.1,
+    "saturation": 0.85
+   }
+  ],
+  [
+   "bloom",
+   {
+    "threshold": 0.7,
+    "intensity": 0.6,
+    "color": {
+     "type": "linear",
+     "angle": 90,
+     "stops": [
+      {
+       "offset": 0,
+       "color": [
+        255,
+        220,
+        150
+       ],
+       "opacity": 1
+      },
+      {
+       "offset": 1,
+       "color": [
+        255,
+        160,
+        100
+       ],
+       "opacity": 1
+      }
+     ]
+    }
+   }
+  ]
+ ],
+ "Retro screen": [
+  [
+   "grade",
+   {
+    "saturation": 0.65,
+    "temperature": 0.2
+   }
+  ],
+  [
+   "pixelate",
+   {
+    "size": 4
+   }
+  ],
+  [
+   "noise",
+   {
+    "amount": 0.08
+   }
+  ],
+  [
+   "crt",
+   {
+    "amount": 0.2,
+    "curvature": 0.06,
+    "chromatic": 1
+   }
+  ]
+ ],
+ "Energy": [
+  [
+   "tint",
+   {
+    "color": 5623039,
+    "mix": 0.65
+   }
+  ],
+  [
+   "glow",
+   {
+    "color": 5623039,
+    "radius": 16,
+    "intensity": 1.2
+   }
+  ]
+ ],
+ "Hit flash": [
+  [
+   "tint",
+   {
+    "color": 16777215,
+    "mix": 1
+   }
+  ],
+  [
+   "glow",
+   {
+    "color": 16777215,
+    "radius": 6,
+    "intensity": 0.7
+   }
+  ]
+ ],
+ "Ghost": [
+  [
+   "tint",
+   {
+    "color": 10075135,
+    "mix": 0.75
+   }
+  ],
+  [
+   "blur",
+   {
+    "radius": 2
+   }
+  ]
+ ],
+ "Retro": [
+  [
+   "grade",
+   {
+    "saturation": 0.65,
+    "temperature": 0.2
+   }
+  ],
+  [
+   "pixelate",
+   {
+    "size": 5
+   }
+  ],
+  [
+   "noise",
+   {
+    "amount": 0.12
+   }
+  ]
+ ]
+}

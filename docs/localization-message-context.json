@@ -7336,7 +7336,7 @@
   },
   "common.noResults": {
     "locations": [
-      "src/vfx-inspector.mjs:340"
+      "src/vfx-inspector.mjs:339"
     ],
     "context": "const list=group.items.filter(item=>!query||item.searchKeys.some(key=>interfaceText(key).toLowerCase().includes(query))||item.aboutKey&&interfaceText(item.about"
   },
@@ -32666,7 +32666,7 @@
   "vfxCatalog.category.blur": {
     "locations": [
       "src/vfx-localization.mjs:200",
-      "src/vfx-localization.mjs:1368"
+      "src/vfx-localization.mjs:1416"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.blur\","
   },
@@ -32675,7 +32675,7 @@
       "src/vfx-localization.mjs:44",
       "src/vfx-localization.mjs:230",
       "src/vfx-localization.mjs:338",
-      "src/vfx-localization.mjs:1366"
+      "src/vfx-localization.mjs:1414"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.color\","
   },
@@ -32686,7 +32686,7 @@
       "src/vfx-localization.mjs:404",
       "src/vfx-localization.mjs:428",
       "src/vfx-localization.mjs:452",
-      "src/vfx-localization.mjs:1365"
+      "src/vfx-localization.mjs:1413"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.distort\","
   },
@@ -32697,7 +32697,7 @@
       "src/vfx-localization.mjs:934",
       "src/vfx-localization.mjs:1071",
       "src/vfx-localization.mjs:1188",
-      "src/vfx-localization.mjs:1370"
+      "src/vfx-localization.mjs:1418"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.generate\","
   },
@@ -32708,35 +32708,47 @@
       "src/vfx-localization.mjs:166",
       "src/vfx-localization.mjs:479",
       "src/vfx-localization.mjs:503",
-      "src/vfx-localization.mjs:1367"
+      "src/vfx-localization.mjs:1415"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.light\","
   },
   "vfxCatalog.category.looks": {
     "locations": [
-      "src/vfx-localization.mjs:1313",
-      "src/vfx-localization.mjs:1317",
-      "src/vfx-localization.mjs:1321",
-      "src/vfx-localization.mjs:1325",
-      "src/vfx-localization.mjs:1329",
-      "src/vfx-localization.mjs:1333",
-      "src/vfx-localization.mjs:1337",
-      "src/vfx-localization.mjs:1341",
-      "src/vfx-localization.mjs:1345",
-      "src/vfx-localization.mjs:1349",
+      "src/vfx-localization.mjs:1348",
       "src/vfx-localization.mjs:1353",
-      "src/vfx-localization.mjs:1357",
-      "src/vfx-localization.mjs:1361",
-      "src/vfx-localization.mjs:1371"
+      "src/vfx-localization.mjs:1358",
+      "src/vfx-localization.mjs:1363",
+      "src/vfx-localization.mjs:1368",
+      "src/vfx-localization.mjs:1373",
+      "src/vfx-localization.mjs:1378",
+      "src/vfx-localization.mjs:1383",
+      "src/vfx-localization.mjs:1388",
+      "src/vfx-localization.mjs:1393",
+      "src/vfx-localization.mjs:1398",
+      "src/vfx-localization.mjs:1403",
+      "src/vfx-localization.mjs:1408",
+      "src/vfx-localization.mjs:1419"
     ],
-    "context": "\"categoryKey\": \"vfxCatalog.category.looks\""
+    "context": "\"categoryKey\": \"vfxCatalog.category.looks\","
+  },
+  "vfxCatalog.category.moments": {
+    "locations": [
+      "src/vfx-localization.mjs:1313",
+      "src/vfx-localization.mjs:1318",
+      "src/vfx-localization.mjs:1323",
+      "src/vfx-localization.mjs:1328",
+      "src/vfx-localization.mjs:1333",
+      "src/vfx-localization.mjs:1338",
+      "src/vfx-localization.mjs:1343"
+    ],
+    "context": "\"categoryKey\": \"vfxCatalog.category.moments\","
   },
   "vfxCatalog.category.texture": {
     "locations": [
       "src/vfx-localization.mjs:266",
       "src/vfx-localization.mjs:294",
       "src/vfx-localization.mjs:540",
-      "src/vfx-localization.mjs:1369"
+      "src/vfx-localization.mjs:1417"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.texture\","
   },
@@ -35753,81 +35765,123 @@
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.wave.wavelength.label\""
   },
-  "vfxCatalog.preset.energy": {
+  "vfxCatalog.preset.damage": {
     "locations": [
-      "src/vfx-localization.mjs:1348"
+      "src/vfx-localization.mjs:1322"
     ],
-    "context": "\"nameKey\": \"vfxCatalog.preset.energy\","
+    "context": "\"nameKey\": \"vfxCatalog.preset.damage\","
+  },
+  "vfxCatalog.preset.embers": {
+    "locations": [
+      "src/vfx-localization.mjs:1407"
+    ],
+    "context": "\"nameKey\": \"vfxCatalog.preset.embers\","
+  },
+  "vfxCatalog.preset.fallingLeaves": {
+    "locations": [
+      "src/vfx-localization.mjs:1402"
+    ],
+    "context": "\"nameKey\": \"vfxCatalog.preset.fallingLeaves\","
   },
   "vfxCatalog.preset.ghost": {
     "locations": [
-      "src/vfx-localization.mjs:1356"
+      "src/vfx-localization.mjs:1362"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.ghost\","
   },
+  "vfxCatalog.preset.glitch": {
+    "locations": [
+      "src/vfx-localization.mjs:1342"
+    ],
+    "context": "\"nameKey\": \"vfxCatalog.preset.glitch\","
+  },
   "vfxCatalog.preset.goldenHour": {
     "locations": [
-      "src/vfx-localization.mjs:1340"
+      "src/vfx-localization.mjs:1367"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.goldenHour\","
   },
   "vfxCatalog.preset.hitFlash": {
     "locations": [
-      "src/vfx-localization.mjs:1352"
+      "src/vfx-localization.mjs:1312"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.hitFlash\","
   },
   "vfxCatalog.preset.hologram": {
     "locations": [
-      "src/vfx-localization.mjs:1324"
+      "src/vfx-localization.mjs:1352"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.hologram\","
   },
   "vfxCatalog.preset.ice": {
     "locations": [
-      "src/vfx-localization.mjs:1328"
+      "src/vfx-localization.mjs:1357"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.ice\","
   },
   "vfxCatalog.preset.impact": {
     "locations": [
-      "src/vfx-localization.mjs:1320"
+      "src/vfx-localization.mjs:1317"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.impact\","
   },
   "vfxCatalog.preset.neon": {
     "locations": [
-      "src/vfx-localization.mjs:1336"
+      "src/vfx-localization.mjs:1347"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.neon\","
   },
-  "vfxCatalog.preset.poison": {
+  "vfxCatalog.preset.night": {
     "locations": [
-      "src/vfx-localization.mjs:1332"
+      "src/vfx-localization.mjs:1377"
     ],
-    "context": "\"nameKey\": \"vfxCatalog.preset.poison\","
+    "context": "\"nameKey\": \"vfxCatalog.preset.night\","
+  },
+  "vfxCatalog.preset.oldFilm": {
+    "locations": [
+      "src/vfx-localization.mjs:1382"
+    ],
+    "context": "\"nameKey\": \"vfxCatalog.preset.oldFilm\","
   },
   "vfxCatalog.preset.powerUp": {
     "locations": [
-      "src/vfx-localization.mjs:1312"
+      "src/vfx-localization.mjs:1332"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.powerUp\","
   },
-  "vfxCatalog.preset.retro": {
+  "vfxCatalog.preset.rain": {
     "locations": [
-      "src/vfx-localization.mjs:1360"
+      "src/vfx-localization.mjs:1392"
     ],
-    "context": "\"nameKey\": \"vfxCatalog.preset.retro\","
+    "context": "\"nameKey\": \"vfxCatalog.preset.rain\","
   },
   "vfxCatalog.preset.retroScreen": {
     "locations": [
-      "src/vfx-localization.mjs:1344"
+      "src/vfx-localization.mjs:1387"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.retroScreen\","
   },
+  "vfxCatalog.preset.shockwave": {
+    "locations": [
+      "src/vfx-localization.mjs:1337"
+    ],
+    "context": "\"nameKey\": \"vfxCatalog.preset.shockwave\","
+  },
+  "vfxCatalog.preset.snow": {
+    "locations": [
+      "src/vfx-localization.mjs:1397"
+    ],
+    "context": "\"nameKey\": \"vfxCatalog.preset.snow\","
+  },
+  "vfxCatalog.preset.sunset": {
+    "locations": [
+      "src/vfx-localization.mjs:1372"
+    ],
+    "context": "\"nameKey\": \"vfxCatalog.preset.sunset\","
+  },
   "vfxCatalog.preset.teleport": {
     "locations": [
-      "src/vfx-localization.mjs:1316"
+      "src/vfx-localization.mjs:1327"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.teleport\","
   },
@@ -36285,14 +36339,14 @@
   },
   "vfxInspector.add2": {
     "locations": [
-      "src/vfx-inspector.mjs:316"
+      "src/vfx-inspector.mjs:315"
     ],
     "context": "const tile=(mode,key,label,art,category,meta,nameKey=mode==='add'?effectMessages[key]?.nameKey:mode==='presets'?presetMessages[key]?.nameKey:null)=>`<button typ"
   },
   "vfxInspector.addEffect": {
     "locations": [
       "src/vfx-inspector.mjs:146",
-      "src/vfx-inspector.mjs:326"
+      "src/vfx-inspector.mjs:325"
     ],
     "context": "const controls=!targets.length?'':`<div class=\"vfx-list-head\"><h3 class=\"vfx-list-title\" data-i18n=\"vfxInspector.effects\">${messageHTML(\"vfxInspector.effects\", "
   },
@@ -36322,7 +36376,7 @@
   },
   "vfxInspector.catalogue": {
     "locations": [
-      "src/vfx-inspector.mjs:327"
+      "src/vfx-inspector.mjs:326"
     ],
     "context": "const tabs=this.addToGroup?'':`<div class=\"ui-segmented vfx-catalog-tabs\" data-size=\"sm\" data-fill role=\"tablist\" aria-label=\"Catalogue\" data-i18n-aria-label=\"v"
   },
@@ -36364,7 +36418,7 @@
       "src/vfx-inspector.mjs:135",
       "src/vfx-inspector.mjs:137",
       "src/vfx-inspector.mjs:146",
-      "src/vfx-inspector.mjs:327"
+      "src/vfx-inspector.mjs:326"
     ],
     "context": "const body=!targets.length?this.noTargetHTML():list?`<div class=\"vfx-list\" role=\"list\" aria-label=\"Effects\" data-i18n-aria-label=\"vfxInspector.effects\">${list}<"
   },
@@ -36421,31 +36475,31 @@
   },
   "vfxInspector.myPresetSummary": {
     "locations": [
-      "src/vfx-inspector.mjs:318"
+      "src/vfx-inspector.mjs:317"
     ],
     "context": "const mine=usablePresets(scene).slice(0,3).map(p=>tile('presets',MINE+p.id,p.name,p.effects.length===1?VFX_REGISTRY[p.effects[0].type]?.icon??'effects':'effects"
   },
   "vfxInspector.noEffectsAtThisFrame": {
     "locations": [
-      "src/vfx-inspector.mjs:322"
+      "src/vfx-inspector.mjs:321"
     ],
     "context": "const titleKey=elsewhere?\"vfxInspector.noEffectsAtThisFrame\":scene?\"vfxInspector.noEffectsOnTheScene\":targets.length===1?\"vfxInspector.noEffectsOnFigure\":\"vfxIn"
   },
   "vfxInspector.noEffectsOnFigure": {
     "locations": [
-      "src/vfx-inspector.mjs:322"
+      "src/vfx-inspector.mjs:321"
     ],
     "context": "const titleKey=elsewhere?\"vfxInspector.noEffectsAtThisFrame\":scene?\"vfxInspector.noEffectsOnTheScene\":targets.length===1?\"vfxInspector.noEffectsOnFigure\":\"vfxIn"
   },
   "vfxInspector.noEffectsOnTheScene": {
     "locations": [
-      "src/vfx-inspector.mjs:322"
+      "src/vfx-inspector.mjs:321"
     ],
     "context": "const titleKey=elsewhere?\"vfxInspector.noEffectsAtThisFrame\":scene?\"vfxInspector.noEffectsOnTheScene\":targets.length===1?\"vfxInspector.noEffectsOnFigure\":\"vfxIn"
   },
   "vfxInspector.noEffectsYet": {
     "locations": [
-      "src/vfx-inspector.mjs:322"
+      "src/vfx-inspector.mjs:321"
     ],
     "context": "const titleKey=elsewhere?\"vfxInspector.noEffectsAtThisFrame\":scene?\"vfxInspector.noEffectsOnTheScene\":targets.length===1?\"vfxInspector.noEffectsOnFigure\":\"vfxIn"
   },
@@ -36457,7 +36511,7 @@
   },
   "vfxInspector.orGiveTheWholePictureALook": {
     "locations": [
-      "src/vfx-inspector.mjs:309"
+      "src/vfx-inspector.mjs:308"
     ],
     "context": "noTargetHTML(){return `<div class=\"ui-empty vfx-empty\"><h3 class=\"ui-empty-title\" data-i18n=\"vfxInspector.selectAFigureToAddEffects\">${messageHTML(\"vfxInspector"
   },
@@ -36469,7 +36523,7 @@
   },
   "vfxInspector.presets": {
     "locations": [
-      "src/vfx-inspector.mjs:327"
+      "src/vfx-inspector.mjs:326"
     ],
     "context": "const tabs=this.addToGroup?'':`<div class=\"ui-segmented vfx-catalog-tabs\" data-size=\"sm\" data-fill role=\"tablist\" aria-label=\"Catalogue\" data-i18n-aria-label=\"v"
   },
@@ -36489,7 +36543,7 @@
   },
   "vfxInspector.sceneEffects": {
     "locations": [
-      "src/vfx-inspector.mjs:309"
+      "src/vfx-inspector.mjs:308"
     ],
     "context": "noTargetHTML(){return `<div class=\"ui-empty vfx-empty\"><h3 class=\"ui-empty-title\" data-i18n=\"vfxInspector.selectAFigureToAddEffects\">${messageHTML(\"vfxInspector"
   },
@@ -36502,13 +36556,13 @@
   "vfxInspector.searchEffects": {
     "locations": [
       "src/vfx-inspector.mjs:147",
-      "src/vfx-inspector.mjs:328"
+      "src/vfx-inspector.mjs:327"
     ],
     "context": "const search=view==='all'&&targets.length?`<label class=\"ui-field vfx-search\" data-size=\"sm\">${icon('search','ui-icon')}<input class=\"ui-field-input\" type=\"sear"
   },
   "vfxInspector.searchPresets": {
     "locations": [
-      "src/vfx-inspector.mjs:328"
+      "src/vfx-inspector.mjs:327"
     ],
     "context": "const searchKey=mode==='presets'?'vfxInspector.searchPresets':'vfxInspector.searchEffects';"
   },
@@ -36520,7 +36574,7 @@
   },
   "vfxInspector.selectAFigureToAddEffects": {
     "locations": [
-      "src/vfx-inspector.mjs:309"
+      "src/vfx-inspector.mjs:308"
     ],
     "context": "noTargetHTML(){return `<div class=\"ui-empty vfx-empty\"><h3 class=\"ui-empty-title\" data-i18n=\"vfxInspector.selectAFigureToAddEffects\">${messageHTML(\"vfxInspector"
   },
@@ -36545,7 +36599,7 @@
   "vfxInspector.showAll2": {
     "locations": [
       "src/vfx-inspector.mjs:144",
-      "src/vfx-inspector.mjs:323"
+      "src/vfx-inspector.mjs:322"
     ],
     "context": "const views=[messageTuple(['playhead',interfaceText(\"vfxInspector.atThisFrame\")], {1: {key: \"vfxInspector.atThisFrame\", params: {}}}),messageTuple(['selected',i"
   },
@@ -36557,13 +36611,13 @@
   },
   "vfxInspector.startWithOneOfTheseOrChooseAdd": {
     "locations": [
-      "src/vfx-inspector.mjs:323"
+      "src/vfx-inspector.mjs:322"
     ],
     "context": "return `<div class=\"ui-empty vfx-empty\"><h3 class=\"ui-empty-title\">${messageHTML(titleKey,titleParams)}</h3>${elsewhere?'':`<p class=\"ui-empty-text\" data-i18n=\""
   },
   "vfxInspector.suggestedEffects": {
     "locations": [
-      "src/vfx-inspector.mjs:323"
+      "src/vfx-inspector.mjs:322"
     ],
     "context": "return `<div class=\"ui-empty vfx-empty\"><h3 class=\"ui-empty-title\">${messageHTML(titleKey,titleParams)}</h3>${elsewhere?'':`<p class=\"ui-empty-text\" data-i18n=\""
   },
@@ -36575,7 +36629,7 @@
   },
   "vfxInspector.vfxPresets": {
     "locations": [
-      "src/vfx-inspector.mjs:326"
+      "src/vfx-inspector.mjs:325"
     ],
     "context": "this.closePopup();const scene=this.targets()[0]?.kind==='scene',popup=this.popup=document.createElement('div');popup.className='vfx-catalog';popup.setAttribute("
   },
@@ -36628,6 +36682,126 @@
     ],
     "context": "menu.className='vfx-channel-menu';menu.popover='auto';menu.setAttribute('role','dialog');localizedAttribute(menu, 'aria-label', 'vfxKeyChannelMenu.visibleEffect"
   },
+  "vfxPanel.aboutPreset.damage": {
+    "locations": [
+      "src/vfx-localization.mjs:1324"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.damage\""
+  },
+  "vfxPanel.aboutPreset.embers": {
+    "locations": [
+      "src/vfx-localization.mjs:1409"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.embers\""
+  },
+  "vfxPanel.aboutPreset.fallingLeaves": {
+    "locations": [
+      "src/vfx-localization.mjs:1404"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.fallingLeaves\""
+  },
+  "vfxPanel.aboutPreset.ghost": {
+    "locations": [
+      "src/vfx-localization.mjs:1364"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.ghost\""
+  },
+  "vfxPanel.aboutPreset.glitch": {
+    "locations": [
+      "src/vfx-localization.mjs:1344"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.glitch\""
+  },
+  "vfxPanel.aboutPreset.goldenHour": {
+    "locations": [
+      "src/vfx-localization.mjs:1369"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.goldenHour\""
+  },
+  "vfxPanel.aboutPreset.hitFlash": {
+    "locations": [
+      "src/vfx-localization.mjs:1314"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.hitFlash\""
+  },
+  "vfxPanel.aboutPreset.hologram": {
+    "locations": [
+      "src/vfx-localization.mjs:1354"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.hologram\""
+  },
+  "vfxPanel.aboutPreset.ice": {
+    "locations": [
+      "src/vfx-localization.mjs:1359"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.ice\""
+  },
+  "vfxPanel.aboutPreset.impact": {
+    "locations": [
+      "src/vfx-localization.mjs:1319"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.impact\""
+  },
+  "vfxPanel.aboutPreset.neon": {
+    "locations": [
+      "src/vfx-localization.mjs:1349"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.neon\""
+  },
+  "vfxPanel.aboutPreset.night": {
+    "locations": [
+      "src/vfx-localization.mjs:1379"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.night\""
+  },
+  "vfxPanel.aboutPreset.oldFilm": {
+    "locations": [
+      "src/vfx-localization.mjs:1384"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.oldFilm\""
+  },
+  "vfxPanel.aboutPreset.powerUp": {
+    "locations": [
+      "src/vfx-localization.mjs:1334"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.powerUp\""
+  },
+  "vfxPanel.aboutPreset.rain": {
+    "locations": [
+      "src/vfx-localization.mjs:1394"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.rain\""
+  },
+  "vfxPanel.aboutPreset.retroScreen": {
+    "locations": [
+      "src/vfx-localization.mjs:1389"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.retroScreen\""
+  },
+  "vfxPanel.aboutPreset.shockwave": {
+    "locations": [
+      "src/vfx-localization.mjs:1339"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.shockwave\""
+  },
+  "vfxPanel.aboutPreset.snow": {
+    "locations": [
+      "src/vfx-localization.mjs:1399"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.snow\""
+  },
+  "vfxPanel.aboutPreset.sunset": {
+    "locations": [
+      "src/vfx-localization.mjs:1374"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.sunset\""
+  },
+  "vfxPanel.aboutPreset.teleport": {
+    "locations": [
+      "src/vfx-localization.mjs:1329"
+    ],
+    "context": "\"aboutKey\": \"vfxPanel.aboutPreset.teleport\""
+  },
   "vfxPanel.addKeyAtFrame": {
     "locations": [
       "src/vfx-inspector.mjs:237"
@@ -36637,34 +36811,34 @@
   "vfxPanel.catalog.lookEffects": {
     "locations": [
       "src/vfx-catalog-peek.mjs:28",
-      "src/vfx-inspector.mjs:334"
+      "src/vfx-inspector.mjs:333"
     ],
     "context": "meta: isMoment(key, preset) ? (timing ? interfaceText('vfxPanel.catalog.momentFrames', {count: timing.duration}) : interfaceText('vfxPanel.catalog.moment')) : i"
   },
   "vfxPanel.catalog.lookShort": {
     "locations": [
-      "src/vfx-inspector.mjs:320"
+      "src/vfx-inspector.mjs:319"
     ],
     "context": "const presetMeta=name=>{const timing=presetTiming(name,VFX_PRESETS[name]);return isMoment(name,VFX_PRESETS[name])?(timing?{messageKey:'vfxPanel.catalog.momentSh"
   },
   "vfxPanel.catalog.moment": {
     "locations": [
       "src/vfx-catalog-peek.mjs:28",
-      "src/vfx-inspector.mjs:320",
-      "src/vfx-inspector.mjs:334"
+      "src/vfx-inspector.mjs:319",
+      "src/vfx-inspector.mjs:333"
     ],
     "context": "meta: isMoment(key, preset) ? (timing ? interfaceText('vfxPanel.catalog.momentFrames', {count: timing.duration}) : interfaceText('vfxPanel.catalog.moment')) : i"
   },
   "vfxPanel.catalog.momentFrames": {
     "locations": [
       "src/vfx-catalog-peek.mjs:28",
-      "src/vfx-inspector.mjs:334"
+      "src/vfx-inspector.mjs:333"
     ],
     "context": "meta: isMoment(key, preset) ? (timing ? interfaceText('vfxPanel.catalog.momentFrames', {count: timing.duration}) : interfaceText('vfxPanel.catalog.moment')) : i"
   },
   "vfxPanel.catalog.momentShort": {
     "locations": [
-      "src/vfx-inspector.mjs:320"
+      "src/vfx-inspector.mjs:319"
     ],
     "context": "const presetMeta=name=>{const timing=presetTiming(name,VFX_PRESETS[name]);return isMoment(name,VFX_PRESETS[name])?(timing?{messageKey:'vfxPanel.catalog.momentSh"
   },
@@ -36757,7 +36931,7 @@
     "locations": [
       "src/vfx-catalog-peek.mjs:27"
     ],
-    "context": "about: interfaceText('vfxPanel.presetHolds', {effects: {format: 'list', value: effects, options: {type: 'conjunction'}}}),"
+    "context": "about: presetMessages[key]?.aboutKey ? interfaceText(presetMessages[key].aboutKey) : interfaceText('vfxPanel.presetHolds', {effects: {format: 'list', value: eff"
   },
   "vfxPanel.previousKey": {
     "locations": [

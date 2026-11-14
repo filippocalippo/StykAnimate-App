@@ -27,3 +27,15 @@ function strip(value) {
 
 /** `text` (a document's JSON) as a recording made before the added effect parameters holds it. */
 export const asRecorded = text => JSON.stringify(strip(JSON.parse(text)));
+
+// The built-in preset catalogue the recordings were made with, frozen with them: the catalogue has changed since, so a
+// recorded `addVfxGroup` or `applyVfxPreset` of a preset by name is replayed with that name's definition from then
+// (the engine's replay does the same: `replay::recorded_call`, engine/crates/styk-edit/src/vfx_presets_recorded.json).
+const RECORDED_PRESETS = JSON.parse(readFileSync(new URL('../../engine/crates/styk-edit/src/vfx_presets_recorded.json', import.meta.url), 'utf8'));
+
+/** A recorded call's arguments as the engine replays them (`args` unchanged for any other call). */
+export const recordedCall = (method, args) => {
+  const name = args[1];
+  if (!['addVfxGroup', 'applyVfxPreset'].includes(method.replace(/^@/, '')) || typeof name !== 'string' || !Object.hasOwn(RECORDED_PRESETS, name)) return args;
+  return [args[0], {name, effects: RECORDED_PRESETS[name]}, ...args.slice(2)];
+};

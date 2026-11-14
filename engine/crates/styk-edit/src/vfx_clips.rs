@@ -987,19 +987,49 @@ impl Editor {
         Ok(Value::str(&id))
     }
 
-    /// `addVfxGroup(target, preset, options)`: editable built-in effects as one clip.
-    pub(crate) fn add_vfx_group(&mut self, target: &Value, name: &Value, options: &Value) -> Result<Value, EditError> {
+    /// `addVfxGroup(target, preset, options)`: editable built-in effects as one clip, named after the preset (a name in
+    /// the catalogue, or a definition: `vfx_stack::preset`). A moment (a preset with a `duration`) starts at the playhead
+    /// (or `options.start`) and lasts its duration, with its fades and its parameters' keys on the new effects; any
+    /// other preset lasts the whole animation unless `options` time it. One undo step.
+    pub(crate) fn add_vfx_group(&mut self, target: &Value, preset: &Value, options: &Value) -> Result<Value, EditError> {
+        let (name, definition) = crate::vfx_stack::preset(preset).ok_or_else(|| invalid("errors.editorVfxClips.chooseAnEffectPreset"))?;
         let mut effects = Vec::new();
-        for effect in self.vfx_preset_effects(name, false)? { effects.push(self.seeded(effect)?); }
+        for effect in self.vfx_preset_effects(&definition, false)? { effects.push(self.seeded(effect)?); }
         let target = normalize_target(target)?;
-        let options = match options { Value::Null => Obj::new(), other => other.as_obj().cloned().ok_or_else(|| EditError::Unported("effect group options that are not an object".into()))? };
-        // Current built-in presets contain filters only, so `generatorTiming` keeps options.
+        let mut options = match options { Value::Null => Obj::new(), other => other.as_obj().cloned().ok_or_else(|| EditError::Unported("effect group options that are not an object".into()))? };
+        let duration = definition.get("duration").and_then(Value::as_f64).filter(|d| d.fract() == 0.0 && *d >= 1.0 && *d <= MAX_TICK);
+        if let Some(duration) = duration {
+            let wanted = options.get("start").and_then(Value::as_f64).unwrap_or(self.tick);
+            options.set("start", Value::Num(js_max(0.0, js_min(wanted.floor(), MAX_TICK - duration))));
+            options.set("duration", Value::Num(duration));
+        }
         let id = self.draw_uuid()?;
         let effect_id = self.draw_uuid()?;
         let kind = effects.first().and_then(|e| e.get("type")).and_then(Value::as_str).unwrap_or("");
         let clip = self.new_vfx_clip(target, kind, &id, &effect_id, &options)?;
         self.check_vfx_clip_scope(&clip)?;
-        let clip = with(&with(&clip, "name", name.clone()), "effects", Value::array(effects));
+        let mut clip = with(&with(&clip, "name", name), "effects", Value::array(effects.clone()));
+        if duration.is_some() {
+            for fade in ["fadeIn", "fadeOut"] {
+                if let Some(frames) = definition.get(fade).and_then(Value::as_f64) {
+                    clip = with(&clip, fade, Value::Num(frames));
+                }
+            }
+        }
+        // The preset's keys, on the effects' new identities: `vfx1:<type>:<id>:<parameter>`.
+        let mut keys = Obj::new();
+        for channel in list(definition.get("keys")) {
+            let index = channel.item(0).as_ref().and_then(Value::as_f64).map_or(usize::MAX, |i| i as usize);
+            let (Some(effect), Some(param)) = (effects.get(index), channel.item(1).as_ref().and_then(|p| p.as_str().map(str::to_string))) else {
+                return Err(EditError::Unported("a preset key for an effect it does not have".into()));
+            };
+            let kind = effect.get("type").and_then(Value::as_str).unwrap_or("");
+            let effect_id = effect.get("id").and_then(Value::as_str).unwrap_or("");
+            keys.set(&format!("vfx1:{kind}:{effect_id}:{param}"), channel.item(2).unwrap_or(Value::Null));
+        }
+        if !keys.is_empty() {
+            clip = with(&clip, "keys", Value::object(keys));
+        }
         let mut clips = self.vfx_clips();
         clips.push(clip);
         self.publish_vfx(clips, "Add effect group")?;

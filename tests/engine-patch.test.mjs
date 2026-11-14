@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readdirSync, readFileSync} from 'node:fs';
 import {applyDocumentPatch} from '../src/engine/engine-patch.mjs';
 import {engineBuilt, sessionFromDocument} from './support/engine-node.mjs';
-import {asRecorded} from './support/recorded.mjs';
+import {asRecorded, recordedCall} from './support/recorded.mjs';
 
 const folder = new URL('../engine/tests/edit/', import.meta.url);
 const documentText = report => JSON.stringify(report, (key, value) => key === 'runtime_segments' ? undefined : value);
@@ -39,7 +39,7 @@ test('engine patches rebuild every recorded document', {skip: !engineBuilt}, asy
     try {
       for (const step of reference.steps.slice(1)) {
         const [method, ...args] = step.call;
-        const answer = JSON.parse(session.call(method.replace(/^@/, ''), JSON.stringify(args), JSON.stringify({...viewOf(view), autoKey: state.autoKey, patch: true, draws: step.draws ?? []})));
+        const answer = JSON.parse(session.call(method.replace(/^@/, ''), JSON.stringify(recordedCall(method, args)), JSON.stringify({...viewOf(view), autoKey: state.autoKey, patch: true, draws: step.draws ?? []})));
         view = answer.state ?? view;
         if (answer.status === 'unported') break;
         if (answer.patch) applyDocumentPatch(report, answer.patch);

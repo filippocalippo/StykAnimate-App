@@ -49,7 +49,8 @@ test('new generated effects start at the playhead with their own seed and undo a
  const a=e.addVfxClip({kind:'figure',uid:1},'explosion'),b=e.addVfxClip({kind:'figure',uid:1},'explosion'),[ca,cb]=e.getVfxClips();
  assert.deepEqual([ca.start,ca.duration],[17,36]);assert.notEqual(ca.effects[0].params.seed,cb.effects[0].params.seed);
  const smoke=e.addVfxClip({kind:'scene'},'smoke');assert.deepEqual([e.getVfxClips().find(c=>c.id===smoke).start,e.getVfxClips().find(c=>c.id===smoke).duration],[17,72]);
- assert.ok(Object.values(VFX_PRESETS).every(p=>p.effects.every(([type])=>!isGeneratorType(type))),'presets hold filters only');assert.equal(presetAvailable(VFX_PRESETS['Golden hour'],true,effectAvailable),true);
+ // A preset with a generated effect is offered only where that effect can go: an aura's on figures, weather on the scene.
+ assert.ok(Object.values(VFX_PRESETS).every(p=>!p.effects.some(([type])=>isGeneratorType(type))||[false,true].some(scene=>presetAvailable(p,scene,effectAvailable))));assert.equal(presetAvailable(VFX_PRESETS['Golden hour'],true,effectAvailable),true);
  assert.equal(effectAvailable('aura',true),false);assert.equal(effectAvailable('explosion',true),true);
  assert.equal(e._undo.length,n+3);e.undo();e.undo();e.undo();assert.equal(e.getVfxClips().length,0);assert.ok(a&&b);
 });

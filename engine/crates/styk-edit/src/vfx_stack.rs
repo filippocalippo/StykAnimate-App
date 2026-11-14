@@ -11,11 +11,18 @@ use crate::property_edit::{normalize_target, validate_vfx_value};
 use crate::sheet::items;
 use crate::{EditError, Editor};
 
-/// Built-in editable effects, generated from
-/// src/vfx-presets.mjs, kept outside browser-specific bindings.
-fn preset(name: &Value) -> Option<Value> {
+/// A built-in preset and its name: by name from the catalogue (`vfx_presets.json`, generated from src/vfx-presets.mjs:
+/// `{effects: [[type, params], …], duration?, fadeIn?, fadeOut?, keys?: [[effect index, parameter, keys], …]}`), or
+/// given whole as such a definition with its `name` (the editor's recordings are replayed with the definitions of the
+/// catalogue they were made with: `replay::recorded_call`).
+pub(crate) fn preset(preset: &Value) -> Option<(Value, Value)> {
     static PRESETS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    PRESETS.get_or_init(|| styk_doc::json::parse(include_bytes!("vfx_presets.json")).expect("the generated preset catalogue is valid")).get(name.as_str()?).cloned()
+    if let Some(name) = preset.as_str() {
+        let catalogue = PRESETS.get_or_init(|| styk_doc::json::parse(include_bytes!("vfx_presets.json")).expect("the generated preset catalogue is valid"));
+        return Some((preset.clone(), catalogue.get(name)?.clone()));
+    }
+    preset.get("effects").filter(|e| e.is_array())?;
+    Some((preset.get("name").cloned().unwrap_or_else(|| Value::str("")), preset.clone()))
 }
 
 fn invalid(key: &str) -> EditError {
@@ -94,10 +101,9 @@ impl Editor {
 
     /// A preset's ordinary editable effects; stack identities use the `fx-` spelling,
     /// clip effects keep the editor's UUIDs. Validation occurs when the stack is published.
-    pub(crate) fn vfx_preset_effects(&mut self, name: &Value, stack_ids: bool) -> Result<Vec<Value>, EditError> {
-        let preset = preset(name).ok_or_else(|| invalid(if stack_ids { "errors.editorVfx.chooseAnAvailablePreset" } else { "errors.editorVfxClips.chooseAnEffectPreset" }))?;
+    pub(crate) fn vfx_preset_effects(&mut self, preset: &Value, stack_ids: bool) -> Result<Vec<Value>, EditError> {
         let mut effects = Vec::new();
-        for definition in items(Some(&preset)) {
+        for definition in items(preset.get("effects")) {
             let id = if stack_ids { self.fresh_effect_id()? } else { self.draw_uuid()? };
             let effect = self.create_vfx(definition.item(0).as_ref().and_then(Value::as_str).unwrap_or(""), &id)?;
             let mut params = effect.get("params").and_then(Value::as_obj).cloned().unwrap_or_default();
@@ -109,15 +115,18 @@ impl Editor {
         Ok(effects)
     }
 
-    /// `applyVfxPreset(targets, name)`: the built-in effects appended to each target.
+    /// `applyVfxPreset(targets, name)`: the built-in effects appended to each target's stack (an older project's
+    /// per-pose effects). A preset with a generated effect needs an effect clip, so it is not available here; a
+    /// stack has no timing of its own, so a moment's length, fades and keys are not used.
     pub(crate) fn apply_vfx_preset(&mut self, targets: &Value, name: &Value) -> Result<Value, EditError> {
-        if preset(name).is_none() { return Err(invalid("errors.editorVfx.chooseAnAvailablePreset")); }
+        let generated = |definition: &Value| items(definition.get("effects")).iter().any(|e| e.item(0).as_ref().and_then(Value::as_str).and_then(Kind::from_name).is_some_and(Kind::is_generator));
+        let Some((_, definition)) = preset(name).filter(|(_, d)| !generated(d)) else { return Err(invalid("errors.editorVfx.chooseAnAvailablePreset")) };
         let list = if targets.is_array() { items(Some(targets)) } else { vec![targets.clone()] };
         let targets = list.iter().map(|target| self.vfx_target(target)).collect::<Result<Vec<_>, _>>()?;
         let mut entries = Vec::new();
         for target in &targets {
             let mut stack = self.vfx_effects(target)?;
-            stack.extend(self.vfx_preset_effects(name, true)?);
+            stack.extend(self.vfx_preset_effects(&definition, true)?);
             entries.push(self.stack_entry(target, stack)?);
         }
         self.add_animation_keys(Some(&Value::array(entries)))

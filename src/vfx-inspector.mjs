@@ -294,14 +294,13 @@ export class VfxInspector {
  }
  dragend(){groupDragEnd(this);this.dragged=null;this.clipDragged=null;for(const row of this.root.querySelectorAll('.is-dragging,.is-drop-target'))row.classList.remove('is-dragging','is-drop-target');}
  closePopup(){this.popup?.remove();this.popup=null;this.closePeek?.();this.closePeek=null;}
- /** Add one effect or preset to every current target (or the open group) as one undo step. A moment preset is placed
-  at the playhead for its length (vfx-presentation.mjs, presetTiming) unless the engine already timed it. */
+ /** Add one effect or preset to every current target (or the open group) as one undo step. The engine places a moment
+  preset at the playhead for its length, with its fades and keys (addVfxGroup). */
  addChoice(mode,key){
   this.beforeEdit();const targets=this.targets(),options={includeAttached:this.root.querySelector('#vfx-scope')?.value==='connected'};
   const mine=key.startsWith(MINE)&&vfxPresetStore.find(key.slice(MINE.length));if(key.startsWith(MINE)&&!mine)throw messageError(new Error(''), "errors.vfxInspector.thatPresetWasDeleted", {});
-  const timing=mode==='presets'&&!mine?presetTiming(key,VFX_PRESETS[key]):null,e=this.editor;
+  const e=this.editor;
   e.movieclipBatch(interfaceText("vfxInspector.addEffects"),()=>{if(this.addToGroup){e.addVfxGroupEffect(this.addToGroup,key);}else for(const target of targets){const id=mine?e.addVfxUserPreset(target,mine,options):mode==='presets'?e.addVfxGroup(target,key,options):e.addVfxClip(target,key,options);
-   const clip=timing&&e.getVfxClips().find(c=>c.id===id);if(clip&&clip.duration===null){const start=Math.max(0,Math.min(Math.floor(e.tick),10000000-timing.duration));e.setVfxClip(id,{start,duration:timing.duration,offset:0,fadeIn:timing.fadeIn,fadeOut:timing.fadeOut});}
    selectClip(this,id);}});
   this.addToGroup=null;this.closePopup();this.sync();this.onChange();
  }

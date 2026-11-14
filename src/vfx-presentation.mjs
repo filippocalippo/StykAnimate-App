@@ -334,17 +334,10 @@ export function catalogueSections(available, registry = VFX_REGISTRY) {
   return sections.filter(section => section.types.length);
 }
 
-/** Presets that are a moment rather than a lasting look (a flash, a hit, a vanishing): the catalogue lists them apart. */
-export const MOMENT_PRESETS = Object.freeze(['Hit flash', 'Impact', 'Teleport']);
-/**
- * Until built-in presets carry their own timing (a later engine task: `duration`, `fadeIn`, `fadeOut` and keys on
- * the preset, applied by addVfxGroup), a moment is placed at the playhead for this many frames with these fades.
- * A preset that carries timing uses its own, and a clip the engine already timed is left as it is.
- */
-export const MOMENT_TIMING = Object.freeze({'Hit flash': {duration: 4, fadeIn: 0, fadeOut: 3}, 'Impact': {duration: 6, fadeIn: 0, fadeOut: 4}, 'Teleport': {duration: 16, fadeIn: 4, fadeOut: 8}});
-/** A preset's timing: its own when it has one, else a moment's, else null (it lasts the whole animation). */
+/** A preset's timing: a moment's length and fades (src/vfx-presets.mjs; the engine places it at the playhead when it is
+ * added), or null for a look, which lasts the whole animation. */
 export function presetTiming(name, preset) {
-  const own = preset && Number.isInteger(preset.duration) && preset.duration > 0 ? {duration: preset.duration, fadeIn: preset.fadeIn ?? 0, fadeOut: preset.fadeOut ?? 0} : null;
-  return own ?? MOMENT_TIMING[name] ?? null;
+  return preset && Number.isInteger(preset.duration) && preset.duration > 0 ? {duration: preset.duration, fadeIn: preset.fadeIn ?? 0, fadeOut: preset.fadeOut ?? 0} : null;
 }
-export const isMoment = (name, preset) => MOMENT_PRESETS.includes(name) || Boolean(presetTiming(name, preset) && !MOMENT_TIMING[name]);
+/** Whether a preset is a moment (a flash, a hit, a vanishing) rather than a lasting look: the catalogue lists them apart. */
+export const isMoment = (name, preset) => Boolean(presetTiming(name, preset));

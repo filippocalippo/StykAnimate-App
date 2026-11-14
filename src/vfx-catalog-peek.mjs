@@ -24,7 +24,7 @@ export function describeEntry(mode, key) {
     const effects = preset.effects.map(([type]) => ({messageKey: effectMessages[type]?.nameKey}));
     return {
       name: interfaceText(presetMessages[key]?.nameKey ?? key),
-      about: interfaceText('vfxPanel.presetHolds', {effects: {format: 'list', value: effects, options: {type: 'conjunction'}}}),
+      about: presetMessages[key]?.aboutKey ? interfaceText(presetMessages[key].aboutKey) : interfaceText('vfxPanel.presetHolds', {effects: {format: 'list', value: effects, options: {type: 'conjunction'}}}),
       meta: isMoment(key, preset) ? (timing ? interfaceText('vfxPanel.catalog.momentFrames', {count: timing.duration}) : interfaceText('vfxPanel.catalog.moment')) : interfaceText('vfxPanel.catalog.lookEffects', {count: preset.effects.length}),
     };
   }

@@ -103,7 +103,7 @@ pub fn replay_session_live_worker(reference: &Value, returns: &Value) -> Result<
     for (at, (step, returned)) in steps[1..].iter().zip(&complete).enumerate() {
         let call = values(step,"call")?;
         let method = call.first().and_then(Value::as_str).ok_or("call method must be text")?;
-        let args = Value::array(call[1..].to_vec());
+        let args = Value::array(super::recorded_call(method, &call[1..]));
         let before = worker.report().clone(); let epoch = worker.operation_epoch();
         let prepared = match worker.prepare_live(method, &args, &Value::Null, ||Ok(())) {
             Ok(prepared) => prepared,

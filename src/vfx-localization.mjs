@@ -1308,57 +1308,105 @@ export const effectMessages = Object.freeze({
   }
 });
 export const presetMessages = Object.freeze({
-  "Power up": {
-    "nameKey": "vfxCatalog.preset.powerUp",
-    "categoryKey": "vfxCatalog.category.looks"
-  },
-  "Teleport": {
-    "nameKey": "vfxCatalog.preset.teleport",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Hit flash": {
+    "nameKey": "vfxCatalog.preset.hitFlash",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.hitFlash"
   },
   "Impact": {
     "nameKey": "vfxCatalog.preset.impact",
-    "categoryKey": "vfxCatalog.category.looks"
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.impact"
   },
-  "Hologram": {
-    "nameKey": "vfxCatalog.preset.hologram",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Damage": {
+    "nameKey": "vfxCatalog.preset.damage",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.damage"
   },
-  "Ice": {
-    "nameKey": "vfxCatalog.preset.ice",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Teleport": {
+    "nameKey": "vfxCatalog.preset.teleport",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.teleport"
   },
-  "Poison": {
-    "nameKey": "vfxCatalog.preset.poison",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Power up": {
+    "nameKey": "vfxCatalog.preset.powerUp",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.powerUp"
+  },
+  "Shockwave": {
+    "nameKey": "vfxCatalog.preset.shockwave",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.shockwave"
+  },
+  "Glitch": {
+    "nameKey": "vfxCatalog.preset.glitch",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.glitch"
   },
   "Neon": {
     "nameKey": "vfxCatalog.preset.neon",
-    "categoryKey": "vfxCatalog.category.looks"
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.neon"
   },
-  "Golden hour": {
-    "nameKey": "vfxCatalog.preset.goldenHour",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Hologram": {
+    "nameKey": "vfxCatalog.preset.hologram",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.hologram"
   },
-  "Retro screen": {
-    "nameKey": "vfxCatalog.preset.retroScreen",
-    "categoryKey": "vfxCatalog.category.looks"
-  },
-  "Energy": {
-    "nameKey": "vfxCatalog.preset.energy",
-    "categoryKey": "vfxCatalog.category.looks"
-  },
-  "Hit flash": {
-    "nameKey": "vfxCatalog.preset.hitFlash",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Ice": {
+    "nameKey": "vfxCatalog.preset.ice",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.ice"
   },
   "Ghost": {
     "nameKey": "vfxCatalog.preset.ghost",
-    "categoryKey": "vfxCatalog.category.looks"
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.ghost"
   },
-  "Retro": {
-    "nameKey": "vfxCatalog.preset.retro",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Golden hour": {
+    "nameKey": "vfxCatalog.preset.goldenHour",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.goldenHour"
+  },
+  "Sunset": {
+    "nameKey": "vfxCatalog.preset.sunset",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.sunset"
+  },
+  "Night": {
+    "nameKey": "vfxCatalog.preset.night",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.night"
+  },
+  "Old film": {
+    "nameKey": "vfxCatalog.preset.oldFilm",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.oldFilm"
+  },
+  "Retro screen": {
+    "nameKey": "vfxCatalog.preset.retroScreen",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.retroScreen"
+  },
+  "Rain": {
+    "nameKey": "vfxCatalog.preset.rain",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.rain"
+  },
+  "Snow": {
+    "nameKey": "vfxCatalog.preset.snow",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.snow"
+  },
+  "Falling leaves": {
+    "nameKey": "vfxCatalog.preset.fallingLeaves",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.fallingLeaves"
+  },
+  "Embers": {
+    "nameKey": "vfxCatalog.preset.embers",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.embers"
   }
 });
 export const categoryMessages = Object.freeze({

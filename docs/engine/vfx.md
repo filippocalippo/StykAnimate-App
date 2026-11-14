@@ -19,10 +19,10 @@ How the Rust engine (`engine/crates/styk-eval/src/vfx/`) decides, for one tick, 
 
 `styk-edit` uses the effect registry and existing typed paint interpolation for stack
 and clip commands. The remaining 12 recordings / 392 steps cover every built-in
-preset, saved preset timing/keys with remapped identities, attached scopes through
+preset of the catalogue they were made with (replayed with it: [editing.md](editing.md)), saved preset timing/keys with remapped identities, attached scopes through
 depth 16 and refusal at 17, raw paint validation and keyed solid/gradient sampling.
 `records::paint_record` preserves the typed paint's editor record form. The facade
-records identity/seed draws (D18) for preset/group creation. User-preset storage and inspector flows remain in
+records identity/seed draws (D18) for preset/group creation. Today's built-in presets (moments with a length, fades and keys; generated effects) are added by `addVfxGroup` and stated by tests/vfx.test.mjs. User-preset storage and inspector flows remain in
 their existing UI owners.
 
 ## Evaluation order

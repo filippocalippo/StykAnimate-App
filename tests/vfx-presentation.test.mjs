@@ -208,14 +208,14 @@ test('the catalogue groups effects by what they do, the most used first, and los
   assert.deepEqual(catalogueSections(type => type !== 'vignette' && !VFX_REGISTRY[type].scene).flatMap(section => section.types).includes('crt'), false);
 });
 
-test('a preset is a moment with a length or a lasting look; its own timing wins once it has one', () => {
+test('a preset is a moment with a length or a lasting look', () => {
   assert.ok(isMoment('Hit flash', VFX_PRESETS['Hit flash']));
   assert.ok(!isMoment('Neon', VFX_PRESETS.Neon));
   assert.deepEqual(presetTiming('Hit flash', VFX_PRESETS['Hit flash']), {duration: 4, fadeIn: 0, fadeOut: 3});
+  assert.deepEqual(presetTiming('Power up', VFX_PRESETS['Power up']), {duration: 36, fadeIn: 3, fadeOut: 8});
   assert.equal(presetTiming('Neon', VFX_PRESETS.Neon), null, 'a look lasts the whole animation');
-  // When the engine's presets carry timing (a later task), that timing is used, and such a preset counts as a moment.
-  assert.deepEqual(presetTiming('Hit flash', {...VFX_PRESETS['Hit flash'], duration: 2, fadeOut: 1}), {duration: 2, fadeIn: 0, fadeOut: 1});
-  assert.ok(isMoment('Shockwave burst', {effects: [], duration: 12}));
+  // The moments the catalogue lists apart are those with a length, the preset's own.
+  assert.deepEqual(Object.keys(VFX_PRESETS).filter(name => isMoment(name, VFX_PRESETS[name])), ['Hit flash', 'Impact', 'Damage', 'Teleport', 'Power up', 'Shockwave', 'Glitch']);
   for (const name of Object.keys(VFX_PRESETS)) assert.equal(typeof isMoment(name, VFX_PRESETS[name]), 'boolean');
 });
 

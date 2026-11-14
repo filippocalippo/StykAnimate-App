@@ -15,7 +15,7 @@ import {MotionTrails} from '../src/motion-path.mjs';
 import {snapshotPoseFrame} from './support/pose-snapshot.mjs';
 import {engineBuilt} from './support/engine-node.mjs';
 import {ownedEditor} from './support/owned-editor.mjs';
-import {asRecorded} from './support/recorded.mjs';
+import {asRecorded, recordedCall} from './support/recorded.mjs';
 import {CLOCKS, canonical, ownerReferences} from './support/owner-references.mjs';
 import {recordedBounds} from './support/edit-bounds-callbacks.mjs';
 
@@ -102,7 +102,7 @@ const run = (editor, [name, ...args]) => {
     return editor.movieclipBatch(args[0], () => { for (const step of args[1]) last = run(editor, step); return last; });
   }
   if (Object.hasOwn(probes, name)) return probes[name](editor, ...args.map(decode));
-  return editor[name.replace(/^@/, '')](...args.map(decode));
+  return editor[name.replace(/^@/, '')](...recordedCall(name, args).map(decode));
 };
 const supported = scenario => scenario.steps.every(call => Array.isArray(call) && (!call[0].startsWith('@') || ['@seek', '@select', '@batch', ...Object.keys(probes)].includes(call[0])));
 const sha = text => createHash('sha256').update(text).digest('hex');
