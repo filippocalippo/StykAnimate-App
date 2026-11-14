@@ -42,6 +42,7 @@
     --mist-175: #eceff4;      /* the window field under the white islands */
     --mist-200: #eceef3;      /* site --mist-2 */
     --mist-250: #e7e9ef;      /* site --line */
+    --mist-275: #dfe2ea;      /* a value field's travel: a clear step off a field, still quiet in a column */
     --mist-300: #e2e5ec;      /* site .btn--light:hover */
     --mist-400: #d9dce5;      /* site --line-2 */
     --mist-500: #c8ccd6;      /* timeline hold bars: a clear step off white */
@@ -408,8 +409,9 @@
     --slider-track: var(--mist-300);
     --slider-fill: var(--blue-500);
     --slider-thumb: var(--paper);
-    --value-fill: var(--mist-250);           /* a value field's travel at rest: where the value sits */
-    --value-fill-hover: var(--mist-300);
+    --value-fill: var(--mist-275);           /* a value field's travel at rest: where the value sits */
+    --value-fill-hover: var(--mist-400);
+    --value-edge: var(--mist-500);           /* the travel's end, where the value is: a 2px line */
     --value-fill-active: var(--blue-100);    /* while it is dragged or typed, on --surface */
     --kbd-bg: var(--paper);
     --kbd-line: var(--mist-400);
@@ -572,6 +574,7 @@
     --slider-thumb: var(--mist-200);
     --value-fill: var(--ink-600);
     --value-fill-hover: var(--ink-550);
+    --value-edge: var(--ink-500);
     --value-fill-active: var(--blue-850);
     --kbd-bg: var(--ink-650);
     --kbd-line: var(--ink-500);
@@ -875,6 +878,7 @@
       --accent-soft-hover: Canvas;
       --value-fill: Canvas;                /* a value field draws its travel as a line in forced colours */
       --value-fill-hover: Canvas;
+      --value-edge: Canvas;
       --value-fill-active: Canvas;
       --selection-fill: Canvas;
       --selection-line: Highlight;

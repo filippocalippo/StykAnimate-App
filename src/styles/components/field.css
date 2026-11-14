@@ -116,20 +116,25 @@
 
   /* Value field ([data-range]): a bounded value whose whole field is its slider. A quiet fill from the start shows
      where the value sits on its travel (--_p, written by the kit and PropertyControls along the field's scale), a
-     small tick at the bottom where its default is (--_d, [data-default]); the label reads from the start and the
+     2px line at the fill's end where the value is, a small tick at the bottom where its default is (--_d,
+     [data-default]); the label reads from the start and the
      value with its unit sits at the end. A drag anywhere scrubs (no jump: it moves from where the value is), a tap
      types, a double tap resets. The fill turns to the accent's soft tint while dragged or typed. The travel stays
      left to right in every language, as numbers do (docs/LOCALIZATION.md). */
   .ui-field[data-range] {
     --_fill: var(--value-fill);
-    /* From the start, or from zero for a value that runs both ways (--_z: a gravity, an offset, a strength that can pull). */
-    background-image: linear-gradient(to right, transparent 0 min(var(--_z, 0%), var(--_p, 0%)), var(--_fill) min(var(--_z, 0%), var(--_p, 0%)) max(var(--_z, 0%), var(--_p, 0%)), transparent max(var(--_z, 0%), var(--_p, 0%)));
+    --_edge: var(--value-edge);
+    /* From the start, or from zero for a value that runs both ways (--_z: a gravity, an offset, a strength that can pull);
+       the first layer is the end line at the value. */
+    background-image:
+      linear-gradient(to right, transparent calc(var(--_p, 0%) - 1px), var(--_edge) calc(var(--_p, 0%) - 1px) calc(var(--_p, 0%) + 1px), transparent calc(var(--_p, 0%) + 1px)),
+      linear-gradient(to right, transparent 0 min(var(--_z, 0%), var(--_p, 0%)), var(--_fill) min(var(--_z, 0%), var(--_p, 0%)) max(var(--_z, 0%), var(--_p, 0%)), transparent max(var(--_z, 0%), var(--_p, 0%)));
     cursor: ew-resize; touch-action: none;
     transition: box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
   }
   .ui-field[data-range]:where(:hover) { --_fill: var(--value-fill-hover); }
   .ui-field[data-scrub-anywhere] { cursor: ew-resize; touch-action: none; }
-  .ui-field[data-range]:where(:focus-within, [data-scrubbing]) { --_fill: var(--value-fill-active); }
+  .ui-field[data-range]:where(:focus-within, [data-scrubbing]) { --_fill: var(--value-fill-active); --_edge: var(--accent-line); }
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
   /* The whole field scrubs (its cursor says so), so its label needs no underline of its own. */
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label:where([data-property-scrub]) { text-decoration: none; cursor: inherit; }
