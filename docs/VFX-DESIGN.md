@@ -14,23 +14,23 @@ No captions, effect-cost badges, or additional animation modes appear in this pa
 
 | Effect | Parameters |
 | --- | --- |
-| Tint | Color, mix |
-| Glow | Core/halo paints, radius, intensity, placement, spread, falloff, blend |
-| Outline | Paint, width, opacity, placement, rounded, outline only |
+| Tint | Color, mix, blend |
+| Glow | Core/halo paints, radius, intensity, placement, spread, falloff, blend, colour source |
+| Outline | Paint, width, opacity, placement, rounded, softness, outline only |
 | Blur | Mode, radius, angle, center |
 | Shadow | Paint, softness, X/Y offset, angle/distance, spread, opacity, placement |
-| Color grading | Exposure, contrast, saturation, temperature, tint, shadows, highlights, gamma |
+| Color grading | Exposure, contrast, saturation, temperature, tint, hue, shadows, highlights, gamma |
 | Pixelate | Linked cell width/height, grid X/Y |
-| Noise | Amount, grain size, color grain, pattern, contrast, softness, seed, evolution |
+| Noise | Amount, grain size, color grain, pattern, contrast, softness, seed, evolution, speed |
 | Vignette | Amount, softness, paint, center, roundness, aspect, radius |
-| Dissolve | Progress, pattern scale, edge width/paint, softness, seed |
+| Dissolve | Progress, pattern scale, edge width/paint, softness, seed, directional, angle |
 | RGB split | Amount, angle, individual channel offsets |
-| Wave distortion | Strength, wavelength, angle, phase |
+| Wave distortion | Strength, wavelength, angle, phase, speed |
 | Shockwave | Radius, thickness, strength, center, falloff |
 | Bloom | Threshold, soft knee, radius, intensity, paint |
-| Light sweep | Position, angle, width, softness, intensity, paint |
-| CRT / scanlines | Scanlines, spacing, curvature, RGB fringe, phase, paint |
-| Turbulent displacement | Amount, scale, evolution, detail, seed |
+| Light sweep | Position, angle, width, softness, intensity, paint, speed, loop |
+| CRT / scanlines | Scanlines, spacing, curvature, RGB fringe, phase, roll, paint |
+| Turbulent displacement | Amount, scale, evolution, detail, seed, speed |
 
 Generated effects — Particles, Aura, Energy beam and Explosion — create artwork rather than filtering it and live only in effect clips.
 
@@ -38,7 +38,7 @@ Every effect also has an animatable **Effect strength** from 0–100%. It mixes 
 
 Scene catalogues include camera distortions and CRT; object catalogues include silhouette effects. Vignette, Shockwave, and CRT are camera effects. Preset choices are filtered by their component effects.
 
-Turbulent displacement uses up to four normalized coherent-noise octaves in a single GPU pass. Its two displacement components are each bounded by Amount, which also supplies the conservative tile guard. Evolution moves continuously through the noise field; seed and explicit evolution determine the output independently of playback order. WebGPU and WebGL implement identical kernels.
+Turbulent displacement uses up to four normalized coherent-noise octaves in a single GPU pass. Its two displacement components are each bounded by Amount, which also supplies the conservative tile guard. Evolution moves continuously through the noise field, and Speed moves it on with the clip's local time; seed, explicit evolution and that time determine the output independently of playback order. WebGPU and WebGL implement identical kernels.
 
 ## Ownership, storage, and animation
 
@@ -69,7 +69,7 @@ Scene effects process the camera output after object effects. During editing, th
 
 Playback filters the full camera image with the prepared frame's scene stack. Zooming or panning cannot change offscreen filter neighborhoods. Thumbnails, the camera monitor and export draw the same effects with the same engine passes. Local movieclip samples include their child effects and scene effects. Converting a selection into a movieclip does not capture the parent scene's effects a second time.
 
-Object sizes use local artwork units and scale with the instance. Scene sizes use project output pixels. Noise is deterministic from spatial coordinates, seed, and explicit evolution; no wall-clock state or playback history enters evaluation. Pixel grids and blur downsampling are anchored independently of tile crops.
+Object sizes use local artwork units and scale with the instance. Scene sizes use project output pixels. Noise is deterministic from spatial coordinates, seed, explicit evolution and the clip's local time (Speed); no wall-clock state or playback history enters evaluation. Pixel grids and blur downsampling are anchored independently of tile crops.
 
 ## Rendering and resource lifetime
 
@@ -102,9 +102,9 @@ Browser scripts use installed Chrome and the server at `STYK_URL` (`http://127.0
 
 ## Expanded controls and rendering
 
-Glow includes inner/outer/both placement, spread, falloff, core and halo paints, and Normal/Add/Screen blending. Outline supports outside/inside/center placement, rounded edges, and outline-only output. Shadow adds spread and inner placement; angle/distance are derived views of the existing X/Y offsets, never duplicate saved state. Blur offers Gaussian, directional, zoom, and radial kernels with bounded sampling. Grading adds shadows, highlights, gamma, and green/magenta balance. Pixelation has linked or independent dimensions and grid offsets. Noise adds color grain, coherent clouds, contrast, and softness. Vignette adds center, aspect, roundness, radius, and paint.
+Glow includes inner/outer/both placement, spread, falloff, core and halo paints, Normal/Add/Screen blending, and a halo coloured by its paint or by the artwork itself. Outline supports outside/inside/center placement, rounded edges, a soft edge, and outline-only output; widths are exact at any size, fractions of a pixel included. Shadow adds spread and inner placement; angle/distance are derived views of the existing X/Y offsets, never duplicate saved state. Blur offers Gaussian, directional, zoom, and radial kernels with bounded sampling. Grading adds hue, shadows, highlights, gamma, and green/magenta balance. Tint blends as Normal, Multiply, Screen, Overlay, Color or Add. Dissolve can wipe along an angle, its edge still noisy. Pixelation has linked or independent dimensions and grid offsets. Noise adds color grain, coherent clouds, contrast, and softness. Vignette adds center, aspect, roundness, radius, and paint.
 
-New effects are Dissolve, RGB split, Wave distortion, Shockwave, Bloom, Light sweep, and CRT/scanlines. Their Progress, Phase, and Evolution controls remain ordinary pose parameters. None relies on elapsed wall-clock time. Spatial kernels use stable full-owner coordinates; curved CRT exports include their displaced sampling neighborhood in tile guards.
+New effects are Dissolve, RGB split, Wave distortion, Shockwave, Bloom, Light sweep, and CRT/scanlines. Their Progress, Phase, and Evolution controls remain ordinary pose parameters. Speeds (noise, turbulence, wave, CRT roll, light sweep) advance those values by the effect clip's local time, or the frame for a pose's effects, never by elapsed wall-clock time, and leave the saved values as they are. Spatial kernels use stable full-owner coordinates; curved CRT exports include their displaced sampling neighborhood in tile guards.
 
 Every VFX color accepts either the legacy RGB integer or the existing normalized paint format: solid, linear, radial, angular, or diamond, with up to 32 stops and stop opacity. `vfx-paint.mjs` handles adaptation/interpolation; the GPU evaluates stops directly. Matching gradient layouts interpolate colors, offsets, opacity, and angle. Changes between gradient kinds or stop counts are discrete; solid/gradient transitions interpolate using the gradient layout. Version 1 stacks resolve compatible defaults lazily without mutating the document. New edits write version 2 records.
 
