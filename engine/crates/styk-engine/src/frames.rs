@@ -373,6 +373,13 @@ impl Engine {
         work.prepare_now(self, tick)
     }
 
+    /// The noise materials of generated effects are all made: frames prepared while they were not drew soft stand-ins
+    /// (`frame_builder`), so the prepared frames are made again, as when decoded pictures arrive. Once per process.
+    pub(crate) fn materials_ready(&self) {
+        self.inner.state.lock().frames.invalidate_resources();
+        self.inner.state.notify_all();
+    }
+
     pub fn set_hidden(&self, uids: &[u32]) {
         while self.hidden_admission(uids, false) == FrameAdmission::Busy { std::thread::yield_now(); }
     }

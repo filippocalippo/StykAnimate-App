@@ -1,4 +1,4 @@
-//! Source-only generators retain the editor census; local generators pack exact batches.
+//! Source-only generators retain the editor census; local generators draw on the same frames, beside the same targets.
 use std::path::Path;
 use styk_doc::Value;
 use styk_eval::{
@@ -57,36 +57,23 @@ fn retained_generator_census_and_local_batches_match_editor() {
                 }
                 (Some(_), None) | (None, Some(_)) => failures.push(format!("{name} tick {tick}: generator batch presence differs")),
                 (Some(batch), Some(expected)) => {
+                    // Since generated effects were rebuilt (2026-11) their packing is no longer the
+                    // editor's: what still holds is which frames draw them, at which tick, and that
+                    // what they draw is placed beside the same targets.
                     batches += 1;
-                    if expected.get("tick").and_then(Value::as_f64) != Some(batch.tick) || expected.get("particles").and_then(Value::as_f64) != Some(batch.particles as f64) {
-                        failures.push(format!("{name} tick {tick}: batch tick/particle count differs"));
+                    if expected.get("tick").and_then(Value::as_f64) != Some(batch.tick) {
+                        failures.push(format!("{name} tick {tick}: batch tick differs"));
                     }
-                    for (key, ours) in [("records", &batch.records), ("table", &batch.table)] {
-                        let theirs = expected.get(key).unwrap().numbers().unwrap();
-                        if theirs.len() != ours.len() || theirs.iter().zip(ours).any(|(&a, &b)| (a as f32).to_bits() != b.to_bits()) {
-                            failures.push(format!("{name} tick {tick}: packed {key} differs"));
-                        }
-                    }
-                    let draws = Value::array(
-                        batch
-                            .draws
-                            .iter()
-                            .map(|d| {
-                                Value::array(vec![
-                                    Value::Num(d.record as f64),
-                                    Value::Num(d.count as f64),
-                                    Value::Num(d.shape as f64),
-                                    Value::Num(d.blend as f64),
-                                    d.uid.map_or(Value::Null, |id| Value::Num(id as f64)),
-                                    Value::Num((d.placement == generated::layers::Placement::Behind) as u8 as f64),
-                                    Value::Num(d.scene as u8 as f64),
-                                    Value::Num(d.material as f64),
-                                ])
-                            })
-                            .collect(),
-                    );
-                    if expected.get("draws") != Some(&draws) {
-                        failures.push(format!("{name} tick {tick}: packed draws differ"));
+                    let theirs: std::collections::BTreeSet<(Option<u32>, bool)> = expected
+                        .get("draws")
+                        .and_then(Value::elements)
+                        .unwrap()
+                        .into_iter()
+                        .map(|d| (d.item(4).and_then(|v| v.as_f64()).map(|v| v as u32), d.item(6).and_then(|v| v.as_f64()) == Some(1.0)))
+                        .collect();
+                    let ours: std::collections::BTreeSet<(Option<u32>, bool)> = batch.draws.iter().map(|d| (d.uid, d.scene)).collect();
+                    if theirs != ours {
+                        failures.push(format!("{name} tick {tick}: drawn beside {ours:?}, the editor beside {theirs:?}"));
                     }
                 }
             }

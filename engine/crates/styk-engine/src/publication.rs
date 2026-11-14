@@ -49,10 +49,16 @@ impl Prepared {
         for cel in &cels {
             tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::Picture::CelChanged(*cel)));
         }
+        // The noise materials of generated effects, ahead of the pictures: frames draw stand-ins until they are made.
         if generation.anchors.is_some() {
             for row in 0..styk_eval::vfx::generated::atlas::ROWS {
                 if styk_eval::vfx::generated::atlas::ready(row).is_none() {
-                    tasks.push_back(crate::OrdinaryTask::Run(Box::new(move |_: &Engine| { styk_eval::vfx::generated::atlas::row(row); })));
+                    tasks.push_front(crate::OrdinaryTask::Run(Box::new(move |engine: &Engine| {
+                        styk_eval::vfx::generated::atlas::row(row);
+                        if styk_eval::vfx::generated::atlas::all_ready() {
+                            engine.materials_ready();
+                        }
+                    })));
                 }
             }
         }
@@ -118,7 +124,13 @@ impl Engine {
         let id = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         generation.id = id;
         if styk_eval::vfx::generated::has_generators(&generation.prepared.doc) {
-            generation.anchors = Some(Arc::new(crate::anchors::Anchors::new()));
+            // An edit that moves no figure (an effect's settings) keeps the earlier-tick anchors.
+            let previous = self.inner.state.lock().current.clone();
+            let anchors = match previous.as_ref().and_then(|p| p.anchors.as_ref().map(|a| (p, a))) {
+                Some((p, a)) if p.lineage == generation.lineage => a.follow(&p.prepared, &generation.prepared),
+                _ => crate::anchors::Anchors::new(),
+            };
+            generation.anchors = Some(Arc::new(anchors));
         }
         let generation = Arc::new(generation);
         loop {

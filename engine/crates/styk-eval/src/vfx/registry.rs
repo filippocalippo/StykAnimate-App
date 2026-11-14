@@ -195,6 +195,37 @@ choice! {
     BeamStyle { Energy, Laser, Cartoon, Spiral, Lightning, FireBreath }
     SmokeStyle { Soft, Thick, Steam, Cartoon, Dust }
     ExplosionStyle { Fireball, Cartoon, Plasma, SmokeBomb, MushroomCloud, Firework, Electric, Magic, Dust, Pixel }
+    /// Whether continuous emission starts already running: Auto for a clip that starts with the
+    /// animation or has no end.
+    Prefill { Auto, Off, On }
+    /// Where an aura or explosion draws: as its style places each layer, or all behind or in front.
+    EffectPlacement { Both, Behind, InFront }
+}
+
+/// Options no longer offered (src/vfx-registry.mjs `retired`): still read from files and drawn as
+/// the option each merged into, with matching settings (docs/engine/vfx.md, "Retired styles").
+impl ParticleLook {
+    pub const RETIRED: &'static [ParticleLook] = &[ParticleLook::Leaf];
+}
+impl BeamStyle {
+    pub const RETIRED: &'static [BeamStyle] = &[BeamStyle::Spiral];
+}
+impl SmokeStyle {
+    pub const RETIRED: &'static [SmokeStyle] = &[SmokeStyle::Thick, SmokeStyle::Steam];
+}
+impl ExplosionStyle {
+    pub const RETIRED: &'static [ExplosionStyle] = &[ExplosionStyle::Plasma, ExplosionStyle::SmokeBomb];
+}
+
+/// The retired options of parameter `name` of `kind`, by saved index.
+pub fn retired_options(kind: Kind, name: &str) -> Vec<u8> {
+    match (kind, name) {
+        (Kind::Particles, "look") => ParticleLook::RETIRED.iter().map(|o| o.index()).collect(),
+        (Kind::Beam, "style") => BeamStyle::RETIRED.iter().map(|o| o.index()).collect(),
+        (Kind::Smoke, "style") => SmokeStyle::RETIRED.iter().map(|o| o.index()).collect(),
+        (Kind::Explosion, "style") => ExplosionStyle::RETIRED.iter().map(|o| o.index()).collect(),
+        _ => Vec::new(),
+    }
 }
 
 const EFFECT_STRENGTH: Spec = Spec { name: "effectStrength", kind: ParamKind::Number, default: 1.0, min: 0.0, max: 1.0 };
@@ -463,12 +494,14 @@ effects! {
         variation: f64 = ("variation", 0.4, 0, 1),
         drag: f64 = ("drag", 0, 0, 0.5),
         wind: f64 = ("wind", 0, -2, 2),
+        gravity_angle: f64 = ("gravityAngle", 90, -180, 180),
         turbulence: f64 = ("turbulence", 0, 0, 300),
         flow: f64 = ("flow", 0, 0, 300),
         swirl: f64 = ("swirl", 0, -30, 30),
         rotation: ParticleRotation = ("rotation", 0, 0, 4),
         spin: f64 = ("spin", 0, -45, 45),
         stretch: f64 = ("stretch", 2, 0, 20),
+        fade_in: f64 = ("fadeIn", 0.08, 0, 1),
         fade: f64 = ("fade", 0.5, 0, 1),
         twinkle: f64 = ("twinkle", 0, 0, 1),
         shading: f64 = ("shading", 1, 0, 1),
@@ -481,10 +514,14 @@ effects! {
         blend: GeneratorBlend = ("blend", 0, 0, 2),
         space: Space = ("space", 0, 0, 1),
         ground: bool = ("ground", 0, 0, 1),
+        bounce: f64 = ("bounce", 0, 0, 1),
         layer: DrawLayer = ("layer", 0, 0, 1),
+        prefill: Prefill = ("prefill", 0, 0, 2),
+        time_scale: f64 = ("timeScale", 1, 0.1, 4),
         delay: f64 = ("delay", 0, 0, 600),
         step: AnimateOn = ("step", 0, 0, 2),
         seed: u32 = ("seed", 1, 0, 65535),
+        unique: bool = ("unique", 1, 0, 1),
         x: f64 = ("x", 0.5, -1, 2),
         y: f64 = ("y", 0.5, -1, 2),
     }
@@ -493,6 +530,7 @@ effects! {
         color: Color = ("color", 0xffc93c, 0, 0xffffff),
         intensity: f64 = ("intensity", 1, 0, 3),
         height: f64 = ("height", 1, 0.2, 3),
+        width: f64 = ("width", 1, 0.2, 3),
         density: f64 = ("density", 1, 0.1, 4),
         turbulence: f64 = ("turbulence", 1, 0, 3),
         dust: bool = ("dust", 0, 0, 1),
@@ -501,9 +539,13 @@ effects! {
         embers: bool = ("embers", 1, 0, 1),
         trail: bool = ("trail", 1, 0, 1),
         blend: GeneratorBlend = ("blend", 0, 0, 2),
+        layer: EffectPlacement = ("layer", 0, 0, 2),
+        prefill: Prefill = ("prefill", 0, 0, 2),
+        time_scale: f64 = ("timeScale", 1, 0.1, 4),
         delay: f64 = ("delay", 0, 0, 600),
         step: AnimateOn = ("step", 0, 0, 2),
         seed: u32 = ("seed", 1, 0, 65535),
+        unique: bool = ("unique", 1, 0, 1),
     }
     Beam = "beam", "Energy beam", "Generate", generator: true, scene_only: false {
         style: BeamStyle = ("style", 0, 0, 5),
@@ -518,15 +560,19 @@ effects! {
         aim_uid: u32 = ("aimUid", 0, 0, 4294967295u32),
         aim_handle: u32 = ("aimHandle", 0, 0, 65535),
         arcs: u32 = ("arcs", 3, 0, 8),
+        strands: bool = ("strands", 0, 0, 1),
         sparks: f64 = ("sparks", 1, 0, 4),
         charge_particles: bool = ("chargeParticles", 1, 0, 1),
         orb: bool = ("orb", 1, 0, 1),
         splash: bool = ("splash", 1, 0, 1),
         layer: DrawLayer = ("layer", 0, 0, 1),
         blend: GeneratorBlend = ("blend", 0, 0, 2),
+        prefill: Prefill = ("prefill", 0, 0, 2),
+        time_scale: f64 = ("timeScale", 1, 0.1, 4),
         delay: f64 = ("delay", 0, 0, 600),
         step: AnimateOn = ("step", 0, 0, 2),
         seed: u32 = ("seed", 1, 0, 65535),
+        unique: bool = ("unique", 1, 0, 1),
         x: f64 = ("x", 0.5, -1, 2),
         y: f64 = ("y", 0.5, -1, 2),
     }
@@ -535,7 +581,9 @@ effects! {
         color: Color = ("color", 0x8a8794, 0, 0xffffff),
         amount: f64 = ("amount", 3, 0, 60),
         size: f64 = ("size", 24, 2, 400),
+        opacity: f64 = ("opacity", 1, 0, 1),
         rise: f64 = ("rise", 1.2, -6, 12),
+        direction: f64 = ("direction", -90, -180, 180),
         wind: f64 = ("wind", 0, -10, 10),
         life: f64 = ("life", 60, 4, 400),
         emission: Emission = ("emission", 0, 0, 1),
@@ -546,9 +594,12 @@ effects! {
         shading: f64 = ("shading", 1, 0, 1),
         space: Space = ("space", 0, 0, 1),
         layer: DrawLayer = ("layer", 0, 0, 1),
+        prefill: Prefill = ("prefill", 0, 0, 2),
+        time_scale: f64 = ("timeScale", 1, 0.1, 4),
         delay: f64 = ("delay", 0, 0, 600),
         step: AnimateOn = ("step", 0, 0, 2),
         seed: u32 = ("seed", 1, 0, 65535),
+        unique: bool = ("unique", 1, 0, 1),
         x: f64 = ("x", 0.5, -1, 2),
         y: f64 = ("y", 0.5, -1, 2),
     }
@@ -566,9 +617,12 @@ effects! {
         ring: bool = ("ring", 1, 0, 1),
         fireball: bool = ("fireball", 1, 0, 1),
         blend: GeneratorBlend = ("blend", 0, 0, 2),
+        layer: EffectPlacement = ("layer", 0, 0, 2),
+        time_scale: f64 = ("timeScale", 1, 0.1, 4),
         delay: f64 = ("delay", 0, 0, 600),
         step: AnimateOn = ("step", 0, 0, 2),
         seed: u32 = ("seed", 1, 0, 65535),
+        unique: bool = ("unique", 1, 0, 1),
         x: f64 = ("x", 0.5, -1, 2),
         y: f64 = ("y", 0.5, -1, 2),
     }
@@ -613,6 +667,41 @@ impl Params {
             Params::LightSweep(p) => p.intensity == 0.0,
             Params::Crt(p) => p.amount == 0.0 && p.curvature == 0.0 && p.chromatic == 0.0,
             Params::Particles(_) | Params::Aura(_) | Params::Beam(_) | Params::Smoke(_) | Params::Explosion(_) => false,
+        }
+    }
+
+    /// A generated effect's playback speed (`timeScale`), 1 for a filter.
+    pub fn time_scale(&self) -> f64 {
+        match self {
+            Params::Particles(p) => p.time_scale,
+            Params::Aura(p) => p.time_scale,
+            Params::Beam(p) => p.time_scale,
+            Params::Smoke(p) => p.time_scale,
+            Params::Explosion(p) => p.time_scale,
+            _ => 1.0,
+        }
+    }
+
+    /// Whether each copy of a generated effect plays its own pattern (`unique`).
+    pub fn unique(&self) -> bool {
+        match self {
+            Params::Particles(p) => p.unique,
+            Params::Aura(p) => p.unique,
+            Params::Beam(p) => p.unique,
+            Params::Smoke(p) => p.unique,
+            Params::Explosion(p) => p.unique,
+            _ => false,
+        }
+    }
+
+    /// A generated effect's `prefill` (explosions have none: a burst has nothing to start with).
+    pub fn prefill(&self) -> Prefill {
+        match self {
+            Params::Particles(p) => p.prefill,
+            Params::Aura(p) => p.prefill,
+            Params::Beam(p) => p.prefill,
+            Params::Smoke(p) => p.prefill,
+            _ => Prefill::Off,
         }
     }
 

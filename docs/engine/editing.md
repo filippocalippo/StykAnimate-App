@@ -38,6 +38,10 @@ and after), and emit change events the interface listens to.
   and their references are frozen: nothing re-records them from the JavaScript
   ([README](README.md#fixtures)), and a new or changed command gets a Rust test that
   states its expected result.
+  One allowance: effects gained parameters after the recordings were made (generated
+  effects, 2026-11), so a parameter an effect of the recording lacks is left out of the
+  comparison where the engine holds its default (`replay::as_recorded`; the JavaScript
+  tape tests use `tests/support/recorded-documents.mjs`).
 - Order: what the app runs. The app constructs the editor with `propertyChannels` and
   `layerTimeline` (`src/app.mjs`), and `load` gives every document a layer sheet
   (`initializeLayerSheet`). Every gesture in the app therefore takes the authored path

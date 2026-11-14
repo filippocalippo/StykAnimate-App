@@ -72,7 +72,7 @@ No effect-cost badges or extra animation modes appear in the panel. Presets inst
 | CRT / scanlines | Scanlines, spacing, curvature, RGB fringe, phase, paint |
 | Turbulent displacement | Amount, scale, evolution, detail, seed |
 
-Generated effects — Particles, Aura, Energy beam, Smoke and Explosion — create artwork rather than filtering it and live only in effect clips.
+Generated effects — Particles, Aura, Energy beam, Smoke and Explosion — create artwork rather than filtering it and live only in effect clips. Their style lists keep retired options (still opened, drawn as the option they merged into, left out of the menus), and a control a style ignores is hidden for that style ([engine/vfx.md](engine/vfx.md#generated-effects)).
 
 Every effect also has an animatable **Effect strength** from 0–100%. It mixes the completed effect with its input in premultiplied alpha. Zero strength bypasses filter work; 100% avoids the extra mixing pass. Older saved stacks resolve to 100% without changing their saved data.
 

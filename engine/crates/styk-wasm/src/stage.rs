@@ -205,6 +205,8 @@ impl Stage {
         let mut renderer = Renderer::new(&device, &queue, format);
         // A stroke changes a part of the frame: the stage keeps each frame, so the next is drawn again in that part alone.
         renderer.set_keep_frames(true);
+        // Generated effects' shading compiles now, with the app's start, not on the first frame that draws one.
+        renderer.prepare_effects();
         // A stage over a document that is already open (the canvas was replaced after a lost device):
         // the pictures decoded so far went to the stage before it.
         engine.engine.redecode_images();

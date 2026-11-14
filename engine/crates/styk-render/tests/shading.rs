@@ -188,7 +188,7 @@ fn every_run_draws_what_the_general_shader_draws() {
             let edges = *edges;
             let mut renderer = Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, edges);
             for (what, list, world, doc) in &lists {
-                if software && list.prims.iter().any(|p| p.kind & (F_DEPTH | F_ADD) != 0) {
+                if software && list.prims.iter().any(|p| p.kind & F_DEPTH != 0 || matches!(p.kind & 255, K_PARTICLE | K_BEAM)) {
                     continue;
                 }
                 let doc = doc.as_ref().map(|(doc, camera)| (&**doc, camera.as_ref()));

@@ -378,13 +378,14 @@ impl Frame {
     pub fn straight(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.pixels.len());
         for p in self.pixels.as_chunks::<4>().0 {
-            let a = p[3] as u32;
+            // Light over transparency becomes a translucent colour as bright as it is (as exports do).
+            let a = (p[3] as u32).max(p[0] as u32).max(p[1] as u32).max(p[2] as u32);
             if a == 0 {
                 out.extend_from_slice(&[0; 4]);
                 continue;
             }
             let c = |v: u8| ((2 * 255 * v as u32 + a) / (2 * a)).min(255) as u8;
-            out.extend_from_slice(&[c(p[0]), c(p[1]), c(p[2]), p[3]]);
+            out.extend_from_slice(&[c(p[0]), c(p[1]), c(p[2]), a as u8]);
         }
         out
     }

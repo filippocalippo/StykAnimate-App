@@ -3,7 +3,8 @@
 //! every step, the document's bytes, the playhead, the selection, history and the
 //! change events with what the JavaScript editor did.
 
-use styk_doc::Value;
+use styk_doc::{Obj, Value};
+use styk_eval::vfx::Kind;
 
 use crate::{EditError, Editor, Options, Selection};
 
@@ -200,9 +201,14 @@ fn replay_with_worker(reference: &Value, worker: bool, max_source_bytes: usize) 
         if let Err(difference) = crate::rebuild_check::rebuilt_whole(&editor) {
             differences.push(difference);
         }
-        let actual = editor.report_json();
+        let mut actual = editor.report_json();
         if actual != expected {
-            differences.push(format!("document differs: {}", first_difference(&actual, &expected)));
+            if let Ok(recorded) = styk_doc::json::parse(expected.as_bytes()) {
+                actual = styk_doc::json::to_string(&as_recorded(&crate::record::without_runtime(editor.report()), &recorded));
+            }
+            if actual != expected {
+                differences.push(format!("document differs: {}", first_difference(&actual, &expected)));
+            }
         }
         let got = json(&editor.state_value());
         let want = json(step.get("state").unwrap_or(&Value::Null));
@@ -264,6 +270,42 @@ fn json(value: &Value) -> String {
 
 fn short(text: &str) -> String {
     if text.len() <= 400 { text.to_string() } else { format!("{}…", &text[..text.floor_char_boundary(400)]) }
+}
+
+/// `actual` as the recording would hold it: effects gained parameters after the recordings were
+/// made (generated effects, 2026-11; docs/engine/vfx.md), so a parameter an effect of the
+/// recording lacks is left out where ours holds its default, as `vfx::parity` compares them.
+/// Anything else is kept, so it still differs.
+pub fn as_recorded(actual: &Value, recorded: &Value) -> Value {
+    match (actual, recorded) {
+        (Value::Obj(ours), Value::Obj(theirs)) => {
+            let kind = ours.get("type").and_then(Value::as_str).and_then(Kind::from_name);
+            let mut out = Obj::new();
+            for (key, value) in ours.iter() {
+                let value = match (theirs.get(key), kind) {
+                    (Some(Value::Obj(params)), Some(kind)) if &**key == "params" => match value {
+                        Value::Obj(ours) => {
+                            let mut kept = Obj::new();
+                            for (name, v) in ours.iter() {
+                                let later = params.get(name).is_none() && kind.param(name).is_some_and(|i| matches!(v, Value::Num(n) if *n == kind.specs()[i].default));
+                                if !later {
+                                    kept.set(name, v.clone());
+                                }
+                            }
+                            Value::object(kept)
+                        }
+                        other => other.clone(),
+                    },
+                    (Some(theirs), _) => as_recorded(value, theirs),
+                    (None, _) => value.clone(),
+                };
+                out.set(key, value);
+            }
+            Value::object(out)
+        }
+        (Value::Arr(ours), Value::Arr(theirs)) => Value::array(ours.iter().enumerate().map(|(i, v)| theirs.get(i).map_or_else(|| v.clone(), |t| as_recorded(v, t))).collect()),
+        _ => actual.clone(),
+    }
 }
 
 fn first_difference(actual: &str, expected: &str) -> String {

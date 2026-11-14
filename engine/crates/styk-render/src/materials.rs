@@ -1,8 +1,9 @@
-//! The particle material atlas of generated effects (docs/engine/vfx.md,
-//! Generated effects): the editor's procedural rows (`styk_eval::vfx::generated::atlas`)
-//! in one two-channel texture with its reduced levels, sampled trilinearly by sprite
-//! particles. A placeholder texel until a draw list needs a row; then the full atlas
-//! (5.9 MB), filled row by row as lists name them (`DrawList::materials`).
+//! The noise material atlas of generated effects (docs/engine/vfx.md, Generated effects):
+//! the procedural materials (`styk_eval::vfx::generated::atlas`) in one two-channel texture
+//! (density, light) of 1,024 texels square with its reduced levels, sampled trilinearly by
+//! material particles within their cells. A placeholder texel until a draw list needs a
+//! material; then the full atlas (2.7 MB), filled material by material as lists name them
+//! (`DrawList::materials`) and as the engine's workers finish generating them.
 
 use styk_draw::{MATERIAL_CELL, MATERIAL_COLUMNS, MATERIAL_LEVELS, MATERIAL_ROWS};
 use styk_eval::vfx::generated::atlas;
@@ -64,15 +65,23 @@ pub(crate) fn sampler(device: &wgpu::Device) -> wgpu::Sampler {
 }
 
 impl Renderer {
-    /// Uploads the material rows in `rows` (one bit each) not uploaded yet. A row no
-    /// engine worker has generated yet is generated here (the engine prepares them in
-    /// the background when a document with generated effects opens).
+    /// Uploads the materials in `rows` (one bit each) not uploaded yet and ready: the engine's
+    /// workers generate them when a document with generated effects opens. One not ready is
+    /// never generated here (the interface thread draws this): the list draws its particles
+    /// as soft discs meanwhile and asks to be drawn again (styk-draw `MATERIALS_PENDING`).
     pub(crate) fn ensure_materials(&mut self, rows: u32) {
-        // The atlas is sampled trilinearly, so a texel at the edge of a row reads its neighbour's: with only the rows a list names
-        // in, what a frame draws depends on the lists before it. Exact sizes ([`Renderer::set_exact_sizes`]) bring every row in.
-        let rows = if self.exact_sizes && rows != 0 { (1u32 << MATERIAL_ROWS) - 1 } else { rows };
+        // Bits beyond the rows say other things (styk-draw `MATERIALS_REDUCED`, `MATERIALS_PENDING`).
+        let all = (1u32 << MATERIAL_ROWS) - 1;
+        let rows = rows & all;
+        // Cells are sampled within their own sides; exact sizes still bring every material in, so
+        // what a frame draws never depends on the lists before it.
+        let rows = if self.exact_sizes && rows != 0 { all } else { rows };
         let missing = rows & !self.materials.rows;
         if missing == 0 {
+            return;
+        }
+        // 1,024 texels square: within every device's limit (WebGL2 guarantees 2,048).
+        if self.device.limits().max_texture_dimension_2d < MATERIAL_CELL * MATERIAL_COLUMNS.max(MATERIAL_ROWS) {
             return;
         }
         if !self.materials.full {
@@ -84,7 +93,8 @@ impl Renderer {
             if missing & 1 << row == 0 {
                 continue;
             }
-            for (mip, level) in atlas::row(row as usize).levels.iter().enumerate() {
+            let Some(material) = atlas::ready(row as usize) else { continue };
+            for (mip, level) in material.levels.iter().enumerate() {
                 self.queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
                         texture: &self.materials.texture,
@@ -97,7 +107,7 @@ impl Renderer {
                     wgpu::Extent3d { width: level.width as u32, height: level.height as u32, depth_or_array_layers: 1 },
                 );
             }
+            self.materials.rows |= 1 << row;
         }
-        self.materials.rows |= missing;
     }
 }
