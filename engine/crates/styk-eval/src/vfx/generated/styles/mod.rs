@@ -62,6 +62,30 @@ pub(super) fn smoke_colors() -> [[f64; 3]; 3] {
     [rgb(0x4a3b35), rgb(0x3a3436), rgb(0x2e2c31)]
 }
 
+/// A deeper tone of `c` for the edges and undersides of light colours, so they read on a light
+/// page: more saturated and darker (`value`, the brightest channel), its hue turned a little toward
+/// whichever neighbour is darker (cyan toward blue, gold toward orange).
+pub(super) fn deeper(c: [f64; 3], value: f64) -> [f64; 3] {
+    // A twentieth of a turn either way about the grey axis.
+    let (cs, sn) = (0.951_056_516_295_153_6, 0.309_016_994_374_947_4);
+    let turn = |sn: f64| {
+        let k = (1.0 - cs) / 3.0;
+        let r = 0.577_350_269_189_625_8 * sn;
+        let m = [[cs + k, k - r, k + r], [k + r, cs + k, k - r], [k - r, k + r, cs + k]];
+        [0, 1, 2].map(|i| clamp(m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2], 0.0, 1.0))
+    };
+    let luma = |c: [f64; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let (a, b) = (turn(sn), turn(-sn));
+    let h = if luma(a) <= luma(b) { a } else { b };
+    let (hi, lo) = (h[0].max(h[1]).max(h[2]), h[0].min(h[1]).min(h[2]));
+    if hi - lo < 1e-3 {
+        return c.map(|v| v * value);
+    }
+    // Saturated: pushed away from its least channel, brightest channel at `value`.
+    let floor = lo * 0.85;
+    h.map(|v| clamp((v - floor) / (hi - floor), 0.0, 1.0) * value)
+}
+
 pub(super) fn m(name: &str) -> Option<Material> {
     Some(material(name))
 }

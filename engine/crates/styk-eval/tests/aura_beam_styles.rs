@@ -2,7 +2,7 @@
 //! anatomy each style is built from, stated on the review stage (a stick figure 180 pixels
 //! tall, its hip at `HIP`, its head's top at y 202).
 
-use styk_eval::vfx::generated::layers::{material, Placement, BEAM_LINE, BEAM_TIP};
+use styk_eval::vfx::generated::layers::{material, Placement, BEAM, BEAM_LINE, BEAM_TIP, DISC, POINT};
 use styk_eval::vfx::generated::particle::Evaluator;
 use styk_eval::vfx::generated::stage::{Clip, Stage, HIP};
 
@@ -10,6 +10,10 @@ use super::generators::{batch_at, live};
 
 /// The head's top on the review stage: hip 300, torso 62, head 36 across.
 const HEAD_TOP: f64 = HIP[1] - 62.0 - 36.0;
+
+fn luma(c: [f64; 3]) -> f64 {
+    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
 
 /// A beam that charges plays its charge from nothing even when its clip starts with the
 /// animation, and what happens once it fires (sparks along it, its impact) waits for that; a
@@ -64,4 +68,26 @@ fn a_fire_aura_is_a_flame_the_figure_stands_in() {
     // centres alone spread wider, and each tongue reaches past its centre.
     assert!(right - left > 90.0, "the tongues' centres span {left}..{right}");
     assert!(top < HEAD_TOP - 45.0, "the flame rises to {top}, the head's top is at {HEAD_TOP}");
+}
+
+/// The energy beam keeps a value structure of its own on a white page: a white-hot core, the
+/// colour, and a deeper, more saturated rim. Its orb swells as it charges.
+#[test]
+fn an_energy_beam_has_a_core_a_body_and_a_deep_rim_and_its_orb_swells() {
+    let prepared = Stage::new(60.0).clip(Clip::new(Some(1), "beam").timed(0.0, Some(40.0))).prepare();
+    let batch = batch_at(&prepared, 24.0).expect("the beam fires");
+    let look = batch.draws.iter().find_map(|d| batch.spec(d).beam_look.filter(|_| batch.spec(d).shape == BEAM)).expect("a beam");
+    let [core, body, rim] = [look.core, look.body, look.rim].map(|c| [c[0], c[1], c[2]]);
+    assert!(luma(core) > 0.9 && luma(body) < luma(core) - 0.1, "a white-hot core {core:?} in a body of the colour {body:?}");
+    assert!(luma(rim) < luma(body) - 0.3, "the rim {rim:?} is deeper than the body {body:?}");
+    // The orb: the crisp discs at the hand.
+    let orb = |tick: f64| {
+        let batch = batch_at(&prepared, tick).unwrap();
+        live(&batch).iter().filter(|(_, _, p)| {
+            let s = &batch.specs[p.spec as usize];
+            s.shape == DISC && s.emit_shape == POINT && s.softness < 0.5
+        }).map(|(_, _, p)| p.size).fold(0.0, f64::max)
+    };
+    let (early, late) = (orb(3.0), orb(11.0));
+    assert!(early > 0.0 && early < 0.75 * late, "the orb swells as it charges: {early} then {late}");
 }

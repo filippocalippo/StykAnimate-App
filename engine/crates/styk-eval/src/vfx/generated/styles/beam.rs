@@ -20,22 +20,28 @@ const BEAM_SPIRAL: f64 = 3.0;
 /// where it lands, a flare, light and sparks thrown back. Its core and glow are light (they
 /// glow on a dark page); its body and sparks paint the colour, so it reads on a white one.
 fn energy(p: &Beam, ctx: &Context, strands: bool, firing_at_once: bool) -> Vec<Spec> {
-    let col = paint_color(&p.color);
-    let li = p.intensity.min(1.0);
+    let i = p.intensity;
+    let li = i.min(1.0);
     let w = p.width;
     let wr = w / 16.0;
     let r = wr.sqrt();
     let charge = if firing_at_once { 0.0 } else { paint::js_round(p.charge) };
+    let (core_c, col, deep) = beam_colors(p);
     let pale = tone(col, 0.55, WHITE);
-    let core_c = tone(col, 0.25, WHITE);
-    let deep = tone(col, 0.35, BLACK);
     let fire_start = ctx.start + charge;
     let fire_end = ctx.end;
     let grow = if firing_at_once { 1.0 } else { p.travel.max(1.0) };
     let firing = (fire_end - fire_start).max(1.0);
     let fade = if ctx.fade_out != 0.0 && !ctx.fade_out.is_nan() { ctx.fade_out } else { 8.0 };
+    let blend = glow_blend(p.blend);
+    // How much light each part gives off: Glow is all light, Solid all paint, Auto the style's mix.
+    let light = |auto: f64| match blend {
+        ADD => 1.0,
+        NORMAL => 0.0,
+        _ => auto,
+    };
     let base = Spec {
-        blend: glow_blend(p.blend),
+        blend,
         beam_w: w,
         wobble: 0.15 * p.wobble,
         grow,
@@ -46,75 +52,130 @@ fn energy(p: &Beam, ctx: &Context, strands: bool, firing_at_once: bool) -> Vec<S
         placement: behind(p.layer == DrawLayer::Behind),
         ..Spec::default()
     };
+    let light_layer = if blend == NORMAL { NORMAL } else { ADD };
+    // Charging: motes of energy streak in from all around and gather into the orb...
     let gathering = (p.charge_particles && charge > 0.0).then(|| layer(Spec {
-        start: ctx.start, emit_dur: charge + 2.0, rate: 12.0, life_min: 10.0, life_max: 14.0,
-        emit_shape: EMIT_RING, emit_radius: 80.0 * r, radial: -1.0, speed_min: 4.0 * r, speed_max: 6.0 * r, attract: 0.7,
-        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.4, size0: 2.2 * r.sqrt(), size_over_life: Some(Curve::three(0.6, 0.5, 1.0, 0.7)),
-        trail: Some(Trail { length: 5.0, segments: 4, width: 0.6, alpha: 0.6, glow: 0.6, emissive: None }),
-        emissive: Some(Curve::three(0.2, 0.6, 0.35, 0.7)), alpha_over_life: Some(Curve::four(0.0, 0.25, 1.0, 0.8, 1.0, 0.0)),
+        start: ctx.start, emit_dur: (charge - 2.0).max(1.0), rate: 7.0, life_min: 9.0, life_max: 13.0,
+        emit_shape: EMIT_RING, emit_radius: 78.0 * r, radial: -1.0, speed_min: 3.5 * r, speed_max: 5.5 * r, attract: 0.8,
+        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.6, size0: 2.4 * r.sqrt(), size_over_life: Some(Curve::three(0.5, 0.5, 1.0, 0.7)), size_jitter: 0.3,
+        trail: Some(Trail { length: 6.0, segments: 5, width: 0.6, alpha: 0.85, glow: 0.4, emissive: None }),
+        emissive: Some(Curve::three(light(0.1), 0.6, light(0.25), light(0.5))), alpha_over_life: Some(Curve::four(0.0, 0.2, 1.0, 0.85, 1.0, 0.0)),
         ..base.clone()
-    }, stops(&[(deep, 1.0), (col, 1.0), (pale, 1.0)])));
-    // The orb in the hand: a crisp bright heart that swells as it charges, and its light.
-    let orb = |glow: bool| layer(Spec {
-        start: ctx.start, emit_dur: (fire_end - ctx.start).max(1.0), rate: 1.5, life_min: 6.0, life_max: 8.0, emit_radius: 1.0,
-        softness: if glow { 1.8 } else { 0.0 }, size0: if glow { 40.0 * wr } else { 11.0 * wr },
-        size_over_life: Some(Curve::three(0.85, 0.5, 1.0, 0.9)), size_jitter: 0.12,
-        alpha_over_life: Some(Curve::three(0.0, 0.25, if glow { 0.5 * li } else { 1.0 }, 0.0)),
+    }, stops(&[(deep, 1.0), (col, 1.0), (tone(col, 0.3, WHITE), 1.0)])));
+    // ...and rings of it close in on the hand.
+    let closing = (p.charge_particles && charge > 2.0).then(|| layer(Spec {
+        start: ctx.start, emit_dur: (charge - 2.0).max(1.0), rate: 0.3, life_min: 7.0, life_max: 7.0,
+        shape: RING, softness: 0.09, size_jitter: 0.0, size0: 64.0 * r, size_over_life: Some(Curve::three(1.0, 0.6, 0.4, 0.12)),
+        alpha_over_life: Some(Curve::three(0.0, 0.55, 1.0, 0.0)), emissive: Some(Curve::three(light(0.15), 0.5, light(0.3), light(0.5))),
+        ..base.clone()
+    }, stops(&[(deep, 1.0), (col, 1.0)])));
+    // The orb in the hand: a white-hot heart in a ball of the colour with a deep rim, swelling as it
+    // charges, and its light.
+    let orb = |size: f64, softness: f64, ramp: Ramp, emissive: f64, alpha: f64, blend: u8| layer(Spec {
+        start: ctx.start, emit_dur: (fire_end - ctx.start).max(1.0), rate: 1.5, life_min: 6.0, life_max: 8.0, emit_radius: 0.6 * r,
+        softness, size0: size, size_over_life: Some(Curve::three(0.88, 0.5, 1.0, 0.92)), size_jitter: 0.1,
+        alpha_over_life: Some(Curve::three(0.0, 0.2, alpha, 0.0)),
         clip_fade_in: charge.max(1.0), clip_fade_out: if ctx.timed { 8.0 } else { 0.0 },
-        blend: if glow && base.blend != NORMAL { ADD } else { base.blend },
-        emissive: Some(if glow { Curve::three(0.7, 0.5, 0.7, 0.7) } else { Curve::three(0.45, 0.5, 0.5, 0.5) }),
+        blend, emissive: Some(Curve::three(emissive, 0.5, emissive, emissive)),
         ..base.clone()
-    }, if glow { stops(&[(pale, 1.0), (col, 1.0)]) } else { stops(&[(core_c, 1.0), (pale, 1.0)]) });
+    }, ramp);
     let beam = layer(Spec {
         shape: BEAM, count: 1.0, start: fire_start,
         beam_look: Some(BeamLook {
-            core: [core_c[0], core_c[1], core_c[2], if base.blend == NORMAL { 0.0 } else if base.blend == ADD { 1.0 } else { 0.45 }],
-            body: [col[0], col[1], col[2], if base.blend == ADD { 1.0 } else { 0.12 }],
-            glow: [col[0], col[1], col[2], if base.blend == NORMAL { 0.0 } else { 1.0 }],
-            rim: [col[0], col[1], col[2], if base.blend == ADD { 1.0 } else { 0.12 }],
+            core: [core_c[0], core_c[1], core_c[2], light(0.5)],
+            body: [col[0], col[1], col[2], light(0.15)],
+            // Its light outshines it on a dark page; at more than full intensity, more of it.
+            glow: [col[0] * i, col[1] * i, col[2] * i, if blend == NORMAL { 0.0 } else { light(0.85) }],
+            rim: [deep[0], deep[1], deep[2], light(0.0)],
             head: 1.0,
             strands,
             ink: None,
         }),
         ..base.clone()
-    }, stops(&[(WHITE, li), (col, li)]));
+    }, stops(&[(WHITE, 1.0), (col, 1.0)]));
+    // As it fires: a flash and a ring at the hand.
+    let muzzle = layer(Spec {
+        start: fire_start, count: 1.0, life_min: 6.0, life_max: 6.0, shape: BURST, rotate: ROTATE_RANDOM, size_jitter: 0.0,
+        size0: 30.0 * r, size_over_life: Some(Curve::three(0.5, 0.3, 1.0, 0.8)),
+        alpha_over_life: Some(Curve::three(1.0, 0.5, 0.9, 0.0)), emissive: Some(Curve::three(light(0.4), 0.5, light(0.3), light(0.2))),
+        ..base.clone()
+    }, stops(&[(core_c, 1.0), (pale, 1.0), (col, 1.0)]));
+    let recoil = layer(Spec {
+        start: fire_start, count: 1.0, life_min: 9.0, life_max: 9.0, shape: RING, softness: 0.05, size_jitter: 0.0,
+        size0: 70.0 * r, size_over_life: Some(Curve::three(0.12, 0.35, 0.75, 1.0)),
+        alpha_over_life: Some(Curve::three(0.9, 0.4, 0.6, 0.0)), emissive: Some(Curve::three(light(0.3), 0.5, light(0.5), light(0.7))),
+        ..base.clone()
+    }, stops(&[(pale, 1.0), (col, 1.0), (deep, 1.0)]));
     let lightning = (p.arcs > 0).then(|| layer(Spec {
         shape: ARC, count: p.arcs as f64 * 16.0, arc_segs: 16.0, start: fire_start, arc_branches: 1.2, arc_rhythm: 2.0,
-        size0: 0.9 * r, softness: 1.0, emissive: Some(Curve::three(0.55, 0.5, 0.55, 0.55)),
+        size0: 0.8 * r, softness: 1.0 * li.max(0.3), outline: Some(Outline { width: 0.8 * r, color: deep }),
+        emissive: Some(Curve::three(light(0.35), 0.5, light(0.35), light(0.35))),
         ..base.clone()
-    }, stops(&[(tone(col, 0.25, WHITE), li)])));
+    }, stops(&[(tone(col, 0.6, WHITE), 1.0)])));
     let along = (p.sparks > 0.0).then(|| layer(Spec {
         start: fire_start, emit_dur: firing, rate: 6.0 * p.sparks, life_min: 8.0, life_max: 14.0,
         emit_shape: BEAM_LINE, emit_radius: 8.0 * wr, spread: 0.5, speed_min: 4.0, speed_max: 9.0, drag: 0.05,
-        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.2, size0: 1.6 * r.sqrt(), size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.3)),
+        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.2, size0: 1.8 * r.sqrt(), size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.3)),
         trail: Some(Trail { length: 3.0, segments: 3, width: 0.6, alpha: 0.6, glow: 0.5, emissive: None }),
-        emissive: Some(Curve::three(0.5, 0.5, 0.45, 0.4)), alpha_over_life: Some(Curve::three(1.0, 0.6, 0.9, 0.0)),
+        emissive: Some(Curve::three(light(0.5), 0.5, light(0.4), light(0.3))), alpha_over_life: Some(Curve::three(1.0, 0.6, 0.9, 0.0)),
         ..base.clone()
     }, stops(&[(pale, 1.0), (col, 1.0), (deep, 1.0)])));
+    // Where it lands: its light, a flare, rings of impact and sparks thrown back.
     let tip_light = p.splash.then(|| layer(Spec {
         start: fire_start + grow, emit_dur: (firing - grow).max(1.0), rate: 1.0, life_min: 4.0, life_max: 5.0,
         emit_shape: BEAM_TIP, emit_radius: 2.0, softness: 1.6, size0: 46.0 * r, size_over_life: Some(Curve::three(0.8, 0.5, 1.0, 1.0)),
-        alpha_over_life: Some(Curve::three(0.0, 0.3, 0.55 * li, 0.0)), blend: if base.blend == NORMAL { NORMAL } else { ADD },
+        alpha_over_life: Some(Curve::three(0.0, 0.3, 0.55 * li, 0.0)), blend: light_layer,
         ..base.clone()
-    }, stops(&[(pale, 1.0), (col, 1.0)])));
+    }, stops(&[(pale, i.max(1.0)), (col, i.max(1.0))])));
+    let impact = p.splash.then(|| layer(Spec {
+        start: fire_start + grow - 1.0, emit_dur: (firing - grow).max(1.0), rate: 0.4, life_min: 7.0, life_max: 7.0,
+        emit_shape: BEAM_TIP, shape: RING, softness: 0.07, size_jitter: 0.1, size0: 46.0 * r, size_over_life: Some(Curve::three(0.2, 0.4, 0.8, 1.0)),
+        alpha_over_life: Some(Curve::three(0.9, 0.5, 0.5, 0.0)), emissive: Some(Curve::three(light(0.3), 0.5, light(0.5), light(0.7))),
+        ..base.clone()
+    }, stops(&[(pale, 1.0), (col, 1.0), (deep, 1.0)])));
     let flare = p.splash.then(|| layer(Spec {
         start: fire_start + grow, emit_dur: (firing - grow).max(1.0), rate: 1.3, life_min: 4.0, life_max: 6.0,
         emit_shape: BEAM_TIP, emit_radius: 2.0, shape: SPARKLE, spin: 0.08, spin_jitter: 1.0,
         size0: 26.0 * r, size_over_life: Some(Curve::three(0.6, 0.35, 1.0, 0.7)),
-        emissive: Some(Curve::three(0.65, 0.5, 0.6, 0.6)), alpha_over_life: Some(Curve::three(1.0, 0.5, 0.9, 0.0)),
+        emissive: Some(Curve::three(light(0.55), 0.5, light(0.5), light(0.5))), alpha_over_life: Some(Curve::three(1.0, 0.5, 0.9, 0.0)),
         ..base.clone()
-    }, stops(&[(WHITE, 1.0), (pale, 1.0)])));
+    }, stops(&[(core_c, 1.0), (pale, 1.0), (col, 1.0)])));
     let splash = (p.splash && p.sparks > 0.0).then(|| layer(Spec {
         start: fire_start + grow, emit_dur: (firing - grow - 4.0).max(1.0), rate: 9.0 * p.sparks, life_min: 8.0, life_max: 16.0,
         emit_shape: BEAM_TIP, emit_radius: 6.0 * wr, angle: std::f64::consts::PI, spread: 2.2, speed_min: 4.0, speed_max: 10.0, gravity: 0.15, drag: 0.05,
-        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.0, size0: 1.8 * r.sqrt(), size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.3)),
+        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.0, size0: 2.0 * r.sqrt(), size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.3)),
         trail: Some(Trail { length: 3.0, segments: 3, width: 0.6, alpha: 0.6, glow: 0.5, emissive: None }),
-        emissive: Some(Curve::three(0.55, 0.5, 0.45, 0.4)), alpha_over_life: Some(Curve::three(1.0, 0.6, 0.9, 0.0)),
+        emissive: Some(Curve::three(light(0.5), 0.5, light(0.4), light(0.3))), alpha_over_life: Some(Curve::three(1.0, 0.6, 0.9, 0.0)),
         ..base.clone()
-    }, stops(&[(WHITE, 1.0), (pale, 1.0), (col, 1.0), (deep, 1.0)])));
-    let orb_glow = p.orb.then(|| orb(true));
-    let orb_core = p.orb.then(|| orb(false));
-    [orb_glow, gathering, along, Some(beam), lightning, tip_light, splash, flare, orb_core].into_iter().flatten().collect()
+    }, stops(&[(core_c, 1.0), (pale, 1.0), (col, 1.0), (deep, 1.0)])));
+    let orbs = p.orb.then(|| {
+        [
+            orb(44.0 * wr, 1.8, stops(&[(pale, i.max(1.0)), (col, i.max(1.0))]), 1.0, 0.5 * li, light_layer),
+            orb(14.0 * wr, 0.0, stops(&[(deep, 1.0)]), light(0.0), 1.0, blend),
+            orb(11.5 * wr, 0.0, stops(&[(col, 1.0), (tone(col, 0.3, WHITE), 1.0)]), light(0.2), 1.0, blend),
+            orb(7.5 * wr, 0.25, stops(&[(core_c, 1.0)]), light(0.4), 1.0, blend),
+        ]
+    });
+    let (orb_glow, orb_body) = match orbs {
+        Some([glow, rim, body, heart]) => (Some(glow), vec![rim, body, heart]),
+        None => (None, Vec::new()),
+    };
+    let mut out: Vec<Spec> = [orb_glow, closing, gathering, along, Some(beam), lightning, tip_light, impact, splash, flare, Some(recoil)].into_iter().flatten().collect();
+    out.extend(orb_body);
+    out.push(muzzle);
+    out
+}
+
+/// A beam's colours: its white-hot core, its body and a deeper, more saturated rim (so a light hue
+/// keeps an edge on a white page), or a gradient's start, middle and end.
+fn beam_colors(p: &Beam) -> ([f64; 3], [f64; 3], [f64; 3]) {
+    if paint::is_gradient(&p.color) {
+        let at = |t: f64| paint::sample_color(&p.color, t).0.map(|v| v / 255.0);
+        (at(0.0), at(0.5), at(1.0))
+    } else {
+        let col = paint_color(&p.color);
+        (tone(col, 0.7, WHITE), col, deeper(col, 0.62))
+    }
 }
 
 /// Start firing: the beam is already firing at its start, without a charge (Auto: when its clip has no end).
