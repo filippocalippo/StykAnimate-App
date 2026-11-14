@@ -134,12 +134,15 @@ function paramHTML(host, ctx, item) {
       return optionRetired(d, i) ? {label: interfaceText('vfxPanel.retiredOption', {name: label}), labelKey: 'vfxPanel.retiredOption', labelParams: {name: optionKeys?.[i] ? {messageKey: optionKeys[i]} : label}} : {label, labelKey: d.options ? optionKeys?.[i] : undefined};
     };
     const valueOf = i => (d.options ? i : d.min + i * (d.step || 1));
-    if (control === 'segments' && indexes.length <= 4) row = {kind: 'segmented', field: true, mode: 'pressed', ...n, value, data: {'vfx-segments': key},
+    // Segments only while their words are short in the person's language; longer words get a menu, never cut words.
+    const words = indexes.map(i => option(i).label), short = words.reduce((n, word) => n + word.length, 0) <= 18 && words.every(word => word.length <= 10);
+    if (control === 'segments' && indexes.length <= 4 && short) row = {kind: 'segmented', field: true, mode: 'pressed', ...n, value, data: {'vfx-segments': key},
       options: indexes.map(i => ({value: valueOf(i), ...option(i), data: {'vfx-option': valueOf(i)}})), disabled};
     else if (control === 'picker') {
       const current = option(value);
       row = {kind: 'picker', ...n, text: current.label, textKey: current.labelKey, art: host.pickerArt?.(effect.type, param, value) ?? '', data: {'vfx-picker': key}, disabled};
     } else row = {kind: 'select', ...n, id: `vfx-field-${key}`, value, data: {'vfx-choice': key}, options: indexes.map(i => ({value: valueOf(i), ...option(i)})), disabled};
+    if (row.kind === 'select') return valueWrap(host, key, binding, choiceHTML({...row, trail}, ENV));
   } else {
     // A number: a slider field for a bounded value, an angle's dial, or a typed and scrubbed number.
     const step = (d.step || 1) * factor, places = decimals(step);
@@ -150,6 +153,22 @@ function paramHTML(host, ctx, item) {
     if (param === 'seed') trail.push({label: interfaceText('vfxPanel.shuffleTip'), labelKey: 'vfxPanel.shuffleTip', icon: 'dice', className: 'vfx-shuffle', data: {'vfx-shuffle': key}, disabled});
   }
   return valueWrap(host, key, binding, renderRow({...row, trail}, ENV));
+}
+
+/** A choice's option this long (in characters, in the person's language) no longer fits a native menu on a narrow panel. */
+const LONG_CHOICE = 16;
+/**
+ * A choice: the kit's select, or, when one of its options is long in the person's language, a field whose words wrap
+ * and which opens a menu of the options (VfxInspector.openChoiceMenu). The select stays in the page, hidden, and the
+ * menu sets it, so a change takes the select's own path whichever control made it.
+ */
+export function choiceHTML(row, env) {
+  if (!row.options.some(option => String(option.label ?? '').length > LONG_CHOICE)) return renderRow(row, env);
+  const {trail, ...select} = row, current = row.options.find(option => String(option.value) === String(row.value)) ?? row.options[0];
+  const button = renderRow({kind: 'picker', label: row.label, labelKey: row.labelKey, labelParams: row.labelParams, description: row.description, descriptionKey: row.descriptionKey,
+    tip: row.tip, tipKey: row.tipKey, bare: row.bare, id: `${row.id}-menu`, text: current?.label ?? '', textKey: current?.labelKey, textParams: current?.labelParams, art: '', popup: 'menu',
+    data: {'vfx-menu-for': row.id}, disabled: row.disabled, trail}, env);
+  return `${button}<div hidden>${renderRow(select, env)}</div>`;
 }
 
 /** Shadow distance and angle: one control each that writes both offsets. */

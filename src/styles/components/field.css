@@ -96,7 +96,7 @@
 
   /* Field switch: the label inside the field box, the switch at its end, in the same grid as the fields. */
   .ui-field[data-switch-field] { justify-content: space-between; cursor: default; }
-  .ui-field:where([data-switch-field]) > .ui-field-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ui-field:where([data-switch-field]) > .ui-field-label { flex: 0 1 auto; min-inline-size: 0; }
   .ui-field:where([data-switch-field]) > .ui-switch { flex: none; }
 
   /* Stepper field: "Order ↓ 2 ↑". The label and input share a display:contents
@@ -135,12 +135,16 @@
   .ui-field[data-range]:where(:hover) { --_fill: var(--value-fill-hover); }
   .ui-field[data-scrub-anywhere] { cursor: ew-resize; touch-action: none; }
   .ui-field[data-range]:where(:focus-within, [data-scrubbing]) { --_fill: var(--value-fill-active); --_edge: var(--accent-line); }
-  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; }
+  /* A label that does not fit beside its value (a narrow panel, a longer language) wraps under itself and the field grows;
+     its value and unit never shrink. */
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere], [data-segments], [data-picker], [data-color][data-labelled], [data-switch-field]) { block-size: auto; min-block-size: var(--_h); padding-block: var(--space-1); }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere], [data-segments], [data-picker], [data-color][data-labelled], [data-switch-field]) > .ui-field-label { white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
   /* The whole field scrubs (its cursor says so), so its label needs no underline of its own. */
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label:where([data-property-scrub]) { text-decoration: none; cursor: inherit; }
   /* The field's own ring shows its focus; its label never draws a second one. */
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label:where(:focus-visible) { outline: none; }
-  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-input { flex: 0 1 auto; inline-size: auto; field-sizing: content; min-inline-size: 1ch; text-align: end; cursor: inherit; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-input { flex: 0 0 auto; inline-size: auto; field-sizing: content; min-inline-size: 1ch; text-align: end; cursor: inherit; }
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-input:where(:focus) { cursor: text; }
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-suffix { flex: none; color: var(--text-3); cursor: inherit; }
   .ui-field[data-default]::after {
@@ -174,25 +178,30 @@
   .ui-field-wrap > .ui-field-trail:where(:hover) { color: var(--text-1); }
 
   /* A visual picker's field (looks and styles): the label, the chosen option's picture and name, a chevron. */
-  .ui-field[data-picker] { padding-inline-end: var(--space-2); }
-  .ui-field:where([data-picker]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* Its label, picture and value share a line while they fit; otherwise the value with its chevron takes the line under
+     them, and its words wrap there rather than being cut. */
+  .ui-field:where([data-picker]) { flex-wrap: wrap; justify-content: flex-start; column-gap: var(--space-2); padding-inline-end: var(--space-2); text-align: start; }
+  .ui-field:where([data-picker]) > .ui-field-label { flex: 0 1 auto; min-inline-size: 0; }
   .ui-field-art { display: grid; flex: none; place-items: center; inline-size: 28px; block-size: 20px; overflow: hidden; border-radius: var(--radius-2xs); background: var(--surface-stage); color: var(--text-3); }
   .ui-field-art > img { display: block; inline-size: 100%; block-size: 100%; object-fit: cover; }
   .ui-field-art > svg { inline-size: var(--icon-sm); block-size: var(--icon-sm); }
-  .ui-field:where([data-picker]) > .ui-field-hex { flex: 0 1 auto; max-inline-size: 50%; }
-  .ui-field:where([data-picker]) > .ui-field-chev { flex: none; inline-size: var(--icon-xs); block-size: var(--icon-xs); color: var(--text-3); }
+  .ui-field-choice { display: flex; flex: 1 1 auto; align-items: center; justify-content: flex-end; gap: var(--space-1); min-inline-size: 0; }
+  .ui-field-choice > .ui-field-hex { flex: 0 1 auto; min-inline-size: 0; white-space: normal; overflow-wrap: anywhere; text-align: end; line-height: 1.2; }
+  .ui-field-choice > .ui-field-chev { flex: none; inline-size: var(--icon-xs); block-size: var(--icon-xs); color: var(--text-3); }
+  /* A bare picker (no label: its value names its kind) reads from the start. */
+  .ui-field:where([data-picker][data-bare]) > .ui-field-choice { justify-content: space-between; }
+  .ui-field:where([data-picker][data-bare]) .ui-field-hex { text-align: start; }
 
   /* A choice of two to four in a field ([data-segments]): the label, then the segments in a quiet track. */
   .ui-field[data-segments] { padding-inline-end: var(--space-0-5); }
-  .ui-field:where([data-segments]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ui-field:where([data-segments]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; }
   .ui-field:where([data-segments]) > .ui-segmented { flex: 0 1 auto; min-inline-size: 0; block-size: calc(100% - 6px); padding: 0; background: transparent; }
   .ui-field:where([data-segments]) .ui-segmented-item { min-inline-size: 0; padding-inline: var(--space-1-5); font: var(--type-small-strong); }
-  .ui-field:where([data-segments]) .ui-segmented-item > :where(.ui-label) { overflow: hidden; text-overflow: ellipsis; }
 
   /* A colour field that names itself (a value field's colour): the label, then the swatch and the hex at the end. */
-  .ui-field:where([data-color][data-labelled]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ui-field:where([data-color][data-labelled]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; }
   .ui-field:where([data-color][data-labelled]) > .ui-swatch { margin-inline-start: 0; }
-  .ui-field:where([data-color][data-labelled]) > .ui-field-hex { flex: none; max-inline-size: 50%; }
+  .ui-field:where([data-color][data-labelled]) > .ui-field-hex { flex: none; }
   .ui-field:where([data-color]) > .ui-swatch:where([data-gradient]) { --_s: 16px; inline-size: 28px; }
 
   /* A linked pair: two fields with the link between them; one field spans while linked. */

@@ -12,9 +12,8 @@ import {clipNumber,clipStrength,editGroupEffect,openGroupMenu} from './vfx-clip-
 import {showTimelineMenu} from './timeline-menu.mjs';
 import {clipsPlaying} from './vfx-clip-views.mjs';
 import {savePresetFromClip} from './vfx-preset-ui.mjs';
-import {effectSettingsHTML,keyIndex,currentKey,derivedOffsets} from './vfx-effect-view.mjs';
+import {effectSettingsHTML,keyIndex,currentKey,derivedOffsets,choiceHTML} from './vfx-effect-view.mjs';
 import {seeded} from './vfx-presentation.mjs';
-import {renderRow} from './inspector-kit.mjs';
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clipNameMessage=c=>c.name||{messageKey:effectMessages[c.effects[0]?.type]?.nameKey||'vfxClipInspector.effects'};
@@ -54,8 +53,8 @@ export function clipKeyControls(host){const clip=host.renderedVfxClip;if(!clip)r
 /** Timing: the whole animation, or a frame range with its start, length and fades, in one compact place. */
 function timingHTML(host,c,locked){
  const number=(key,labelKey,value,min,max,extra)=>clipNumber(host,c,key,labelKey,value,min,max,locked,extra);
- const plays=renderRow({kind:'select',bare:true,label:interfaceText('vfxClipInspector.plays'),labelKey:'vfxClipInspector.plays',description:interfaceText('vfxClipInspector.effectDuration'),descriptionKey:'vfxClipInspector.effectDuration',value:c.duration===null?'always':'timed',
-  options:[{value:'always',label:interfaceText('vfxClipInspector.wholeAnimation'),labelKey:'vfxClipInspector.wholeAnimation'},{value:'timed',label:interfaceText('vfxClipInspector.frameRange'),labelKey:'vfxClipInspector.frameRange'}],data:{'clip-field':'mode'},disabled:locked});
+ const plays=choiceHTML({kind:'select',bare:true,id:`vfx-clip-mode-${c.id}`,label:interfaceText('vfxClipInspector.plays'),labelKey:'vfxClipInspector.plays',description:interfaceText('vfxClipInspector.effectDuration'),descriptionKey:'vfxClipInspector.effectDuration',value:c.duration===null?'always':'timed',
+  options:[{value:'always',label:interfaceText('vfxClipInspector.wholeAnimation'),labelKey:'vfxClipInspector.wholeAnimation'},{value:'timed',label:interfaceText('vfxClipInspector.frameRange'),labelKey:'vfxClipInspector.frameRange'}],data:{'clip-field':'mode'},disabled:locked},undefined);
  const range=c.duration===null?'':`<div class="vfx-timing-grid">${number('start','vfxClipInspector.start',c.start+1,1,10000001-c.duration)}${number('duration','vfxClipInspector.duration',c.duration,1,10000000-c.start,{unit:'f'})}${number('fadeIn','vfxPanel.fadeIn',c.fadeIn,0,c.duration,{unit:'f',default:0})}${number('fadeOut','vfxPanel.fadeOut',c.fadeOut,0,c.duration,{unit:'f',default:0})}</div>`;
  return `<div class="vfx-timing" data-section="clip-timing-${c.id}"><div class="vfx-timing-head"><h4 class="vfx-subhead" data-i18n="vfxClipInspector.timing">${messageHTML("vfxClipInspector.timing", {})}</h4>${plays}</div>${range}</div>`;
 }

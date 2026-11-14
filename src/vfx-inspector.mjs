@@ -186,9 +186,16 @@ export class VfxInspector {
   const segments=button.closest('[data-vfx-segments]');
   if(segments&&button.dataset.vfxOption!==undefined){const b=this.bindings.get(segments.dataset.vfxSegments);if(!b)return false;this.choose(b,Number(button.dataset.vfxOption));return true;}
   if(button.dataset.vfxPicker){const b=this.bindings.get(button.dataset.vfxPicker);if(!b)return false;this.commit();openStylePicker(this,b,button);return true;}
+  if(button.dataset.vfxMenuFor){const select=this.root.querySelector(`#${CSS.escape(button.dataset.vfxMenuFor)}`);if(!select)return false;this.commit();this.openChoiceMenu(select,button);return true;}
   if(button.dataset.vfxLink){const b=this.bindings.get(button.dataset.vfxLink);if(!b)return false;const value=resolvedVfx(this.bindingEffects(b).find(e=>e.id===b.id)).params[b.param];this.commit();this.beforeEdit();this.setBinding(b,Number(!value));this.sync();this.onChange();return true;}
   if(button.dataset.vfxShuffle){const b=this.bindings.get(button.dataset.vfxShuffle);if(!b)return false;if(b.clip)shuffleEffect(this,{id:b.clip},b.id);else{const seed=resolvedVfx(this.bindingEffects(b).find(e=>e.id===b.id)).params.seed??1;this.commit();this.beforeEdit();this.setBinding(b,1+(seed+Math.floor(Math.random()*65533))%65535);this.sync();this.onChange();}return true;}
   return false;
+ }
+ /** A long choice's menu (vfx-effect-view.mjs choiceHTML): its options, the current one checked; choosing one sets its hidden select as a person would. */
+ openChoiceMenu(select,button){
+  let menu=this.choiceMenu;
+  if(!menu){menu=this.choiceMenu={editor:this.editor,_run:fn=>this.run(fn)};this.abort.signal.addEventListener('abort',()=>{menu.menuEvents?.abort();menu.menu?.remove();},{once:true});}
+  showTimelineMenu(menu,{currentTarget:button},[[...select.options].map(option=>({label:option.textContent.trim(),checked:option.selected,disabled:option.disabled,action:()=>{if(select.value===option.value)return;select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));}}))]);
  }
  /** A choice (a segment, a menu, a picker's tile) as one undo step; a style brings its own suggested colours and settings with it. */
  choose(b,value){
@@ -309,7 +316,8 @@ export class VfxInspector {
   const tile=(mode,key,label,art,category,meta,nameKey=mode==='add'?effectMessages[key]?.nameKey:mode==='presets'?presetMessages[key]?.nameKey:null)=>`<button type="button" class="vfx-suggestion" data-vfx-action="quick" data-vfx-quick="${mode}:${esc(key)}" aria-label="Add ${esc(label)}" ${locked?'disabled':''} ${messageAttributes("vfxInspector.add2", {label: nameKey ? {messageKey:nameKey} : label}, "aria-label")}>${vfxTile(art,category)}<span class="vfx-suggestion-name" ${nameKey ? messageAttributes(nameKey) : ''}>${esc(label)}</span>${meta?`<span class="vfx-suggestion-meta">${typeof meta==='string'?esc(meta):messageHTML(meta.messageKey,meta.messageParams)}</span>`:''}</button>`;
   const effect=type=>{const d=VFX_REGISTRY[type];return tile('add',type,d.name,d.icon,d.category,null);};
   const mine=usablePresets(scene).slice(0,3).map(p=>tile('presets',MINE+p.id,p.name,p.effects.length===1?VFX_REGISTRY[p.effects[0].type]?.icon??'effects':'effects',p.effects.length===1?VFX_REGISTRY[p.effects[0].type]?.category??'Looks':'Looks',{messageKey:'vfxInspector.myPresetSummary',messageParams:{summary:presetSummaryMessage(p)}}));
-  const presetMeta=name=>{const timing=presetTiming(name,VFX_PRESETS[name]);return isMoment(name,VFX_PRESETS[name])?(timing?{messageKey:'vfxPanel.catalog.momentFrames',messageParams:{count:timing.duration}}:{messageKey:'vfxPanel.catalog.moment'}):{messageKey:'vfxPanel.catalog.lookEffects',messageParams:{count:VFX_PRESETS[name].effects.length}};};
+  // A suggestion's caption is short ("Look · 2", "Moment · 4 f"): the catalogue and its preview card say the rest.
+  const presetMeta=name=>{const timing=presetTiming(name,VFX_PRESETS[name]);return isMoment(name,VFX_PRESETS[name])?(timing?{messageKey:'vfxPanel.catalog.momentShort',messageParams:{count:timing.duration}}:{messageKey:'vfxPanel.catalog.moment'}):{messageKey:'vfxPanel.catalog.lookShort',messageParams:{count:VFX_PRESETS[name].effects.length}};};
   const elsewhere=view==='playhead'&&total;
   const titleKey=elsewhere?"vfxInspector.noEffectsAtThisFrame":scene?"vfxInspector.noEffectsOnTheScene":targets.length===1?"vfxInspector.noEffectsOnFigure":"vfxInspector.noEffectsYet",titleParams=titleKey==='vfxInspector.noEffectsOnFigure'?{name:this.ownerNameMessage(targets[0])}:{};
   return `<div class="ui-empty vfx-empty"><h3 class="ui-empty-title">${messageHTML(titleKey,titleParams)}</h3>${elsewhere?'':`<p class="ui-empty-text" data-i18n="vfxInspector.startWithOneOfTheseOrChooseAdd">${messageHTML("vfxInspector.startWithOneOfTheseOrChooseAdd", {})}</p>`}${elsewhere?`<div class="ui-empty-actions"><button type="button" class="ui-button" data-size="sm" data-variant="ghost" data-vfx-action="show-all" ${messageAttributes("vfxInspector.showAll2", {total: total})}>Show all ${total}</button></div>`:''}<div class="vfx-suggestions" role="group" aria-label="Suggested effects" data-i18n-aria-label="vfxInspector.suggestedEffects">${[...mine,...effects.map(effect),...generated.map(effect),...presets.map(name=>tile('presets',name,name,VFX_PRESETS[name].icon,'Looks',presetMeta(name)))].join('')}</div></div>`;

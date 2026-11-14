@@ -34,6 +34,8 @@ export default Object.freeze({
   "vfxPanel.catalog.looks": "Looks",
   "vfxPanel.catalog.moment": "Moment",
   "vfxPanel.catalog.momentFrames": {"one": "Moment · {count} frame", "other": "Moment · {count} frames"},
+  "vfxPanel.catalog.lookShort": "Look · {count}",
+  "vfxPanel.catalog.momentShort": "Moment · {count} f",
   "vfxPanel.catalog.lookEffects": {"one": "Look · {count} effect", "other": "Look · {count} effects"},
   "vfxPanel.presetHolds": "Adds {effects}.",
   // What each effect does, in the catalogue's preview.

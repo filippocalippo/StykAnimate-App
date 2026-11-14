@@ -58,6 +58,64 @@ try{
   const momentUndo=await page.evaluate(()=>{styk.editor.seek(3,{allowBeyondEnd:true});return styk.editor._undo.length;});
   await page.locator('.vfx-catalog [data-choice="Hit flash"]').click();
   check('a moment preset lasts its few frames from the playhead, with its fade, as one undo step',await page.evaluate(undo=>{const clip=styk.editor.getVfxClips().at(-1);return clip.name==='Hit flash'&&clip.start===3&&clip.duration===4&&clip.fadeOut===3&&styk.editor._undo.length===undo+1;},momentUndo));
+  // No name, caption or value in the panel is cut at the dock's narrowest width, in English or in a longer language
+  // (the long-text mode): names wrap, narrow lists go to one column, values never shrink. A word is cut when its box
+  // clips it (an ellipsis, hidden overflow, an input or select too narrow for its value) or when it runs out of its own box.
+  const cutWords=()=>page.evaluate(()=>{
+    const cut=[];
+    for(const root of [document.getElementById('vfx-panel'),...document.querySelectorAll('.vfx-catalog:popover-open, .vfx-peek:popover-open, .vfx-picker:popover-open')])for(const el of root.querySelectorAll('*')){
+      if(!el.checkVisibility()||el.closest('[aria-hidden="true"]')||el.matches('svg, svg *, img'))continue;
+      const style=getComputedStyle(el),text=(el.matches('input')?el.value:el.textContent).trim();
+      if(!text)continue;
+      if(el.matches('select')){
+        const words=el.selectedOptions[0]?.textContent.trim()??'',ctx=(window.cutMeasure??=document.createElement('canvas').getContext('2d'));
+        ctx.font=`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        if(words&&ctx.measureText(words).width>el.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)+1)cut.push(`${words} (a select too narrow for its value)`);
+        continue;
+      }
+      const own=[...el.childNodes].filter(node=>node.nodeType===3&&node.data.trim());
+      if(own.length&&style.display!=='inline'&&!el.matches('input, select, textarea')){
+        const box=el.getBoundingClientRect(),range=document.createRange();range.setStartBefore(own[0]);range.setEndAfter(own.at(-1));
+        const words=range.getBoundingClientRect();
+        if(words.width&&(words.right>box.right+1||words.left<box.left-1)){cut.push(`${text} (runs out of its box)`);continue;}
+      }
+      const clips=el.matches('input')||style.textOverflow==='ellipsis'||['hidden','clip'].includes(style.overflowX);
+      if(clips&&!['auto','scroll'].includes(style.overflowX)&&el.scrollWidth>el.clientWidth+1)cut.push(`${text} (${el.scrollWidth} px in ${el.clientWidth})`);
+    }
+    return cut;
+  });
+  await page.keyboard.press('Escape');
+  const separator=page.locator('[role=separator][data-i18n-aria-label="dockHost.resizePropertiesPanel"]').first();
+  await separator.focus();
+  for(let i=0;i<12&&await page.evaluate(()=>styk.workspace.sizes.right)>256;i++)await page.keyboard.press('Shift+ArrowRight');
+  check('the dock is at its narrowest width',await page.evaluate(()=>styk.workspace.sizes.right)===256);
+  const fresh=()=>page.evaluate(async()=>{
+    const {emptyDocument,createObject,createFrame}=await import('/src/demo.mjs'),{initializeLayerSheet}=await import('/src/editor-layer-sheet.mjs');
+    const e=styk.editor,doc=emptyDocument();doc.figure_types[0].name='Bubble';doc.keyframes=[createFrame([createObject(doc.figure_types[0],1,300,320)],80)];
+    e.load(doc);initializeLayerSheet(e.report);e._invalidate({timing:true});e.select(1);
+  });
+  const openEffect=async type=>{
+    await page.evaluate(type=>{const e=styk.editor,id=e.addVfxClip({kind:'figure',uid:1},type);e._selectedVfxClip=id;e._emit('vfx-selection');},type);
+    await page.waitForTimeout(150);
+    await page.evaluate(()=>{for(const section of document.querySelectorAll('#vfx-panel details[data-vfx-section]:not([open])'))section.querySelector('summary').click();});
+    await page.waitForTimeout(150);
+  };
+  for(const pseudo of [null,'long']){
+    const language=pseudo?'in long text':'in English';
+    await page.evaluate(mode=>styk.localization.localization.setPseudo(mode),pseudo);
+    await fresh();await page.waitForTimeout(200);
+    check(`no word is cut in the empty panel's suggestions at 256 px ${language}`,(await cutWords()).length===0||console.error(await cutWords()));
+    await page.locator('#vfx-panel [data-vfx-action="add"]').first().click();await page.locator('.vfx-catalog [data-choice="glow"]').waitFor();
+    check(`no word is cut in the catalogue of effects at 256 px ${language}`,(await cutWords()).length===0||console.error(await cutWords()));
+    await page.locator('.vfx-catalog [data-catalog-mode="presets"]').click();await page.waitForTimeout(150);
+    check(`no word is cut in the catalogue of presets at 256 px ${language}`,(await cutWords()).length===0||console.error(await cutWords()));
+    await page.keyboard.press('Escape');
+    for(const type of ['glow','shadow','particles','beam','grade']){
+      await fresh();await openEffect(type);
+      check(`no word is cut in an open ${type} with its sections open at 256 px ${language}`,(await cutWords()).length===0||console.error(await cutWords()));
+    }
+  }
+  await page.evaluate(()=>styk.localization.localization.setPseudo(null));
   check('no uncaught browser errors',!errors.length);
 }finally{await browser.close();}
 if(errors.length)console.error(errors.join('\n'));

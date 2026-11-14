@@ -166,3 +166,18 @@ test('every seeded effect can be shuffled', () => {
   for (const type of ['noise', 'dissolve', 'turbulence', 'particles', 'aura', 'beam', 'smoke', 'explosion']) assert.ok(seeded(type), type);
   assert.ok(!seeded('glow'));
 });
+
+test('a choice too long for a native menu in the person\'s language opens a menu from a field whose words wrap', async () => {
+  const {choiceHTML} = await import('../src/vfx-effect-view.mjs');
+  const row = (labels, extra = {}) => ({kind: 'select', id: 'vfx-field-a', label: 'Draw', value: 1, data: {'vfx-choice': 'a'}, options: labels.map((label, value) => ({value, label})), ...extra});
+  const short = choiceHTML(row(['Behind', 'In front']));
+  assert.match(short, /^<label[^>]*class="ui-field"[^>]*data-select/, 'short words keep the native menu');
+  assert.doesNotMatch(short, /data-vfx-menu-for/);
+  // A longer language (the localization's long-text mode gives about this) or a long option.
+  const long = choiceHTML(row(['［Bëhïnd tárgët ————］', '［Ïn frônt ôf tárgët ————————］']));
+  assert.match(long, /<button[^>]*data-picker[^>]*aria-haspopup="menu"[^>]*data-vfx-menu-for="vfx-field-a"/, 'a field button that opens a menu');
+  assert.match(long, /<span class="ui-field-choice"><span class="ui-field-hex">［Ïn frônt ôf tárgët ————————］<\/span>/, 'it shows the current option whole');
+  assert.doesNotMatch(long, /ui-field-art/, 'without an empty picture');
+  assert.match(long, /<div hidden><label[^>]*data-select[^>]*>.*<select[^>]*id="vfx-field-a"[^>]*data-vfx-choice="a"/s, 'the select stays, hidden, so a choice takes its path');
+  assert.doesNotMatch(choiceHTML(row(['［Whôlë ánïmátïôn ——————］', 'x'], {bare: true})), /ui-field-label/, 'a bare choice stays bare');
+});

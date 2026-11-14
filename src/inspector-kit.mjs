@@ -673,10 +673,10 @@ function group(row, env) {
  */
 function picker(row, env) {
   return `<button${attributes({
-    type: 'button', class: `ui-field${span(row)}`, 'data-picker': true, id: id(row.id), 'aria-label': row.description ?? row.label, 'aria-haspopup': 'dialog',
-    'data-tooltip': row.tip, disabled: Boolean(row.disabled), ...extras(row),
-  })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}><span class="ui-field-label"${descriptorAttributes(row, 'label')}>${escapeHTML(row.label)}</span>` +
-    `<span class="ui-field-art" aria-hidden="true">${row.art ?? ''}</span><span class="ui-field-hex"${descriptorAttributes(row, 'text')}>${escapeHTML(row.text)}</span>${glyph(env, 'chevron-down', 'ui-icon ui-field-chev')}</button>`;
+    type: 'button', class: `ui-field${span(row)}`, 'data-picker': true, 'data-bare': Boolean(row.bare), id: id(row.id), 'aria-label': row.description ?? row.label,
+    'aria-haspopup': row.popup ?? 'dialog', 'data-tooltip': row.tip, disabled: Boolean(row.disabled), ...extras(row),
+  })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}>${row.bare ? '' : `<span class="ui-field-label"${descriptorAttributes(row, 'label')}>${escapeHTML(row.label)}</span>`}` +
+    `${row.art === '' ? '' : `<span class="ui-field-art" aria-hidden="true">${row.art ?? ''}</span>`}<span class="ui-field-choice"><span class="ui-field-hex"${descriptorAttributes(row, 'text')}>${escapeHTML(row.text)}</span>${glyph(env, 'chevron-down', 'ui-icon ui-field-chev')}</span></button>`;
 }
 
 /**

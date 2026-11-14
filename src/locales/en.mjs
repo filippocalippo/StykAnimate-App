@@ -6334,6 +6334,8 @@ const messages = {
     "one": "Moment · {count} frame",
     "other": "Moment · {count} frames"
   },
+  "vfxPanel.catalog.lookShort": "Look · {count}",
+  "vfxPanel.catalog.momentShort": "Moment · {count} f",
   "vfxPanel.catalog.lookEffects": {
     "one": "Look · {count} effect",
     "other": "Look · {count} effects"
