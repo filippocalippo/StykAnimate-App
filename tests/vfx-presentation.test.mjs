@@ -238,3 +238,19 @@ test('a choice too long for a native menu in the person\'s language opens a menu
   assert.match(long, /<div hidden><label[^>]*data-select[^>]*>.*<select[^>]*id="vfx-field-a"[^>]*data-vfx-choice="a"/s, 'the select stays, hidden, so a choice takes its path');
   assert.doesNotMatch(choiceHTML(row(['［Whôlë ánïmátïôn ——————］', 'x'], {bare: true})), /ui-field-label/, 'a bare choice stays bare');
 });
+
+test('an old project\'s retired style is shown by its name, marked retired, and offered to no other effect', async () => {
+  const {effectSettingsHTML} = await import('../src/vfx-effect-view.mjs');
+  const {t: interfaceText} = await import('../src/localization.mjs');
+  const field = params => {
+    const html = effectSettingsHTML({bindings: new Map(), editor: {tick: 0}}, {target: {kind: 'figure', uid: 1}, effect: {id: 'e1', type: 'smoke', params}, clip: null, ownerIndex: 0});
+    return html.match(/<button[^>]*data-vfx-picker[^>]*>[\s\S]*?<\/button>/)[0];
+  };
+  // Smoke Thick (option 1) is retired into Soft: an old project that uses it sees "Thick (retired)", parameters filled in,
+  // so the language binding never shows the bare message with its placeholder.
+  const thick = field({...defaults('smoke'), style: 1}), shown = interfaceText('vfxPanel.retiredOption', {name: 'Thick'});
+  assert.ok(thick.includes(`>${shown}<`), thick);
+  assert.match(thick, /data-i18n="vfxPanel.retiredOption"/);
+  assert.match(thick, /data-i18n-params="[^"]*vfxCatalog\.parameter\.smoke\.style\.option\.thick/, 'the retired name is a message too, so it follows the language');
+  assert.doesNotMatch(field(defaults('smoke')), /retired/);
+});

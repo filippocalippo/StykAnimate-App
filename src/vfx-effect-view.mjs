@@ -141,7 +141,7 @@ function paramHTML(host, ctx, item) {
       options: indexes.map(i => ({value: valueOf(i), ...option(i), data: {'vfx-option': valueOf(i)}})), disabled};
     else if (control === 'picker') {
       const current = option(value);
-      row = {kind: 'picker', ...n, text: current.label, textKey: current.labelKey, art: host.pickerArt?.(effect.type, param, value) ?? '', data: {'vfx-picker': key}, disabled};
+      row = {kind: 'picker', ...n, text: current.label, textKey: current.labelKey, textParams: current.labelParams, art: host.pickerArt?.(effect.type, param, value) ?? '', data: {'vfx-picker': key}, disabled};
     } else row = {kind: 'select', ...n, id: `vfx-field-${key}`, value, data: {'vfx-choice': key}, options: indexes.map(i => ({value: valueOf(i), ...option(i)})), disabled};
     if (row.kind === 'select') return valueWrap(host, key, binding, choiceHTML({...row, trail}, ENV));
   } else {
