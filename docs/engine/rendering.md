@@ -26,8 +26,8 @@ Paint records live in `DrawList::paints`; `sample_paint` is the reference
 evaluation every renderer reproduces. Generated effects are `K_PARTICLE` records
 (one per particle, in the shape bits of its kind, in its draw's local units) and
 `K_BEAM` records; each points at its draw's rows in `paints` (its transform to the
-world and its constants), `F_ADD` marks those blended additively, and
-`DrawList::materials` names the particle material rows sprites sample
+world and its constants) and says how much of it is light (it blends premultiplied,
+with less alpha than colour), and `DrawList::materials` names the noise materials it samples
 ([vfx.md](vfx.md#generated-effects-on-screen)). An object that is one solid glyph
 is a `K_GLYPH` record drawn from a mask of the glyph, followed by the glyph's own
 triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
@@ -46,7 +46,7 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | `present.rs` | copy into the host's surface, read-back |
 | `view.rs` | world → output transform, artboard |
 | `effects/` | effect layers ([vfx.md](vfx.md#rendering)): `plan.rs` places each group for the view (density, crop, composite), `mod.rs` writes its group record, `executor.rs` and `passes.wgsl` run effect stacks on pooled slots |
-| `materials.rs` | the particle material atlas of generated effects: a placeholder texel until a list names a row, then the editor's procedural rows with their reduced levels (5.9 MB), sampled trilinearly |
+| `materials.rs` | the noise materials of generated effects: a placeholder texel until a list names one, then one two-channel texture (density, light) of 1,024 texels square with its reduced levels (2.7 MB), filled as the engine's workers finish them, sampled trilinearly |
 | `glyphs.rs`, `glyph.wgsl` | the masks of lone glyphs ([Text](#text)): each glyph filled once per mask size into an atlas of one-channel pages kept across frames (at most 64 MiB), and the per-frame table that tells each `K_GLYPH` record where its mask is |
 
 Drawing cels: every display level's tiles are in the list; the vertex shader
@@ -150,11 +150,13 @@ and two variants of the one shader's pipeline (painter order writing depth; face
 tested `less-equal`), switched where faces begin and end; the vertex shader maps a
 corner's depth to its window depth with the editor's expression.
 
-Generated effects: the vertex shader expands each `K_PARTICLE` or `K_BEAM` record
-exactly as the editor's generator shader does, in its draw's local units with the
-target's pixel in those units, then places it by the draw's transform; the fragment
-shader shades it as the editor's does. Runs of `F_ADD` records draw with an additive
-pipeline variant (colour and alpha added), created with the first list that has one.
+Generated effects: runs of `K_PARTICLE` and `K_BEAM` records draw with their own
+entry points (`vs_particle`, `fs_particle`) and pipeline, created with the first list
+that has one, so a list without them never compiles their shading. The vertex shader
+expands a record in its draw's local units and places it by the draw's transform; the
+fragment shader measures its shape as a distance or samples its material, erodes it,
+and outputs premultiplied colour with alpha reduced by its share of light
+([vfx.md](vfx.md#generated-effects)).
 
 Lone glyphs: before the passes, `GlyphMasks::prepare` lays out each `K_GLYPH`
 record's mask for the view's raster density and writes the glyph table (three
@@ -167,11 +169,11 @@ mask bilinearly, clamped to its own texels, times the record's colour and opacit
 
 Invariants: no per-frame allocation in steady state; the no-effect path draws
 one pass per depth and round and creates no effect resource; a list without 3D
-faces creates no depth buffer and a list without additive records no additive
+faces creates no depth buffer and a list without generated effects no generated-effects
 pipeline, and either draws one instanced draw per pass (on a software rasterizer, one per run
 of primitives a simpler fragment shader holds, at most 64 runs besides the background's:
 [Without a graphics card](#without-a-graphics-card)); the material atlas is a
-placeholder texel until a list names a row, and the glyph atlas until a list has a
+placeholder texel until a list names a material, and the glyph atlas until a list has a
 lone glyph; glyph masks are filled only when first needed; WebGL2 limits (no storage buffers, one sampler
 per texture, array textures of at least two layers, [D11](decisions/0011-array-textures-two-layers.md)).
 
@@ -510,7 +512,7 @@ its size.
 
 - Samples: a target keeps one colour per pixel until a write covers only some of its
   samples, then four; a write that leaves them equal folds them back. Blending is the
-  pipeline's (`One, OneMinusSrcAlpha`; `One, One` for `F_ADD`), each result rounded to 8
+  pipeline's (`One, OneMinusSrcAlpha`, generated effects too), each result rounded to 8
   bits as an `Rgba8Unorm` target stores it; resolving averages the samples.
 - Strokes, arcs, polylines, discs and rings are covered by distance at each pixel's centre
   (`clamp(0.5 − d / aa, 0, 1)`, hairlines faded to a one-pixel footprint; crisp: in or out),

@@ -88,13 +88,13 @@ impl Shading {
     }
 }
 
-/// The simplest shader that draws `p` as `fs_main` does. A paint record (a gradient), a face of a depth run and a
-/// record that adds light need the general one; so do lone glyphs, the background picture and generated effects. A
+/// The simplest shader that draws `p` as `fs_main` does. A paint record (a gradient) and a face of a depth run
+/// need the general one; so do lone glyphs, the background picture and generated effects. A
 /// drawing tile's `paint` names its parent tile, not a paint record.
 pub(crate) fn shading(p: &Prim) -> Shading {
     let kind = p.kind & 255;
     let painted = p.paint != NO_PAINT && !(kind == K_IMAGE && p.kind & F_DRAWING != 0);
-    if painted || p.kind & (F_DEPTH | F_ADD) != 0 {
+    if painted || p.kind & F_DEPTH != 0 {
         return Shading::Full;
     }
     match kind {
@@ -184,7 +184,7 @@ mod tests {
             assert_eq!(shading(&prim(kind)), Shading::Image, "kind {kind}");
         }
         assert_eq!(shading(&prim(K_COMPOSITE)), Shading::Composite);
-        for kind in [K_GLYPH, K_BG_IMAGE, K_PARTICLE, K_BEAM, K_DEPTH_RESET, K_TRI | F_DEPTH, K_PARTICLE | F_ADD] {
+        for kind in [K_GLYPH, K_BG_IMAGE, K_PARTICLE, K_BEAM, K_DEPTH_RESET, K_TRI | F_DEPTH] {
             assert_eq!(shading(&prim(kind)), Shading::Full, "kind {kind}");
         }
         let painted = Prim { paint: 0, ..prim(K_FILL_VIEW) };

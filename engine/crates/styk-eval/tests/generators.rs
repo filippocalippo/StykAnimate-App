@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use styk_doc::Value;
 use styk_eval::eval::Prepared;
 use styk_eval::vfx::generated::anchors::{sample_now, Anchor, Sample, Sampler};
 use styk_eval::vfx::generated::batch::row;
@@ -22,10 +21,6 @@ use styk_eval::vfx::Target;
 
 fn folder() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generators")
-}
-
-fn json(path: &Path) -> Value {
-    styk_doc::json::parse(&std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
 /// The recorded scene documents: every style of every type, tails, placement, a movieclip.

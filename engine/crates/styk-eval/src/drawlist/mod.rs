@@ -30,7 +30,7 @@ use crate::vfx::{Effect, FrameVfx, ObjectVfx};
 
 pub use styk_draw::{
     argb8, CameraPose, EffectLayer, Effects, GlyphInstance, GlyphMask, LayerKind, F_GLYPH_VECTOR, K_GLYPH, NO_LAYER, rgba8, sample_paint, window_depth, DrawList, Group, Pass, Prim, SharedDrawList, F_CLOSED, F_DEPTH, F_DRAWING, F_RING_FILL, F_SMOOTH, F_TINT, K_ARC, K_BG_IMAGE, K_BOX, K_CAPSULE,
-    K_COMPOSITE, K_DEPTH_RESET, K_DISC, K_FILL_VIEW, K_IMAGE, K_POLYLINE, K_RING, K_TRI, NO_PAINT, P_ANGULAR, P_DIAMOND, P_LINEAR, P_RADIAL, P_RADIAL_RING, K_PARTICLE, K_BEAM, F_ADD,
+    K_COMPOSITE, K_DEPTH_RESET, K_DISC, K_FILL_VIEW, K_IMAGE, K_POLYLINE, K_RING, K_TRI, NO_PAINT, P_ANGULAR, P_DIAMOND, P_LINEAR, P_RADIAL, P_RADIAL_RING, K_PARTICLE, K_BEAM,
 };
 
 /// The quads a live drawing cel's block holds for `quads` of its own ([`Out::reserve_live_room`]): at least 64, doubling.

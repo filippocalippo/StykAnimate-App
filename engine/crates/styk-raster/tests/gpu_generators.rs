@@ -1,6 +1,6 @@
-//! Generated effects on the GPU and the CPU (styk-draw `K_PARTICLE`, `K_BEAM`,
-//! `F_ADD`; docs/engine/vfx.md): an editor-built document with every explosion
-//! style draws its particles on both renderers, and the two pictures agree.
+//! Generated effects on the GPU and the CPU (styk-draw `K_PARTICLE`, `K_BEAM`;
+//! docs/engine/vfx.md): both renderers draw the same particles, shapes, materials
+//! and light.
 //! Skipped where no GPU adapter exists.
 
 use std::path::Path;

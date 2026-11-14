@@ -195,12 +195,12 @@ fn consume_gpu_sources(prims: &[styk_draw::Prim], placed: &[GpuGroup], sources: 
 struct DepthRuns {
     flat: wgpu::RenderPipeline,
     faces: wgpu::RenderPipeline,
-    flat_add: wgpu::RenderPipeline,
+    flat_generated: wgpu::RenderPipeline,
     ranges: Vec<(u32, u32)>,
 }
 
 /// Where the list's generated effects are and their pipeline ([`crate::pipeline::generated_pipeline`]).
-struct Additive {
+struct Generated {
     pipeline: wgpu::RenderPipeline,
     ranges: Vec<(u32, u32)>,
 }
@@ -246,11 +246,11 @@ impl Shaders {
 }
 
 /// Draws prims `range` of the list in one instanced draw, split where generated effects
-/// add light (`additive`), where depth-tested faces need the depth pipeline (`depth`:
+/// draw (`generated`), where depth-tested faces need the depth pipeline (`depth`:
 /// the flat and faces pipelines of a pass with a depth buffer, and the list's face ranges)
 /// and, elsewhere, where a run of prims draws with a simpler fragment shader (`shaders`).
-fn draw_prims(pass: &mut wgpu::RenderPass<'_>, base: &Shaders, additive: Option<&Additive>, depth: Option<&DepthRuns>, range: std::ops::Range<u32>) {
-    let Some(add) = additive else { return draw_painted(pass, base, depth, range) };
+fn draw_prims(pass: &mut wgpu::RenderPass<'_>, base: &Shaders, generated: Option<&Generated>, depth: Option<&DepthRuns>, range: std::ops::Range<u32>) {
+    let Some(add) = generated else { return draw_painted(pass, base, depth, range) };
     let mut at = range.start;
     let first = add.ranges.partition_point(|&(_, end)| end <= range.start);
     for &(start, end) in &add.ranges[first..] {
@@ -260,7 +260,7 @@ fn draw_prims(pass: &mut wgpu::RenderPass<'_>, base: &Shaders, additive: Option<
         if start > at {
             draw_painted(pass, base, depth, at..start);
         }
-        pass.set_pipeline(depth.map_or(&add.pipeline, |d| &d.flat_add));
+        pass.set_pipeline(depth.map_or(&add.pipeline, |d| &d.flat_generated));
         pass.draw(0..6, start.max(at)..end.min(range.end));
         at = end.min(range.end);
     }
@@ -590,16 +590,16 @@ impl Renderer {
         let depth_runs = (!self.depth_faces.is_empty()).then(|| {
             let ranges = self.depth_faces.clone();
             let pipelines = self.depth_pipelines();
-            DepthRuns { flat: pipelines.flat.clone(), faces: pipelines.faces.clone(), flat_add: pipelines.flat_add.clone(), ranges }
+            DepthRuns { flat: pipelines.flat.clone(), faces: pipelines.faces.clone(), flat_generated: pipelines.flat_generated.clone(), ranges }
         });
-        let additive = (!self.add_ranges.is_empty()).then(|| Additive { pipeline: self.additive_pipeline(), ranges: self.add_ranges.clone() });
+        let generated = (!self.generated_ranges.is_empty()).then(|| Generated { pipeline: self.effects_pipeline(), ranges: self.generated_ranges.clone() });
         // An upright view with the native painter draws with the simpler shaders' plain forms (`prim.wgsl`).
         let plain = self.orientation.is_none() && self.paint_context == crate::paint::PaintContext::Native;
         let shaders = Shaders { full: self.pipeline.clone(), runs: self.shading_on.then(|| (self.shading_pipelines(plain), self.shading_runs.clone())) };
         // A frame that differs from the kept one in a part is drawn in that part alone ([`Renderer::redraw_within`]): `Some(None)` for a part
         // that lies outside the target (nothing is drawn).
         let key = KeptFrame::of(self, view, size, &list);
-        let plain_list = passes.is_empty() && rounds.len() == 1 && depth_runs.is_none() && additive.is_none() && list.groups.len() <= 1 && list.layers.is_empty() && list.glyphs.is_empty() && list.materials == 0;
+        let plain_list = passes.is_empty() && rounds.len() == 1 && depth_runs.is_none() && generated.is_none() && list.groups.len() <= 1 && list.layers.is_empty() && list.glyphs.is_empty() && list.materials == 0;
         let part = within.filter(|_| self.keep_frames && targets_kept && plain_list && !foreground && view.clear == [0.0; 4] && self.kept.as_ref() == Some(&key)).map(|rect| {
             let mut r = [rect[0].floor().max(0.0), rect[1].floor().max(0.0), rect[2].ceil().min(size[0] as f64), rect[3].ceil().min(size[1] as f64)];
             if view.clip_to_artboard {
@@ -650,7 +650,7 @@ impl Renderer {
                     pass.set_bind_group(1, &self.sprite_bind, &[]);
                     pass.set_bind_group(2, &self.layer_binds[(depth as usize + 1) % 2], &[]);
                     pass.set_vertex_buffer(0, self.prims.slice(..));
-                    draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, start..end);
+                    draw_prims(&mut pass, &shaders, generated.as_ref(), face_runs, start..end);
                     if let Some(sources) = &mut gpu_sources {
                         consume_gpu_sources(&list.prims[start as usize..end as usize], &placed, sources, Some(page_index), None);
                     }
@@ -714,20 +714,20 @@ impl Renderer {
             if let Some(part) = part {
                 if part.is_some() {
                     if bg > 0 {
-                        draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, root.0..root.0 + bg);
+                        draw_prims(&mut pass, &shaders, generated.as_ref(), face_runs, root.0..root.0 + bg);
                     }
                     match &part_runs {
                         Some(runs) => {
                             for &(start, end) in runs {
-                                draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, start..end);
+                                draw_prims(&mut pass, &shaders, generated.as_ref(), face_runs, start..end);
                             }
                         }
-                        None if until > from => draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until),
+                        None if until > from => draw_prims(&mut pass, &shaders, generated.as_ref(), face_runs, from..until),
                         None => {}
                     }
                 }
             } else if r == 0 && bg > 0 {
-                draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, root.0..root.0 + bg);
+                draw_prims(&mut pass, &shaders, generated.as_ref(), face_runs, root.0..root.0 + bg);
             }
             if part.is_none() && until > from {
                 if view.clip_to_artboard {
@@ -738,7 +738,7 @@ impl Renderer {
                     let y1 = a[3].clamp(0.0, size[1] as f64).ceil() as u32;
                     if x1 > x0 && y1 > y0 {
                         pass.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
-                        draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until);
+                        draw_prims(&mut pass, &shaders, generated.as_ref(), face_runs, from..until);
                         if let Some(sources) = &mut gpu_sources {
                             consume_gpu_sources(&list.prims[from as usize..until as usize], &placed, sources, None, Some([
                                 crate::paint::CanvasClip::new(view.artboard).rect()[0].max(x0 as f32),
@@ -748,7 +748,7 @@ impl Renderer {
                         }
                     }
                 } else {
-                    draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until);
+                    draw_prims(&mut pass, &shaders, generated.as_ref(), face_runs, from..until);
                     if let Some(sources) = &mut gpu_sources {
                         consume_gpu_sources(&list.prims[from as usize..until as usize], &placed, sources, None, Some([0.0,0.0,size[0] as f32,size[1] as f32]));
                     }

@@ -57,7 +57,6 @@ pub fn body_scale(measure: f64) -> f64 {
     clamp(m / 200.0, 0.25, 4.0)
 }
 
-pub(super) const DUST: [f64; 3] = [0.54, 0.58, 0.65];
 pub(super) const ROCK_COLOR: [f64; 3] = [0.42, 0.38, 0.36];
 pub(super) fn smoke_colors() -> [[f64; 3]; 3] {
     [rgb(0x4a3b35), rgb(0x3a3436), rgb(0x2e2c31)]

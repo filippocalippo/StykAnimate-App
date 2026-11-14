@@ -156,10 +156,10 @@ pub struct Renderer {
     pub(crate) material_sampler: wgpu::Sampler,
     /// The masks of lone glyphs (styk-draw `K_GLYPH`) and where each instance is drawn from.
     pub(crate) glyphs: glyphs::GlyphMasks,
-    /// Additive blending (generated effects), created with the first list that has any.
-    pub(crate) pipeline_add: Option<wgpu::RenderPipeline>,
+    /// The generated-effects pipeline, created with the first list that has any.
+    pub(crate) pipeline_generated: Option<wgpu::RenderPipeline>,
     /// Ranges of the current list's generated-effect prims (drawn with their own pipeline); empty when it has none.
-    pub(crate) add_ranges: Vec<(u32, u32)>,
+    pub(crate) generated_ranges: Vec<(u32, u32)>,
     pub(crate) nearest: wgpu::Sampler,
     pub(crate) linear: wgpu::Sampler,
     pub(crate) layers: [LayerAtlas; 2],
@@ -283,7 +283,7 @@ impl Renderer {
             && since.groups.len() == list.groups.len()
             && ranges.iter().all(|&(start, end)| start <= end && end as usize <= list.prims.len())
         {
-            let structural = |p: &styk_draw::Prim| p.kind & (styk_draw::F_DEPTH | styk_draw::F_ADD) != 0 || matches!(p.kind & 255, styk_draw::K_COMPOSITE | styk_draw::K_PARTICLE | styk_draw::K_BEAM);
+            let structural = |p: &styk_draw::Prim| p.kind & styk_draw::F_DEPTH != 0 || matches!(p.kind & 255, styk_draw::K_COMPOSITE | styk_draw::K_PARTICLE | styk_draw::K_BEAM);
             let mut same = since.background_prims == list.background_prims;
             for &(start, end) in &ranges {
                 let (start, end) = (start as usize, end as usize);
@@ -327,7 +327,7 @@ impl Renderer {
         self.derive(list);
     }
 
-    /// What is worked out of a list's primitives when it is set: each group's run, where its composites, faces and additive draws are.
+    /// What is worked out of a list's primitives when it is set: each group's run, where its composites, faces and generated effects are.
     fn derive(&mut self, list: &Arc<DrawList>) {
         self.group_runs.clear();
         self.group_runs.resize(list.groups.len(), (u32::MAX, 0));
@@ -346,7 +346,7 @@ impl Renderer {
         // Where the depth-tested faces and the generated effects are: passes switch pipelines
         // there. (A reset without faces draws nothing, with or without a depth buffer.)
         self.depth_faces.clear();
-        self.add_ranges.clear();
+        self.generated_ranges.clear();
         let extend = |ranges: &mut Vec<(u32, u32)>, i: u32| match ranges.last_mut() {
             Some(last) if last.1 == i => last.1 = i + 1,
             _ => ranges.push((i, i + 1)),
@@ -354,12 +354,12 @@ impl Renderer {
         for (i, p) in list.prims.iter().enumerate() {
             match p.kind & 255 {
                 styk_draw::K_TRI if p.kind & styk_draw::F_DEPTH != 0 => extend(&mut self.depth_faces, i as u32),
-                styk_draw::K_PARTICLE | styk_draw::K_BEAM => extend(&mut self.add_ranges, i as u32),
+                styk_draw::K_PARTICLE | styk_draw::K_BEAM => extend(&mut self.generated_ranges, i as u32),
                 _ => {}
             }
         }
-        if !self.add_ranges.is_empty() {
-            self.additive_pipeline();
+        if !self.generated_ranges.is_empty() {
+            self.effects_pipeline();
         }
         self.derive_shading(list);
     }

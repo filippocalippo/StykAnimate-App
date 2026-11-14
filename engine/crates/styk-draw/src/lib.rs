@@ -108,8 +108,6 @@ pub const K_PARTICLE: u32 = 13;
 /// glow colours (straight RGB, how much light each emits) and `[head swell, ink RGB]`.
 /// Styles: 0 energy, 1 laser, 2 cartoon.
 pub const K_BEAM: u32 = 14;
-/// Drawn with additive blending: colour and alpha are added to the target's.
-pub const F_ADD: u32 = 1 << 14;
 /// A lone solid glyph drawn from its coverage mask ([`GlyphMask`], docs/engine/rendering.md):
 /// `b.x` = the bits of its index in [`DrawList::glyphs`], `color` = straight RGBA (the text's
 /// colour and opacity). Renderers draw the mask the view calls for
