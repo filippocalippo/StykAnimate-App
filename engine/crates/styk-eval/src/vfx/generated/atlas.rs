@@ -310,15 +310,3 @@ pub fn prepare() {
         row(r);
     }
 }
-
-#[cfg(test)]
-mod timing_tmp {
-    #[test]
-    fn time_atlas() {
-        for r in 0..4 {
-            let t = std::time::Instant::now();
-            let _ = super::generate(r);
-            eprintln!("material {r}: {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
-        }
-    }
-}

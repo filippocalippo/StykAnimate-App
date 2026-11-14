@@ -49,10 +49,16 @@ impl Prepared {
         for cel in &cels {
             tasks.push_back(crate::OrdinaryTask::Decode(generation.clone(), images::Picture::CelChanged(*cel)));
         }
+        // The noise materials of generated effects, ahead of the pictures: frames draw stand-ins until they are made.
         if generation.anchors.is_some() {
             for row in 0..styk_eval::vfx::generated::atlas::ROWS {
                 if styk_eval::vfx::generated::atlas::ready(row).is_none() {
-                    tasks.push_back(crate::OrdinaryTask::Run(Box::new(move |_: &Engine| { styk_eval::vfx::generated::atlas::row(row); })));
+                    tasks.push_front(crate::OrdinaryTask::Run(Box::new(move |engine: &Engine| {
+                        styk_eval::vfx::generated::atlas::row(row);
+                        if styk_eval::vfx::generated::atlas::all_ready() {
+                            engine.materials_ready();
+                        }
+                    })));
                 }
             }
         }

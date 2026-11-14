@@ -206,8 +206,11 @@ impl FrameBuilder {
                 )
             });
         }
-        // A worker: the materials its particles sample are generated here if they are not yet.
-        if batch.as_ref().is_some_and(|b| b.draws.iter().any(|d| d.material >= 0)) {
+        // The noise materials its particles sample: an export makes any that are not made yet here (on its worker). A frame
+        // for the screen does not wait for them: until the workers have made them (queued when the document was published)
+        // it draws soft stand-ins and says so, and prepared frames are made again when the last is ready
+        // (`Engine::materials_ready`), so playback never stops for them.
+        if !options.clip_to_canvas && batch.as_ref().is_some_and(|b| b.draws.iter().any(|d| d.material >= 0)) {
             styk_eval::vfx::generated::atlas::prepare();
         }
         if cancelled() {

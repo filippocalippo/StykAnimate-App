@@ -348,6 +348,15 @@ impl Renderer {
         })
     }
 
+    /// Creates the generated-effects pipeline now instead of with the first list that has them. Compiling its shading
+    /// takes from a few hundred milliseconds to over a second on Direct3D (WebGPU and WebGL on Windows), during which the
+    /// graphics process draws nothing: the stage does it when it is made, with the app's start, so the first frame of a
+    /// particle effect (often one of playback) does not wait for it. Renderers that may never draw one (exports,
+    /// thumbnails) leave it to their first list.
+    pub fn prepare_effects(&mut self) {
+        self.effects_pipeline();
+    }
+
     /// The generated-effects pipeline ([`generated_pipeline`]), created with the first list that has them.
     pub(crate) fn effects_pipeline(&mut self) -> wgpu::RenderPipeline {
         let (device, layout, shader, samples) = (&self.device, &self.prim_layout, &self.prim_shader, self.samples);

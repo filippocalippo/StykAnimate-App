@@ -151,8 +151,10 @@ tested `less-equal`), switched where faces begin and end; the vertex shader maps
 corner's depth to its window depth with the editor's expression.
 
 Generated effects: runs of `K_PARTICLE` and `K_BEAM` records draw with their own
-entry points (`vs_particle`, `fs_particle`) and pipeline, created with the first list
-that has one, so a list without them never compiles their shading. The vertex shader
+entry points (`vs_particle`, `fs_particle`) and pipeline, which the stage creates when
+it is made (`Renderer::prepare_effects`: its compile would otherwise hold the first
+frame with a particle for up to a second on Direct3D) and other renderers with their
+first list that has one. The vertex shader
 expands a record in its draw's local units and places it by the draw's transform; the
 fragment shader measures its shape as a distance or samples its material, erodes it,
 and outputs premultiplied colour with alpha reduced by its share of light
