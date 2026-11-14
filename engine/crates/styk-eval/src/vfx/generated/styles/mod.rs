@@ -50,6 +50,23 @@ pub(super) fn glow_blend(blend: GeneratorBlend) -> u8 {
     }
 }
 
+/// Fire's temperatures from its colour: white-hot, the heat, the flame cooling a step, its embers and
+/// their dark: each a deeper turn of the colour's own hue, so gold fire cools through orange to red,
+/// blue fire to indigo and green fire to teal, never to a grey between the colour and orange.
+pub(super) struct FireTones {
+    pub white_hot: [f64; 3],
+    pub heat: [f64; 3],
+    pub orange: [f64; 3],
+    pub ember: [f64; 3],
+    pub deep: [f64; 3],
+}
+
+pub(super) fn fire_tones(col: [f64; 3]) -> FireTones {
+    let orange = deeper(col, 1.0);
+    let ember = deeper(deeper(col, 0.9), 0.62);
+    FireTones { white_hot: tone(col, 0.75, WHITE), heat: tone(col, 0.45, WHITE), orange, ember, deep: ember.map(|v| v * 0.5) }
+}
+
 /// Size over life of a shape that pops in, holds and shrinks away (a cartoon flame, a star, a glint).
 pub(super) const POP: Curve = Curve::four(0.25, 0.12, 1.0, 0.75, 1.0, 0.0);
 

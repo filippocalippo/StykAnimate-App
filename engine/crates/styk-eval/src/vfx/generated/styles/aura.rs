@@ -34,12 +34,8 @@ struct AuraInput {
 fn aura_fire(a: &AuraInput) -> AuraParts {
     let AuraInput { col, i, s, t, ref base, .. } = *a;
     let li = i.min(1.0);
-    let white_hot = tone(col, 0.2, [1.0, 0.97, 0.82]);
-    let heat = tone(col, 0.55, [1.0, 0.95, 0.72]);
-    // Whatever the colour, fire cools through orange to ember red: the colour leads, the warm end follows.
-    let orange = tone(col, 0.55, [1.0, 0.42, 0.08]);
-    let ember = tone(col, 0.35, [0.62, 0.1, 0.04]);
-    let deep = tone(ember, 0.4, [0.3, 0.03, 0.02]);
+    // White-hot at the body, cooling within the colour's own hue to its embers.
+    let FireTones { white_hot, heat, orange, ember, deep } = fire_tones(col);
     let light = |auto: f64| light_share(base.blend, auto);
     // Three flames inside one another, as fire is: white-hot along the body, the colour around it,
     // and an outer flame of orange cooling to deep red that gives the aura its silhouette and a
@@ -130,7 +126,7 @@ fn aura_fire(a: &AuraInput) -> AuraParts {
                 emissive: Some(Curve::three(light(0.6), 0.5, light(0.5), light(0.4))), alpha_over_life: Some(Curve::four(0.0, 0.1, 1.0, 0.7, 0.85, 0.0)),
                 ..base.clone()
             },
-            stops(&[([1.0, 0.9, 0.55], 1.0), (heat, 1.0), (orange, 1.0), (ember, 1.0)]),
+            stops(&[(white_hot, 1.0), (heat, 1.0), (orange, 1.0), (ember, 1.0)]),
         ),
     }
 }

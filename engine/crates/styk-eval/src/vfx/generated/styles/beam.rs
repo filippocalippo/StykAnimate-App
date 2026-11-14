@@ -326,11 +326,7 @@ fn breath(p: &Beam, ctx: &Context) -> Vec<Spec> {
     let i = p.intensity;
     let li = i.min(1.0);
     let col = paint_color(&p.color);
-    let white_hot = tone(col, 0.2, [1.0, 0.97, 0.82]);
-    let heat = tone(col, 0.55, [1.0, 0.95, 0.72]);
-    let orange = tone(col, 0.55, [1.0, 0.42, 0.08]);
-    let ember = tone(col, 0.35, [0.62, 0.1, 0.04]);
-    let deep = tone(ember, 0.4, [0.3, 0.03, 0.02]);
+    let FireTones { white_hot, heat, orange, ember, deep } = fire_tones(col);
     let charge = if fires_at_once(p, ctx) { 0.0 } else { paint::js_round(p.charge) };
     let fire_start = ctx.start + charge;
     let firing = (ctx.end - fire_start).max(1.0);
@@ -391,7 +387,7 @@ fn breath(p: &Beam, ctx: &Context) -> Vec<Spec> {
             shape: SPARK, rotate: ROTATE_MOTION, aspect: 1.8, size0: 1.6, size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.2)),
             emissive: Some(Curve::three(light(0.6), 0.5, light(0.5), light(0.4))), alpha_over_life: Some(Curve::four(0.0, 0.1, 1.0, 0.7, 0.85, 0.0)),
             ..stream.clone()
-        }, stops(&[([1.0, 0.9, 0.55], 1.0), (heat, 1.0), (orange, 1.0), (ember, 1.0)])));
+        }, stops(&[(white_hot, 1.0), (heat, 1.0), (orange, 1.0), (ember, 1.0)])));
     }
     out
 }
