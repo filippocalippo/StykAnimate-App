@@ -562,7 +562,8 @@ fn particle_corner(p: Prim, kind: u32, q: vec2<f32>, px: f32, shape_row: vec4<f3
     o.uv = vec2<f32>(e.x / hx, e.y / hy);
     var lod = 0.0;
     if (shape == P_MATERIAL) { lod = clamp(log2(MATERIAL_CELL * px / (2.0 * max(hx, hy))), 0.0, MATERIAL_MAX_LOD); }
-    o.prm = vec4<f32>(px / min(hx, hy), ow / hx, lod, 0.0);
+    // The record's rotation rides along for the fragment stage (its cartoon shadow), which sees `prm` in place of `a`.
+    o.prm = vec4<f32>(px / min(hx, hy), ow / hx, lod, p.a.w);
     return o;
 }
 
@@ -586,10 +587,28 @@ fn material_level(m: f32, v: f32, uv: vec2<f32>, level: f32) -> vec2<f32> {
     return textureSampleLevel(materials, material_sampler, at, level).rg;
 }
 
+// Where the light comes from in the world, for cartoon shadows: above, a little to the left.
+const CEL_LIGHT: vec2<f32> = vec2<f32>(-0.45, -0.893);
+
+// A crisp shape's cartoon shadow side: where the shape moved `rim.w` of its size toward the light no
+// longer covers `uv`, its colour turns to `rim.rgb`, `erosion.w` strong, with a hard edge.
+fn cel_shadow(p: Prim, uv: vec2<f32>, shape: u32, px: f32, rotation: f32, aspect: f32, erosion: vec4<f32>, rim: vec4<f32>) -> vec3<f32> {
+    let cr = vec2<f32>(cos(rotation), sin(rotation));
+    // The light in the particle's own (turned, stretched) frame.
+    let l = vec2<f32>(CEL_LIGHT.x * cr.x + CEL_LIGHT.y * cr.y, (-CEL_LIGHT.x * cr.y + CEL_LIGHT.y * cr.x) / max(aspect, 0.05)) * rim.w;
+    var d = 0.0;
+    if (shape == P_DISC) { d = length(uv - l) - 1.0; } else { d = shape_distance(shape, uv - l, p.color & 0xffffu); }
+    let s = (1.0 - clamp(0.5 - d / px, 0.0, 1.0)) * erosion.w;
+    return mix(p.c.rgb, rim.rgb, s);
+}
+
 // A generated-effect particle's premultiplied colour; `rows` are the draw's rows 2 to 5.
 fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, shape_row: vec4<f32>, ink: vec4<f32>, erosion: vec4<f32>, rim: vec4<f32>) -> vec4<f32> {
     let shape = particle_shape_of(p.kind);
-    let rgb = p.c.rgb;
+    var rgb = p.c.rgb;
+    if (erosion.w > 0.0 && shape != P_SEGMENT && shape != P_STREAK && shape != P_MATERIAL && shape != P_RING && shape != P_BOKEH) {
+        rgb = cel_shadow(p, uv, shape, prm.x, prm.w, shape_row.z, erosion, rim);
+    }
     let alpha = p.c.a;
     let e = p.b.z;
     let softness = shape_row.x;

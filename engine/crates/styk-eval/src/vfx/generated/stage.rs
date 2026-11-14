@@ -141,10 +141,13 @@ pub struct Figure {
     pub motion: Motion,
 }
 
-/// A stage: its background (ARGB), figures, clips and length.
+/// A stage: its background (ARGB, or a picture), figures, clips and length.
 #[derive(Clone, Debug)]
 pub struct Stage {
     pub background: u32,
+    /// A picture behind everything instead of the colour: a `data:image/png;base64,…` URL (the colour still says
+    /// whether the figure is drawn dark or light).
+    pub picture: Option<String>,
     pub figures: Vec<Figure>,
     pub clips: Vec<Clip>,
     pub ticks: f64,
@@ -168,7 +171,7 @@ pub fn json_value(v: &str) -> String {
 impl Stage {
     /// One still figure (uid 1) at the middle, on white, `ticks` long.
     pub fn new(ticks: f64) -> Stage {
-        Stage { background: 0xffffffff, figures: vec![Figure { uid: 1, hip: HIP, motion: Motion::Still }], clips: Vec::new(), ticks }
+        Stage { background: 0xffffffff, picture: None, figures: vec![Figure { uid: 1, hip: HIP, motion: Motion::Still }], clips: Vec::new(), ticks }
     }
 
     pub fn clip(mut self, clip: Clip) -> Stage {
@@ -280,10 +283,13 @@ impl Stage {
             ));
         }
         format!(
-            r#"{{"version":5,"canvas_width":{},"canvas_height":{},"fps":24,"auto_easing":false,"auto_easing_disabled_raw":1,"auto_easing_source":"file","backgrounds":[{{"background_id":1,"kind":2,"color":{}}}],"figure_types":[{{"figure_type_id":1,"name":"Figure","segment_count":10,"segments":[{}],"polyfills":[],"image_assets":[],"text_assets":[]}}],"keyframes":[{}],"_styk":{{"format":"StykAnimate","format_version":1,"name":"generated effects stage","vfxClips":{{"version":1,"clips":[{}]}}}}}}"#,
+            r#"{{"version":5,"canvas_width":{},"canvas_height":{},"fps":24,"auto_easing":false,"auto_easing_disabled_raw":1,"auto_easing_source":"file","backgrounds":[{}],"figure_types":[{{"figure_type_id":1,"name":"Figure","segment_count":10,"segments":[{}],"polyfills":[],"image_assets":[],"text_assets":[]}}],"keyframes":[{}],"_styk":{{"format":"StykAnimate","format_version":1,"name":"generated effects stage","vfxClips":{{"version":1,"clips":[{}]}}}}}}"#,
             CANVAS[0],
             CANVAS[1],
-            self.background,
+            match &self.picture {
+                Some(url) => format!(r#"{{"background_id":1,"kind":0,"data_url":"{url}"}}"#),
+                None => format!(r#"{{"background_id":1,"kind":2,"color":{}}}"#, self.background),
+            },
             segments.join(","),
             frames.join(","),
             clips.join(",")
@@ -305,6 +311,8 @@ pub struct Specimen {
     pub outline: f32,
     pub emissive: f32,
     pub erosion: f32,
+    /// A cartoon shadow side's strength (crisp shapes).
+    pub cel: f32,
     /// A material's cell (`material << 4 | variant`), or a shape's seed.
     pub cell: u32,
 }
@@ -312,8 +320,8 @@ pub struct Specimen {
 /// Every particle shape and material, each in a few looks: what the renderers must draw alike.
 pub fn specimen_list() -> Vec<Specimen> {
     use styk_draw::*;
-    let s = |label, shape, softness: f32| Specimen { label, shape, softness, outline: 0.0, emissive: 0.0, erosion: 0.0, cell: 7 };
-    let m = |label, material: u32, erosion: f32, outline: f32| Specimen { label, shape: P_MATERIAL, softness: 0.0, outline, emissive: 0.0, erosion, cell: material << 4 | 1 };
+    let s = |label, shape, softness: f32| Specimen { label, shape, softness, outline: 0.0, emissive: 0.0, erosion: 0.0, cel: 0.0, cell: 7 };
+    let m = |label, material: u32, erosion: f32, outline: f32| Specimen { label, shape: P_MATERIAL, softness: 0.0, outline, emissive: 0.0, erosion, cel: 0.0, cell: material << 4 | 1 };
     vec![
         s("SOFT DISC", P_DISC, 1.4),
         s("DISC", P_DISC, 0.0),
@@ -338,6 +346,8 @@ pub fn specimen_list() -> Vec<Specimen> {
         s("BOKEH", P_BOKEH, 0.0),
         s("TOON STAR", P_TOON_STAR, 0.0),
         Specimen { outline: 0.18, ..s("INKED", P_CLOUD, 0.0) },
+        Specimen { outline: 0.12, cel: 0.9, ..s("CEL", P_DISC, 0.0) },
+        Specimen { outline: 0.12, cel: 0.9, ..s("CEL CLOUD", P_CLOUD, 0.0) },
         Specimen { emissive: 1.0, ..s("LIGHT", P_DISC, 1.4) },
         Specimen { softness: 1.0, ..s("TRAIL", P_SEGMENT, 1.0) },
         m("SMOKE", super::atlas::SMOKE, 0.05, 0.0),
@@ -376,8 +386,8 @@ pub fn specimens(background: u32, sizes: &[f32], columns: usize) -> (styk_draw::
             let rows = if k == 0 { rows } else { at };
             paints.push([sp.softness, 1.0, 1.0, sp.outline * r]);
             paints.push([0.08, 0.05, 0.1, 1.0]);
-            paints.push([0.12, 0.2, 0.6, 0.0]);
-            paints.push([0.55, 0.08, 0.02, 0.0]);
+            paints.push([0.12, 0.2, 0.6, sp.cel]);
+            paints.push([0.55, 0.08, 0.02, if sp.cel > 0.0 { 0.3 } else { 0.0 }]);
             let cx = x + r;
             let kind = particle_kind(sp.shape) | if sp.shape == P_SEGMENT { F_CAP_START | F_CAP_END } else { 0 };
             let (a, b) = match sp.shape {

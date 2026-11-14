@@ -362,12 +362,30 @@ fn over(top: [f32; 4], under: [f32; 4]) -> [f32; 4] {
     [top[0] + under[0] * keep, top[1] + under[1] * keep, top[2] + under[2] * keep, top[3] + under[3] * keep]
 }
 
+/// Where the light comes from in the world, for cartoon shadows (`CEL_LIGHT` in prim.wgsl).
+const CEL_LIGHT: [f32; 2] = [-0.45, -0.893];
+
+/// A crisp shape's cartoon shadow side (`cel_shadow` in prim.wgsl): where the shape moved toward the
+/// light no longer covers `uv`, its colour turns to the shadow's, with a hard edge.
+fn cel_shadow(p: &Prim, uv: [f32; 2], shape: u32, px: f32, rows: &Rows) -> [f32; 3] {
+    let (sn, cs) = (p.a[3].sin(), p.a[3].cos());
+    let depth = rows.rim[3];
+    let l = [(CEL_LIGHT[0] * cs + CEL_LIGHT[1] * sn) * depth, (-CEL_LIGHT[0] * sn + CEL_LIGHT[1] * cs) / rows.shape[2].max(0.05) * depth];
+    let (x, y) = (uv[0] - l[0], uv[1] - l[1]);
+    let d = if shape == P_DISC { len(x, y) - 1.0 } else { shape_distance(shape, x, y, p.color & 0xffff) };
+    let s = (1.0 - (0.5 - d / px).clamp(0.0, 1.0)) * rows.erosion[3];
+    [0, 1, 2].map(|i| mix(p.c[i], rows.rim[i], s))
+}
+
 /// A particle's premultiplied colour at `uv` (`particle_color` in prim.wgsl); its alpha is
 /// what it covers of the target, less where it emits light.
 fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4] {
     let shape = particle_shape(p.kind);
     let c = p.c;
-    let rgb = [c[0], c[1], c[2]];
+    let mut rgb = [c[0], c[1], c[2]];
+    if rows.erosion[3] > 0.0 && !matches!(shape, P_SEGMENT | P_STREAK | P_MATERIAL | P_RING | P_BOKEH) {
+        rgb = cel_shadow(p, uv, shape, prm[0], rows);
+    }
     let e = p.b[2];
     let softness = rows.shape[0];
     let cov = match shape {
