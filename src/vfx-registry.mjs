@@ -49,7 +49,7 @@ const PARTICLE_LOOKS=[
  lookMotion({color:0x9fb8ff,rate:2,life:50,size:12,speed:1.4,spread:60,gravity:-.03,drag:.02,flow:30,endSize:1.6,fadeIn:.2,fade:.5,layer:1}),
  lookMotion({color:0x6e625a,rate:1.5,life:60,size:4,speed:6,spread:100,gravity:.4,drag:.01,spin:10,endSize:1,variation:.6,fadeIn:0,fade:.15,ground:1,bounce:.3}),
  lookMotion({color:0x7bd13a,rate:2,life:50,size:5,speed:5,spread:120,gravity:.35,drag:.01,endSize:1.3,variation:.5,fadeIn:0,fade:.2,ground:1}),
- lookMotion({color:0xffd23c,rate:.6,life:8,size:14,radius:30,speed:.5,spread:360,endSize:.3,variation:.5,fadeIn:0,fade:.3,step:1}),
+ lookMotion({color:0xffd23c,rate:.6,life:8,size:18,radius:30,speed:.5,spread:360,endSize:.3,variation:.5,fadeIn:0,fade:.3,step:1}),
 ];
 // Looks whose particles turn (round ones, lightning flashes and pixels never do), and those drawn from a noise material (shading).
 const turningLooks=[1,4,5,6,8,9,10,11,12,13,14,15,16,19,20,21,22],shadedLooks=[5,8,19];

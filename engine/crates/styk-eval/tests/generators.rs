@@ -616,3 +616,26 @@ fn a_stage_emitter_emits_from_the_edge_its_particles_come_from() {
     assert!(launches("-90", "-0.05").iter().all(|&y| y > 400.0), "rising: from the bottom");
     assert!(launches("-90", "0").iter().all(|&y| y > 400.0), "launched up without gravity: from the bottom");
 }
+
+/// A layer's inner copy (`Inner`) is drawn over each of its particles from the same evaluation: at the same place,
+/// smaller, in its own colour (the Burst look's white-hot middle).
+#[test]
+fn an_inner_copy_sits_inside_each_particle() {
+    let prepared = Stage::new(40.0).clip(Clip::new(Some(1), "particles").set("look", "22").set("rate", "2").set("life", "8")).prepare();
+    let tick = 20.0;
+    let batch = batch_at(&prepared, tick).expect("bursts draw");
+    let frame = prepared.evaluate(tick);
+    let scene = styk_eval::geometry::build(&prepared.doc, &frame);
+    let assets = styk_eval::assets::Assets::build(&prepared.doc);
+    let list = styk_eval::drawlist::encode_with(&prepared.doc, &assets, &scene, &styk_eval::drawlist::Overrides { generators: Some(&batch), ..Default::default() });
+    let bursts: Vec<&styk_draw::Prim> = list.prims.iter().filter(|p| p.kind & 255 == styk_draw::K_PARTICLE && styk_draw::particle_shape(p.kind) == styk_draw::P_BURST).collect();
+    let n = bursts.len() / 2;
+    assert!(n > 0 && bursts.len() == 2 * n, "{} burst records", bursts.len());
+    // The particles, then their inner copies in the same order.
+    for (outer, inner) in bursts[..n].iter().zip(&bursts[n..]) {
+        assert_eq!((outer.a[0], outer.a[1], outer.a[3]), (inner.a[0], inner.a[1], inner.a[3]), "the same place and turn");
+        assert!((inner.a[2] - outer.a[2] * 0.55).abs() < 1e-3, "smaller: {} of {}", inner.a[2], outer.a[2]);
+        let darkest = |c: [f32; 4]| c[0].min(c[1]).min(c[2]);
+        assert!(darkest(inner.c) > darkest(outer.c) + 0.3, "whiter: {:?} over {:?}", inner.c, outer.c);
+    }
+}

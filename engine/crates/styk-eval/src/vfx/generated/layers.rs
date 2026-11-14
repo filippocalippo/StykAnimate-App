@@ -156,6 +156,18 @@ pub struct Halo {
     pub alpha: f64,
 }
 
+/// A smaller copy of each particle drawn inside it, from the same evaluation (so it is
+/// always centred in it): `scale` of its size, its colour moved `mix` of the way to
+/// `color`, giving off `emissive` of light (a burst's white-hot middle, a cartoon flame's
+/// yellow heart).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Inner {
+    pub scale: f64,
+    pub color: [f64; 3],
+    pub mix: f64,
+    pub emissive: f64,
+}
+
 /// An ink line around each particle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Outline {
@@ -379,6 +391,8 @@ pub struct Spec {
     /// A white-hot middle: discs and crisp shapes turn whiter toward their centre by this much
     /// (0: none; a spark and a sparkle have 0.6 of their own).
     pub core: f64,
+    /// A smaller copy of each particle inside it.
+    pub inner: Option<Inner>,
 }
 
 impl Default for Spec {
@@ -472,6 +486,7 @@ impl Default for Spec {
             snap: 0.0,
             strike: 0.0,
             core: 0.0,
+            inner: None,
         }
     }
 }

@@ -160,11 +160,13 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
     let main = rows(&mut out, m, scale, s, s.softness, true);
     let halo_rows = s.halo.map(|_| rows(&mut out, m, scale, s, 2.2, false));
     let trail_rows = s.trail.map(|t| rows(&mut out, m, scale, s, t.glow, false));
+    // The smaller copy inside each particle: its shape without the ink line.
+    let inner_rows = s.inner.map(|_| rows(&mut out, m, scale, s, s.softness, false));
     // Lightning striking out to each particle: its bolt's pieces, with a glow.
     let strike_rows = (s.strike > 0.0).then(|| rows(&mut out, m, scale, s, 0.9, false));
     // A material not generated yet: soft discs this frame, and the frame is drawn again.
     let fallback_rows = (s.shape == MATERIAL && s.material.and_then(|m| m.noise).is_some_and(|row| atlas::ready(row as usize).is_none())).then(|| rows(&mut out, m, scale, s, 1.5, false));
-    let (mut trails, mut halos, mut mains) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut trails, mut halos, mut mains, mut inners) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let ev = Evaluator::new(batch, draw);
     for (b, p) in alive {
         let mut alpha_scale = 1.0;
@@ -198,6 +200,11 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
             }
         }
         mains.push(prim(particle_kind(shape), p.cell, rows_of, [p.x, p.y, p.size, p.rotation], [p.vx, p.vy, p.emissive, p.erosion], [p.rgba[0], p.rgba[1], p.rgba[2], alpha]));
+        if let (Some(k), Some(r)) = (ps.inner, inner_rows) {
+            let rgb = [0, 1, 2].map(|c| p.rgba[c] + (k.color[c] - p.rgba[c]) * k.mix);
+            let rows_of = if rows_of == main { r } else { rows_of };
+            inners.push(prim(particle_kind(shape), p.cell, rows_of, [p.x, p.y, p.size * k.scale, p.rotation], [p.vx * k.scale, p.vy * k.scale, k.emissive, p.erosion], [rgb[0], rgb[1], rgb[2], alpha]));
+        }
         if let (Some(h), Some(r)) = (ps.halo, halo_rows) {
             let size = p.size * h.scale;
             grow(&mut out, world(p.x, p.y), (size + 1.0) * scale);
@@ -240,10 +247,11 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
             }
         }
     }
-    // Painter order within the draw: trails, halos, then the particles.
+    // Painter order within the draw: trails, halos, the particles, then their inner copies.
     out.prims.extend(trails);
     out.prims.extend(halos);
     out.prims.extend(mains);
+    out.prims.extend(inners);
     if out.prims.is_empty() {
         return (Out::new(), 0);
     }

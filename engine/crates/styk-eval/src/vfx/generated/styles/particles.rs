@@ -376,16 +376,18 @@ fn splat(i: &In<'_>) -> Vec<Spec> {
     vec![layer(i.sized(s, 1.0, Curve::four(0.6, 0.2, 0.9, 0.6, mix(0.9, i.end(), 0.6), i.end())), ramp)]
 }
 
-/// Burst: impact stars that pop out in a frame and shrink away.
+/// Burst: impact stars that pop out at full size in a frame or two, white-hot in the middle of
+/// their colour, and shrink away.
 fn burst(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
-    let ramp = i.ramp(stops(&[(hot(col, 0.6), 1.0), (col, 1.0), (deep(col, 0.3), 1.0)]));
+    let ramp = i.ramp(stops(&[(col, 1.0), (deep(col, 0.2), 1.0), (deep(col, 0.45), 1.0)]));
     let s = Spec {
         material: m("burst"), rotate: i.rotate(ROTATE_RANDOM),
-        emissive: Some(Curve::three(0.45, 0.5, 0.25, 0.1)), blend: i.blend(AUTO),
+        inner: Some(Inner { scale: 0.55, color: [1.0, 0.98, 0.86], mix: 0.85, emissive: 0.6 }),
+        emissive: Some(Curve::three(0.3, 0.5, 0.15, 0.05)), blend: i.blend(AUTO),
         ..i.base.clone()
     };
-    vec![layer(i.sized(s, 1.0, Curve::four(0.2, 0.15, 1.0, 0.6, mix(1.0, i.end(), 0.6), i.end())), ramp)]
+    vec![layer(i.sized(s, 1.0, Curve::four(0.35, 0.1, 1.0, 0.5, mix(1.0, i.end(), 0.6), i.end())), ramp)]
 }
 
 // ---------------------------------------------------------------------------
@@ -462,23 +464,20 @@ fn cartoon_cloud(i: &In<'_>) -> Vec<Spec> {
 fn cartoon_flame(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
     let ramp = i.ramp(stops(&[(tone(col, 0.65, [1.0, 0.95, 0.45]), 1.0), (tone(col, 0.3, [1.0, 0.85, 0.3]), 1.0), (col, 1.0), (deep(col, 0.25), 1.0)]));
-    let s = Spec { material: m("toonFlame"), rotate: i.rotate(ROTATE_MOTION), aspect: 1.25, blend: i.blend(NORMAL), ..i.base.clone() };
-    let curve = Curve::four(0.3, 0.15, 1.0, 0.6, mix(1.0, i.end(), 0.4), i.end());
-    let outer = layer(i.sized(s.clone(), 1.0, curve), ramp);
-    // The yellow heart of the fire: smaller, slower, shorter-lived, no ink, over the flames' roots.
-    let heart = Spec {
-        outline: None, speed_min: s.speed_min * 0.6, speed_max: s.speed_max * 0.7, life_min: s.life_min * 0.6, life_max: s.life_max * 0.7,
-        ..s
+    // Each tongue has a yellow heart inside it, without ink.
+    let s = Spec {
+        material: m("toonFlame"), rotate: i.rotate(ROTATE_MOTION), aspect: 1.25, blend: i.blend(NORMAL),
+        inner: Some(Inner { scale: 0.5, color: [1.0, 0.94, 0.5], mix: 0.75, emissive: 0.0 }),
+        ..i.base.clone()
     };
-    let heart = layer(i.share(i.sized(heart, 0.5, curve), 0.8), stops(&[(tone(col, 0.7, [1.0, 0.97, 0.6]), 1.0), (tone(col, 0.45, [1.0, 0.9, 0.35]), 1.0)]));
-    vec![outer, heart]
+    vec![layer(i.sized(s, 1.0, Curve::four(0.3, 0.15, 1.0, 0.6, mix(1.0, i.end(), 0.4), i.end())), ramp)]
 }
 
 /// Cartoon star: flat stars that pop out spinning and fall away.
 fn cartoon_star(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
     let ramp = i.ramp(stops(&[(tone(col, 0.35, WHITE), 1.0), (col, 1.0)]));
-    let s = Spec { material: m("toonStar"), rotate: i.rotate(ROTATE_RANDOM), blend: i.blend(NORMAL), ..i.base.clone() };
+    let s = Spec { material: m("toonStar"), rotate: i.rotate(ROTATE_RANDOM), blend: i.blend(NORMAL), inner: Some(Inner { scale: 0.45, color: WHITE, mix: 0.45, emissive: 0.0 }), ..i.base.clone() };
     vec![layer(i.sized(s, 1.0, Curve::four(0.0, 0.12, 1.15, 0.3, 1.0, i.end())), ramp)]
 }
 
