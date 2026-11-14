@@ -11,14 +11,53 @@ const PI: f32 = std::f32::consts::PI;
 
 type C = [f32; 4];
 
-/// A seed of the jump flood: a point on the edge in eighths of a pixel and its strength (0–65535), as the GPU's 16-bit integers
-/// hold them; `None`: no seed.
-type Seed = Option<[u16; 3]>;
+/// A seed of the jump flood: a point on the edge (texel positions) and its strength, the values the GPU reads out of its 16-bit
+/// integers (eighths of a pixel, strength in 65535ths); `NO_SEED`, at infinity, is never the nearest.
+type Seed = [f32; 3];
+const NO_SEED: Seed = [f32::INFINITY, f32::INFINITY, 1.0];
 
-/// An image of a run: premultiplied colour (or a mask), or the jump flood's seeds.
+/// An image of a run: premultiplied colour (or a mask), or the jump flood's seeds with the tiles that hold any.
 enum Pixels {
     Color(Vec<C>),
-    Seeds(Vec<Seed>),
+    Seeds(Vec<Seed>, Tiles),
+}
+
+/// Side of the tiles a seed image keeps track of.
+const TILE: usize = 16;
+
+/// Which `TILE`-pixel tiles of a seed image hold a seed. A jump of k pixels reaches only the tiles within ceil(k / TILE) of
+/// those: the rest stay without a seed, and the jump flood skips them.
+struct Tiles {
+    columns: usize,
+    rows: usize,
+    any: Vec<bool>,
+}
+
+impl Tiles {
+    fn of(size: [usize; 2], seeds: &[Seed]) -> Tiles {
+        let (columns, rows) = (size[0].div_ceil(TILE), size[1].div_ceil(TILE));
+        let mut any = vec![false; columns * rows];
+        for (i, seed) in seeds.iter().enumerate() {
+            if seed[0].is_finite() {
+                any[(i / size[0] / TILE) * columns + (i % size[0]) / TILE] = true;
+            }
+        }
+        Tiles { columns, rows, any }
+    }
+    /// The tiles within `reach` tiles of one that holds a seed.
+    fn grown(&self, reach: usize) -> Vec<bool> {
+        let mut out = vec![false; self.any.len()];
+        for ty in 0..self.rows {
+            for tx in 0..self.columns {
+                if self.any[ty * self.columns + tx] {
+                    for y in ty.saturating_sub(reach)..(ty + reach + 1).min(self.rows) {
+                        out[y * self.columns + tx.saturating_sub(reach)..y * self.columns + (tx + reach + 1).min(self.columns)].fill(true);
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 struct Img {
@@ -30,12 +69,12 @@ impl Img {
     fn color(&self) -> &[C] {
         match &self.pixels {
             Pixels::Color(c) => c,
-            Pixels::Seeds(_) => &[],
+            Pixels::Seeds(..) => &[],
         }
     }
     fn seeds(&self) -> &[Seed] {
         match &self.pixels {
-            Pixels::Seeds(s) => s,
+            Pixels::Seeds(s, _) => s,
             Pixels::Color(_) => &[],
         }
     }
@@ -205,72 +244,123 @@ fn linear_taps(u: f32, n: usize) -> [(usize, f32); 4] {
     [(i.min(n - 1), 1.0 - f), ((i + 1).min(n - 1), f), (0, 0.0), (0, 0.0)]
 }
 
-/// Reads of an image mapped from a full-size target by `map`, displaced by `offset` target pixels, per column and per row:
-/// smooth (the B-spline) for a halved image, bilinear otherwise (`read0` in `common.wgsl`).
-struct Reader {
-    columns: Vec<[(usize, f32); 4]>,
-    rows: Vec<[(usize, f32); 4]>,
+/// Taps along one axis: texels and their weights, the `n` that count first (a read that lands on a texel is one).
+#[derive(Clone, Copy)]
+struct Taps {
+    at: [(usize, f32); 4],
+    n: usize,
 }
 
-impl Reader {
-    fn new(img: &Img, map: [f32; 4], offset: [f32; 2], size: [usize; 2]) -> Reader {
-        let smooth = map[0] < 1.0;
-        let taps = |u: f32, n: usize| if smooth { spline_taps(u, n) } else { linear_taps(u, n) };
-        let columns = (0..size[0]).map(|x| taps((x as f32 + 0.5 - offset[0]) * map[0] + map[2], img.size[0])).collect();
-        let rows = (0..size[1]).map(|y| taps((y as f32 + 0.5 - offset[1]) * map[1] + map[3], img.size[1])).collect();
-        Reader { columns, rows }
-    }
-    #[inline]
-    fn at(&self, img: &Img, x: usize, y: usize) -> C {
-        let d = img.color();
-        let w = img.size[0];
-        let mut out = [0.0; 4];
-        for &(row, wy) in &self.rows[y] {
-            if wy == 0.0 {
+impl Taps {
+    fn of(list: [(usize, f32); 4]) -> Taps {
+        let mut at = [(0, 0.0); 4];
+        let mut n = 0;
+        for (i, w) in list {
+            if w == 0.0 {
                 continue;
             }
-            for &(column, wx) in &self.columns[x] {
-                if wx != 0.0 {
-                    out = add(out, d[row * w + column], wx * wy);
+            match at[..n].iter_mut().find(|t| t.0 == i) {
+                Some(t) => t.1 += w,
+                None => {
+                    at[n] = (i, w);
+                    n += 1;
                 }
+            }
+        }
+        Taps { at, n }
+    }
+}
+
+/// Reads of an image at a pass's pixels, mapped from a full-size target by `map` and displaced by `offset` target pixels. A
+/// read's taps depend on its column and its row alone: they are worked out once for the pass, not at every pixel.
+struct Read<'a> {
+    data: &'a [C],
+    width: usize,
+    columns: Vec<Taps>,
+    rows: Vec<Taps>,
+}
+
+impl<'a> Read<'a> {
+    fn with(img: &'a Img, map: [f32; 4], offset: [f32; 2], size: [usize; 2], taps: impl Fn(f32, usize) -> [(usize, f32); 4]) -> Read<'a> {
+        let columns = (0..size[0]).map(|x| Taps::of(taps((x as f32 + 0.5 - offset[0]) * map[0] + map[2], img.size[0]))).collect();
+        let rows = (0..size[1]).map(|y| Taps::of(taps((y as f32 + 0.5 - offset[1]) * map[1] + map[3], img.size[1]))).collect();
+        Read { data: img.color(), width: img.size[0], columns, rows }
+    }
+    /// `read0` in `common.wgsl`: smooth (the B-spline) for a halved image, bilinear otherwise.
+    fn smooth(img: &'a Img, map: [f32; 4], offset: [f32; 2], size: [usize; 2]) -> Read<'a> {
+        let smooth = map[0] < 1.0;
+        Read::with(img, map, offset, size, |u, n| if smooth { spline_taps(u, n) } else { linear_taps(u, n) })
+    }
+    /// `sampleK(mapped(k, at))`: bilinear.
+    fn bilinear(img: &'a Img, map: [f32; 4], size: [usize; 2]) -> Read<'a> {
+        Read::with(img, map, [0.0; 2], size, linear_taps)
+    }
+    /// A halving's tent (`reduce.wgsl`): the mean of bilinear reads three quarters of a texel either side, on each axis.
+    fn tent(img: &'a Img, map: [f32; 4], size: [usize; 2]) -> Read<'a> {
+        Read::with(img, map, [0.0; 2], size, |u, n| {
+            let [a, b, _, _] = linear_taps(u - 0.75, n);
+            let [c, d, _, _] = linear_taps(u + 0.75, n);
+            [(a.0, a.1 * 0.5), (b.0, b.1 * 0.5), (c.0, c.1 * 0.5), (d.0, d.1 * 0.5)]
+        })
+    }
+    #[inline]
+    fn at(&self, x: usize, y: usize) -> C {
+        let (columns, rows) = (&self.columns[x], &self.rows[y]);
+        let mut out = [0.0; 4];
+        for &(row, wy) in &rows.at[..rows.n] {
+            let line = &self.data[row * self.width..];
+            for &(column, wx) in &columns.at[..columns.n] {
+                out = add(out, line[column], wx * wy);
             }
         }
         out
     }
 }
 
+/// A new image of `size`, pixel by pixel.
+#[inline]
+fn fill(size: [usize; 2], mut f: impl FnMut(usize, usize) -> C) -> Img {
+    let mut data = Vec::with_capacity(size[0] * size[1]);
+    for y in 0..size[1] {
+        for x in 0..size[0] {
+            data.push(f(x, y));
+        }
+    }
+    Img { size, pixels: Pixels::Color(data) }
+}
+
+/// The brush of a pass at a texel position: its colour once for a solid brush.
+fn brushes(u: &Uniform) -> impl Fn([f32; 2]) -> C + '_ {
+    let solid = (u.paint_type == 0).then_some(u.stops[0]);
+    move |at| solid.unwrap_or_else(|| brush(u, at))
+}
+
 /// One pass of `u.operation` into a new image of `size`.
 fn pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
-    let [w, h] = size;
-    let color = |f: &mut dyn FnMut(usize, usize) -> C| {
-        let mut data = Vec::with_capacity(w * h);
-        for y in 0..h {
-            for x in 0..w {
-                data.push(f(x, y));
-            }
-        }
-        Img { size, pixels: Pixels::Color(data) }
-    };
     let input = |k: usize| inputs[k].expect("the pass reads this input");
     // Input k at a target texel's position: the map applied to the texel's centre.
     let mapped = |k: usize, x: f32, y: f32| [x * u.maps[k][0] + u.maps[k][2], y * u.maps[k][1] + u.maps[k][3]];
     let strengthen = |result: C, base: C| mix4(base, result, u.s[3]);
     let (p, q) = (u.p, u.q);
     match u.operation {
-        op::TENT | op::BOX | op::BRIGHT => {
+        op::TENT => {
+            let read = Read::tent(input(0), u.maps[0], size);
+            fill(size, |x, y| read.at(x, y))
+        }
+        op::BOX => {
+            let read = Read::bilinear(input(0), u.maps[0], size);
+            fill(size, |x, y| read.at(x, y))
+        }
+        op::BRIGHT => {
             let src = input(0);
             let bright = |c: C| {
                 let rgb = straight(c);
                 let l = rgb[0].max(rgb[1]).max(rgb[2]);
                 scale(c, smoothstep(p[0] - p[1], p[0] + p[1], l))
             };
-            color(&mut |x, y| {
+            fill(size, |x, y| {
                 let c = mapped(0, x as f32 + 0.5, y as f32 + 0.5);
-                if u.operation == op::BOX {
-                    return src.sample(c);
-                }
-                let taps = [[-0.75, -0.75], [0.75, -0.75], [-0.75, 0.75], [0.75, 0.75]].map(|o| src.sample([c[0] + o[0], c[1] + o[1]]));
-                let taps = if u.operation == op::BRIGHT { taps.map(bright) } else { taps };
+                let taps = [[-0.75, -0.75], [0.75, -0.75], [-0.75, 0.75], [0.75, 0.75]].map(|o| bright(src.sample([c[0] + o[0], c[1] + o[1]])));
                 scale(add(add(add(taps[0], taps[1], 1.0), taps[2], 1.0), taps[3], 1.0), 0.25)
             })
         }
@@ -279,39 +369,53 @@ fn pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
             let count = (u.seed[0] as usize).min(16);
             let samples: Vec<(f32, f32)> = (0..count).map(|i| (u.taps[i / 4][i % 4], u.weights[i / 4][i % 4])).collect();
             let along_x = p[0] != 0.0;
-            let base = (p[2] > 0.0).then(|| input(1));
-            // Along an axis a bilinear read is a linear one: the two texels of the row (or column) and their weights.
-            let (n, d) = (if along_x { src.size[0] } else { src.size[1] }, src.color());
-            color(&mut |x, y| {
-                let c = mapped(0, x as f32 + 0.5, y as f32 + 0.5);
-                let mut sum = [0.0; 4];
+            let base = (p[2] > 0.0).then(|| Read::bilinear(input(1), u.maps[1], size));
+            // Along an axis a bilinear read is a linear one: the two texels of the row (or column) and their weights. Every
+            // pixel of a column (or row) reads the same texels of its row (or column): their weights are summed once.
+            let ([sw, sh], d) = (src.size, src.color());
+            let n = if along_x { sw } else { sh };
+            let line = |c: f32| {
+                let mut taps: Vec<(usize, f32)> = Vec::with_capacity(2 * samples.len());
                 for &(o, weight) in &samples {
-                    let t = if along_x { c[0] + o } else { c[1] + o };
-                    let v = t.clamp(0.5, (n as f32 - 0.5).max(0.5)) - 0.5;
+                    let v = (c + o).clamp(0.5, (n as f32 - 0.5).max(0.5)) - 0.5;
                     let i = v as usize;
                     let f = v - i as f32;
-                    let j = (i + 1).min(n - 1);
-                    let (a, b) = if along_x {
-                        let row = (c[1] as usize).min(src.size[1] - 1) * src.size[0];
-                        (d[row + i.min(n - 1)], d[row + j])
-                    } else {
-                        let column = (c[0] as usize).min(src.size[0] - 1);
-                        (d[i.min(n - 1) * src.size[0] + column], d[j * src.size[0] + column])
-                    };
-                    sum = add(sum, mix4(a, b, f), weight);
+                    for (t, tw) in [(i.min(n - 1), weight * (1.0 - f)), ((i + 1).min(n - 1), weight * f)] {
+                        match taps.iter_mut().find(|e| e.0 == t) {
+                            Some(e) => e.1 += tw,
+                            None => taps.push((t, tw)),
+                        }
+                    }
                 }
-                match base {
-                    Some(base) => strengthen(sum, base.sample(mapped(1, x as f32 + 0.5, y as f32 + 0.5))),
+                taps
+            };
+            let columns: Vec<f32> = (0..size[0]).map(|x| (x as f32 + 0.5) * u.maps[0][0] + u.maps[0][2]).collect();
+            let rows: Vec<f32> = (0..size[1]).map(|y| (y as f32 + 0.5) * u.maps[0][1] + u.maps[0][3]).collect();
+            let lines: Vec<Vec<(usize, f32)>> = if along_x { columns.iter().map(|&c| line(c)).collect() } else { rows.iter().map(|&c| line(c)).collect() };
+            fill(size, |x, y| {
+                let mut sum = [0.0; 4];
+                if along_x {
+                    let row = (rows[y] as usize).min(sh - 1) * sw;
+                    for &(i, weight) in &lines[x] {
+                        sum = add(sum, d[row + i], weight);
+                    }
+                } else {
+                    let column = (columns[x] as usize).min(sw - 1);
+                    for &(i, weight) in &lines[y] {
+                        sum = add(sum, d[i * sw + column], weight);
+                    }
+                }
+                match &base {
+                    Some(base) => strengthen(sum, base.at(x, y)),
                     None => sum,
                 }
             })
         }
         op::SPLINE | op::ACCUMULATE => {
-            let (coarse, this) = (input(0), input(1));
-            let reader = Reader::new(coarse, u.maps[0], [0.0; 2], size);
-            color(&mut |x, y| {
-                let c = reader.at(coarse, x, y);
-                let t = this.sample(mapped(1, x as f32 + 0.5, y as f32 + 0.5));
+            let (coarse, this) = (Read::smooth(input(0), u.maps[0], [0.0; 2], size), Read::bilinear(input(1), u.maps[1], size));
+            fill(size, |x, y| {
+                let c = coarse.at(x, y);
+                let t = this.at(x, y);
                 if u.operation == op::ACCUMULATE { add(scale(c, p[0]), t, p[1]) } else { strengthen(c, t) }
             })
         }
@@ -319,7 +423,7 @@ fn pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
         op::SEED | op::JUMP => flood(u, inputs, size),
         op::SPREAD | op::OUTLINE => distance_pass(u, inputs, size),
         op::LINE => {
-            let (src, base) = (input(0), inputs[1]);
+            let (src, base) = (input(0), inputs[1].filter(|_| p[3] > 0.0).map(|b| Read::bilinear(b, u.maps[1], size)));
             let count = p[1] as usize;
             let first = -(p[1] - 1.0) * 0.5 * p[2];
             let turns: Vec<[f32; 3]> = (0..count)
@@ -328,7 +432,7 @@ fn pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
                     [t, t.cos(), t.sin()]
                 })
                 .collect();
-            color(&mut |x, y| {
+            fill(size, |x, y| {
                 let g = [u.origin[0] + x as f32 + 0.5 - q[0], u.origin[1] + y as f32 + 0.5 - q[1]];
                 let mut sum = [0.0; 4];
                 for &[t, c, s] in &turns {
@@ -343,41 +447,29 @@ fn pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
                     sum = add(sum, src.sample([at[0] + q[0] - u.origin[0], at[1] + q[1] - u.origin[1]]), 1.0);
                 }
                 let sum = scale(sum, 1.0 / p[1]);
-                match (p[3] > 0.0, base) {
-                    (true, Some(base)) => strengthen(sum, base.sample(mapped(1, x as f32 + 0.5, y as f32 + 0.5))),
-                    _ => sum,
+                match &base {
+                    Some(base) => strengthen(sum, base.at(x, y)),
+                    None => sum,
                 }
             })
         }
         op::TINT | op::GRADE | op::VIGNETTE | op::SWEEP => {
-            let (src, base) = (input(0), input(1));
-            color(&mut |x, y| {
-                let at = [x as f32 + 0.5, y as f32 + 0.5];
-                let c = src.sample(mapped(0, at[0], at[1]));
-                let b0 = base.sample(mapped(1, at[0], at[1]));
-                strengthen(colour_op(u, c, at), b0)
-            })
+            let (src, base) = (Read::bilinear(input(0), u.maps[0], size), Read::bilinear(input(1), u.maps[1], size));
+            let (brush, grading) = (brushes(u), Grading::of(u));
+            fill(size, |x, y| strengthen(colour_op(u, src.at(x, y), [x as f32 + 0.5, y as f32 + 0.5], &brush, &grading), base.at(x, y)))
         }
         op::GRAIN | op::CLOUDS | op::DISSOLVE | op::TURBULENCE => {
-            let (src, base) = (input(0), input(1));
-            color(&mut |x, y| {
-                let at = [x as f32 + 0.5, y as f32 + 0.5];
-                let b0 = base.sample(mapped(1, at[0], at[1]));
-                strengthen(noise_op(u, src, at), b0)
-            })
+            let (src, base) = (input(0), Read::bilinear(input(1), u.maps[1], size));
+            fill(size, |x, y| strengthen(noise_op(u, src, [x as f32 + 0.5, y as f32 + 0.5]), base.at(x, y)))
         }
         op::SPLIT | op::WAVE | op::SHOCK | op::CRT => {
-            let (src, base) = (input(0), input(1));
-            color(&mut |x, y| {
-                let at = [x as f32 + 0.5, y as f32 + 0.5];
-                let b0 = base.sample(mapped(1, at[0], at[1]));
-                strengthen(warp(u, src, at), b0)
-            })
+            let (src, base) = (input(0), Read::bilinear(input(1), u.maps[1], size));
+            fill(size, |x, y| strengthen(warp(u, src, [x as f32 + 0.5, y as f32 + 0.5]), base.at(x, y)))
         }
         op::CELLS => {
             let src = input(0);
             let step = u.r[0];
-            color(&mut |x, y| {
+            fill(size, |x, y| {
                 let index = [x as f32 + q[0], y as f32 + q[1]];
                 let low = [(p[2] + index[0] * p[0] - u.origin[0] + q[2]) / step, (p[3] + index[1] * p[1] - u.origin[1] + q[3]) / step];
                 let high = [low[0] + p[0] / step, low[1] + p[1] / step];
@@ -393,16 +485,16 @@ fn pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
             })
         }
         op::SHOW => {
-            let (cells, base) = (input(0), input(1));
-            color(&mut |x, y| {
+            let (cells, base) = (input(0), Read::bilinear(input(1), u.maps[1], size));
+            fill(size, |x, y| {
                 let g = [u.origin[0] + x as f32 + 0.5, u.origin[1] + y as f32 + 0.5];
                 let cell = [((g[0] - p[2]) / p[0]).floor() - q[0], ((g[1] - p[3]) / p[1]).floor() - q[1]];
                 let cx = (cell[0].max(0.0) as usize).min(cells.size[0] - 1);
                 let cy = (cell[1].max(0.0) as usize).min(cells.size[1] - 1);
-                strengthen(cells.color()[cy * cells.size[0] + cx], base.sample(mapped(1, x as f32 + 0.5, y as f32 + 0.5)))
+                strengthen(cells.color()[cy * cells.size[0] + cx], base.at(x, y))
             })
         }
-        _ => color(&mut |x, y| input(0).sample([x as f32 + 0.5, y as f32 + 0.5])),
+        _ => fill(size, |x, y| input(0).sample([x as f32 + 0.5, y as f32 + 0.5])),
     }
 }
 
@@ -411,17 +503,17 @@ fn light(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
     let [w, h] = size;
     let (p, q) = (u.p, u.q);
     let mask = inputs[0].expect("a mask");
-    let front = inputs[1].expect("the artwork");
+    let front = Read::bilinear(inputs[1].expect("the artwork"), u.maps[1], size);
+    let brush = brushes(u);
     let mut data = Vec::with_capacity(w * h);
-    let at_of = |k: usize, at: [f32; 2]| [at[0] * u.maps[k][0] + u.maps[k][2], at[1] * u.maps[k][1] + u.maps[k][3]];
     if u.operation == op::BLOOM {
-        let reader = Reader::new(mask, u.maps[0], [0.0; 2], size);
+        let reader = Read::smooth(mask, u.maps[0], [0.0; 2], size);
         for y in 0..h {
             for x in 0..w {
                 let at = [x as f32 + 0.5, y as f32 + 0.5];
-                let b = brush(u, at);
-                let f = front.sample(at_of(1, at));
-                let c = scale(reader.at(mask, x, y), p[1]);
+                let b = brush(at);
+                let f = front.at(x, y);
+                let c = scale(reader.at(x, y), p[1]);
                 let top = f[3].max(c[3]);
                 let k = b[3] * p[0];
                 let lit = [(f[0] + c[0] * b[0] * k).min(top), (f[1] + c[1] * b[1] * k).min(top), (f[2] + c[2] * b[2] * k).min(top), top];
@@ -430,25 +522,27 @@ fn light(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
         }
         return Img { size, pixels: Pixels::Color(data) };
     }
-    let base = inputs[2].expect("the base");
-    let reader = Reader::new(mask, u.maps[0], [q[0], q[1]], size);
-    let colours = inputs[3].filter(|_| q[2] > 0.0).map(|c| (c, Reader::new(c, u.maps[3], [q[0], q[1]], size)));
+    let base = Read::bilinear(inputs[2].expect("the base"), u.maps[2], size);
+    let reader = Read::smooth(mask, u.maps[0], [q[0], q[1]], size);
+    let colours = inputs[3].filter(|_| q[2] > 0.0).map(|c| Read::smooth(c, u.maps[3], [q[0], q[1]], size));
     let modes = p[2] as i32;
+    // The falloff's power; most glows and shadows keep 1.
+    let falloff = |v: f32| if p[1] == 1.0 { v } else { v.powf(p[1]) };
     for y in 0..h {
         for x in 0..w {
             let at = [x as f32 + 0.5, y as f32 + 0.5];
-            let f = front.sample(at_of(1, at));
-            let b0 = base.sample(at_of(2, at));
-            let m = reader.at(mask, x, y);
-            let b = brush(u, at);
+            let f = front.at(x, y);
+            let b0 = base.at(x, y);
+            let m = reader.at(x, y);
+            let b = brush(at);
             let (glow, reach) = match &colours {
-                Some((img, r)) => (straight(r.at(img, x, y)).map(|v| v.clamp(0.0, 1.0)), 1.0),
+                Some(r) => (straight(r.at(x, y)).map(|v| v.clamp(0.0, 1.0)), 1.0),
                 None => ([b[0], b[1], b[2]], b[3]),
             };
             let mut pixel = f;
             if modes & 1 != 0 {
                 let inner = if q[3] > 0.0 { m[0] } else { 1.0 - m[3] };
-                let a = (inner.max(0.0).powf(p[1]) * p[0] * reach).clamp(0.0, 1.0);
+                let a = (falloff(inner.max(0.0)) * p[0] * reach).clamp(0.0, 1.0);
                 let mut rgb = [0, 1, 2].map(|k| mix(f[k], glow[k] * f[3], a));
                 if p[3] == 1.0 {
                     rgb = [0, 1, 2].map(|k| (f[k] + glow[k] * f[3] * a).min(f[3]));
@@ -459,7 +553,7 @@ fn light(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
                 pixel = [rgb[0], rgb[1], rgb[2], f[3]];
             }
             if modes & 2 != 0 {
-                let a = (m[3].max(0.0).powf(p[1]) * p[0] * reach).clamp(0.0, 1.0);
+                let a = (falloff(m[3].max(0.0)) * p[0] * reach).clamp(0.0, 1.0);
                 let under = [glow[0] * a, glow[1] * a, glow[2] * a, a];
                 let top = pixel[3].max(a);
                 pixel = if p[3] == 1.0 {
@@ -500,7 +594,10 @@ fn flood(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
     let [w, h] = size;
     let mut data = Vec::with_capacity(w * h);
     let square = u.p[1] > 0.0;
-    let packed = |e: [f32; 2], strength: f32| Some([(e[0] * 8.0).round().clamp(0.0, 65535.0) as u16, (e[1] * 8.0).round().clamp(0.0, 65535.0) as u16, (strength.clamp(0.0, 1.0) * 65535.0).round() as u16]);
+    let packed = |e: [f32; 2], strength: f32| -> Seed {
+        let [x, y, k] = [(e[0] * 8.0).round().clamp(0.0, 65535.0) as u16, (e[1] * 8.0).round().clamp(0.0, 65535.0) as u16, (strength.clamp(0.0, 1.0) * 65535.0).round() as u16];
+        [x as f32 / 8.0, y as f32 / 8.0, k as f32 / 65535.0]
+    };
     if u.operation == op::SEED {
         let art = inputs[1].expect("the artwork");
         let alpha = |x: i64, y: i64| art.load(x, y)[3];
@@ -508,15 +605,20 @@ fn flood(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
             for x in 0..w as i64 {
                 let a = alpha(x, y);
                 let (l, r, up, d) = (alpha(x - 1, y), alpha(x + 1, y), alpha(x, y - 1), alpha(x, y + 1));
-                let (ul, ur, dl, dr) = (alpha(x - 1, y - 1), alpha(x + 1, y - 1), alpha(x - 1, y + 1), alpha(x + 1, y + 1));
-                let centre = [x as f32 + 0.5, y as f32 + 0.5];
                 let inside = a >= 0.5;
                 let across = (l >= 0.5) != inside || (r >= 0.5) != inside || (up >= 0.5) != inside || (d >= 0.5) != inside;
+                // Neither on the edge nor on a faint line (most pixels): the diagonals are not needed.
+                if !across && (a <= 0.0 || inside) {
+                    data.push(NO_SEED);
+                    continue;
+                }
+                let (ul, ur, dl, dr) = (alpha(x - 1, y - 1), alpha(x + 1, y - 1), alpha(x - 1, y + 1), alpha(x + 1, y + 1));
+                let centre = [x as f32 + 0.5, y as f32 + 0.5];
                 if across {
                     // A whole pixel beside a partly covered one across the edge leaves the edge to that one.
                     let partly = |n: f32| (n >= 0.5) != inside && n > 0.0 && n < 1.0;
                     if (a <= 0.0 || a >= 1.0) && (partly(l) || partly(r) || partly(up) || partly(d)) {
-                        data.push(None);
+                        data.push(NO_SEED);
                         continue;
                     }
                     let g = [(ur + 2.0 * r + dr) - (ul + 2.0 * l + dl), (dl + 2.0 * d + dr) - (ul + 2.0 * up + ur)];
@@ -527,36 +629,53 @@ fn flood(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Img {
                     continue;
                 }
                 let ridge = a > 0.0 && !inside && a >= l.max(r).max(up).max(d).max(ul).max(ur).max(dl).max(dr);
-                data.push(if ridge { packed(centre, a * 2.0) } else { None });
+                data.push(if ridge { packed(centre, a * 2.0) } else { NO_SEED });
             }
         }
-        return Img { size, pixels: Pixels::Seeds(data) };
+        let tiles = Tiles::of(size, &data);
+        return Img { size, pixels: Pixels::Seeds(data, tiles) };
     }
     let seeds = inputs[0].expect("the seeds");
-    let s = seeds.seeds();
-    let k = u.p[0] as i64;
-    for y in 0..h as i64 {
-        for x in 0..w as i64 {
-            let centre = [x as f32 + 0.5, y as f32 + 0.5];
-            let mut best: Seed = None;
+    let (s, tiles) = match &seeds.pixels {
+        Pixels::Seeds(s, tiles) => (s, tiles),
+        Pixels::Color(_) => unreachable!("a jump reads seeds"),
+    };
+    let k = u.p[0] as usize;
+    // Only tiles within the jump's reach of a seed can find one; the rest stay without.
+    let near = tiles.grown(k.div_ceil(TILE));
+    // The neighbours k pixels away in the eight directions and here, rows then columns (the shader's order: ties go the same
+    // way), those outside the image left out.
+    for y in 0..h {
+        let rows = [y.checked_sub(k), Some(y), (y + k < h).then_some(y + k)];
+        let cy = y as f32 + 0.5;
+        let tile_row = (y / TILE) * tiles.columns;
+        for x in 0..w {
+            if !near[tile_row + x / TILE] {
+                data.push(NO_SEED);
+                continue;
+            }
+            let columns = [x.checked_sub(k), Some(x), (x + k < w).then_some(x + k)];
+            let cx = x as f32 + 0.5;
+            let mut best = NO_SEED;
             let mut nearest = f32::INFINITY;
-            for n in 0..9 {
-                let (qx, qy) = (x + (n % 3 - 1) * k, y + (n / 3 - 1) * k);
-                if qx < 0 || qy < 0 || qx >= w as i64 || qy >= h as i64 {
-                    continue;
-                }
-                let Some(e) = s[qy as usize * w + qx as usize] else { continue };
-                let v = [e[0] as f32 / 8.0 - centre[0], e[1] as f32 / 8.0 - centre[1]];
-                let d = if square { v[0].abs().max(v[1].abs()) } else { v[0] * v[0] + v[1] * v[1] };
-                if d < nearest {
-                    nearest = d;
-                    best = Some(e);
+            for qy in rows.into_iter().flatten() {
+                let line = &s[qy * w..(qy + 1) * w];
+                for qx in columns.into_iter().flatten() {
+                    // No seed is at infinity: never nearer.
+                    let e = line[qx];
+                    let v = [e[0] - cx, e[1] - cy];
+                    let d = if square { v[0].abs().max(v[1].abs()) } else { v[0] * v[0] + v[1] * v[1] };
+                    if d < nearest {
+                        nearest = d;
+                        best = e;
+                    }
                 }
             }
             data.push(best);
         }
     }
-    Img { size, pixels: Pixels::Seeds(data) }
+    let tiles = Tiles::of(size, &data);
+    Img { size, pixels: Pixels::Seeds(data, tiles) }
 }
 
 /// The spread mask and the outline, from the signed distance to the artwork's edge (`spread.wgsl`, `outline.wgsl`).
@@ -566,17 +685,20 @@ fn distance_pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Im
     let seeds = inputs[0].expect("the seeds").seeds();
     let art = inputs[1].expect("the artwork");
     let square = u.operation == op::OUTLINE && q[1] > 0.0;
+    let art = Read::bilinear(art, u.maps[1], size);
+    let brush = brushes(u);
     let mut data = Vec::with_capacity(w * h);
     for y in 0..h {
         for x in 0..w {
             let at = [x as f32 + 0.5, y as f32 + 0.5];
-            let front = art.sample([at[0] * u.maps[1][0] + u.maps[1][2], at[1] * u.maps[1][1] + u.maps[1][3]]);
+            let front = art.at(x, y);
             let mut d = 1e6f32;
             let mut strength = 1.0f32;
-            if let Some(e) = seeds[y * w + x] {
-                let v = [e[0] as f32 / 8.0 - at[0], e[1] as f32 / 8.0 - at[1]];
+            let e = seeds[y * w + x];
+            if e[0].is_finite() {
+                let v = [e[0] - at[0], e[1] - at[1]];
                 d = if square { v[0].abs().max(v[1].abs()) } else { (v[0] * v[0] + v[1] * v[1]).sqrt() };
-                strength = e[2] as f32 / 65535.0;
+                strength = e[2];
             }
             if front[3] >= 0.5 {
                 d = -d;
@@ -585,7 +707,7 @@ fn distance_pass(u: &Uniform, inputs: [Option<&Img>; 4], size: [usize; 2]) -> Im
                 data.push([(p[0] + 0.5 + d).clamp(0.0, 1.0), 0.0, 0.0, (p[0] + 0.5 - d).clamp(0.0, 1.0) * strength]);
                 continue;
             }
-            let b = brush(u, at);
+            let b = brush(at);
             let opacity = p[3] * b[3];
             // Each band's coverage: the artwork grown by the width less the artwork, the artwork less the artwork shrunk by it.
             let outer = if p[0] > 0.0 { (((p[0] - d) / p[2] + 0.5).clamp(0.0, 1.0) * strength - front[3]).max(0.0) } else { 0.0 };
@@ -628,14 +750,36 @@ fn with_luminance(c: [f32; 3], l: f32) -> [f32; 3] {
     v
 }
 
+/// What a grade works out once for a pass: the exposure's factor, the hue and temperature matrix and the gamma's power.
+struct Grading {
+    exposure: f32,
+    matrix: [[f32; 3]; 3],
+    gamma: f32,
+}
+
+impl Grading {
+    fn of(u: &Uniform) -> Grading {
+        let (k, n) = (u.r[0], u.r[1]);
+        Grading {
+            exposure: u.p[0].exp2(),
+            matrix: [
+                [0.213 + k * 0.787 - n * 0.213, 0.715 - k * 0.715 - n * 0.715, 0.072 - k * 0.072 + n * 0.928],
+                [0.213 - k * 0.213 + n * 0.143, 0.715 + k * 0.285 + n * 0.14, 0.072 - k * 0.072 - n * 0.283],
+                [0.213 - k * 0.213 - n * 0.787, 0.715 - k * 0.715 + n * 0.715, 0.072 + k * 0.928 + n * 0.072],
+            ],
+            gamma: 1.0 / u.q[3],
+        }
+    }
+}
+
 /// Tint, grade, vignette and light sweep (`color.wgsl`), before the strength.
-fn colour_op(u: &Uniform, c: C, at: [f32; 2]) -> C {
+fn colour_op(u: &Uniform, c: C, at: [f32; 2], brush: &impl Fn([f32; 2]) -> C, grading: &Grading) -> C {
     let (p, q) = (u.p, u.q);
     let mut rgb = straight(c);
     let g = [u.origin[0] + at[0], u.origin[1] + at[1]];
     match u.operation {
         op::TINT => {
-            let b = brush(u, at);
+            let b = brush(at);
             let k = p[0] * b[3];
             let bc = [b[0], b[1], b[2]];
             let blended = match p[1] as i32 {
@@ -649,21 +793,18 @@ fn colour_op(u: &Uniform, c: C, at: [f32; 2]) -> C {
             [mix(rgb[0], blended[0], k) * c[3], mix(rgb[1], blended[1], k) * c[3], mix(rgb[2], blended[2], k) * c[3], c[3]]
         }
         op::GRADE => {
-            let e = p[0].exp2();
+            let e = grading.exposure;
             rgb = rgb.map(|x| ((x * e) - 0.5) * p[1] + 0.5);
             let l = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
             rgb = rgb.map(|x| mix(l, x, p[2]));
-            let (k, n) = (u.r[0], u.r[1]);
             let dot = |a: [f32; 3]| rgb[0] * a[0] + rgb[1] * a[1] + rgb[2] * a[2];
-            rgb = [
-                dot([0.213 + k * 0.787 - n * 0.213, 0.715 - k * 0.715 - n * 0.715, 0.072 - k * 0.072 + n * 0.928]),
-                dot([0.213 - k * 0.213 + n * 0.143, 0.715 + k * 0.285 + n * 0.14, 0.072 - k * 0.072 - n * 0.283]),
-                dot([0.213 - k * 0.213 - n * 0.787, 0.715 - k * 0.715 + n * 0.715, 0.072 + k * 0.928 + n * 0.072]),
-            ];
+            rgb = grading.matrix.map(dot);
             rgb = [rgb[0] + p[3] * 0.12, rgb[1] + q[0] * 0.12, rgb[2] - p[3] * 0.12];
             let lc = l.clamp(0.0, 1.0);
-            let lift = q[1] * (1.0 - lc).powf(2.0) * 0.4 + q[2] * lc.powf(2.0) * 0.4;
-            rgb = rgb.map(|x| (x + lift).max(0.0).powf(1.0 / q[3]));
+            let lift = q[1] * ((1.0 - lc) * (1.0 - lc)) * 0.4 + q[2] * (lc * lc) * 0.4;
+            // The gamma's power; a grade usually keeps 1.
+            let gamma = grading.gamma;
+            rgb = rgb.map(|x| if gamma == 1.0 { (x + lift).max(0.0) } else { (x + lift).max(0.0).powf(gamma) });
             [rgb[0].clamp(0.0, 1.0) * c[3], rgb[1].clamp(0.0, 1.0) * c[3], rgb[2].clamp(0.0, 1.0) * c[3], c[3]]
         }
         op::VIGNETTE => {
@@ -671,7 +812,7 @@ fn colour_op(u: &Uniform, c: C, at: [f32; 2]) -> C {
             xy[0] /= q[2];
             let distance = mix(xy[0].abs().max(xy[1].abs()), (xy[0] * xy[0] + xy[1] * xy[1]).sqrt() / std::f32::consts::SQRT_2, q[3]) / p[2];
             let dark = smoothstep(1.0 - p[1], 1.0, distance) * p[0];
-            let b = brush(u, at);
+            let b = brush(at);
             let k = dark * b[3];
             [mix(c[0], b[0] * c[3], k), mix(c[1], b[1] * c[3], k), mix(c[2], b[2] * c[3], k), c[3]]
         }
@@ -680,7 +821,7 @@ fn colour_op(u: &Uniform, c: C, at: [f32; 2]) -> C {
             let position = xy[0] * p[1].cos() + xy[1] * p[1].sin() + 0.5;
             let distance = (position - p[0]).abs() * 2.0 / p[2];
             let light = 1.0 - smoothstep(1.0 - p[3], 1.0, distance);
-            let b = brush(u, at);
+            let b = brush(at);
             let k = b[3] * light * q[0] * c[3];
             [(c[0] + b[0] * k).clamp(0.0, c[3]), (c[1] + b[1] * k).clamp(0.0, c[3]), (c[2] + b[2] * k).clamp(0.0, c[3]), c[3]]
         }
