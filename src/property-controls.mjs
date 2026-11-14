@@ -3,10 +3,55 @@ import {messageError} from './localized-error.mjs';
 import {t as interfaceText} from './localization.mjs';
 /** Delegated numeric/property controls. Model transactions are supplied by the owner. */
 import {dragSlop} from "./pen-input.mjs";
-export const propertyStep = (
-  step = 1,
-  { shiftKey = false, altKey = false } = {},
-) => step * (shiftKey ? 0.1 : 1) * (altKey ? 0.01 : 1);
+import {positionToValue, valueToPosition, positionPercent} from "./ui/value-scale.mjs";
+/** How much one unit of input moves a value: Shift is fine (×0.1), Alt finer (×0.01), Ctrl or ⌘ coarse (×10). */
+export const propertyRate = ({ shiftKey = false, altKey = false, ctrlKey = false, metaKey = false } = {}, coarse = 10) =>
+  (shiftKey ? 0.1 : 1) * (altKey ? 0.01 : 1) * (ctrlKey || metaKey ? coarse : 1);
+export const propertyStep = (step = 1, modifiers = {}) => step * propertyRate(modifiers);
+/** A slider field's own travel: dragging its whole width crosses its range; Ctrl crosses it in a quarter of that. */
+const RANGE_COARSE = 4;
+/** Two taps on one field within this long and this close reset it to its default. */
+const DOUBLE_TAP_MS = 450, DOUBLE_TAP_PX = 8;
+/** The scale a slider field's input declares (data-property-scale, -knee, -exponent, min, max). */
+const rangeOf = (input) => ({
+  scale: input.dataset.propertyScale || "linear",
+  min: Number(input.min),
+  max: Number(input.max),
+  knee: input.dataset.propertyKnee,
+  exponent: input.dataset.propertyExponent,
+  step: Number(input.dataset.propertyStep || input.step) || 0,
+});
+const isRange = (input) => Boolean(input?.closest?.("[data-property-row]")?.hasAttribute("data-range")) && input.min !== "" && input.max !== "";
+/** Snaps `value` to the field's step grid (finer under Shift or Alt), from its minimum. */
+const snap = (value, input, modifiers = {}) => {
+  const step = (Number(input.dataset.propertyStep || input.step) || 0) * (modifiers.shiftKey ? 0.1 : 1) * (modifiers.altKey ? 0.01 : 1);
+  if (!(step > 0)) return value;
+  const min = input.min === "" ? 0 : Number(input.min);
+  return min + Math.round((value - min) / step) * step;
+};
+/**
+ * Draws a value control's state from its value: a slider field's fill (--_p), an angle's dial (--_a) and the
+ * spoken value (aria-valuetext with the unit). Owners call it after they write a value; the controls call it while a
+ * value is dragged, typed or stepped, so nothing else rebuilds during a gesture.
+ */
+export function paintValueControl(input, value = Number(input.dataset.propertyValue ?? input.value)) {
+  const row = input.closest?.("[data-property-row]");
+  if (!row || !Number.isFinite(value)) return;
+  if (isRange(input)) {
+    const fill = positionPercent(valueToPosition(value, rangeOf(input)));
+    if (row.style.getPropertyValue("--_p") !== fill) row.style.setProperty("--_p", fill);
+  }
+  const dial = row.querySelector("[data-property-dial]");
+  if (dial) {
+    const turn = `${Number(value.toFixed(2))}deg`;
+    if (dial.style.getPropertyValue("--_a") !== turn) dial.style.setProperty("--_a", turn);
+  }
+  const unit = input.dataset.propertyUnit;
+  if (unit !== undefined) {
+    const text = formatPropertyValue(value, Number(input.dataset.propertyPrecision || 2)) + (["%", "°", "×"].includes(unit) ? unit : unit ? ` ${unit}` : "");
+    if (input.getAttribute("aria-valuetext") !== text) input.setAttribute("aria-valuetext", text);
+  }
+}
 export const formatPropertyValue = (value, precision = 2) => {
   if (!Number.isFinite(Number(value))) return "";
   return String(
@@ -126,7 +171,7 @@ export class PropertyControls {
     listen(
       "lostpointercapture",
       () => {
-        if (this.gesture?.source === "scrub") this._finish(true);
+        if (["scrub", "dial"].includes(this.gesture?.source)) this._finish(true);
       },
       true,
     );
@@ -231,6 +276,18 @@ export class PropertyControls {
       this.callbacks.preview?.(this._payload(g));
     }
     if (display) g.element.value = formatPropertyValue(value, g.precision);
+    paintValueControl(g.element, value);
+  }
+  /** Sets a field with a default (data-property-default) back to it, as one edit: a double click, or a menu's Reset value. */
+  reset(input) {
+    if (!this.handles(input) || input.dataset.propertyDefault === undefined) return false;
+    const value = Number(input.dataset.propertyDefault);
+    if (!Number.isFinite(value)) return false;
+    const g = this.gesture?.element === input ? this.gesture : this._begin(input, "reset");
+    this._preview(g, value, { round: false });
+    this._finish(true);
+    if (this.doc.activeElement === input) input.select?.();
+    return true;
   }
   _cleanup(g) {
     this.doc.body.classList.remove("styk-property-scrubbing");
@@ -259,7 +316,9 @@ export class PropertyControls {
       this.callbacks.cancel?.(this._payload(g));
       g.element.dataset.propertyValue = String(g.initialValue);
       g.element.value = formatPropertyValue(g.initialValue, g.precision);
+      paintValueControl(g.element, g.initialValue);
     }
+    g.element.closest?.("[data-property-row]")?.removeAttribute("data-scrubbing");
     clearTranslation(g.element,'validation-message');
     g.element.setCustomValidity("");
     g.element.removeAttribute("aria-invalid");
@@ -296,34 +355,87 @@ export class PropertyControls {
     event.preventDefault();
     event.stopImmediatePropagation();
   }
+  /**
+   * A press on a value control. The label scrubs (Properties' fields); a slider field ([data-range]) scrubs from
+   * anywhere on it except its value while that is being typed; an angle's dial turns to the pointer. A press and
+   * release without a drag types the value; a second tap on the same field soon after resets it to its default.
+   */
   _pointerDown(event) {
-    const label = event.target.closest?.("[data-property-scrub]");
-    if (!label || event.button !== 0) return;
-    const input = this._inputFor(label);
+    if (event.button !== 0) return;
+    const target = event.target;
+    const row = target.closest?.("[data-property-row]");
+    if (!row || target.closest("button, select, a, [data-property-ignore]")) {
+      this._lastTap = null;
+      return;
+    }
+    const input = this._inputFor(row);
     if (!input) return;
+    const tap = this._lastTap;
+    this._lastTap = null;
+    if (tap?.row === row && event.timeStamp - tap.time < DOUBLE_TAP_MS && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) < DOUBLE_TAP_PX && input.dataset.propertyDefault !== undefined) {
+      this._consume(event);
+      this.suppressPointerClick = true;
+      this.reset(input);
+      return;
+    }
+    const dial = target.closest("[data-property-dial]");
+    const label = target.closest("[data-property-scrub]");
+    const typing = target === input && this.doc.activeElement === input;
+    if (!dial && !label && !(row.hasAttribute("data-range") && !typing)) return;
     this._consume(event);
     this.suppressPointerClick = true;
     if (this.gesture) this._finish(true);
-    const g = this._begin(input, "scrub");
+    const g = this._begin(input, dial ? "dial" : "scrub");
     g.pointerId = event.pointerId;
     g.lastX = event.clientX;
     g.startX = event.clientX;
+    g.startY = event.clientY;
+    g.row = row;
     // A pen tap on a label focuses its field; only a real drag scrubs.
     g.slop = dragSlop(event, 2);
     g.accumulator = g.value;
     g.moved = false;
+    g.typed = this.doc.activeElement === input;
+    if (isRange(input)) {
+      g.range = rangeOf(input);
+      g.position = valueToPosition(g.value, g.range);
+      g.travel = Math.max(48, row.getBoundingClientRect().width);
+    }
+    if (dial) g.dial = dial;
     this.container.setPointerCapture(event.pointerId);
-    label.focus({ preventScroll: true });
-    this.doc.body.classList.add("styk-property-scrubbing");
+    row.setAttribute("data-scrubbing", "");
+    // The label holds focus while dragging (arrow keys keep stepping it); the value is typed after a tap.
+    (label ?? row.querySelector("[data-property-scrub]") ?? input).focus?.({ preventScroll: true });
+    if (!dial) this.doc.body.classList.add("styk-property-scrubbing");
+    if (dial) this._turn(g, event);
+  }
+  /** An angle from its dial's centre to the pointer, in degrees (screen y down, as the stage's angles), Shift in 15° steps. */
+  _turn(g, event) {
+    const box = g.dial.getBoundingClientRect();
+    let angle = Math.atan2(event.clientY - (box.top + box.height / 2), event.clientX - (box.left + box.width / 2)) * 180 / Math.PI;
+    if (event.shiftKey) angle = Math.round(angle / 15) * 15;
+    g.moved = true;
+    this._preview(g, angle);
   }
   _pointerMove(event) {
     const g = this.gesture;
-    if (!g || g.source !== "scrub" || g.pointerId !== event.pointerId) return;
+    if (!g || !["scrub", "dial"].includes(g.source) || g.pointerId !== event.pointerId) return;
     this._consume(event);
+    if (g.source === "dial") {
+      this._turn(g, event);
+      return;
+    }
     const dx = event.clientX - g.lastX;
     if (!g.moved && Math.abs(event.clientX - g.startX) < g.slop) return;
     g.lastX = event.clientX;
     g.moved = true;
+    if (g.range) {
+      // A slider field moves along its own travel: the unrounded position accumulates, so a slow drag never sticks
+      // and the value never jumps when a modifier is pressed or released.
+      g.position = Math.max(0, Math.min(1, g.position + (dx / g.travel) * propertyRate(event, RANGE_COARSE)));
+      this._preview(g, snap(positionToValue(g.position, g.range), g.element, event));
+      return;
+    }
     g.accumulator = this._limit(
       g,
       g.accumulator + dx * propertyStep(g.step, event),
@@ -333,12 +445,14 @@ export class PropertyControls {
   }
   _pointerUp(event) {
     const g = this.gesture;
-    if (!g || g.source !== "scrub" || g.pointerId !== event.pointerId) return;
+    if (!g || !["scrub", "dial"].includes(g.source) || g.pointerId !== event.pointerId) return;
     this._consume(event);
     const input = g.element,
       moved = g.moved;
     this._finish(true);
     if (!moved) {
+      // A tap types the value; a second tap soon after resets it (above).
+      this._lastTap = { row: g.row, time: event.timeStamp, x: event.clientX, y: event.clientY };
       input.focus({ preventScroll: true });
       input.select();
     }
@@ -354,7 +468,7 @@ export class PropertyControls {
   }
   _focusOut(event) {
     const input = event.target;
-    if (this.gesture?.element === input && this.gesture.source !== "scrub")
+    if (this.gesture?.element === input && !["scrub", "dial"].includes(this.gesture.source))
       this._finish(true);
     if (input?.matches?.("input[data-property-display-precision]"))
       this.win.queueMicrotask(() => showAtRest(input));
@@ -426,7 +540,9 @@ export class PropertyControls {
       ![
         "ArrowUp",
         "ArrowDown",
-        ...(isLabel ? ["ArrowLeft", "ArrowRight"] : []),
+        "PageUp",
+        "PageDown",
+        ...(isLabel ? ["ArrowLeft", "ArrowRight", "Home", "End"] : []),
       ].includes(event.key) ||
       event.ctrlKey ||
       event.metaKey
@@ -435,13 +551,26 @@ export class PropertyControls {
     this._consume(event);
     const g = this._begin(input, "keyboard");
     g.keyStepping = true;
-    const direction = ["ArrowUp", "ArrowRight"].includes(event.key) ? 1 : -1;
+    if (event.key === "Home" || event.key === "End") {
+      const limit = event.key === "Home" ? input.min : input.max;
+      if (limit !== "") this._preview(g, Number(limit));
+      return;
+    }
+    const direction = ["ArrowUp", "ArrowRight", "PageUp"].includes(event.key) ? 1 : -1;
+    if (event.key.startsWith("Page")) {
+      // The coarse step: a tenth of a slider field's travel, or ten steps.
+      if (isRange(input)) {
+        const range = rangeOf(input), position = valueToPosition(g.value, range) + direction * 0.1;
+        this._preview(g, snap(positionToValue(position, range), input));
+      } else this._preview(g, g.value + direction * 10 * g.step);
+      return;
+    }
     this._preview(g, g.value + direction * propertyStep(g.step, event));
   }
   _keyUp(event) {
     if (
       this.gesture?.keyStepping &&
-      ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)
+      ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"].includes(event.key)
     ) {
       this._consume(event);
       this._finish(true);

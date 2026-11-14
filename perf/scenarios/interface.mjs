@@ -62,6 +62,41 @@ export const inspectorDrag = {
   teardown: context => context.request('select', {uid: null}),
 };
 
+/** The first number of the open effect in the VFX panel: what a person grabs to change an effect (runs in the page). */
+const VFX_VALUE = '#vfx-panel .vfx-detail [data-property-row] [data-property-scrub]';
+
+export const vfxScrub = {
+  id: 'interface.vfx-scrub', area: 'interface', title: 'Drag an effect value', kind: 'gesture',
+  description: 'With a figure\'s effect open in the VFX panel, drags its first value sideways for 1.5 s (the value control\'s scrub). '
+    + 'Each move previews the effect\'s new value through the engine and the stage redraws the effect; the panel must not be rebuilt. The release commits one edit.',
+  when: context => context.evaluate(() => (globalThis.styk.editor.getVfxClips().some(clip => clip.target.kind === 'figure') ? undefined : 'the document has no effect on a figure')),
+  async setup(context) {
+    const uid = await context.evaluate(() => globalThis.styk.editor.getVfxClips().find(clip => clip.target.kind === 'figure').target.uid);
+    await context.request('select', {uid});
+    await context.evaluate(uid => {
+      const styk = globalThis.styk, clip = styk.editor.getVfxClips().find(c => c.target.kind === 'figure' && c.target.uid === uid);
+      styk.workspace.show('vfx');
+      styk.vfx.clipView = 'all';
+      styk.editor._selectedVfxClip = clip.id;
+      styk.editor._emit('vfx-selection');
+    }, uid);
+    await context.until(selector => [...document.querySelectorAll(selector)].some(node => node.getBoundingClientRect().width > 0), {argument: VFX_VALUE, what: 'the open effect\'s first value'});
+    const {centre} = await context.rect(VFX_VALUE);
+    return centre;
+  },
+  async run(context, label) {
+    const before = (await context.state()).document.revision;
+    await context.input.stroke(t => ({x: label.x + Math.sin(t * Math.PI * 1.5) * 90, y: label.y}), {durationMs: 1500});
+    await context.settle();
+    if ((await context.state()).document.revision === before) throw new Error('The drag on the effect value did not change the effect.');
+  },
+  reset: context => context.request('undo'),
+  async teardown(context) {
+    await context.evaluate(() => { globalThis.styk.vfx.clipView = 'playhead'; globalThis.styk.workspace.show('properties'); });
+    await context.request('select', {uid: null});
+  },
+};
+
 /** Whether the workspace `mode` is on and its button pressed (runs in the page). */
 const inWorkspace = mode => globalThis.styk.shell.mode === mode && Boolean(document.querySelector(`[data-workspace-mode="${mode}"][aria-pressed="true"]`));
 
@@ -322,4 +357,4 @@ export const palette = {
   },
 };
 
-export default [inspectorDrag, workspace, panelFold, panelClose, focusMode, dockTab, dockResize, windowResize, onionToggle, onionDrag, menu, palette];
+export default [inspectorDrag, vfxScrub, workspace, panelFold, panelClose, focusMode, dockTab, dockResize, windowResize, onionToggle, onionDrag, menu, palette];

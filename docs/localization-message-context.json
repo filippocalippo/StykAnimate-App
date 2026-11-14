@@ -14648,115 +14648,115 @@
   },
   "errors.inspectorKit.aButtonNeedsALabelItsAccessibleName": {
     "locations": [
-      "src/inspector-kit.mjs:247"
+      "src/inspector-kit.mjs:248"
     ],
     "context": "if (!item?.label) throw messageError(new TypeError(''), \"errors.inspectorKit.aButtonNeedsALabelItsAccessibleName\", {});"
   },
   "errors.inspectorKit.anOwnedHostNeedsAKeyItsData": {
     "locations": [
-      "src/inspector-kit.mjs:560"
+      "src/inspector-kit.mjs:599"
     ],
     "context": "if (!row.key || !DATA_NAME.test(row.key)) throw messageError(new TypeError(''), \"errors.inspectorKit.anOwnedHostNeedsAKeyItsData\", {});"
   },
   "errors.inspectorKit.attributeIsNotAllowedInInspectorDescriptors": {
     "locations": [
-      "src/inspector-kit.mjs:132"
+      "src/inspector-kit.mjs:133"
     ],
     "context": "if (!ATTRIBUTE_NAME.test(name)) throw messageError(new TypeError(''), \"errors.inspectorKit.attributeIsNotAllowedInInspectorDescriptors\", {name: name});"
   },
   "errors.inspectorKit.bareSectionHasNoTitleActionsOrPlace": {
     "locations": [
-      "src/inspector-kit.mjs:745"
+      "src/inspector-kit.mjs:794"
     ],
     "context": "if (section.title || section.actions?.length || section.switch || (section.place ?? 'core') !== 'core') throw messageError(new TypeError(''), \"errors.inspectorK"
   },
   "errors.inspectorKit.coreSectionCannotCarryATitleSwitchMake": {
     "locations": [
-      "src/inspector-kit.mjs:755"
+      "src/inspector-kit.mjs:804"
     ],
     "context": "if (section.switch) throw messageError(new TypeError(''), \"errors.inspectorKit.coreSectionCannotCarryATitleSwitchMake\", {id: section.id});"
   },
   "errors.inspectorKit.duplicateSectionId": {
     "locations": [
-      "src/inspector-kit.mjs:815"
+      "src/inspector-kit.mjs:864"
     ],
     "context": "if (seen.has(section.id)) throw messageError(new TypeError(''), \"errors.inspectorKit.duplicateSectionId\", {id: section.id});"
   },
   "errors.inspectorKit.invalidControlId": {
     "locations": [
-      "src/inspector-kit.mjs:139"
+      "src/inspector-kit.mjs:140"
     ],
     "context": "if (!ID.test(String(value))) throw messageError(new TypeError(''), \"errors.inspectorKit.invalidControlId\", {value: value});"
   },
   "errors.inspectorKit.invalidDataAttribute": {
     "locations": [
-      "src/inspector-kit.mjs:128"
+      "src/inspector-kit.mjs:129"
     ],
     "context": "if (!DATA_NAME.test(name)) throw messageError(new TypeError(''), \"errors.inspectorKit.invalidDataAttribute\", {name: name});"
   },
   "errors.inspectorKit.invalidInspectorKind": {
     "locations": [
-      "src/inspector-kit.mjs:829"
+      "src/inspector-kit.mjs:878"
     ],
     "context": "if (!SECTION_ID.test(kind)) throw messageError(new TypeError(''), \"errors.inspectorKit.invalidInspectorKind\", {kind: kind});"
   },
   "errors.inspectorKit.invalidQuickActionsContext": {
     "locations": [
-      "src/inspector-kit.mjs:795"
+      "src/inspector-kit.mjs:844"
     ],
     "context": "if (!SECTION_ID.test(quick.context)) throw messageError(new TypeError(''), \"errors.inspectorKit.invalidQuickActionsContext\", {context: quick.context});"
   },
   "errors.inspectorKit.invalidSectionId": {
     "locations": [
-      "src/inspector-kit.mjs:743"
+      "src/inspector-kit.mjs:792"
     ],
     "context": "if (!SECTION_ID.test(String(section.id))) throw messageError(new TypeError(''), \"errors.inspectorKit.invalidSectionId\", {id: section.id});"
   },
   "errors.inspectorKit.numberFieldNeedsAPropertyKey": {
     "locations": [
-      "src/inspector-kit.mjs:276"
+      "src/inspector-kit.mjs:277"
     ],
     "context": "if (!key) throw messageError(new TypeError(''), \"errors.inspectorKit.numberFieldNeedsAPropertyKey\", {value: label ?? ''});"
   },
   "errors.inspectorKit.sectionHasAnUnknownPlace": {
     "locations": [
-      "src/inspector-kit.mjs:750"
+      "src/inspector-kit.mjs:799"
     ],
     "context": "if (!SECTION_PLACES.includes(place)) throw messageError(new TypeError(''), \"errors.inspectorKit.sectionHasAnUnknownPlace\", {id: section.id, place: place});"
   },
   "errors.inspectorKit.sectionHasTitleActionsAtMost": {
     "locations": [
-      "src/inspector-kit.mjs:729"
+      "src/inspector-kit.mjs:778"
     ],
     "context": "if (count > MAX_TITLE_ACTIONS) throw messageError(new TypeError(''), \"errors.inspectorKit.sectionHasTitleActionsAtMost\", {id: section.id, count: count, MAX_TITL"
   },
   "errors.inspectorKit.segmentedInRadioModeNeedsANameOr": {
     "locations": [
-      "src/inspector-kit.mjs:497"
+      "src/inspector-kit.mjs:534"
     ],
     "context": "if (mode === 'radio' && !row.name) throw messageError(new TypeError(''), \"errors.inspectorKit.segmentedInRadioModeNeedsANameOr\", {value: row.label ?? ''});"
   },
   "errors.inspectorKit.segmentedNeeds24OptionsUseASelect": {
     "locations": [
-      "src/inspector-kit.mjs:496"
+      "src/inspector-kit.mjs:533"
     ],
     "context": "if (options.length < 2 || options.length > 4) throw messageError(new TypeError(''), \"errors.inspectorKit.segmentedNeeds24OptionsUseASelect\", {value: row.label ?"
   },
   "errors.inspectorKit.theInspectorKitNeedsARootElement": {
     "locations": [
-      "src/inspector-kit.mjs:968"
+      "src/inspector-kit.mjs:1017"
     ],
     "context": "if (!root?.addEventListener) throw messageError(new TypeError(''), \"errors.inspectorKit.theInspectorKitNeedsARootElement\", {});"
   },
   "errors.inspectorKit.titledSectionNeedsATitleThatSaysWhat": {
     "locations": [
-      "src/inspector-kit.mjs:759"
+      "src/inspector-kit.mjs:808"
     ],
     "context": "if (!section.title) throw messageError(new TypeError(''), \"errors.inspectorKit.titledSectionNeedsATitleThatSaysWhat\", {id: section.id});"
   },
   "errors.inspectorKit.unknownInspectorRowKind": {
     "locations": [
-      "src/inspector-kit.mjs:643"
+      "src/inspector-kit.mjs:692"
     ],
     "context": "if (!render) throw messageError(new TypeError(''), \"errors.inspectorKit.unknownInspectorRowKind\", {value: row?.kind});"
   },
@@ -15995,19 +15995,19 @@
   },
   "errors.propertyControls.propertyBeginMustReturnASynchronousTransactionToken": {
     "locations": [
-      "src/property-controls.mjs:203"
+      "src/property-controls.mjs:248"
     ],
     "context": "throw messageError(new Error(''), \"errors.propertyControls.propertyBeginMustReturnASynchronousTransactionToken\", {});"
   },
   "errors.propertyControls.propertyControlsNeedAContainer": {
     "locations": [
-      "src/property-controls.mjs:93"
+      "src/property-controls.mjs:138"
     ],
     "context": "throw messageError(new TypeError(''), \"errors.propertyControls.propertyControlsNeedAContainer\", {});"
   },
   "errors.propertyControls.thisPropertyHasNoFiniteNumericValue": {
     "locations": [
-      "src/property-controls.mjs:169"
+      "src/property-controls.mjs:214"
     ],
     "context": "throw messageError(new Error(''), \"errors.propertyControls.thisPropertyHasNoFiniteNumericValue\", {});"
   },
@@ -21476,68 +21476,68 @@
   },
   "inspector.actions": {
     "locations": [
-      "src/inspector-kit.mjs:797"
+      "src/inspector-kit.mjs:846"
     ],
     "context": "class: 'ui-quick', role: 'toolbar', 'aria-label': quick.label ?? say(env, 'inspector.actions'), 'data-quick-context': quick.context,"
   },
   "inspector.decrease": {
     "locations": [
-      "src/inspector-kit.mjs:324"
+      "src/inspector-kit.mjs:358"
     ],
     "context": "const fallback = {label: say(env, direction < 0 ? 'inspector.decrease' : 'inspector.increase', {name}), labelKey: direction < 0 ? 'inspector.decrease' : 'inspec"
   },
   "inspector.increase": {
     "locations": [
-      "src/inspector-kit.mjs:324"
+      "src/inspector-kit.mjs:358"
     ],
     "context": "const fallback = {label: say(env, direction < 0 ? 'inspector.decrease' : 'inspector.increase', {name}), labelKey: direction < 0 ? 'inspector.decrease' : 'inspec"
   },
   "inspector.mixed": {
     "locations": [
-      "src/inspector-kit.mjs:288",
-      "src/inspector-kit.mjs:445"
+      "src/inspector-kit.mjs:297",
+      "src/inspector-kit.mjs:479"
     ],
     "context": "placeholder: mixed ? say(env, 'inspector.mixed') : undefined, 'data-mixed': mixed ? String(value) : undefined, ...extras(row),"
   },
   "inspector.scrubHint": {
     "locations": [
-      "src/inspector-kit.mjs:99",
-      "src/inspector-kit.mjs:1037"
+      "src/inspector-kit.mjs:100",
+      "src/inspector-kit.mjs:1086"
     ],
     "context": "export const SCRUB_HINT = TEXT['inspector.scrubHint'];"
   },
   "inspector.scrubLabel": {
     "locations": [
-      "src/inspector-kit.mjs:292",
-      "src/inspector-kit.mjs:293"
+      "src/inspector-kit.mjs:302",
+      "src/inspector-kit.mjs:303"
     ],
     "context": "'aria-label': row.scrubLabel ?? say(env, 'inspector.scrubLabel', {name: description}), 'data-tooltip': row.tip ?? say(env, 'inspector.scrubTip'),"
   },
   "inspector.scrubTip": {
     "locations": [
-      "src/inspector-kit.mjs:292",
-      "src/inspector-kit.mjs:293"
+      "src/inspector-kit.mjs:302",
+      "src/inspector-kit.mjs:303"
     ],
     "context": "'aria-label': row.scrubLabel ?? say(env, 'inspector.scrubLabel', {name: description}), 'data-tooltip': row.tip ?? say(env, 'inspector.scrubTip'),"
   },
   "inspector.stop": {
     "locations": [
-      "src/inspector-kit.mjs:783"
+      "src/inspector-kit.mjs:832"
     ],
     "context": "const stop = scope.stop ? renderButton({variant: 'ghost', ...scope.stop, label: scope.stop.label ?? say(env, 'inspector.stop')}, env, {size: 'sm'}) : '';"
   },
   "inspector.unit.degrees": {
     "locations": [
-      "src/inspector-kit.mjs:185",
-      "src/inspector-kit.mjs:193",
+      "src/inspector-kit.mjs:186",
+      "src/inspector-kit.mjs:194",
       "src/inspector-legacy.mjs:32"
     ],
     "context": "return say(env, 'inspector.withUnit', {label, unit: unit === '°' ? say(env, 'inspector.unit.degrees') : unit});"
   },
   "inspector.withUnit": {
     "locations": [
-      "src/inspector-kit.mjs:185",
-      "src/inspector-kit.mjs:193",
+      "src/inspector-kit.mjs:186",
+      "src/inspector-kit.mjs:194",
       "src/inspector-legacy.mjs:32"
     ],
     "context": "return say(env, 'inspector.withUnit', {label, unit: unit === '°' ? say(env, 'inspector.unit.degrees') : unit});"
@@ -25132,13 +25132,13 @@
   },
   "propertyControls.enterAFiniteNumber": {
     "locations": [
-      "src/property-controls.mjs:373"
+      "src/property-controls.mjs:487"
     ],
     "context": "localizedAttribute(input,'validation-message',Number.isFinite(value)?'propertyControls.enterValueBetween':'propertyControls.enterAFiniteNumber',Number.isFinite("
   },
   "propertyControls.enterValueBetween": {
     "locations": [
-      "src/property-controls.mjs:373"
+      "src/property-controls.mjs:487"
     ],
     "context": "localizedAttribute(input,'validation-message',Number.isFinite(value)?'propertyControls.enterValueBetween':'propertyControls.enterAFiniteNumber',Number.isFinite("
   },

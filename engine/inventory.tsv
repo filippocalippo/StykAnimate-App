@@ -571,6 +571,7 @@ src/ui/ui-popover.mjs	ui	-	stays
 src/ui/ui-strings.mjs	ui	-	stays	
 src/ui/ui-toast.mjs	ui	-	stays	
 src/ui/ui-tooltip.mjs	ui	-	stays	
+src/ui/value-scale.mjs	ui	-	stays	Where a value field's value sits along its travel (linear, log, pow): the fill, the scrub and the coarse keys
 src/update-ui.mjs	app	-	stays	support, updates
 src/user-action-error.mjs	ui	-	stays	
 src/user-library.mjs	ui	-	stays	
