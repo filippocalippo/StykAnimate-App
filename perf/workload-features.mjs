@@ -102,6 +102,35 @@ function effects(document) {
   document._styk.vfxClips = {version: 1, clips};
 }
 
+// --- Generated effects ----------------------------------------------------------------------------------------------
+
+/**
+ * `particles`: generated effects of every type running over the busy scene, as effect clips: an aura on six figures for
+ * the whole animation, two energy beams, two smoke columns, an explosion on another figure every second (24 ticks), and a
+ * scene particle emitter of about 2,000 live particles (50 a frame for 40 frames). Parameters not written take their
+ * defaults when the document opens; those written exist under the same names in every version of the app.
+ */
+function particles(document, spec) {
+  const objects = document.keyframes[0].objects, ticks = (spec.keyframes - 1) * spec.hold + 1;
+  const clip = (number, target, start, duration, type, params) => ({id: uuid(2 * number + 1), name: '', target, start, duration, offset: 0, enabled: true, strength: 1, fadeIn: 0, fadeOut: 0, includeAttached: false,
+    effects: [{version: 2, id: uuid(2 * number + 2), type, enabled: true, params: {effectStrength: 1, seed: 1 + number * 7919 % 65535, ...params}}], keys: {}});
+  const figure = slot => ({kind: 'figure', uid: objects[slot % objects.length].unique_id});
+  const clips = [];
+  // Auras on six figures spread over the grid, styles in turn.
+  for (let index = 0; index < 6; index++) clips.push(clip(clips.length, figure(index * 13 + 2), 0, null, 'aura', {style: index % 4, color: [0xffc93c, 0x6fd8ff, 0x8a4dff, 0xffe7a0][index % 4]}));
+  // Two beams firing across the stage, from two figures, for most of the animation.
+  clips.push(clip(clips.length, figure(20), 4, ticks - 8, 'beam', {style: 0, color: 0x4fd2ff, aimX: .85, aimY: .3}));
+  clips.push(clip(clips.length, figure(45), 10, ticks - 16, 'beam', {style: 0, color: 0xff3148, aimX: .15, aimY: .7}));
+  // Two smoke columns.
+  clips.push(clip(clips.length, figure(33), 0, null, 'smoke', {style: 0, amount: 3}));
+  clips.push(clip(clips.length, figure(58), 0, null, 'smoke', {style: 0, amount: 2, wind: 1}));
+  // An explosion every second, on figures across the scene.
+  for (let start = 0, index = 0; start < ticks; start += 24, index++) clips.push(clip(clips.length, figure(index * 11 + 7), start, 20, 'explosion', {style: 0}));
+  // A scene emitter of about 2,000 live particles.
+  clips.push(clip(clips.length, {kind: 'scene'}, 0, null, 'particles', {emission: 0, rate: 50, life: 40, variation: 0, look: 1, color: 0xffe08a, size: 3, speed: 4, direction: 90, spread: 30, x: .5, y: .1, shape: 3, radius: 1600}));
+  document._styk.vfxClips = {version: 1, clips};
+}
+
 // --- Movieclips -----------------------------------------------------------------------------------------------------
 
 /** A figure type that is a movieclip of `clip`, turning about the clip's middle. */
@@ -221,6 +250,7 @@ export const FEATURES = Object.freeze({
   sprites: {version: 1, apply: sprites,
     measure: spec => ({pictures: spec.pictures, picturePixels: spec.pictures * spec.pictureSize ** 2, picturesPerFrame: spec.figures * 2 * Math.ceil(spec.segments / spec.chain)})},
   effects: {version: 1, apply: effects, measure: spec => ({effects: spec.figures, effectTypes: EFFECTS.map(([type]) => type)})},
+  particles: {version: 1, apply: particles, measure: spec => ({auras: 6, beams: 2, smoke: 2, explosions: Math.ceil(((spec.keyframes - 1) * spec.hold + 1) / 24), sceneParticles: 2000})},
   movieclips: {version: 1, apply: movieclips, measure: () => ({clips: 2, clipInstances: 8, clipDepth: 2})},
   camera: {version: 1, apply: camera, measure: spec => ({scene: spec.canvas, canvas: spec.shot, cameraKeys: spec.keyframes})},
   text: {version: 1, apply: text, measure: spec => ({labels: spec.figures, glyphsPerFrame: spec.figures * 7})},

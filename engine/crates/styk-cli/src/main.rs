@@ -18,6 +18,8 @@
 //!   styk prims <file> [tick…]            what a frame's draw list is made of, and how much lies outside the artboard
 //!   styk raster-parity <file>…            styk-raster against styk-render on the same draw lists,
 //!                                         by the app-parity rule D13 (see raster_parity.rs)
+//!   styk vfx-review <type> [options]      contact sheets and frame sequences of a generated effect on a
+//!                                         stick figure (see review.rs)
 
 use std::path::Path;
 use std::time::Instant;
@@ -36,6 +38,7 @@ mod load;
 mod prims;
 mod stepbench;
 mod raster_parity;
+mod review;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -70,6 +73,7 @@ fn main() {
         Some("raster-parity") if args.len() >= 2 => raster_parity::run(&args[1..]),
         Some("prims") if args.len() >= 2 => prims::run(&args[1..]),
         Some("stepbench") if args.len() >= 3 => stepbench::run(&args[1..]),
+        Some("vfx-review") if args.len() >= 2 => review::run(&args[1..]),
         _ => {
             eprintln!("usage: styk info <file> | compare <file> <reference.json> [--verbose] | bench <file> [--frames N] | render <file> <tick> <out.png> [--size WxH] [--zoom Z] [--center X,Y] [--no-clip] [--neutral] [--after T] | gpubench <file> <tick> [--no-effects] | layers <file> <tick> [--all] | edit-replay [--worker [--max-source-bytes N]] <reference.json>... | edit-replay --live-worker <session.json> <returns.json>... | export <file> <ticks> <out> [..]");
             2
