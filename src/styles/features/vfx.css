@@ -305,7 +305,8 @@
   .vfx-picker-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1); }
   @container vfx-picker (width < 270px) { .vfx-picker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .vfx-picker-tile {
-    display: grid; gap: var(--space-1); min-inline-size: 0; padding: var(--space-1); border: 0; border-radius: var(--radius-md);
+    /* The whole cell, so a tile still waiting for its picture has the same frame as the drawn ones. */
+    display: grid; gap: var(--space-1); inline-size: 100%; min-inline-size: 0; padding: var(--space-1); border: 0; border-radius: var(--radius-md);
     background: transparent; color: var(--text-1); text-align: center; cursor: default;
   }
   .vfx-picker-still {
