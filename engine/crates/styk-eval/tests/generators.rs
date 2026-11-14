@@ -588,7 +588,7 @@ fn pixel_particles_sit_on_their_grid() {
         for tick in [1.0, 5.0, 11.0] {
             let batch = batch_at(&prepared, tick).unwrap();
             for (d, _, p) in live(&batch) {
-                let cell = batch.spec(&batch.draws[d]).grid;
+                let cell = batch.spec(&batch.draws[d]).pixel.expect("pixel art").cell;
                 assert!(cell >= 2.0, "a grid");
                 let (cells, corner) = (2.0 * p.size / cell, ((p.x - p.size) / cell, (p.y - p.size) / cell));
                 let whole = |v: f64| (v - v.round()).abs() < 1e-6;
@@ -641,8 +641,8 @@ fn every_particles_look_draws_within_the_limits_at_its_extremes() {
     assert_eq!(drawn_anywhere, ParticleLook::ALL.len() * 6);
 }
 
-/// The Pixel look snaps to a grid of its own size and steps through its colours: every particle sits on the
-/// grid, its size in half steps of it.
+/// The Pixel look is pixel art on a grid of its own size at birth (the same pixel art as the Pixel explosion's, whose
+/// grid is fixed): every particle a whole number of cells wide, its edges on the grid's lines.
 #[test]
 fn pixel_particles_sit_on_a_grid_of_their_size() {
     let clip = Clip::new(Some(1), "particles").set("look", "17").set("size", "3").set("rate", "4").set("speed", "4").set("gravity", "0.25").set("endSize", "0.34");
@@ -651,8 +651,8 @@ fn pixel_particles_sit_on_a_grid_of_their_size() {
     assert!(particles.len() > 20, "{} pixels", particles.len());
     let on = |v: f64, step: f64| ((v / step) - (v / step).round()).abs() < 1e-6;
     for (_, _, p) in &particles {
-        assert!(on(p.x, 3.0) && on(p.y, 3.0), "({}, {}) is off the grid of 3", p.x, p.y);
-        assert!(on(p.size, 1.5) && p.size >= 1.5, "size {} is not in half steps of the grid", p.size);
+        assert!(on(p.x - p.size, 3.0) && on(p.y - p.size, 3.0), "({}, {}) of half-size {} has its edges off the grid of 3", p.x, p.y, p.size);
+        assert!(on(p.size, 1.5) && p.size >= 1.5, "size {} is not a whole number of cells", p.size);
     }
     let sizes: std::collections::HashSet<i64> = particles.iter().map(|(_, _, p)| (p.size * 10.0).round() as i64).collect();
     assert!(sizes.len() >= 2, "they shrink in steps: {sizes:?}");

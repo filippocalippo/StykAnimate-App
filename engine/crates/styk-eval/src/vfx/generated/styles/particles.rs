@@ -485,6 +485,8 @@ fn cartoon_star(i: &In<'_>) -> Vec<Spec> {
 fn pixel(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
     let ramp = i.ramp(stops(&[(tone(col, 0.6, WHITE), 1.0), (tone(col, 0.25, WHITE), 1.0), (col, 1.0), (deep(col, 0.3), 1.0), (deep(col, 0.6), 1.0)]));
-    let s = Spec { shape: SQUARE, rotate: ROTATE_FIXED, snap: 1.0, blend: i.blend(NORMAL), size_jitter: 0.0, ..i.base.clone() };
+    // A grid of each pixel's own size at birth; five colours, as many as its ramp's stops; opacity in thirds; a pixel
+    // stays at least one cell while it lives.
+    let s = Spec { shape: SQUARE, rotate: ROTATE_FIXED, pixel: Some(Pixel { cell: 1.0, by_size: true, colors: 5, alpha_steps: 3, keep_one: true }), blend: i.blend(NORMAL), size_jitter: 0.0, ..i.base.clone() };
     vec![layer(i.sized(s, 1.0, Curve::three(1.0, 0.5, mix(1.0, i.end(), 0.5), i.end())), ramp)]
 }

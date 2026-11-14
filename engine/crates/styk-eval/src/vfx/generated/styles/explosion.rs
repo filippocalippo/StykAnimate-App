@@ -716,7 +716,7 @@ fn blast_dust(b: &Blast<'_>) -> Vec<Option<Spec>> {
 fn blast_pixel(b: &Blast<'_>) -> Vec<Option<Spec>> {
     let Blast { p, col, s, d, s0, ref base, .. } = *b;
     let cell = (4.0 * s).max(2.0);
-    let block = Spec { blend: NORMAL, shape: SQUARE, softness: 0.0, stretch: 0.0, rotate: ROTATE_FIXED, fade_in: 0.0, fade_out: 0.0, size_jitter: 0.0, grid: cell, ..base.clone() };
+    let block = Spec { blend: NORMAL, shape: SQUARE, softness: 0.0, stretch: 0.0, rotate: ROTATE_FIXED, fade_in: 0.0, fade_out: 0.0, size_jitter: 0.0, pixel: Some(Pixel { cell, by_size: false, colors: COLOR_STOPS as u32, alpha_steps: 0, keep_one: false }), ..base.clone() };
     let yellow = tone(col, 0.35, [1.0, 0.86, 0.15]);
     let red = tone(col, 0.5, [0.6, 0.08, 0.06]);
     let flash = [1.0, 0.96, 0.62];

@@ -565,24 +565,19 @@ impl<'a> Evaluator<'a> {
         let mut size = size.max(0.0);
         let mut x = if s.color_mode > 0.5 { hash(n, 16, seed) } else { an };
         let (mut px, mut py) = (px, py);
-        // Pixel art: whole cells of the grid, on its lines, in the ramp's own colours.
-        if s.grid > 0.0 {
-            x = (x * (COLOR_STOPS - 1) as f64).round() / (COLOR_STOPS - 1) as f64;
-            (px, py, size) = snap(px, py, size, s.grid);
-        }
-        // Pixel art: on a grid of the particle's own size at birth, in steps of colour and opacity.
-        let grid = s.snap * b.size_key * b.scale * s.size0;
-        if grid > 1e-3 {
-            px = (px / grid).round() * grid;
-            py = (py / grid).round() * grid;
-            size = (size / (grid * 0.5)).round().max(1.0) * grid * 0.5;
-            x = ((x * 5.0).floor() / 4.0).min(1.0);
+        // Pixel art: whole cells of one grid, on its lines, in a stepped palette.
+        let pixel = s.pixel.filter(|p| p.cell > 0.0);
+        if let Some(p) = pixel {
+            let cell = if p.by_size { p.cell * b.size_key * b.scale * s.size0 } else { p.cell };
+            let steps = p.colors.max(2) as f64 - 1.0;
+            x = (x * steps).round() / steps;
+            (px, py, size) = if cell > 1e-3 { snap(px, py, size, cell, p.keep_one) } else { (px, py, 0.0) };
         }
         let (rgb, stop_alpha) = color_at(s, x);
         let rgb = vary(rgb, s.hue_jitter, s.value_jitter, hash(n, 24, seed), hash(n, 25, seed));
         alpha = (alpha * stop_alpha).min(1.0);
-        if grid > 1e-3 {
-            alpha = (alpha * 3.0).ceil() / 3.0;
+        if let Some(steps) = pixel.map(|p| p.alpha_steps as f64).filter(|&k| k > 0.0) {
+            alpha = (alpha * steps).ceil() / steps;
         }
         if alpha <= 0.0 || size <= 0.0 {
             return None;
@@ -656,10 +651,10 @@ pub fn vary(rgb: [f64; 3], hue: f64, value: f64, h1: f64, h2: f64) -> [f64; 3] {
 }
 
 /// A square of half-size `size` at (`x`, `y`) on a grid of `cell`: a whole number of cells wide
-/// (none when it is much smaller than one), its corner on the grid's lines.
-fn snap(x: f64, y: f64, size: f64, cell: f64) -> (f64, f64, f64) {
+/// (none when it is much smaller than one, unless `keep_one`), its corner on the grid's lines.
+fn snap(x: f64, y: f64, size: f64, cell: f64, keep_one: bool) -> (f64, f64, f64) {
     let cells = (2.0 * size / cell).round();
-    let cells = if cells >= 1.0 { cells } else if 2.0 * size > 0.35 * cell { 1.0 } else { 0.0 };
+    let cells = if cells >= 1.0 { cells } else if keep_one || 2.0 * size > 0.35 * cell { 1.0 } else { 0.0 };
     let half = cells * cell * 0.5;
     (((x - half) / cell).round() * cell + half, ((y - half) / cell).round() * cell + half, half)
 }

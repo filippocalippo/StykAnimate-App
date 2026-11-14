@@ -159,6 +159,20 @@ pub struct Halo {
     pub alpha: f64,
 }
 
+/// Pixel art (`Spec::pixel`): every particle is a whole number of cells of one grid wide, its edges on the
+/// grid's lines, its colour stepped through `colors` evenly spaced stops of the ramp, never blended between them,
+/// and its opacity in `alpha_steps` steps (0: smooth). The cell is `cell` (layer units), or with `by_size` that
+/// share of each particle's size at birth. A particle much smaller than a cell is not drawn, or with `keep_one` is
+/// one cell for as long as it lives.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pixel {
+    pub cell: f64,
+    pub by_size: bool,
+    pub colors: u32,
+    pub alpha_steps: u32,
+    pub keep_one: bool,
+}
+
 /// A smaller copy of each particle drawn inside it, from the same evaluation (so it is
 /// always centred in it): `scale` of its size, its colour moved `mix` of the way to
 /// `color`, giving off `emissive` of light (a burst's white-hot middle, a cartoon flame's
@@ -398,17 +412,13 @@ pub struct Spec {
     pub trail: Option<Trail>,
     /// A beam's look (`None`: from its colour stops).
     pub beam_look: Option<BeamLook>,
-    /// Pixel art: particles are whole cells of a grid this many pixels wide, on its lines, in the
-    /// ramp's own colours (0: off).
-    pub grid: f64,
+    /// Pixel art: whole cells of a grid in a stepped palette.
+    pub pixel: Option<Pixel>,
     /// Lightning: forks per arc, and how many ticks each shape holds.
     pub arc_branches: f64,
     pub arc_rhythm: f64,
     /// Lightning about a body (an `ARC` layer emitting from the body): how far each bolt reaches.
     pub arc_reach: f64,
-    /// Pixel art: positions on a grid of `snap` times the particle's size at birth, its size in
-    /// half steps of that grid, its colour and opacity in steps (0: smooth).
-    pub snap: f64,
     /// Each particle is drawn as lightning striking from where it was born to where it is: a
     /// jagged bolt `arc_amp` of its length rough, forked `arc_branches` times, struck again every
     /// `arc_rhythm` ticks, its radius `strike` times the particle's size (0: none).
@@ -508,11 +518,10 @@ impl Default for Spec {
             ease: 0.0,
             trail: None,
             beam_look: None,
-            grid: 0.0,
+            pixel: None,
             arc_branches: 0.0,
             arc_rhythm: 2.0,
             arc_reach: 0.0,
-            snap: 0.0,
             strike: 0.0,
             core: 0.0,
             inner: None,
