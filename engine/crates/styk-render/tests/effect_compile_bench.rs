@@ -1,4 +1,5 @@
-//! How long creating the effect pipelines takes, family by family: what the first frame that draws an effect waits for. On
+//! How long creating the effect pipelines takes, effect by effect (each pipeline is one operation variant: `recipe::Variant`):
+//! what the first frame that draws an effect waits for. On
 //! WebGL2 the browser compiles each pipeline on the interface thread (ANGLE translates it to HLSL and compiles it with FXC on
 //! Windows), so a slow shader is a frozen interface. A measurement, not a check: it prints and asserts nothing about time.
 //!
