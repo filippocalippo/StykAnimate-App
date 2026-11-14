@@ -719,6 +719,33 @@ export const effectMessages = Object.freeze({
       "seed": {
         "labelKey": "vfxCatalog.parameter.particles.seed.label"
       },
+      "gravityAngle": {
+        "labelKey": "vfxCatalog.parameter.particles.gravityAngle.label"
+      },
+      "fadeIn": {
+        "labelKey": "vfxCatalog.parameter.particles.fadeIn.label"
+      },
+      "bounce": {
+        "labelKey": "vfxCatalog.parameter.particles.bounce.label"
+      },
+      "prefill": {
+        "labelKey": "vfxCatalog.parameter.particles.prefill.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.particles.prefill.option.auto",
+          "vfxCatalog.parameter.particles.prefill.option.off",
+          "vfxCatalog.parameter.particles.prefill.option.on"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.particles.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.particles.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.particles.unique.option.off",
+          "vfxCatalog.parameter.particles.unique.option.on"
+        ]
+      },
       "x": {
         "labelKey": "vfxCatalog.parameter.particles.x.label"
       },
@@ -818,6 +845,35 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.aura.seed.label"
+      },
+      "width": {
+        "labelKey": "vfxCatalog.parameter.aura.width.label"
+      },
+      "layer": {
+        "labelKey": "vfxCatalog.parameter.aura.layer.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.aura.layer.option.behindAndInFront",
+          "vfxCatalog.parameter.aura.layer.option.behindTarget",
+          "vfxCatalog.parameter.aura.layer.option.inFrontOfTarget"
+        ]
+      },
+      "prefill": {
+        "labelKey": "vfxCatalog.parameter.aura.prefill.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.aura.prefill.option.auto",
+          "vfxCatalog.parameter.aura.prefill.option.off",
+          "vfxCatalog.parameter.aura.prefill.option.on"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.aura.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.aura.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.aura.unique.option.off",
+          "vfxCatalog.parameter.aura.unique.option.on"
+        ]
       }
     }
   },
@@ -925,6 +981,31 @@ export const effectMessages = Object.freeze({
       "seed": {
         "labelKey": "vfxCatalog.parameter.beam.seed.label"
       },
+      "strands": {
+        "labelKey": "vfxCatalog.parameter.beam.strands.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.beam.strands.option.off",
+          "vfxCatalog.parameter.beam.strands.option.on"
+        ]
+      },
+      "prefill": {
+        "labelKey": "vfxCatalog.parameter.beam.prefill.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.beam.prefill.option.auto",
+          "vfxCatalog.parameter.beam.prefill.option.off",
+          "vfxCatalog.parameter.beam.prefill.option.on"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.beam.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.beam.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.beam.unique.option.off",
+          "vfxCatalog.parameter.beam.unique.option.on"
+        ]
+      },
       "x": {
         "labelKey": "vfxCatalog.parameter.beam.x.label"
       },
@@ -1017,6 +1098,30 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.smoke.seed.label"
+      },
+      "opacity": {
+        "labelKey": "vfxCatalog.parameter.smoke.opacity.label"
+      },
+      "direction": {
+        "labelKey": "vfxCatalog.parameter.smoke.direction.label"
+      },
+      "prefill": {
+        "labelKey": "vfxCatalog.parameter.smoke.prefill.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.smoke.prefill.option.auto",
+          "vfxCatalog.parameter.smoke.prefill.option.off",
+          "vfxCatalog.parameter.smoke.prefill.option.on"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.smoke.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.smoke.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.smoke.unique.option.off",
+          "vfxCatalog.parameter.smoke.unique.option.on"
+        ]
       },
       "x": {
         "labelKey": "vfxCatalog.parameter.smoke.x.label"
@@ -1122,6 +1227,24 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.explosion.seed.label"
+      },
+      "layer": {
+        "labelKey": "vfxCatalog.parameter.explosion.layer.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.explosion.layer.option.behindAndInFront",
+          "vfxCatalog.parameter.explosion.layer.option.behindTarget",
+          "vfxCatalog.parameter.explosion.layer.option.inFrontOfTarget"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.explosion.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.explosion.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.explosion.unique.option.off",
+          "vfxCatalog.parameter.explosion.unique.option.on"
+        ]
       },
       "x": {
         "labelKey": "vfxCatalog.parameter.explosion.x.label"

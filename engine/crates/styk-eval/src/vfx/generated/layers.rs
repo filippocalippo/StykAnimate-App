@@ -1,22 +1,25 @@
-//! The vocabulary of generated-effect layers:
-//! the sub-emitters that effect styles compile into ([`super::styles`]) and the
-//! batch packs into records ([`super::batch`]). Sizes and speeds are stage
-//! pixels and pixels per frame; lives are frames.
+//! The vocabulary of generated-effect layers: what effect styles compile into
+//! ([`super::styles`]) and the batch packs ([`super::batch`]). A layer is one
+//! emitter: when and how many particles are born, where, how they move, and how
+//! each is drawn over its life. Sizes and speeds are stage pixels and pixels per
+//! frame (of the effect's own time); lives are frames.
 
 use super::super::paint;
 use super::super::Color;
 
-/// Particle shapes (`SHAPE`).
+/// Particle shapes (`Spec::shape`).
 pub const DISC: u8 = 0;
 pub const STREAK: u8 = 1;
 pub const RING: u8 = 2;
 pub const CHUNK: u8 = 3;
+/// A beam layer: one beam from the target to the aim.
 pub const BEAM: u8 = 4;
+/// Lightning arcs along a beam.
 pub const ARC: u8 = 5;
 pub const SPRITE: u8 = 6;
 pub const SQUARE: u8 = 7;
 
-/// Emitters (`EMIT`).
+/// Emitters (`Spec::emit_shape`).
 pub const POINT: u8 = 0;
 pub const BODY: u8 = 1;
 pub const BEAM_LINE: u8 = 2;
@@ -26,28 +29,28 @@ pub const GROUND: u8 = 5;
 pub const LINE: u8 = 6;
 pub const STAGE: u8 = 7;
 
-/// Blending (`BLEND`): `AUTO` adds light on dark scenes and paints solid on light ones.
+/// Blending (`Spec::blend`): `AUTO` is the style's own mix of paint and light.
 pub const NORMAL: u8 = 0;
 pub const ADD: u8 = 1;
 pub const AUTO: u8 = 2;
 
-/// Sprite orientation (`ROTATE`): random with spin, along the motion, upright with a slight tilt, fixed.
+/// Sprite orientation (`Spec::rotate`): random with spin, along the motion, upright with a slight tilt, fixed.
 pub const ROTATE_RANDOM: u8 = 0;
 pub const ROTATE_MOTION: u8 = 1;
 pub const ROTATE_UPRIGHT: u8 = 2;
 pub const ROTATE_FIXED: u8 = 3;
 
-/// Size over life (`GROW`): eased curve, fast puff, pop in and shrink away, flicker.
+/// Size over life (`Spec::size_mode`): eased curve, fast puff, pop in and shrink away, flicker.
 pub const GROW_CURVE: u8 = 0;
 pub const GROW_PUFF: u8 = 1;
 pub const GROW_POP: u8 = 2;
 pub const GROW_FLICKER: u8 = 3;
 
 pub const COLOR_STOPS: usize = 8;
-/// "Forever" for untimed clips (`FAR`).
+/// "Forever" for untimed clips.
 pub const FAR: f64 = 1e7;
 
-/// Cells of the material atlas a material's particles choose from (`MATERIALS`).
+/// Cells of the material atlas a material's particles choose from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Material {
     pub row: u32,
@@ -55,11 +58,10 @@ pub struct Material {
     pub count: u32,
 }
 
-/// Material rows of the procedural atlas, in atlas order (`ROW_LIST`).
+/// Material rows of the procedural atlas, in atlas order.
 pub const ROWS: [&str; 17] = ["smoke", "cloud", "flame", "toonFlame", "star", "bokeh", "wisp", "bolt", "shard", "rock", "leaf", "petal", "flake", "drop", "splat", "burst", "cute"];
 
-/// `MATERIALS[name]`: every row but `cute` is one material of eight variants;
-/// `cute` holds hearts (four) and cartoon stars (four).
+/// Every row but `cute` is one material of eight variants; `cute` holds hearts (four) and cartoon stars (four).
 pub fn material(name: &str) -> Material {
     match name {
         "heart" => Material { row: 16, col: 0, count: 4 },
@@ -68,13 +70,13 @@ pub fn material(name: &str) -> Material {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Placement {
     Front,
     Behind,
 }
 
-/// Trailing copies of the same particles a few frames earlier.
+/// A trail behind each particle: where it was over the last `length` frames.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Echoes {
     pub count: u32,
@@ -83,22 +85,22 @@ pub struct Echoes {
     pub size: f64,
 }
 
-/// A larger soft disc under each particle.
+/// A larger soft disc of light under each particle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Halo {
     pub scale: f64,
     pub alpha: f64,
 }
 
-/// The particle drawn wider in a flat colour before its fill.
+/// An ink line around each particle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Outline {
     pub width: f64,
     pub color: [f64; 3],
 }
 
-/// The parameter a layer's emission follows when keyed (`rateParam`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The parameter a layer's emission follows when keyed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RateParam {
     Density,
     Amount,
@@ -115,24 +117,31 @@ impl RateParam {
     }
 }
 
-/// One layer specification (`layer()` over `LAYER`): every field with the
-/// editor's default. A material makes it a textured sprite.
+/// One layer specification. Every field has a default ([`Spec::default`]); a
+/// material makes the layer a textured sprite.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spec {
     pub placement: Placement,
+    /// When the layer starts emitting, in the effect's time.
     pub start: f64,
+    /// How long it emits; 0 is a burst of `count` at `start`.
     pub emit_dur: f64,
     pub count: f64,
+    /// Particles a frame.
     pub rate: f64,
     pub life_min: f64,
     pub life_max: f64,
     pub speed_min: f64,
     pub speed_max: f64,
+    /// Launch direction (radians, 0 = right, y down) and the spread around it.
     pub angle: f64,
     pub spread: f64,
+    /// Constant acceleration, down and right (pixels a frame²).
     pub gravity: f64,
     pub wind: f64,
+    /// Drag: velocity falls as `e^(-drag·age)`.
     pub drag: f64,
+    /// Bends the launch away from (+) or toward (−) the emitter's centre.
     pub radial: f64,
     pub turb: f64,
     pub turb_scale: f64,
@@ -147,16 +156,25 @@ pub struct Spec {
     pub fade_in: f64,
     pub fade_out: f64,
     pub alpha: f64,
+    /// 0: colour over life; 1: a random place on the ramp per particle.
     pub color_mode: f64,
     pub emit_shape: u8,
     pub emit_radius: f64,
+    /// Share of the emitter's velocity a particle starts with.
     pub inherit: f64,
     pub burst_jitter: f64,
     pub size_jitter: f64,
+    /// The exponent of [`GROW_CURVE`].
     pub size_curve: f64,
+    /// Lands on the ground (1) or passes through it (0).
     pub collide: f64,
+    /// On landing: the share of the fall speed it bounces back with, and how fast its slide
+    /// stops (per frame: its speed falls as `e^(-friction·t)`).
+    pub bounce: f64,
+    pub friction: f64,
     pub clip_fade_in: f64,
     pub clip_fade_out: f64,
+    /// Starts already running: as if it had emitted for a lifetime before its start.
     pub prewarm: f64,
     pub beam_w: f64,
     pub wobble: f64,
@@ -171,7 +189,7 @@ pub struct Spec {
     pub colors: Option<[[f64; 4]; COLOR_STOPS]>,
     /// Stop opacities (`None`: opaque).
     pub opacity: Option<[f64; COLOR_STOPS]>,
-    /// Particles keep the anchor their target had when they were born.
+    /// Particles keep the place their target had when they were born.
     pub world: bool,
     /// Explosions burst from a fixed point.
     pub fixed: Option<[f64; 2]>,
@@ -194,8 +212,11 @@ pub struct Spec {
     /// Streams leave toward the beam's aim (fire breath).
     pub aimed: bool,
     pub rate_param: Option<RateParam>,
-    /// Direction, speed and size are read at each particle's birth tick (Particles).
+    /// Direction, speed and size are read at each particle's birth (Particles).
     pub keyed: bool,
+    /// Sizes, speeds, distances and forces are in units of the target's size, read at each
+    /// particle's birth (auras): multiplied by the birth's body scale.
+    pub body_scaled: bool,
 }
 
 impl Default for Spec {
@@ -237,6 +258,8 @@ impl Default for Spec {
             size_jitter: 0.3,
             size_curve: 1.0,
             collide: 0.0,
+            bounce: 0.0,
+            friction: 0.15,
             clip_fade_in: 0.0,
             clip_fade_out: 0.0,
             prewarm: 0.0,
@@ -271,7 +294,20 @@ impl Default for Spec {
             aimed: false,
             rate_param: None,
             keyed: false,
+            body_scaled: false,
         }
+    }
+}
+
+impl Spec {
+    /// A beam or its arcs, rather than particles.
+    pub fn is_beam(&self) -> bool {
+        self.shape == BEAM || self.shape == ARC
+    }
+
+    /// How long a trail reaches back (frames).
+    pub fn trail_span(&self) -> f64 {
+        self.echoes.map_or(0.0, |e| e.count as f64 * e.lag)
     }
 }
 
@@ -282,8 +318,7 @@ pub struct Ramp {
     pub opacity: [f64; COLOR_STOPS],
 }
 
-/// `layer(options)`: the finished specification with its colour ramp. A material
-/// makes it a sprite (no style gives a material layer a shape of its own).
+/// The finished specification with its colour ramp. A material makes it a sprite.
 pub fn layer(spec: Spec, ramp: Ramp) -> Spec {
     let mut spec = Spec { colors: Some(ramp.colors), opacity: Some(ramp.opacity), ..spec };
     if spec.material.is_some() {
@@ -306,12 +341,12 @@ pub fn clamp(v: f64, a: f64, b: f64) -> f64 {
     }
 }
 
-/// `rgb(0xRRGGBB)`.
+/// `0xRRGGBB` as 0–1 channels.
 pub fn rgb(hex: u32) -> [f64; 3] {
     [(hex >> 16 & 255) as f64 / 255.0, (hex >> 8 & 255) as f64 / 255.0, (hex & 255) as f64 / 255.0]
 }
 
-/// `tone(c, t, to)`: `c` moved toward `to` by `t`.
+/// `c` moved toward `to` by `t`.
 pub fn tone(c: [f64; 3], t: f64, to: [f64; 3]) -> [f64; 3] {
     [0, 1, 2].map(|i| c[i] + (to[i] - c[i]) * t)
 }
@@ -319,19 +354,18 @@ pub fn tone(c: [f64; 3], t: f64, to: [f64; 3]) -> [f64; 3] {
 pub const WHITE: [f64; 3] = [1.0, 1.0, 1.0];
 pub const BLACK: [f64; 3] = [0.0, 0.0, 0.0];
 
-/// `paintColor(value)`: the effect colour's middle, 0–1 per channel.
+/// The effect colour's middle, 0–1 per channel.
 pub fn paint_color(color: &Color) -> [f64; 3] {
     let (c, _) = paint::sample_color(color, 0.5);
     c.map(|v| v / 255.0)
 }
 
-/// `ramp(stops)`: eight evenly spaced stops from `[colour, intensity, opacity]` entries.
+/// Eight evenly spaced stops from `[colour, intensity, opacity]` entries.
 pub fn ramp(stops: &[([f64; 3], f64, f64)]) -> Ramp {
     let mut out = Ramp { colors: [[0.0; 4]; COLOR_STOPS], opacity: [0.0; COLOR_STOPS] };
     let n = stops.len();
     for i in 0..COLOR_STOPS {
         let x = i as f64 / (COLOR_STOPS - 1) as f64 * (n - 1) as f64;
-        // `Math.min(stops.length - 2, Math.floor(x))`: -1 for a single stop, which then reads the stop itself.
         let j = (n as i64 - 2).min(x.floor() as i64);
         let f = if n > 1 { x - j as f64 } else { 0.0 };
         let (a, b) = if n > 1 { (stops[j as usize], stops[j as usize + 1]) } else { (stops[0], stops[0]) };
@@ -341,18 +375,22 @@ pub fn ramp(stops: &[([f64; 3], f64, f64)]) -> Ramp {
     out
 }
 
-/// `stops(...)`: a ramp from `[colour, intensity]` pairs, opaque.
+/// A ramp from `[colour, intensity]` pairs, opaque.
 pub fn stops(entries: &[([f64; 3], f64)]) -> Ramp {
-    let full: Vec<([f64; 3], f64, f64)> = entries.iter().map(|&(c, i)| (c, i, 1.0)).collect();
-    ramp(&full)
+    let mut full = [([0.0; 3], 0.0, 1.0); COLOR_STOPS];
+    let n = entries.len().min(COLOR_STOPS);
+    for (slot, &(c, i)) in full.iter_mut().zip(entries) {
+        *slot = (c, i, 1.0);
+    }
+    ramp(&full[..n])
 }
 
-/// `stops(...)` with stop opacities.
+/// [`stops`] with stop opacities.
 pub fn stops_with(entries: &[([f64; 3], f64, f64)]) -> Ramp {
     ramp(entries)
 }
 
-/// `paintRamp(value, intensity)`: the effect colour sampled at eight stops.
+/// The effect colour sampled at eight stops.
 pub fn paint_ramp(color: &Color, intensity: f64) -> Ramp {
     let mut out = Ramp { colors: [[0.0; 4]; COLOR_STOPS], opacity: [0.0; COLOR_STOPS] };
     for i in 0..COLOR_STOPS {
@@ -363,7 +401,7 @@ pub fn paint_ramp(color: &Color, intensity: f64) -> Ramp {
     out
 }
 
-/// `ink(c)`: a dark colour of the same hue family, for outlines.
+/// A dark colour of the same hue family, for outlines.
 pub fn ink(c: [f64; 3]) -> [f64; 3] {
     let m = c[0].max(c[1]).max(c[2]).max(1e-3);
     c.map(|v| clamp(v / m * 0.18, 0.0, 1.0))

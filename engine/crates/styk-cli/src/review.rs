@@ -18,19 +18,16 @@
 //!     --until <tick>            the last tick of --seq (default: the last of --ticks)
 //!     --save <file.json>        also writes the review document, to open in the app or `styk render`
 //!
-//! The document is built here: a canvas of 640 × 400, a stick figure 180 pixels tall standing at its middle, one effect
-//! clip. A sheet has a row per background and zoom and a column per tick, each labelled; the header names the effect.
+//! The document is a stage of `styk_eval::vfx::generated::stage`: a canvas of 640 × 400, a stick figure 180 pixels tall
+//! standing at its middle, one effect clip. A sheet has a row per background and zoom and a column per tick, each labelled; the header names the effect.
 
 use std::path::Path;
 use std::time::Instant;
 
 use styk_eval::eval::Prepared;
 use styk_eval::geometry::build;
+use styk_eval::vfx::generated::stage::{Clip, Motion, Stage, CANVAS, HIP};
 use styk_eval::vfx::registry::{AuraStyle, BeamStyle, ExplosionStyle, ParticleLook, SmokeStyle};
-
-const CANVAS: [f64; 2] = [640.0, 400.0];
-/// The figure's hip.
-const HIP: [f64; 2] = [320.0, 300.0];
 
 /// What the review shows, read from the command line.
 struct Request {
@@ -182,142 +179,23 @@ fn style_of(r: &Request) -> Result<(&'static str, usize, String), String> {
     Ok((param, index, names[index].clone()))
 }
 
-/// A parameter value as the saved JSON holds it: numbers, hexadecimal colours (`0x…`, `#…`), or JSON.
-fn json_value(v: &str) -> String {
-    let t = v.trim();
-    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix('#')) {
-        if let Ok(n) = u32::from_str_radix(hex, 16) {
-            return n.to_string();
-        }
-    }
-    match t {
-        "on" | "true" => "1".into(),
-        "off" | "false" => "0".into(),
-        _ => t.to_string(),
-    }
-}
-
-/// The stick figure's ten segments: torso, head, two arms of two, two legs of two (absolute angles, y down).
-const SEGMENTS: [(u32, u32, f64, bool); 10] = [
-    (1, 0, 62.0, false),
-    (2, 1, 36.0, true),
-    (3, 1, 34.0, false),
-    (4, 3, 32.0, false),
-    (5, 1, 34.0, false),
-    (6, 5, 32.0, false),
-    (7, 0, 44.0, false),
-    (8, 7, 44.0, false),
-    (9, 0, 44.0, false),
-    (10, 9, 44.0, false),
-];
-
-const UP: f64 = -std::f64::consts::FRAC_PI_2;
-
-/// A pose: the hip, every segment's angle.
-fn pose(hip: [f64; 2], arms: f64, stride: f64) -> ([f64; 2], [f64; 10]) {
-    // `arms`: 0 at rest beside the body, 1 raised above the head. `stride`: -1..1, legs and arms swinging.
-    let lerp = |a: f64, b: f64| a + (b - a) * arms;
-    let s = stride * 0.45;
-    (
-        hip,
-        [
-            UP,
-            UP,
-            lerp(2.05 + s, -2.45),
-            lerp(1.8 + s * 1.2, -2.05),
-            lerp(1.1 - s, -0.7),
-            lerp(1.35 - s * 1.2, -1.1),
-            1.9 - s,
-            1.75 - s * 0.6,
-            1.25 + s,
-            1.4 + s * 0.6,
-        ],
-    )
-}
-
-/// Keyframes of the figure for `motion` over `ticks` ticks: (duration, pose or `None` when the figure is gone).
-fn keyframes(motion: &str, ticks: f64) -> Vec<(f64, Option<([f64; 2], [f64; 10])>)> {
-    let span = ticks.max(8.0);
-    match motion {
-        "walk" | "run" => {
-            let (keys, from, to) = if motion == "walk" { (8, 150.0, 490.0) } else { (12, 80.0, 560.0) };
-            (0..=keys)
-                .map(|k| {
-                    let t = k as f64 / keys as f64;
-                    let stride = if k % 2 == 0 { 1.0 } else { -1.0 };
-                    let hip = [from + (to - from) * t, HIP[1] - if k % 2 == 0 { 0.0 } else { 4.0 }];
-                    ((span / keys as f64).round().max(1.0), Some(pose(hip, 0.0, stride)))
-                })
-                .collect()
-        }
-        "arms" => {
-            // Arms rise, hold, fall, rise.
-            let q = (span / 4.0).round().max(1.0);
-            vec![(q, Some(pose(HIP, 0.0, 0.0))), (q, Some(pose(HIP, 1.0, 0.0))), (q, Some(pose(HIP, 1.0, 0.0))), (q, Some(pose(HIP, 0.0, 0.0))), (1.0, Some(pose(HIP, 1.0, 0.0)))]
-        }
-        "vanish" => {
-            // The figure leaves the scene a third of the way in, as a figure removed after it explodes.
-            let k = (span / 3.0).round().max(1.0);
-            vec![(k, Some(pose(HIP, 0.0, 0.0))), (span - k + 1.0, None)]
-        }
-        _ => vec![(span + 1.0, Some(pose(HIP, 0.0, 0.0)))],
-    }
-}
-
-/// The review document as the app's JSON.
-fn document(r: &Request, background: u32) -> Result<String, String> {
+/// The review document: one stick figure doing `r.motion`, one clip of the effect.
+fn stage(r: &Request, background: u32) -> Result<Stage, String> {
     let (param, index, _) = style_of(r)?;
+    let motion = Motion::parse(&r.motion).ok_or_else(|| format!("unknown motion {:?}: still, walk, run, arms or vanish", r.motion))?;
     let last = r.ticks.iter().copied().fold(0.0f64, f64::max).max(r.until.unwrap_or(0.0)) + 2.0;
-    // A dark figure on light backgrounds, a light one on dark backgrounds.
-    let luminance = (0.2126 * (background >> 16 & 255) as f64 + 0.7152 * (background >> 8 & 255) as f64 + 0.0722 * (background & 255) as f64) / 255.0;
-    let ink = if luminance > 0.45 { "34,34,40" } else { "214,214,222" };
-    let mut segments = Vec::new();
-    for (id, parent, length, circle) in SEGMENTS {
-        let (code, kind) = if circle { (1, "circle") } else { (0, "line") };
-        segments.push(format!(
-            r#"{{"segment_id":{id},"parent_id":{parent},"length":{length},"angle_rad":0,"thickness":7,"bend_rad":0,"primitive_code":{code},"aux_code":0,"flags":0,"segment_type":"{kind}","segment_kind":"{kind}","color_rgb":[{ink}],"transparency":0,"visible":true,"z_order":{id},"is_static":false,"flag_bits":{{"is_static":false}}}}"#
-        ));
-    }
-    let mut frames = Vec::new();
-    for (k, (duration, posed)) in keyframes(&r.motion, last).into_iter().enumerate() {
-        let objects = match posed {
-            Some((hip, angles)) => format!(
-                r#"[{{"object_slot":0,"unique_id":1,"figure_type_id":1,"root_x":{},"root_y":{},"scale":1,"color_override_raw":0,"field28":0,"angles":[{}],"len_flag":0,"lengths":[],"bend_flag":0,"bends":[],"join":null,"color_override_rgb":[0,0,0],"color_override_mix":0,"transparency":0,"opacity":1}}]"#,
-                hip[0],
-                hip[1],
-                angles.iter().map(|a| format!("{a:.5}")).collect::<Vec<_>>().join(",")
-            ),
-            None => "[]".into(),
-        };
-        let order = if objects == "[]" { "[],\"object_draw_order_unique_ids\":[]" } else { "[0],\"object_draw_order_unique_ids\":[1]" };
-        frames.push(format!(
-            r#"{{"duration_raw":{duration},"background_id":1,"background_id_b":0,"background_mix":0,"camera":{{"is_default":true,"x":0,"y":0,"scale":1,"angle_rad":0}},"objects":{objects},"object_draw_order":{order},"_styk":{{"frameId":"frame-{k}"}},"inbetweens":0,"hidden":false}}"#
-        ));
-    }
-    let mut params = vec![format!(r#""effectStrength":1"#), format!(r#""{param}":{index}"#)];
+    let mut clip = Clip::new(if r.scene { None } else { Some(1) }, &r.kind).set(param, &index.to_string()).timed(r.start, r.duration);
     for (k, v) in &r.sets {
-        params.retain(|p| !p.starts_with(&format!("\"{k}\":")));
-        params.push(format!(r#""{k}":{}"#, json_value(v)));
+        clip = clip.set(k, v);
     }
-    let target = if r.scene { r#"{"kind":"scene"}"#.to_string() } else { r#"{"kind":"figure","uid":1}"#.to_string() };
-    let duration = r.duration.map_or("null".to_string(), |d| d.to_string());
-    let clip = format!(
-        r#"{{"id":"00000000-0000-4000-8000-000000000001","name":"","target":{target},"start":{},"duration":{duration},"offset":0,"enabled":true,"strength":1,"fadeIn":0,"fadeOut":0,"includeAttached":false,"effects":[{{"version":2,"id":"00000000-0000-4000-8000-000000000002","type":"{}","enabled":true,"params":{{{}}}}}],"keys":{{}}}}"#,
-        r.start,
-        r.kind,
-        params.join(",")
-    );
-    Ok(format!(
-        r#"{{"version":5,"canvas_width":{},"canvas_height":{},"fps":24,"auto_easing":false,"auto_easing_disabled_raw":1,"auto_easing_source":"file","backgrounds":[{{"background_id":1,"kind":2,"color":{background}}}],"figure_types":[{{"figure_type_id":1,"name":"Figure","segment_count":10,"segments":[{}],"polyfills":[],"image_assets":[],"text_assets":[]}}],"keyframes":[{}],"_styk":{{"format":"StykAnimate","format_version":1,"name":"vfx review","vfxClips":{{"version":1,"clips":[{clip}]}}}}}}"#,
-        CANVAS[0],
-        CANVAS[1],
-        segments.join(","),
-        frames.join(",")
-    ))
+    let mut stage = Stage::new(last).clip(clip);
+    stage.background = background;
+    stage.figures[0].motion = motion;
+    Ok(stage)
 }
 
 fn prepared(r: &Request, background: u32) -> Result<Prepared, String> {
-    let json = document(r, background)?;
+    let json = stage(r, background)?.json();
     let doc = styk_eval::open_bytes(json.as_bytes(), "json", "vfx review").map_err(|e| e.to_string())?;
     Ok(styk_eval::prepare(doc))
 }
@@ -528,7 +406,7 @@ fn review(args: &[String]) -> Result<(), String> {
     let started = Instant::now();
     let (_, _, style) = style_of(&r)?;
     if let Some(path) = &r.save {
-        std::fs::write(path, document(&r, r.backgrounds[0].1)?).map_err(|e| format!("{path}: {e}"))?;
+        std::fs::write(path, stage(&r, r.backgrounds[0].1)?.json()).map_err(|e| format!("{path}: {e}"))?;
     }
     let centre = focus(&r);
     if let Some(folder) = &r.seq {

@@ -131,6 +131,15 @@ pub const fn particle_kind(shape: u32, additive: bool) -> u32 {
 /// editor's procedural atlas, `styk_eval::vfx::generated::atlas`): `MATERIAL_ROWS` rows of
 /// `MATERIAL_COLUMNS` cells of `MATERIAL_CELL` pixels, two channels (shading × coverage,
 /// coverage), `MATERIAL_LEVELS` box-reduced levels sampled trilinearly.
+/// A bit of [`DrawList::materials`] beyond every material row: a limit thinned or left out
+/// part of the frame's generated effects (docs/engine/vfx.md, "Limits"), which the app can say.
+pub const MATERIALS_REDUCED: u32 = 1 << 31;
+
+/// Whether a list's generated effects were reduced by a limit ([`MATERIALS_REDUCED`]).
+pub fn effects_reduced(list: &DrawList) -> bool {
+    list.materials & MATERIALS_REDUCED != 0
+}
+
 pub const MATERIAL_CELL: u32 = 128;
 pub const MATERIAL_COLUMNS: u32 = 8;
 pub const MATERIAL_ROWS: u32 = 17;

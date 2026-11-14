@@ -327,7 +327,7 @@ fn layers(path: &str, tick: &str, all: bool) -> i32 {
 /// blend, target and live particles, and what building the batch and evaluating
 /// its particles cost (earlier-tick anchors evaluated without a cache).
 fn generators(path: &str, ticks: &[String]) -> i32 {
-    use styk_eval::vfx::generated::{self, particle};
+    use styk_eval::vfx::generated::{self, particle::Evaluator};
     let (p, _) = match load(path) {
         Ok(v) => v,
         Err(e) => {
@@ -349,12 +349,13 @@ fn generators(path: &str, ticks: &[String]) -> i32 {
         let started = Instant::now();
         let mut live = 0;
         for draw in &batch.draws {
-            let alive = (0..draw.count).filter(|&i| particle::evaluate(&batch, draw, i).is_some()).count();
+            let ev = Evaluator::new(&batch, draw);
+            let alive = (0..draw.count).filter(|&i| ev.particle(i).is_some()).count();
             live += alive;
-            println!("  draw {}: shape {} blend {} uid {:?} {:?}{} material {}: {alive} of {} alive", draw.record, draw.shape, draw.blend, draw.uid, draw.placement, if draw.scene { " scene" } else { "" }, draw.material, draw.count);
+            println!("  draw {}: shape {} blend {} uid {:?} {:?}{} material {} keep {:.2}: {alive} of {} alive", draw.spec, draw.shape, draw.blend, draw.uid, draw.placement, if draw.scene { " scene" } else { "" }, draw.material, draw.keep, draw.count);
         }
         let evaluated = started.elapsed().as_secs_f64() * 1000.0;
-        println!("tick {tick}: {} draws, {live} of {} particles alive; batch {built:.2} ms, particles {evaluated:.2} ms", batch.draws.len(), batch.particles);
+        println!("tick {tick}: {} draws, {live} of {} particles alive{}; batch {built:.2} ms, particles {evaluated:.2} ms", batch.draws.len(), batch.particles, if batch.reduced { ", reduced by a limit" } else { "" });
     }
     0
 }

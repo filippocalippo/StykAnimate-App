@@ -1,18 +1,23 @@
 /** Saved effect vocabulary and inspector metadata. Rendering never enters this module. */
 const n=(label,value,min,max,step=.01,unit='')=>({label,default:value,min,max,step,unit,type:'number'});
 const c=(label='Color',value=0x66ccff)=>({label,default:value,min:0,max:0xffffff,step:1,type:'color'});
-const choice=(label,value,options)=>({...n(label,value,0,options.length-1,1),discrete:true,options});
+const choice=(label,value,options,retired)=>({...n(label,value,0,options.length-1,1),discrete:true,options,...(retired?{retired:Object.freeze(retired)}:{})});
 const toggle=(label,value=0)=>({...choice(label,value,['Off','On']),toggle:true});
 /** A look chooser. `applies` holds each option's suggested values, set together
  * with the choice in the inspector so a new style starts from its own colours. */
-const style=(options,applies)=>({...choice('Style',0,options),applies:applies.map(values=>Object.freeze(values))});
+const style=(options,applies,retired)=>({...choice('Style',0,options,retired),applies:applies.map(values=>Object.freeze(values))});
 const spectrum=(...colors)=>({type:'linear',angle:0,stops:colors.map((color,i)=>({offset:i/(colors.length-1),color,opacity:1}))});
 const center={centerX:n('Center X',.5,0,1,.01,'%'),centerY:n('Center Y',.5,0,1,.01,'%')};
 const advanced=params=>Object.fromEntries(Object.entries(params).map(([k,v])=>[k,{...v,advanced:true}]));
 // Auto glows on dark scenes and keeps colours solid on light ones.
 const glowChoice=choice('Blend',0,['Auto','Glow','Solid']);
 // Delay starts one effect of a group later, so combined effects can play in sequence.
-const generatorTiming={delay:n('Start delay',0,0,600,1,'f'),step:choice('Animate on',0,['Ones (smooth)','Twos','Threes']),seed:{...n('Seed',1,0,65535,1),discrete:true}};
+// Playback speed runs the effect's own time faster or slower; each copy of an effect (on another figure, or a duplicated clip) plays its own pattern unless "Vary each copy" is off.
+const generatorTiming={timeScale:n('Playback speed',1,.1,4,.05,'×'),delay:n('Start delay',0,0,600,1,'f'),step:choice('Animate on',0,['Ones (smooth)','Twos','Threes']),seed:{...n('Seed',1,0,65535,1),discrete:true},unique:toggle('Vary each copy',1)};
+// Start running: continuous emission starts as if it had been running for a while. Auto does so for a clip that starts with the animation or has no end.
+const prefill=choice('Start running',0,['Auto','Off','On']);
+// Where an aura or explosion draws: as its style places each layer, or all of it behind or in front of the target.
+const drawPlacement=choice('Draw',0,['Behind and in front','Behind target','In front of target']);
 // Scene clips have no figure to follow; they emit at a stage position instead.
 const scenePosition={x:{...n('Position X',.5,-1,2,.001,'%'),sceneOnly:true},y:{...n('Position Y',.5,-1,2,.001,'%'),sceneOnly:true}};
 export const VFX_REGISTRY={
@@ -36,28 +41,28 @@ export const VFX_REGISTRY={
  // Generators create artwork instead of filtering it. They only live in effect
  // clips; the engine compiles and draws them.
  particles:{name:'Particles',category:'Generate',icon:'particles',generator:true,params:{emission:choice('Emission',0,['Continuous','Burst']),rate:{...n('Rate',6,0,200,.1,'/f'),when:{emission:[0]}},count:{...n('Count',40,1,5000,1),when:{emission:[1]}},life:n('Lifetime',30,1,300,1,'f'),
-  look:choice('Look',0,['Soft glow','Spark','Dot','Ring','Shard','Smoke','Star','Bokeh','Flame','Cartoon cloud','Cartoon flame','Leaf','Petal','Snowflake','Drop','Heart','Cartoon star','Pixel','Lightning','Wisp','Rock','Splat','Burst']),
+  look:choice('Look',0,['Soft glow','Spark','Dot','Ring','Shard','Smoke','Star','Bokeh','Flame','Cartoon cloud','Cartoon flame','Leaf','Petal','Snowflake','Drop','Heart','Cartoon star','Pixel','Lightning','Wisp','Rock','Splat','Burst'],[11]),
   color:c('Color',0x66ccff),size:n('Size',6,.5,400,.5,'px'),speed:n('Speed',3,0,120,.1,'px/f'),direction:n('Direction',-90,-180,180,1,'°'),spread:n('Spread',60,0,360,1,'°'),gravity:n('Gravity',0,-3,3,.01),
   ...advanced({shape:choice('Emit from',0,['Target point','Circle','Body','Line']),radius:n('Emitter size',0,0,4000,1,'px'),endSize:n('End size',.4,0,5,.01,'×'),sizeMode:choice('Size over life',0,['Auto','Grow or shrink','Puff out','Pop','Flicker']),variation:n('Variation',.4,0,1,.01,'%'),
-   drag:n('Drag',0,0,.5,.005),wind:n('Wind',0,-2,2,.01),turbulence:n('Turbulence',0,0,300,1,'px'),flow:n('Flow',0,0,300,1,'px'),swirl:n('Swirl',0,-30,30,.1,'°/f'),
+   drag:n('Drag',0,0,.5,.005),wind:n('Wind',0,-2,2,.01),gravityAngle:n('Gravity direction',90,-180,180,1,'°'),turbulence:n('Turbulence',0,0,300,1,'px'),flow:n('Flow',0,0,300,1,'px'),swirl:n('Swirl',0,-30,30,.1,'°/f'),
    rotation:choice('Rotation',0,['Auto','Random','Follow motion','Upright','None']),spin:n('Spin',0,-45,45,.5,'°/f'),stretch:{...n('Streak length',2,0,20,.1),when:{look:[1]}},
-   fade:n('Fade out',.5,0,1,.01,'%'),twinkle:n('Twinkle',0,0,1,.01,'%'),shading:n('Shading',1,0,1,.01,'%'),glow:n('Glow halo',0,0,2,.01),trail:{...n('Motion trail',0,0,6,1),discrete:true},
+   fadeIn:n('Fade in',.08,0,1,.01,'%'),fade:n('Fade out',.5,0,1,.01,'%'),twinkle:n('Twinkle',0,0,1,.01,'%'),shading:n('Shading',1,0,1,.01,'%'),glow:n('Glow halo',0,0,2,.01),trail:{...n('Motion trail',0,0,6,1),discrete:true},
    outline:toggle('Outline'),outlineColor:{...c('Outline color',0x16121c),when:{outline:[1]}},outlineWidth:{...n('Outline width',2,0,24,.1,'px'),when:{outline:[1]}},
-   colorMode:choice('Color mode',0,['Over lifetime','Random per particle']),blend:choice('Blend',0,['Auto','Glow','Solid']),space:choice('Particles',0,['Leave a trail','Follow target']),ground:toggle('Land on ground'),layer:choice('Draw',0,['In front of target','Behind target']),...generatorTiming,...scenePosition})}},
+   colorMode:choice('Color mode',0,['Over lifetime','Random per particle']),blend:choice('Blend',0,['Auto','Glow','Solid']),space:choice('Particles',0,['Leave a trail','Follow target']),ground:toggle('Land on ground'),bounce:{...n('Bounce',0,0,1,.01,'%'),when:{ground:[1]}},layer:choice('Draw',0,['In front of target','Behind target']),prefill:{...prefill,when:{emission:[0]}},...generatorTiming,...scenePosition})}},
  aura:{name:'Aura',category:'Generate',icon:'aura',generator:true,params:{style:style(['Fire','Electric','Shadow','Holy','Ice','Wind','Cartoon','Spirit'],[{color:0xffc93c},{color:0x6fd8ff},{color:0x8a4dff},{color:0xffe7a0},{color:0x9fe6ff},{color:0xb8f0d0},{color:0xffb000},{color:0x7fd7ff}]),
-  color:c('Color',0xffc93c),intensity:n('Intensity',1,0,3),height:n('Height',1,.2,3),density:n('Density',1,.1,4),turbulence:n('Turbulence',1,0,3),dust:toggle('Ground effect'),...advanced({flames:toggle('Main layer',1),glow:toggle('Body glow',1),embers:toggle('Particles',1),trail:toggle('Trail when moving',1),blend:glowChoice,...generatorTiming})}},
+  color:c('Color',0xffc93c),intensity:n('Intensity',1,0,3),height:n('Height',1,.2,3),width:n('Width',1,.2,3),density:n('Density',1,.1,4),turbulence:n('Turbulence',1,0,3),dust:toggle('Ground effect'),...advanced({flames:toggle('Main layer',1),glow:toggle('Body glow',1),embers:toggle('Particles',1),trail:toggle('Trail when moving',1),blend:glowChoice,layer:drawPlacement,prefill,...generatorTiming})}},
  beam:{name:'Energy beam',category:'Generate',icon:'beam',generator:true,params:{style:style(['Energy','Laser','Cartoon','Spiral','Lightning','Fire breath'],[
    {color:0x4fd2ff,width:16,wobble:1,charge:12,travel:6,arcs:3},{color:0xff3148,width:6,wobble:0,charge:6,travel:2,arcs:0},{color:0xffd23c,width:22,wobble:.6,charge:10,travel:5,arcs:0},
-   {color:0xb06bff,width:18,wobble:.8,charge:12,travel:6,arcs:2},{color:0xa47cff,width:7,wobble:2.4,charge:0,travel:2,arcs:6},{color:0xff7a1a,width:26,wobble:1,charge:4,travel:8,arcs:0}]),
-  color:c('Color',0x4fd2ff),width:n('Width',16,1,200,1,'px'),intensity:n('Intensity',1,0,3),charge:n('Charge time',12,0,120,1,'f'),travel:n('Travel time',6,1,60,1,'f'),wobble:n('Wobble',1,0,3),aimX:{...n('Aim X',.9,-1,2,.001,'%'),when:{aimUid:[0]}},aimY:{...n('Aim Y',.5,-1,2,.001,'%'),when:{aimUid:[0]}},aimUid:{...n('Aim figure',0,0,4294967295,1),discrete:true,hidden:true},aimHandle:{...n('Aim node',0,0,65535,1),discrete:true,hidden:true},...advanced({arcs:{...n('Lightning arcs',3,0,8,1),discrete:true},sparks:n('Sparks',1,0,4),chargeParticles:toggle('Charge particles',1),orb:toggle('Muzzle glow',1),splash:toggle('Impact splash',1),layer:choice('Draw',0,['In front of target','Behind target']),blend:glowChoice,...generatorTiming,...scenePosition})}},
- smoke:{name:'Smoke',category:'Generate',icon:'smoke',generator:true,params:{style:style(['Soft','Thick','Steam','Cartoon','Dust'],[{color:0x8a8794},{color:0x4a4650},{color:0xe8eef2},{color:0xd9d6e0},{color:0xb49a7c}]),
-  color:c('Color',0x8a8794),amount:n('Amount',3,0,60,.1,'/f'),size:n('Puff size',24,2,400,1,'px'),rise:n('Rise',1.2,-6,12,.05,'px/f'),wind:n('Wind',0,-10,10,.05,'px/f'),life:n('Lifetime',60,4,400,1,'f'),
+   {color:0xb06bff,width:18,wobble:.8,charge:12,travel:6,arcs:2},{color:0xa47cff,width:7,wobble:2.4,charge:0,travel:2,arcs:6},{color:0xff7a1a,width:26,wobble:1,charge:4,travel:8,arcs:0}],[3]),
+  color:c('Color',0x4fd2ff),width:n('Width',16,1,200,1,'px'),intensity:n('Intensity',1,0,3),charge:n('Charge time',12,0,120,1,'f'),travel:n('Travel time',6,1,60,1,'f'),wobble:n('Wobble',1,0,3),aimX:{...n('Aim X',.9,-1,2,.001,'%'),when:{aimUid:[0]}},aimY:{...n('Aim Y',.5,-1,2,.001,'%'),when:{aimUid:[0]}},aimUid:{...n('Aim figure',0,0,4294967295,1),discrete:true,hidden:true},aimHandle:{...n('Aim node',0,0,65535,1),discrete:true,hidden:true},...advanced({arcs:{...n('Lightning arcs',3,0,8,1),discrete:true,when:{style:[0,3,4]}},strands:{...toggle('Spiral strands'),when:{style:[0,3]}},sparks:{...n('Sparks',1,0,4),when:{style:[0,1,2,3,5]}},chargeParticles:{...toggle('Charge particles',1),when:{style:[0,1,2,3,4]}},orb:{...toggle('Muzzle glow',1),when:{style:[0,1,2,3,5]}},splash:{...toggle('Impact splash',1),when:{style:[0,1,2,3,4]}},layer:choice('Draw',0,['In front of target','Behind target']),blend:glowChoice,prefill:choice('Start firing',0,['Auto','Off','On']),...generatorTiming,...scenePosition})}},
+ smoke:{name:'Smoke',category:'Generate',icon:'smoke',generator:true,params:{style:style(['Soft','Thick','Steam','Cartoon','Dust'],[{color:0x8a8794},{color:0x4a4650},{color:0xe8eef2},{color:0xd9d6e0},{color:0xb49a7c}],[1,2]),
+  color:c('Color',0x8a8794),amount:n('Amount',3,0,60,.1,'/f'),size:n('Puff size',24,2,400,1,'px'),opacity:n('Opacity',1,0,1,.01,'%'),rise:n('Rise',1.2,-6,12,.05,'px/f'),direction:n('Direction',-90,-180,180,1,'°'),wind:n('Wind',0,-10,10,.05,'px/f'),life:n('Lifetime',60,4,400,1,'f'),
   ...advanced({emission:choice('Emission',0,['Continuous','Burst']),count:{...n('Count',16,1,400,1),when:{emission:[1]}},spread:n('Emitter size',12,0,2000,1,'px'),growth:n('Growth',3,.2,8,.05,'×'),turbulence:n('Turbulence',1,0,4),shading:n('Shading',1,0,1,.01,'%'),
-   space:choice('Smoke',0,['Leave a trail','Follow target']),layer:choice('Draw',0,['In front of target','Behind target']),...generatorTiming,...scenePosition})}},
+   space:choice('Smoke',0,['Leave a trail','Follow target']),layer:choice('Draw',0,['In front of target','Behind target']),prefill:{...prefill,when:{emission:[0]}},...generatorTiming,...scenePosition})}},
  explosion:{name:'Explosion',category:'Generate',icon:'explosion',generator:true,params:{style:style(['Fireball','Cartoon','Plasma','Smoke bomb','Mushroom cloud','Firework','Electric','Magic','Dust','Pixel'],[
    {color:0xff8a2a,step:0},{color:0xff9d2a,step:0},{color:0x5ad8ff,step:0},{color:0x8d8a99,step:0},{color:0xff7a2a,step:0},{color:spectrum([255,80,120],[255,200,60],[90,220,130],[70,170,255],[190,110,255]),step:0},
-   {color:0x7fc8ff,step:0},{color:0xd67bff,step:0},{color:0xb49a7c,step:0},{color:0xff7a2a,step:1}]),
-  color:c('Color',0xff8a2a),size:n('Size',1,.2,5),intensity:n('Intensity',1,0,3),density:n('Density',1,.1,4),debris:n('Debris',1,0,4),smoke:n('Smoke',1,0,4),sparks:toggle('Sparks',1),dust:toggle('Ground dust',1),...advanced({flash:toggle('Flash',1),ring:toggle('Shockwave ring',1),fireball:toggle('Core blast',1),blend:glowChoice,...generatorTiming,...scenePosition})}},
+   {color:0x7fc8ff,step:0},{color:0xd67bff,step:0},{color:0xb49a7c,step:0},{color:0xff7a2a,step:1}],[2,3]),
+  color:c('Color',0xff8a2a),size:n('Size',1,.2,5),intensity:n('Intensity',1,0,3),density:n('Density',1,.1,4),debris:n('Debris',1,0,4),smoke:n('Smoke',1,0,4),sparks:toggle('Sparks',1),dust:toggle('Ground dust',1),...advanced({flash:toggle('Flash',1),ring:toggle('Shockwave ring',1),fireball:toggle('Core blast',1),blend:glowChoice,layer:drawPlacement,...generatorTiming,...scenePosition})}},
 };
 for(const definition of Object.values(VFX_REGISTRY)){definition.params={effectStrength:n(definition.generator?'Opacity':'Effect strength',1,0,1,.01,'%'),...definition.params};for(const p of Object.values(definition.params))Object.freeze(p);Object.freeze(definition.params);Object.freeze(definition);}Object.freeze(VFX_REGISTRY);
 export const isGeneratorType=type=>Boolean(VFX_REGISTRY[type]?.generator);

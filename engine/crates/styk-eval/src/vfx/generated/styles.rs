@@ -24,9 +24,9 @@ pub struct Context {
     /// The clip's fade-out (0 when it has none).
     pub fade_out: f64,
     pub scene: bool,
-    /// The target's height in 4-pixel steps; `None` for the scene.
-    pub body_height: Option<f64>,
     pub start_point: [f64; 2],
+    /// Continuous layers start already running, as if they had emitted for a lifetime.
+    pub prefill: bool,
 }
 
 /// Glow layers: Auto adds light on dark scenes and paints solid colour on light ones.
@@ -38,14 +38,11 @@ fn glow_blend(blend: GeneratorBlend) -> u8 {
     }
 }
 
-/// Figures are authored at many scales; auras follow the target's height.
-fn body_scale(height: Option<f64>) -> f64 {
-    // `(height || 200) / 200`: no height, or none at all, counts as 200.
-    let h = match height {
-        Some(h) if h != 0.0 && !h.is_nan() => h,
-        _ => 200.0,
-    };
-    clamp(h / 200.0, 0.25, 4.0)
+/// Figures are authored at many scales; auras follow the target's size (`Anchor::measure`,
+/// which its pose does not change): the scale of a layer with `body_scaled` at a birth.
+pub fn body_scale(measure: f64) -> f64 {
+    let m = if measure > 0.0 && measure.is_finite() { measure } else { 200.0 };
+    clamp(m / 200.0, 0.25, 4.0)
 }
 
 const DUST: [f64; 3] = [0.54, 0.58, 0.65];
@@ -76,7 +73,19 @@ pub fn compile(params: &Params, ctx: &Context) -> Vec<Spec> {
         Params::Smoke(p) => smoke(p, ctx),
         _ => Vec::new(),
     };
-    layers.into_iter().filter(|l| l.shape == BEAM || l.shape == ARC || l.count > 0.0 || l.rate > 0.0 || l.rate_param.is_some()).collect()
+    layers
+        .into_iter()
+        .filter(|l| l.shape == BEAM || l.shape == ARC || l.count > 0.0 || l.rate > 0.0 || l.rate_param.is_some())
+        .map(|mut l| {
+            // Started already running: continuous layers emitted for a lifetime before the
+            // effect's start, so nothing fades in from empty.
+            if ctx.prefill && l.emit_dur > 0.0 && !l.is_beam() {
+                l.prewarm = 1.0;
+                l.clip_fade_in = 0.0;
+            }
+            l
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -353,8 +362,10 @@ fn aura(p: &Aura, ctx: &Context) -> Vec<Spec> {
         7 => aura_spirit,
         _ => aura_fire,
     };
-    let sc = body_scale(ctx.body_height);
+    // Sizes, speeds and forces are in units of the body's size, scaled at each birth.
+    let sc = 1.0;
     let base = Spec {
+        body_scaled: true,
         start: ctx.start,
         emit_dur: ctx.window,
         clip_fade_in: if ctx.timed { 14.0 } else { 0.0 },

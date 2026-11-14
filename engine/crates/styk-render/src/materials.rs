@@ -68,6 +68,8 @@ impl Renderer {
     /// engine worker has generated yet is generated here (the engine prepares them in
     /// the background when a document with generated effects opens).
     pub(crate) fn ensure_materials(&mut self, rows: u32) {
+        // Bits beyond the rows say other things (styk-draw `MATERIALS_REDUCED`).
+        let rows = rows & ((1u32 << MATERIAL_ROWS) - 1);
         // The atlas is sampled trilinearly, so a texel at the edge of a row reads its neighbour's: with only the rows a list names
         // in, what a frame draws depends on the lists before it. Exact sizes ([`Renderer::set_exact_sizes`]) bring every row in.
         let rows = if self.exact_sizes && rows != 0 { (1u32 << MATERIAL_ROWS) - 1 } else { rows };

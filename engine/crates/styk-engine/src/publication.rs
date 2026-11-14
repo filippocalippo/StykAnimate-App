@@ -118,7 +118,13 @@ impl Engine {
         let id = self.inner.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         generation.id = id;
         if styk_eval::vfx::generated::has_generators(&generation.prepared.doc) {
-            generation.anchors = Some(Arc::new(crate::anchors::Anchors::new()));
+            // An edit that moves no figure (an effect's settings) keeps the earlier-tick anchors.
+            let previous = self.inner.state.lock().current.clone();
+            let anchors = match previous.as_ref().and_then(|p| p.anchors.as_ref().map(|a| (p, a))) {
+                Some((p, a)) if p.lineage == generation.lineage => a.follow(&p.prepared, &generation.prepared),
+                _ => crate::anchors::Anchors::new(),
+            };
+            generation.anchors = Some(Arc::new(anchors));
         }
         let generation = Arc::new(generation);
         loop {
