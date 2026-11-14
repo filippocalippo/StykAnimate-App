@@ -35833,7 +35833,7 @@
   },
   "vfxChannels.aimTarget": {
     "locations": [
-      "src/vfx-effect-view.mjs:210"
+      "src/vfx-effect-view.mjs:211"
     ],
     "context": "aim = {messageKey: 'vfxChannels.aimTarget', messageParams: {figure: figure?.name || {messageKey: 'vfxChannels.figure', messageParams: {id: p.aimUid}}, node: p.a"
   },
@@ -35869,7 +35869,7 @@
   },
   "vfxChannels.figure": {
     "locations": [
-      "src/vfx-effect-view.mjs:210"
+      "src/vfx-effect-view.mjs:211"
     ],
     "context": "aim = {messageKey: 'vfxChannels.aimTarget', messageParams: {figure: figure?.name || {messageKey: 'vfxChannels.figure', messageParams: {id: p.aimUid}}, node: p.a"
   },
@@ -35881,7 +35881,7 @@
   },
   "vfxChannels.node": {
     "locations": [
-      "src/vfx-effect-view.mjs:210"
+      "src/vfx-effect-view.mjs:211"
     ],
     "context": "aim = {messageKey: 'vfxChannels.aimTarget', messageParams: {figure: figure?.name || {messageKey: 'vfxChannels.figure', messageParams: {id: p.aimUid}}, node: p.a"
   },
@@ -35899,7 +35899,7 @@
   },
   "vfxChannels.origin": {
     "locations": [
-      "src/vfx-effect-view.mjs:210"
+      "src/vfx-effect-view.mjs:211"
     ],
     "context": "aim = {messageKey: 'vfxChannels.aimTarget', messageParams: {figure: figure?.name || {messageKey: 'vfxChannels.figure', messageParams: {id: p.aimUid}}, node: p.a"
   },
@@ -35974,25 +35974,25 @@
   },
   "vfxClipInspector.aimAt": {
     "locations": [
-      "src/vfx-effect-view.mjs:213"
+      "src/vfx-effect-view.mjs:214"
     ],
     "context": "const field = `<div class=\"ui-field vfx-aim\" data-aim><span class=\"ui-field-label\" ${messageAttributes('vfxClipInspector.aimAt')}>${escapeHTML(interfaceText('vf"
   },
   "vfxClipInspector.aimAtAStagePointInstead": {
     "locations": [
-      "src/vfx-effect-view.mjs:214"
+      "src/vfx-effect-view.mjs:215"
     ],
     "context": "`${p.aimUid ? `<button type=\"button\" class=\"ui-icon-button\" data-size=\"xs\" data-clip-action=\"aim-clear\" data-effect-id=\"${effect.id}\" aria-label=\"${escapeHTML(i"
   },
   "vfxClipInspector.clickANodeAFigureOriginOrAny": {
     "locations": [
-      "src/vfx-effect-view.mjs:215"
+      "src/vfx-effect-view.mjs:216"
     ],
     "context": "`<button type=\"button\" class=\"ui-button vfx-aim-pick\" data-size=\"xs\" data-variant=\"${picking ? 'accent' : 'ghost'}\" data-clip-action=\"aim-pick\" data-effect-id=\""
   },
   "vfxClipInspector.clickTheStage": {
     "locations": [
-      "src/vfx-effect-view.mjs:215"
+      "src/vfx-effect-view.mjs:216"
     ],
     "context": "`<button type=\"button\" class=\"ui-button vfx-aim-pick\" data-size=\"xs\" data-variant=\"${picking ? 'accent' : 'ghost'}\" data-clip-action=\"aim-pick\" data-effect-id=\""
   },
@@ -36143,7 +36143,7 @@
   },
   "vfxClipInspector.pick": {
     "locations": [
-      "src/vfx-effect-view.mjs:215"
+      "src/vfx-effect-view.mjs:216"
     ],
     "context": "`<button type=\"button\" class=\"ui-button vfx-aim-pick\" data-size=\"xs\" data-variant=\"${picking ? 'accent' : 'ghost'}\" data-clip-action=\"aim-pick\" data-effect-id=\""
   },
@@ -36161,7 +36161,7 @@
   },
   "vfxClipInspector.pointOnStage": {
     "locations": [
-      "src/vfx-effect-view.mjs:207"
+      "src/vfx-effect-view.mjs:208"
     ],
     "context": "let aim = {messageKey: 'vfxClipInspector.pointOnStage'};"
   },
@@ -36304,7 +36304,7 @@
   },
   "vfxInspector.angle": {
     "locations": [
-      "src/vfx-effect-view.mjs:177"
+      "src/vfx-effect-view.mjs:178"
     ],
     "context": "const n = names(effect.type, item.name, interfaceText(item.name === 'angle' ? 'vfxInspector.angle' : 'vfxInspector.distance'));"
   },
@@ -36342,7 +36342,7 @@
   },
   "vfxInspector.distance": {
     "locations": [
-      "src/vfx-effect-view.mjs:177"
+      "src/vfx-effect-view.mjs:178"
     ],
     "context": "const n = names(effect.type, item.name, interfaceText(item.name === 'angle' ? 'vfxInspector.angle' : 'vfxInspector.distance'));"
   },
@@ -36396,8 +36396,8 @@
   },
   "vfxInspector.gradient": {
     "locations": [
-      "src/vfx-effect-view.mjs:124",
-      "src/vfx-effect-view.mjs:125"
+      "src/vfx-effect-view.mjs:125",
+      "src/vfx-effect-view.mjs:126"
     ],
     "context": "const caption = solid ? `${hex.slice(1).toUpperCase()}${stop.opacity < 1 ? ` · ${Math.round(stop.opacity * 100)}%` : ''}` : interfaceText('vfxInspector.gradient"
   },
@@ -36695,19 +36695,19 @@
   "vfxPanel.help.common.effectStrength": {
     "locations": [
       "src/vfx-clip-controls.mjs:29",
-      "src/vfx-presentation.mjs:230"
+      "src/vfx-presentation.mjs:234"
     ],
     "context": "value,min:0,max:100,step:1,precision:2,displayPrecision:0,unit:'%',range:true,default:100,field:false,data:{'clip-field':'strength'},help:interfaceText('vfxPane"
   },
   "vfxPanel.help.common.opacity": {
     "locations": [
-      "src/vfx-presentation.mjs:230"
+      "src/vfx-presentation.mjs:234"
     ],
     "context": "if (param === 'effectStrength') return VFX_REGISTRY[type]?.generator ? 'vfxPanel.help.common.opacity' : 'vfxPanel.help.common.effectStrength';"
   },
   "vfxPanel.linkTip": {
     "locations": [
-      "src/vfx-effect-view.mjs:196"
+      "src/vfx-effect-view.mjs:197"
     ],
     "context": "link = `<button type=\"button\" class=\"ui-icon-button ui-field-link\" data-size=\"xs\" data-vfx-link=\"${escapeHTML(key)}\" aria-pressed=\"${linked}\" aria-label=\"${esca"
   },
@@ -36794,7 +36794,7 @@
   },
   "vfxPanel.retiredOption": {
     "locations": [
-      "src/vfx-effect-view.mjs:134"
+      "src/vfx-effect-view.mjs:135"
     ],
     "context": "return optionRetired(d, i) ? {label: interfaceText('vfxPanel.retiredOption', {name: label}), labelKey: 'vfxPanel.retiredOption', labelParams: {name: optionKeys?"
   },
@@ -36821,7 +36821,7 @@
   "vfxPanel.shuffleTip": {
     "locations": [
       "src/vfx-clip-inspector.mjs:69",
-      "src/vfx-effect-view.mjs:153",
+      "src/vfx-effect-view.mjs:154",
       "src/vfx-inspector.mjs:159"
     ],
     "context": "const own=(effect&&seeded(effect.type)?footButton('shuffle',vfxIcon('dice'),'vfxPanel.shuffle',{disabled:locked,tipKey:'vfxPanel.shuffleTip',word:false,effectId"

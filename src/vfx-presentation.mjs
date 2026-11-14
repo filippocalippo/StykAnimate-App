@@ -21,19 +21,22 @@ import {effectMessages} from './vfx-localization.mjs';
 const has = key => Object.hasOwn(english, key);
 
 // Shared parts. `when` shows a value only while it does something: {param: [values]} or (params) => boolean.
-// A generated effect's own clock: when it starts in its clip, its drawing rhythm and (coming) how fast it plays,
-// `timeScale` on all five. Particles call their launch speed `speed`, so only the others may list it here.
-const GENERATOR_TIMING = ['delay', 'step', 'timeScale', 'speed', 'timeSpeed'];
-const PARTICLE_TIMING = ['delay', 'step', 'timeScale', 'timeSpeed'];
-const VARIATION = ['seed'];
+// A generated effect's own clock: how fast it plays, whether it starts already running, when it starts in its clip and
+// its drawing rhythm. An explosion is a burst, with nothing to start running: it has no `prefill`.
+const GENERATOR_TIMING = ['timeScale', 'prefill', 'delay', 'step'];
+const BURST_TIMING = GENERATOR_TIMING.filter(name => name !== 'prefill');
+// Playback speed runs from a tenth to four times: even steps in ratio, so half and double speed are as far from 1.
+const CLOCK = {timeScale: {scale: 'log', knee: .1}};
+// Its randomness: the pattern, and whether every copy of the effect plays a pattern of its own.
+const VARIATION = ['seed', 'unique'];
 const SCENE_POSITION = ['x', 'y'];
 
 /** Per effect type: `primary` (three to five values, in the order a person thinks of them), `sections` ([id, params]),
  * and per parameter: `control`, `scale` (log, pow), `knee`, `exponent`, `unit` (shown), `when`. */
 export const PRESENTATION = Object.freeze({
   glow: {
-    primary: ['color', 'source', 'radius', 'intensity', 'mode'],
-    sections: [['core', ['coreMix', 'coreColor']], ['shape', ['spread', 'falloff']], ['blend', ['blend', 'effectStrength']]],
+    primary: ['color', 'radius', 'intensity', 'mode'],
+    sections: [['color', ['source']], ['core', ['coreMix', 'coreColor']], ['shape', ['spread', 'falloff']], ['blend', ['blend', 'effectStrength']]],
     params: {color: {when: {source: [0]}}, radius: {scale: 'pow'}, spread: {scale: 'pow'}, coreColor: {when: p => p.coreMix > 0}},
   },
   outline: {
@@ -81,7 +84,7 @@ export const PRESENTATION = Object.freeze({
   dissolve: {
     primary: ['progress', 'size', 'edge', 'color'],
     sections: [['direction', ['directional', 'angle']], ['edge', ['softness']], ['variation', ['seed']], ['blend', ['effectStrength']]],
-    params: {angle: {when: {directional: [1]}}, softness: {unit: '%'}, size: {scale: 'pow'}},
+    params: {angle: {when: p => p.directional > 0}, softness: {unit: '%'}, size: {scale: 'pow'}},
   },
   rgbSplit: {
     primary: ['amount', 'angle'],
@@ -107,6 +110,7 @@ export const PRESENTATION = Object.freeze({
   lightSweep: {
     primary: ['position', 'angle', 'width', 'intensity', 'color'],
     sections: [['motion', ['speed', 'loop']], ['shape', ['softness']], ['blend', ['effectStrength']]],
+    params: {speed: {unit: '%/f'}, loop: {when: p => p.speed !== 0}},
   },
   crt: {
     primary: ['amount', 'spacing', 'curvature'],
@@ -121,54 +125,54 @@ export const PRESENTATION = Object.freeze({
     primary: ['look', 'color', 'emission', 'rate', 'count', 'size'],
     sections: [
       ['motion', ['speed', 'direction', 'spread', 'gravity', 'gravityAngle', 'drag', 'wind', 'turbulence', 'flow', 'swirl']],
-      ['life', ['life', 'sizeMode', 'endSize', 'fade', 'opacityMode', 'opacityOverLife', 'twinkle']],
+      ['life', ['life', 'sizeMode', 'endSize', 'fadeIn', 'fade', 'twinkle']],
       ['look', ['rotation', 'spin', 'stretch', 'shading', 'glow', 'trail', 'outline', 'outlineColor', 'outlineWidth', 'colorMode', 'variation', 'blend', 'effectStrength']],
       ['emitter', ['shape', 'radius', 'space', 'ground', 'bounce', 'layer', 'position']],
-      ['rhythm', PARTICLE_TIMING],
+      ['rhythm', GENERATOR_TIMING],
       ['variation', VARIATION],
     ],
     params: {
       look: {control: 'picker'}, rate: {scale: 'pow', exponent: 2.5}, count: {scale: 'log', knee: 1}, size: {scale: 'log', knee: 1}, speed: {scale: 'pow'},
       life: {scale: 'pow'}, radius: {scale: 'log', knee: 2, when: {shape: [1, 3]}}, turbulence: {scale: 'pow'}, flow: {scale: 'pow'},
-      gravity: {unit: 'px/f²'}, delay: {scale: 'pow'}, trail: {control: 'segments'}, endSize: {scale: 'pow'},
+      gravity: {unit: 'px/f²'}, gravityAngle: {when: p => p.gravity !== 0}, delay: {scale: 'pow'}, trail: {control: 'segments'}, endSize: {scale: 'pow'}, ...CLOCK,
     },
     pairs: {position: {params: SCENE_POSITION}},
   },
   aura: {
     primary: ['style', 'color', 'intensity', 'height', 'width'],
     sections: [
-      ['shape', ['density', 'turbulence', 'layer', 'placement']],
+      ['shape', ['density', 'turbulence', 'layer']],
       ['layers', ['flames', 'glow', 'embers', 'trail', 'dust']],
       ['blend', ['blend', 'effectStrength']],
       ['rhythm', GENERATOR_TIMING],
       ['variation', VARIATION],
     ],
-    params: {style: {control: 'picker'}},
+    params: {style: {control: 'picker'}, ...CLOCK},
   },
   beam: {
     primary: ['style', 'color', 'width', 'aim', 'intensity'],
     sections: [
       ['motion', ['charge', 'travel', 'wobble']],
-      ['details', ['arcs', 'sparks', 'chargeParticles', 'orb', 'splash']],
+      ['details', ['arcs', 'strands', 'sparks', 'chargeParticles', 'orb', 'splash']],
       ['emitter', ['layer', 'position']],
       ['blend', ['blend', 'effectStrength']],
       ['rhythm', GENERATOR_TIMING],
       ['variation', VARIATION],
     ],
-    params: {style: {control: 'picker'}, width: {scale: 'pow'}, charge: {scale: 'pow'}},
+    params: {style: {control: 'picker'}, width: {scale: 'pow'}, charge: {scale: 'pow'}, ...CLOCK},
     pairs: {position: {params: SCENE_POSITION}},
   },
   smoke: {
     primary: ['style', 'color', 'amount', 'size', 'rise'],
     sections: [
-      ['motion', ['wind', 'direction', 'turbulence', 'growth']],
+      ['motion', ['direction', 'wind', 'turbulence', 'growth']],
       ['life', ['life', 'opacity', 'shading']],
       ['emitter', ['emission', 'count', 'spread', 'space', 'layer', 'position']],
-      ['blend', ['blend', 'effectStrength']],
+      ['blend', ['effectStrength']],
       ['rhythm', GENERATOR_TIMING],
       ['variation', VARIATION],
     ],
-    params: {style: {control: 'picker'}, amount: {scale: 'pow'}, size: {scale: 'log', knee: 2}, life: {scale: 'pow'}, spread: {scale: 'log', knee: 2}, count: {scale: 'log', knee: 1}},
+    params: {style: {control: 'picker'}, amount: {scale: 'pow'}, size: {scale: 'log', knee: 2}, life: {scale: 'pow'}, spread: {scale: 'log', knee: 2}, count: {scale: 'log', knee: 1}, ...CLOCK},
     pairs: {position: {params: SCENE_POSITION}},
   },
   explosion: {
@@ -177,10 +181,10 @@ export const PRESENTATION = Object.freeze({
       ['parts', ['density', 'debris', 'smoke', 'sparks', 'dust', 'flash', 'ring', 'fireball']],
       ['emitter', ['layer', 'position']],
       ['blend', ['blend', 'effectStrength']],
-      ['rhythm', GENERATOR_TIMING],
+      ['rhythm', BURST_TIMING],
       ['variation', VARIATION],
     ],
-    params: {style: {control: 'picker'}},
+    params: {style: {control: 'picker'}, ...CLOCK},
     pairs: {position: {params: SCENE_POSITION}},
   },
 });

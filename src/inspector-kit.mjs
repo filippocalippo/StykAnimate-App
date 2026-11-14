@@ -199,7 +199,7 @@ function fieldNameAttributes(row, withUnit = false) {
   return reference?.messageKey ? ' ' + messageAttributes(reference.messageKey, reference.messageParams, 'aria-label') : '';
 }
 
-const GLUED_UNITS = new Set(['%', '°', '×', '/f']);
+const GLUED_UNITS = new Set(['%', '%/f', '°', '×', '/f']);
 /** A value with its unit as a person reads it: "100%", "172°", "8 px", "24 fps". */
 export function formatValueWithUnit(value, {unit = '', precision = 2} = {}) {
   const text = formatPropertyValue(value, precision);

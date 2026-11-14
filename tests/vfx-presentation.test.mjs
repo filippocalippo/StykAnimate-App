@@ -52,7 +52,58 @@ test('an open effect leads with the few values that define it, the rest in title
   const glow = presentEffect('glow', defaults('glow'));
   assert.deepEqual(glow.primary.flatMap(paramsOf), ['color', 'radius', 'intensity', 'mode', 'effectStrength']);
   assert.deepEqual(glow.sections.map(section => section.id), ['more']);
-  assert.deepEqual(glow.sections[0].items.flatMap(paramsOf), ['coreMix', 'spread', 'falloff', 'blend']);
+  assert.deepEqual(glow.sections[0].items.flatMap(paramsOf), ['source', 'coreMix', 'spread', 'falloff', 'blend']);
+});
+
+test('every name the presentation gives a value is one the registry saves', () => {
+  for (const [type, own] of Object.entries(PRESENTATION)) {
+    const descriptors = VFX_REGISTRY[type].params, views = {...own.pairs, ...own.derived};
+    const names = [...own.primary, ...own.sections.flatMap(([, list]) => list), ...Object.keys(own.params ?? {})];
+    for (const name of names) {
+      if (name === 'aim') continue;
+      const saved = views[name] ? [...views[name].params, ...(views[name].link ? [views[name].link] : [])] : [name];
+      for (const param of saved) assert.ok(Object.hasOwn(descriptors, param), `${type}.${param} is not a saved value`);
+    }
+  }
+});
+
+test('the controls the filters and generated effects gained sit where a person looks for them', () => {
+  /** Where `param` shows (`primary`, a section id or null) and with which control. */
+  const place = (type, param, params = defaults(type), options = {}) => {
+    const view = presentEffect(type, params, options), mine = item => paramsOf(item).includes(param);
+    const at = view.primary.some(mine) ? 'primary' : view.sections.find(section => section.items.some(mine))?.id ?? null;
+    const item = itemsOf(view).flatMap(entry => (entry.kind === 'pair' ? entry.items : [entry])).find(entry => entry.param === param);
+    return [at, item?.control ?? null];
+  };
+  // Filters: a small effect's secondary values are in its one section, More settings.
+  assert.deepEqual(place('tint', 'blend'), ['primary', 'menu']);
+  assert.deepEqual(place('glow', 'source'), ['more', 'segments']);
+  assert.deepEqual(place('outline', 'softness'), ['primary', 'value']);
+  assert.deepEqual(place('grade', 'hue'), ['primary', 'angle']);
+  assert.deepEqual(place('dissolve', 'directional'), ['more', 'value']);
+  assert.deepEqual(place('dissolve', 'angle', {...defaults('dissolve'), directional: .5}), ['more', 'angle']);
+  for (const type of ['noise', 'turbulence', 'wave']) assert.deepEqual(place(type, 'speed'), ['primary', 'value'], type);
+  assert.deepEqual(place('crt', 'roll', defaults('crt'), {scene: true}), ['more', 'value']);
+  assert.deepEqual(place('lightSweep', 'speed'), ['more', 'value']);
+  assert.deepEqual(place('lightSweep', 'loop', {...defaults('lightSweep'), speed: .01}), ['more', 'switch']);
+  // Generated effects: their clock under Rhythm, their randomness under Variation, the rest beside what they change.
+  for (const type of ['particles', 'aura', 'beam', 'smoke', 'explosion']) {
+    assert.deepEqual(place(type, 'timeScale'), ['rhythm', 'value'], type);
+    const rhythm = presentEffect(type, defaults(type)).sections.find(section => section.id === 'rhythm');
+    assert.equal(rhythm.items.find(item => item.param === 'timeScale').scale, 'log', `${type}: half and double speed lie as far from 1`);
+    assert.deepEqual(place(type, 'unique'), ['variation', 'switch'], type);
+    if (type !== 'explosion') assert.equal(place(type, 'prefill')[0], 'rhythm', type);
+  }
+  assert.deepEqual(place('aura', 'width'), ['primary', 'value']);
+  assert.deepEqual(place('aura', 'layer'), ['shape', 'menu']);
+  assert.deepEqual(place('explosion', 'layer'), ['emitter', 'menu']);
+  assert.deepEqual(place('smoke', 'direction'), ['motion', 'angle']);
+  assert.deepEqual(place('smoke', 'opacity'), ['life', 'value']);
+  assert.equal(english[labelKey('smoke', 'opacity')], 'Density', 'not a second "Opacity" beside the effect\'s own');
+  assert.deepEqual(place('particles', 'fadeIn'), ['life', 'value']);
+  assert.deepEqual(place('particles', 'gravityAngle', {...defaults('particles'), gravity: 1}), ['motion', 'angle']);
+  assert.deepEqual(place('particles', 'bounce', {...defaults('particles'), ground: 1}), ['emitter', 'value']);
+  assert.deepEqual(place('beam', 'strands'), ['details', 'switch']);
 });
 
 test('a small effect keeps its secondary values in one section; titled sections are for the large ones', () => {
@@ -80,6 +131,12 @@ test('a value shows only while it does something', () => {
   assert.ok(!shown('glow', defaults('glow')).includes('coreColor'), 'the core colour waits for a core');
   assert.ok(shown('glow', {...defaults('glow'), coreMix: 0.3}).includes('coreColor'));
   assert.ok(!shown('blur', defaults('blur')).includes('angle') && shown('blur', {...defaults('blur'), mode: 1}).includes('angle'));
+  // A glow coloured by the artwork has no colour of its own; a wipe's angle waits for a wipe, a loop for a moving sweep,
+  // a gravity direction for gravity.
+  assert.ok(shown('glow', defaults('glow')).includes('color') && !shown('glow', {...defaults('glow'), source: 1}).includes('color'));
+  assert.ok(!shown('dissolve', defaults('dissolve')).includes('angle') && shown('dissolve', {...defaults('dissolve'), directional: .2}).includes('angle'));
+  assert.ok(!shown('lightSweep', defaults('lightSweep')).includes('loop') && shown('lightSweep', {...defaults('lightSweep'), speed: -.05}).includes('loop'));
+  assert.ok(!shown('particles', particles).includes('gravityAngle') && shown('particles', {...particles, gravity: -.5}).includes('gravityAngle'));
   // A group's strength is the clip's: a member's own waits in its section; a lone filter shows it last.
   const lone = presentEffect('glow', defaults('glow')), member = presentEffect('glow', defaults('glow'), {group: true});
   assert.equal(lone.primary.at(-1).param, 'effectStrength');

@@ -114,7 +114,8 @@ function bind(host, ctx, param, extra = {}) {
 
 function paramHTML(host, ctx, item) {
   const {effect} = ctx, {param, d, control} = item, value = effect.params[param];
-  const unit = item.unit ?? d.unit ?? '', factor = unit === '%' ? 100 : 1;
+  // A share (0 to 1) and a share a frame read in percent.
+  const unit = item.unit ?? d.unit ?? '', factor = unit === '%' || unit === '%/f' ? 100 : 1;
   const {key, binding} = bind(host, ctx, param, {factor});
   const n = names(effect.type, param, d.label), disabled = ctx.locked;
   const trail = [keyButton(host, ctx, key, [binding.property], n.label, n.labelKey ? {messageKey: n.labelKey} : undefined)];
