@@ -408,8 +408,8 @@
     --slider-track: var(--mist-300);
     --slider-fill: var(--blue-500);
     --slider-thumb: var(--paper);
-    --value-fill: var(--mist-300);           /* a value field's travel at rest: where the value sits */
-    --value-fill-hover: var(--mist-400);
+    --value-fill: var(--mist-250);           /* a value field's travel at rest: where the value sits */
+    --value-fill-hover: var(--mist-300);
     --value-fill-active: var(--blue-100);    /* while it is dragged or typed, on --surface */
     --kbd-bg: var(--paper);
     --kbd-line: var(--mist-400);
@@ -570,8 +570,8 @@
     --slider-track: var(--ink-550);
     --slider-fill: var(--blue-500);
     --slider-thumb: var(--mist-200);
-    --value-fill: var(--ink-550);
-    --value-fill-hover: var(--ink-500);
+    --value-fill: var(--ink-600);
+    --value-fill-hover: var(--ink-550);
     --value-fill-active: var(--blue-850);
     --kbd-bg: var(--ink-650);
     --kbd-line: var(--ink-500);

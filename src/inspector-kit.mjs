@@ -324,7 +324,8 @@ const dial = (row, value) => (row.angle ? `<span class="ui-field-dial" data-prop
  * The value field (components.md): `range: true` makes the whole field a slider
  * for a bounded value: a quiet fill shows where the value sits on its travel
  * (`scale`: linear, log or pow, src/ui/value-scale.mjs), `default` adds the
- * default's tick and a double click's reset, `angle: true` adds a dial, `trail`
+ * default's tick and a double click's reset, `angle: true` adds a dial,
+ * `scrubAnywhere` lets an unbounded value scrub from any point of its field, `trail`
  * puts small buttons inside the field's end (a key, a shuffle), and `help` is
  * the one-line description a tooltip and a screen reader give.
  */
@@ -340,12 +341,11 @@ function numberField(row, env) {
     return `<label${attributes({class: `ui-field${span(row)}`, 'data-tooltip': row.tip})}${descriptorAttributes(row, 'tip', 'data-tooltip')}><span class="ui-field-label"${descriptorAttributes(row, "label")}>${escapeHTML(row.label)}</span>${input}${suffix}</label>`;
   }
   const {input, scrub, value} = numberInput(row, env, 'ui-field-input');
-  const trail = (row.trail ?? []).filter(Boolean).map(item => (typeof item === 'string' ? item : renderButton({size: 'xs', ...item}, env, {className: 'ui-field-trail'}))).join('');
   return `<label${attributes({
     class: `ui-field${span(row)}`, 'data-property-row': row.key, 'data-mixed': Boolean(row.mixed), 'data-range': Boolean(row.range && !row.mixed),
-    'data-angle': Boolean(row.angle), 'data-default': row.range && finite(row.default) !== undefined ? true : undefined,
+    'data-angle': Boolean(row.angle), 'data-scrub-anywhere': Boolean(row.scrubAnywhere && !row.range), 'data-default': row.range && finite(row.default) !== undefined ? true : undefined,
     'data-tooltip': row.help, style: valueFieldStyle(row, value), ...(row.fieldData ? extras({data: row.fieldData}) : {}),
-  })}${row.helpKey ? descriptorAttributes(row, 'help', 'data-tooltip') : ''}>${dial(row, value)}${scrub}${input}${suffix}${trail}</label>`;
+  })}${row.helpKey ? descriptorAttributes(row, 'help', 'data-tooltip') : ''}>${dial(row, value)}${scrub}${input}${suffix}</label>`;
 }
 
 /**
@@ -485,7 +485,7 @@ function color(row, env) {
     return `<button${attributes({
       type: 'button', class: `ui-field${span(row)}`, 'data-color': true, 'data-labelled': Boolean(row.showLabel), id: id(row.id), 'data-paint-picker': true,
       'aria-label': row.description ?? row.label, 'data-tooltip': row.tip, disabled: Boolean(row.disabled), ...extras(row),
-    })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}>${label}${swatch}<span class="ui-field-hex"${row.captionKey ? descriptorAttributes(row, 'caption') : ''}>${caption}</span>${(row.trail ?? []).filter(Boolean).join('')}</button>`;
+    })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}>${label}${swatch}<span class="ui-field-hex"${row.captionKey ? descriptorAttributes(row, 'caption') : ''}>${caption}</span></button>`;
   }
   const value = HEX.test(String(row.value ?? '')) ? String(row.value).toLowerCase() : '#000000';
   return `<label${attributes({class: `ui-field${span(row)}`, 'data-color': true, 'data-tooltip': row.tip})}${descriptorAttributes(row, 'tip', 'data-tooltip')}><input${attributes({
@@ -665,6 +665,18 @@ function group(row, env) {
 }
 
 /**
+ * A visual picker's field (looks and styles): its label, the chosen option's picture and name, and a chevron; a
+ * click opens the owner's grid of options. `art` is trusted markup (an <img> or a glyph) from the owner.
+ */
+function picker(row, env) {
+  return `<button${attributes({
+    type: 'button', class: `ui-field${span(row)}`, 'data-picker': true, id: id(row.id), 'aria-label': row.description ?? row.label, 'aria-haspopup': 'dialog',
+    'data-tooltip': row.tip, disabled: Boolean(row.disabled), ...extras(row),
+  })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}><span class="ui-field-label"${descriptorAttributes(row, 'label')}>${escapeHTML(row.label)}</span>` +
+    `<span class="ui-field-art" aria-hidden="true">${row.art ?? ''}</span><span class="ui-field-hex"${descriptorAttributes(row, 'text')}>${escapeHTML(row.text)}</span>${glyph(env, 'chevron-down', 'ui-icon ui-field-chev')}</button>`;
+}
+
+/**
  * A linked pair (width and height): two fields side by side with the link between them, a pressed toggle. While
  * linked, a pair may show one field that edits both.
  */
@@ -676,7 +688,7 @@ function pair(row, env) {
 
 const RENDERERS = {
   number: numberField, 'stepper-field': stepperField, stepper, slider, select, switch: switchRow, 'field-switch': fieldSwitch,
-  checkbox, color, swatch, swatches, segmented, text, actions, 'list-row': listRow, pager, preview, owned, markup, meta, value, grid, group, pair,
+  checkbox, color, swatch, swatches, segmented, text, actions, 'list-row': listRow, pager, preview, owned, markup, meta, value, grid, group, pair, picker,
 };
 /** The row kinds a descriptor may use. */
 export const ROW_KINDS = Object.freeze(Object.keys(RENDERERS));
@@ -690,7 +702,12 @@ export function renderRow(row, env = {}) {
   if (!row || (row.hidden && !REGIONS.has(row.kind))) return ROW_PLACEHOLDER;
   const render = RENDERERS[row.kind];
   if (!render) throw messageError(new TypeError(''), "errors.inspectorKit.unknownInspectorRowKind", {value: row?.kind});
-  return render(row, env);
+  const trail = (row.trail ?? []).filter(Boolean);
+  if (!trail.length) return render(row, env);
+  // Small buttons at a field's end (a value's key, a seed's shuffle) sit beside the field, never inside its <label>
+  // or <button>, and are drawn over its end, which keeps room for them (data-trail).
+  const buttons = trail.map(item => renderButton({size: 'xs', ...item}, env, {className: `ui-field-trail${item.className ? ` ${item.className}` : ''}`})).join('');
+  return `<div class="ui-field-wrap${span(row)}" data-trail="${trail.length}">${render(row, env)}${buttons}</div>`;
 }
 const renderRows = (rows, env) => (rows ?? []).map(row => renderRow(row, env)).join('');
 

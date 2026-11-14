@@ -357,7 +357,7 @@ export class PropertyControls {
   }
   /**
    * A press on a value control. The label scrubs (Properties' fields); a slider field ([data-range]) scrubs from
-   * anywhere on it except its value while that is being typed; an angle's dial turns to the pointer. A press and
+   * anywhere on it; an angle's dial turns to the pointer. A press and
    * release without a drag types the value; a second tap on the same field soon after resets it to its default.
    */
   _pointerDown(event) {
@@ -380,8 +380,9 @@ export class PropertyControls {
     }
     const dial = target.closest("[data-property-dial]");
     const label = target.closest("[data-property-scrub]");
-    const typing = target === input && this.doc.activeElement === input;
-    if (!dial && !label && !(row.hasAttribute("data-range") && !typing)) return;
+    // A value field ([data-range]) and a field that scrubs anywhere ([data-scrub-anywhere]) scrub from any point, its
+    // value too, even while it is typed (a tap selects the whole value again; the keys edit it).
+    if (!dial && !label && !row.matches("[data-range], [data-scrub-anywhere]")) return;
     this._consume(event);
     this.suppressPointerClick = true;
     if (this.gesture) this._finish(true);

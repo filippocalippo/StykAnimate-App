@@ -124,14 +124,15 @@
     transition: box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
   }
   .ui-field[data-range]:where(:hover) { --_fill: var(--value-fill-hover); }
+  .ui-field[data-scrub-anywhere] { cursor: ew-resize; touch-action: none; }
   .ui-field[data-range]:where(:focus-within, [data-scrubbing]) { --_fill: var(--value-fill-active); }
-  .ui-field:where([data-range], [data-angle]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
   .ui-field:where([data-range]) > .ui-field-label:where([data-property-scrub]) { text-decoration: none; cursor: inherit; }
   /* The field's own ring shows its focus; its label never draws a second one. */
-  .ui-field:where([data-range], [data-angle]) > .ui-field-label:where(:focus-visible) { outline: none; }
-  .ui-field:where([data-range], [data-angle]) > .ui-field-input { flex: 0 1 auto; inline-size: auto; field-sizing: content; min-inline-size: 1ch; text-align: end; cursor: inherit; }
-  .ui-field:where([data-range], [data-angle]) > .ui-field-input:where(:focus) { cursor: text; }
-  .ui-field:where([data-range], [data-angle]) > .ui-field-suffix { flex: none; color: var(--text-3); cursor: inherit; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label:where(:focus-visible) { outline: none; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-input { flex: 0 1 auto; inline-size: auto; field-sizing: content; min-inline-size: 1ch; text-align: end; cursor: inherit; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-input:where(:focus) { cursor: text; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-suffix { flex: none; color: var(--text-3); cursor: inherit; }
   .ui-field[data-default]::after {
     content: ""; position: absolute; inset-block-end: 2px; left: var(--_d, 0%); z-index: 0;
     inline-size: 2px; block-size: 4px; margin-left: -1px; border-radius: 1px;
@@ -153,10 +154,23 @@
   .ui-field:where(:hover, [data-scrubbing]) > .ui-field-dial { color: var(--accent-text); box-shadow: inset 0 0 0 1.25px currentColor; }
   .ui-field-dial:where(:active) { cursor: grabbing; }
 
-  /* Small buttons inside a field's end (a value's key, a seed's shuffle): quiet, at full contrast on hover. */
-  .ui-field > .ui-field-trail { flex: none; margin-inline: calc(-1 * var(--space-1)) calc(-1 * var(--space-1)); color: var(--text-3); }
-  .ui-field-trail + .ui-field-trail { margin-inline-start: 0; }
-  .ui-field > .ui-field-trail:where(:hover) { color: var(--text-1); }
+  /* Small buttons at a field's end (a value's key, a seed's shuffle): beside the field in the markup, drawn over its
+     end, which keeps room for them; quiet, at full contrast on hover. */
+  .ui-field-wrap { position: relative; display: grid; min-inline-size: 0; }
+  .ui-field-wrap:where([data-trail="1"]) > .ui-field { padding-inline-end: calc(var(--space-1) + var(--control-xs)); }
+  .ui-field-wrap:where([data-trail="2"]) > .ui-field { padding-inline-end: calc(var(--space-1) + 2 * var(--control-xs)); }
+  .ui-field-wrap > .ui-field-trail { position: absolute; inset-block: 0; margin-block: auto; inset-inline-end: var(--space-1); color: var(--text-3); }
+  .ui-field-wrap > .ui-field-trail:where(.ui-field-trail + *) { inset-inline-end: calc(var(--space-1) + var(--control-xs)); }
+  .ui-field-wrap > .ui-field-trail:where(:hover) { color: var(--text-1); }
+
+  /* A visual picker's field (looks and styles): the label, the chosen option's picture and name, a chevron. */
+  .ui-field[data-picker] { padding-inline-end: var(--space-2); }
+  .ui-field:where([data-picker]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ui-field-art { display: grid; flex: none; place-items: center; inline-size: 28px; block-size: 20px; overflow: hidden; border-radius: var(--radius-2xs); background: var(--surface-stage); color: var(--text-3); }
+  .ui-field-art > img { display: block; inline-size: 100%; block-size: 100%; object-fit: cover; }
+  .ui-field-art > svg { inline-size: var(--icon-sm); block-size: var(--icon-sm); }
+  .ui-field:where([data-picker]) > .ui-field-hex { flex: 0 1 auto; max-inline-size: 50%; }
+  .ui-field:where([data-picker]) > .ui-field-chev { flex: none; inline-size: var(--icon-xs); block-size: var(--icon-xs); color: var(--text-3); }
 
   /* A choice of two to four in a field ([data-segments]): the label, then the segments in a quiet track. */
   .ui-field[data-segments] { padding-inline-end: var(--space-0-5); }

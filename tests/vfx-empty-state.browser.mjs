@@ -15,9 +15,10 @@ try{
   check('a suggestion adds one effect clip as one undo step',await page.evaluate(u=>styk.editor.getVfxClips().length===1&&styk.editor._undo.length===u+1,undo));
   check('the new effect is shown and selected',await page.locator('.vfx-clip.is-selected').count()===1);
   check('its settings open under its own row, without repeating its name',await page.locator('.vfx-entry.is-open > .vfx-clip.is-selected + .vfx-detail').count()===1&&await page.locator('.vfx-detail h3').count()===0);
-  // Combining is the standard workflow, so it is a visible button in the effect's settings, not only in its ⋯ menu.
+  // Combining is the usual next step, so it is a visible button at the foot of the effect's settings (a quiet word button,
+  // a 24px target at least), not only in its ⋯ menu.
   const combine=page.locator('.vfx-detail').getByRole('button',{name:'Combine with another effect',exact:true});
-  check('a single effect shows Combine with another effect in view under its settings',await combine.isVisible()&&await combine.evaluate(button=>{const r=button.getBoundingClientRect(),panel=button.closest('#vfx-panel')?.getBoundingClientRect()??{top:0,bottom:innerHeight};return r.height>=32&&r.top>=panel.top&&r.bottom<=panel.bottom;}));
+  check('a single effect shows Combine with another effect in view under its settings',await combine.isVisible()&&await combine.evaluate(button=>{const r=button.getBoundingClientRect(),panel=button.closest('#vfx-panel')?.getBoundingClientRect()??{top:0,bottom:innerHeight};return r.height>=24&&r.top>=panel.top&&r.bottom<=panel.bottom;}));
   await combine.click();
   await page.locator('.vfx-catalog [data-choice="blur"]').click();
   check('the visible button combines another effect into a group in one step',await page.evaluate(()=>styk.editor.getVfxClips().length===1&&styk.editor.getVfxClips()[0].effects.length===2)&&await page.getByRole('button',{name:'Add to group',exact:true}).isVisible());

@@ -1,8 +1,11 @@
-import {messageAttributes, messageHTML} from './localization-bindings.mjs';
 import {t as interfaceText} from './localization.mjs';
 import {setVfxVisibleChannels} from './vfx-key-channels.mjs';
 import {vfxDescriptor} from './vfx.mjs';
 import {showTimelineMenu} from './timeline-menu.mjs';
+import {renderRow} from './inspector-kit.mjs';
+import {presetFromClip} from './vfx-user-presets.mjs';
+import {vfxGroupEffectName} from './vfx-key-channels.mjs';
+import {seeded} from './vfx-presentation.mjs';
 
 export function focusClipBinding(host,binding){
  if(!binding?.clip||binding.clipField)return;
@@ -12,23 +15,29 @@ export function focusClipBinding(host,binding){
  host.sync();host.onChange();
 }
 
-/** Timing and strength use the same gesture/undo owner as effect values. */
-export function clipNumber(host,clip,field,labelKey,value,min,max,locked){
+/** Timing and strength use the same gesture/undo owner as effect values, through the shared value control. */
+export function clipNumber(host,clip,field,labelKey,value,min,max,locked,{unit='',default:reset}={}){
  const key=`clip-${clip.id}-${field}`;
  host.bindings.set(key,{clip:clip.id,clipField:field,factor:field==='strength'?100:1,offset:field==='start'?1:0});
- return `<label class="ui-field" data-size="sm" data-property-row="${key}"><span class="ui-field-label" data-property-scrub="${key}">${messageHTML(labelKey)}</span><input class="ui-field-input" type="number" data-clip-field="${field}" data-property="${key}" data-property-scrub="${key}" data-property-value="${value}" data-property-step="1" data-property-precision="${field==='strength'?2:0}" ${messageAttributes(labelKey,{},'aria-label')} value="${value}" min="${min}" max="${max}" step="1" ${locked?'disabled':''}></label>`;
+ return renderRow({kind:'number',key,id:`vfx-${key}`,label:interfaceText(labelKey),labelKey,description:interfaceText(labelKey),descriptionKey:labelKey,value,min,max,step:1,precision:0,unit,default:reset,scrubAnywhere:true,field:false,data:{'clip-field':field},disabled:locked});
 }
-/** A group's strength: the parameter row's scrub label, slider and typed value. */
+/** A group's strength: a slider field from 0 to 100%. */
 export function clipStrength(host,clip,locked){
  const key=`clip-${clip.id}-strength`,value=+(clip.strength*100).toFixed(2);
  host.bindings.set(key,{clip:clip.id,clipField:'strength',factor:100,offset:0});
- return `<div class="vfx-row vfx-parameter" data-property-row="${key}"><span class="vfx-label" data-property-scrub="${key}" data-i18n="vfxClipControls.strength">Strength</span><label class="ui-field vfx-number" data-size="sm"><input class="ui-field-input" type="number" data-clip-field="strength" data-property="${key}" data-property-scrub="${key}" data-property-value="${value}" data-property-step="1" data-property-precision="2" data-i18n-aria-label="vfxClipControls.strength" aria-label="Strength" value="${value}" min="0" max="100" step="1" ${locked?'disabled':''}><span class="ui-field-suffix" data-glue aria-hidden="true">%</span></label><input class="ui-slider vfx-slider" type="range" data-property="${key}" data-property-value="${value}" data-property-step="1" data-property-precision="2" value="${value}" min="0" max="100" step="1" style="--_p:${value}%" data-i18n-aria-label="vfxClipControls.strength" aria-label="Strength" ${locked?'disabled':''}></div>`;
+ return renderRow({kind:'number',key,id:`vfx-${key}`,label:interfaceText('vfxClipControls.strength'),labelKey:'vfxClipControls.strength',description:interfaceText('vfxClipControls.strength'),descriptionKey:'vfxClipControls.strength',
+  value,min:0,max:100,step:1,precision:2,displayPrecision:0,unit:'%',range:true,default:100,field:false,data:{'clip-field':'strength'},help:interfaceText('vfxPanel.help.common.effectStrength'),helpKey:'vfxPanel.help.common.effectStrength',disabled:locked});
 }
 
 export function editGroupEffect(host,clip,id,operation){
  host.commit();host.beforeEdit();const index=clip.effects.findIndex(e=>e.id===id);
  if(operation==='effect-delete'){const keys={...clip.keys};for(const key of Object.keys(keys))if(vfxDescriptor(key).id===id)delete keys[key];host.editor.setVfxClip(clip.id,{effects:clip.effects.filter(e=>e.id!==id),keys});}
  else if(operation==='effect-enable')host.editor.setVfxClipParameter(clip.id,id,'enabled',Number(!host.editor.sampleVfxClip(clip.id).find(e=>e.id===id).enabled));
+ else if(operation==='effect-copy'){
+  // One effect copied out of a group: kept as a one-effect preset (its settings and its keys), pasted as its own clip.
+  const effect=clip.effects.find(e=>e.id===id),keys=Object.fromEntries(Object.entries(clip.keys).filter(([property])=>vfxDescriptor(property)?.id===id));
+  host.effectClipboard=presetFromClip({...clip,effects:[effect],keys},vfxGroupEffectName(clip,effect));host.lastCopy='member';host.sync();host.onChange();return;
+ }
  else host.editor.reorderVfxGroupEffect(clip.id,id,index+(operation==='effect-up'?-1:1));
  host.sync();host.onChange();
 }
@@ -39,7 +48,9 @@ export function openGroupMenu(host,clip,id,anchor){
  showTimelineMenu(menu,{currentTarget:anchor},[
   [{label:interfaceText("vfxClipControls.enabled"), labelKey: "vfxClipControls.enabled", labelParams: {},symbol:'eye',checked:host.editor.sampleVfxClip(clip.id).find(e=>e.id===id).enabled,action:action('effect-enable')}],
   [index>0&&{label:interfaceText("vfxClipControls.moveUp"), labelKey: "vfxClipControls.moveUp", labelParams: {},symbol:'chevron-up',action:action('effect-up')},index<clip.effects.length-1&&{label:interfaceText("vfxClipControls.moveDown"), labelKey: "vfxClipControls.moveDown", labelParams: {},symbol:'chevron-down',action:action('effect-down')}],
-  [{label:interfaceText("vfxClipControls.remove"), labelKey: "vfxClipControls.remove", labelParams: {},symbol:'trash',danger:true,action:action('effect-delete')}],
+  [{label:interfaceText('vfxInspector.copyEffect'),labelKey:'vfxInspector.copyEffect',symbol:'duplicate',action:action('effect-copy')}],
+  [...(seeded(clip.effects[index]?.type)?[{label:interfaceText('vfxPanel.shuffle'),labelKey:'vfxPanel.shuffle',symbol:'rotate',action:()=>host.shuffleEffect(clip,id)}]:[]),{label:interfaceText('vfxPanel.resetEffect'),labelKey:'vfxPanel.resetEffect',symbol:'reset',action:()=>host.resetEffect(clip,id)},
+   {label:interfaceText("vfxClipControls.remove"), labelKey: "vfxClipControls.remove", labelParams: {},symbol:'trash',danger:true,action:action('effect-delete')}],
  ]);
 }
 
