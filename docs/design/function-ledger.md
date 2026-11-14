@@ -534,35 +534,35 @@ Every row again at the tier sizes (1440×900 at 125% and 150% UI scale are 1152�
 | P195 | Reuse a recent color | H | +1 · no | Colour picker | +1–2 | no | = |
 | P196 | Sample a color from the screen or canvas | M | +2 · no | Colour picker | +1–2 | no | = |
 | P197 | Gradient paint | L | +2 · no | Colour picker | +1–2 | no | = |
-| P198 | "Apply to": Selected node (joint selected), This part, Whole figure or Scene | M | 3 · ctx | VFX › Apply to (a labelled select under the target name; its value shows the scope) | 3 | ctx | = |
-| P199 | Add effect: catalogue popover with 23 effects in 6 categories (Generate, Distort, Color… | M | 3 · ctx | VFX › Add effect (the catalogue: search, the Effects │ Presets switch, 22 effects in six categories); Presets (a visible button beside Add effect) › the 13 looks | 3 | ctx | = |
-| P200 | Presets: 12 looks (Power up, Teleport, Impact, Hologram, Ice, Poison, Neon, Golden hour… | M | 3 · ctx | VFX › Add effect (the catalogue: search, the Effects │ Presets switch, 22 effects in six categories); Presets (a visible button beside Add effect) › the 13 looks | 3 | ctx | = |
-| P201 | Search effects or presets | L | 4 · no | VFX › Add effect (the catalogue: search, the Effects │ Presets switch, 22 effects in six categories); Presets (a visible button beside Add effect) › the 13 looks | 3 | ctx | −1 |
+| P198 | "Apply to": Selected node (joint selected), This part, Whole figure or Scene | M | 3 · ctx | VFX › Apply to (a quiet choice at the end of the target's line; its value shows the scope) | 3 | ctx | = |
+| P199 | Add effect: catalogue popover with 23 effects in 6 categories (Generate, Distort, Color… | M | 3 · ctx | VFX › Add (the catalogue: search, the Effects │ Presets switch, effects grouped by what they do, a preview card on hover) | 3 | ctx | = |
+| P200 | Presets: 12 looks (Power up, Teleport, Impact, Hologram, Ice, Poison, Neon, Golden hour… | M | 3 · ctx | VFX › Add › Presets (My presets, Moments, Looks) | 3 | ctx | = |
+| P201 | Search effects or presets | L | 4 · no | VFX › Add (the catalogue's search: names, groups and what an effect does) | 3 | ctx | −1 |
 | P202 | One-click empty-state chips: Glow, Outline, Shadow, Blur; Particles, Aura, Beam, Explos… | M | 2 · ctx (empty only) | VFX › the twelve suggested tiles on an empty target (today's twelve chips: Glow, Outline, Shadow, Blur, Particles, Aura, Energy beam, Explosion, Smoke, Power up, Neon, Hit flash) | 2 | ctx | = |
 | P203 | Filter clips: At this frame, Selected or All (n); "N on other frames · Show all" | L | 3 · ctx | VFX › Show (a labelled row whenever the filter hides effects: "At this frame · 5 of 7"); the VFX ⋯ menu | 2 | ctx | −1 |
 | P204 | Search effect clips | L | 4 · no | VFX › Add effect › the catalogue's search | 3 | ctx | −1 |
-| P205 | Expand or select a clip card | M | 2 · ctx | Effect row | 2 | ctx | = |
+| P205 | Expand or select a clip card | M | 2 · ctx | Effect row (opens its card under it) | 2 | ctx | = |
 | P206 | Enable or disable a clip (eye) | L | 2 · no (hover only, opacity 0) | Row switch (visible) | 2 | ctx | = |
-| P207 | Clip menu: rename (inline), move up or down, copy animation, duplicate, delete | M | 3 · ctx (re-measured) | VFX › an effect row's ⋯ (on every row at rest, quiet; full on hover and on the selected row) › Rename, Move up, Move down, Copy, Duplicate, Combine with…, Remove | 3 | ctx | = |
+| P207 | Clip menu: rename (inline), move up or down, copy animation, duplicate, delete | M | 3 · ctx (re-measured) | VFX › an effect row's ⋯ › Copy effect, Duplicate, Move up, Move down, Rename…, Combine with…, Save as preset…, Shuffle, Reset effect, Delete | 3 | ctx | = |
 | P208 | Paste a copied effect animation; paste a legacy effect | L | 2 · ctx (re-measured) | VFX › Paste effect (beside Add effect, while an effect is copied); the header menu | 2 | ctx | = |
-| P209 | "Plays": Whole animation or Frame range | M | 3 · ctx | VFX › the selected effect › Timing › Plays | 3 | ctx | = |
-| P210 | Clip start and duration (scrub) | M | 3 · ctx | VFX › the selected effect › Timing › Start, Duration; the clip in the timeline | 2 | ctx | −1 |
-| P211 | Clip or group strength (%) | L | 3 · ctx | VFX › the selected effect › its parameters (Strength) | 2 | ctx | −1 |
-| P212 | Effect parameters (radius, intensity, speed …) | M | 3 · ctx | Selected effect parameters | 3 | ctx | = |
-| P213 | Effect color or gradient with alpha (paint picker) | M | 3 (+picker) · ctx | Selected effect parameters | 3 | ctx | = |
-| P214 | Effect style option; choosing a style applies suggested colors in the same undo step | L | 3 · ctx | VFX › the selected effect › parameters and Advanced (a titled section: style, toggles) | 3 | ctx | = |
-| P215 | Effect on/off options | L | 3 · ctx | VFX › the selected effect › parameters and Advanced (a titled section: style, toggles) | 3 | ctx | = |
-| P216 | Advanced effect parameters | L | 4 · no | VFX › the selected effect › parameters and Advanced (a titled section: style, toggles) | 3 | ctx | −1 |
-| P217 | Add or remove a key on one effect parameter at this frame | L | 3 · no (hover unless animated) | Parameter menu › Add key | 3 | no | = |
-| P218 | Shuffle a generator (same settings, new random pattern) | M | 3 · ctx | Selected effect › Variation, Aim at | 3 | ctx | = |
-| P219 | Beam aim: pick a node, origin or stage point on the canvas; clear the lock | L | 3 · ctx | Selected effect › Variation, Aim at | 3 | ctx | = |
+| P209 | "Plays": Whole animation or Frame range | M | 3 · ctx | VFX › the open effect › Timing (Whole animation │ Frame range) | 3 | ctx | = |
+| P210 | Clip start and duration (scrub) | M | 3 · ctx | VFX › the open effect › Timing › Start, Duration, Fade in, Fade out; the clip in the timeline | 2 | ctx | −1 |
+| P211 | Clip or group strength (%) | L | 3 · ctx | VFX › the open effect (a group's Strength leads its card) | 2 | ctx | −1 |
+| P212 | Effect parameters (radius, intensity, speed …) | M | 3 · ctx | The open effect's values (the shared value field) | 3 | ctx | = |
+| P213 | Effect color or gradient with alpha (paint picker) | M | 3 (+picker) · ctx | The open effect's Color (a labelled colour field; the paint picker) | 3 | ctx | = |
+| P214 | Effect style option; choosing a style applies suggested colors in the same undo step | L | 3 · ctx | The open effect › Style (a visual picker of rendered stills) | 3 | ctx | = |
+| P215 | Effect on/off options | L | 3 · ctx | The open effect's values and titled sections (switches) | 3 | ctx | = |
+| P216 | Advanced effect parameters | L | 4 · no | VFX › the open effect › its titled sections (Core, Shape, Motion, Life, Emitter, …) | 3 | ctx | −1 |
+| P217 | Add or remove a key on one effect parameter at this frame | L | 3 · no (hover unless animated) | The value's key at its field's end (quiet until hovered, drawn once animated); the value's menu › Add key | 3 | no | = |
+| P218 | Shuffle a generator (same settings, new random pattern) | M | 3 · ctx | The open effect's foot › Shuffle (every seeded effect); a seed's shuffle | 3 | ctx | = |
+| P219 | Beam aim: pick a node, origin or stage point on the canvas; clear the lock | L | 3 · ctx | The open effect › Aim at (Pick, clear) | 3 | ctx | = |
 | P220 | Group members: expand, reorder by drag, menu (Enabled, Move up or down, Remove) | L | 3–4 · ctx / no | Effect menu › Combine with…; row drag | 3–4 | no | = |
-| P221 | "Combine with another effect" or "Add to group" | L | 3 · ctx | VFX › the selected effect's title action › Combine with… (a word, visible); an effect row's ⋯ › Combine with… | 3 | ctx | = |
+| P221 | "Combine with another effect" or "Add to group" | L | 3 · ctx | VFX › the open effect's foot › Combine (a word); an effect row's ⋯ › Combine with… | 3 | ctx | = |
 | P222 | Choose which effect values show keys (inspector and timeline) | L | 4 · no | Effect menu › Visible keys… | 3 | no | −1 |
-| P223 | Jump to the previous or next effect key; toggle a key on the chosen value | L | 3 · ctx (when keys exist) | VFX › a parameter's right-click menu › Previous key, Next key, Add key | 3 | ctx | = |
+| P223 | Jump to the previous or next effect key; toggle a key on the chosen value | L | 3 · ctx (when keys exist) | VFX › a value's menu (right-click) › Previous key, Next key, Add key; the key strip | 3 | ctx | = |
 | P224 | Easing of the current effect key | L | 4 · ctx | Parameter menu | 3–4 | no | = |
 | P225 | Legacy per-pose effect stacks | L | 3 · ctx (legacy) | One effect list | 3 | ctx | = |
-| P226 | Warns that effects apply to this part only | L | — · ctx | VFX › the selected effect: a one-line warning under its name when a connected part is missing | 0 | ctx | = |
+| P226 | Warns that effects apply to this part only | L | — · ctx | VFX › a notice under the head (connected effects), in the person's language | 0 | ctx | = |
 | P227 | Search the library | M | 2 · ctx | Library search | 2 | ctx | = |
 | P228 | Refresh | L | 2 · ctx | Library › Mine › the folder path › New folder, Refresh | 2 | no | = |
 | P229 | New folder (dialog) | L | 2 · ctx | Library › Mine › the folder path › New folder, Refresh | 2 | no | = |
@@ -672,7 +672,7 @@ Every row again at the tier sizes (1440×900 at 125% and 150% UI scale are 1152�
 | VX-01 | Select a VFX clip, which the VFX panel then edits | L | 1 · contextual | Effect clip rows | 1 | ctx | = |
 | VX-02 | Move or trim a VFX clip | L | 1 (drag) · contextual | Effect clip rows | 1 | ctx | = |
 | VX-03 | Retime effect keys | L | 1 (drag) · contextual | Effect clip rows | 1 | ctx | = |
-| VX-04 | Fade-in / fade-out handles | L | 1 (drag) · contextual | Effect clip fade handles (on the selected clip and on hover) | 1d | ctx | = |
+| VX-04 | Fade-in / fade-out handles | L | 1 (drag) · contextual | Effect clip fade handles (on the selected clip and on hover); the open effect › Timing › Fade in, Fade out | 1d | ctx | = |
 | VX-05 | Choose which property keys the lane shows | L | 1 (+ choice) · contextual (the clip has keys) | The effect row’s Visible keys (on hover, beside its name); the effect menu › Visible keys… | 1 (+ choice) | hover | = |
 | VX-06 | Delete a key or clip; copy / duplicate / paste a clip | L | K · no | Keys | K | no | = |
 | EA-01 | Choose the easing: Auto, Bezier, Ease in, Ease out, Linear or Constant | M | 3 (double-click a key › mode › Apply) or 4 (via the menu) · no | Advanced: range inspector Easing; Simple: easing popover | 2–3 | ctx | = |

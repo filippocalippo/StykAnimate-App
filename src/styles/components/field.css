@@ -13,7 +13,10 @@
  * switch ([data-switch-field]: the one switch pattern in inspector sections),
  * the stepper field ([data-steps]: "Order ↓ 2 ↑"), the text field
  * ([data-text]), the inline field of header rows ([data-inline]) and the
- * selects (select.css). Rendered by src/inspector-kit.mjs. No key state. */
+ * selects (select.css), and the value field ([data-range]: a bounded number that is its own slider, with its
+ * default, an angle's dial, small buttons at its end and the choice, colour, picker and pair that go with it;
+ * components.md, Value field). Rendered by src/inspector-kit.mjs. The Properties tab shows no key state; an
+ * effect clip's value carries its key in its trailing slot (features/vfx.css). */
 @layer components {
   .ui-field {
     --_h: var(--control-lg);

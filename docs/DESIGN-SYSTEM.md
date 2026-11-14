@@ -152,7 +152,7 @@ stylesheet at runtime (JS02).
 | Lines | `--line-1` … `--line-3`, `--line-control` | The first three are decorative; `--line-control` meets 3:1 for control boundaries. |
 | Blue | `--accent`, `--accent-strong`, `--accent-line`, `--accent-text`, `--accent-soft` | One blue, four jobs: brand fills that carry an ink label, fills behind glyphs (switches, checkboxes, sliders), focus rings and thin marks, and small blue text. The brand blue `#0d99ff` is 2.99:1 on white, so never put white text or icons on `--accent`. |
 | Primary | `--primary`, `--primary-hover`, `--on-primary` | The main action on a surface: an ink pill in light, a light pill in dark. |
-| Controls | `--control-soft`, `--switch-knob-on`, `--switch-knob-off`, `--slider-*`, `--swatch-ring`, `--scrollbar-thumb` | |
+| Controls | `--control-soft`, `--switch-knob-on`, `--switch-knob-off`, `--slider-*`, `--value-fill`, `--value-fill-hover`, `--value-fill-active`, `--swatch-ring`, `--scrollbar-thumb` | `--value-fill*`: the travel a value field fills (components.md, Value field): a neutral at rest and on hover, the accent's soft tint while dragged or typed. |
 | Status | `--danger-*`, `--warning-*`, `--success-*`, `--neutral-dot` | Each has `-text` and `-soft`; danger also `-strong` with `--on-danger`. |
 | Concepts | `--tint-select`, `-time`, `-library`, `-draw`, `-fx`, `-camera`, `-export` | One meaning per hue. `-soft` is a background; `-ink` is for small text and icons. |
 
@@ -223,6 +223,7 @@ dark colour.
 - **Empty states**: `.ds-empty` with `.ds-empty-icon`, a `strong` title, a short
   `p` and `.ds-empty-actions`. Explain what the area is for and offer the next
   action; avoid bare "Nothing here" messages.
+- **Value field**: `.ui-field[data-range]` (`src/inspector-kit.mjs` number rows with `range`, `default`, `angle`, `scrubAnywhere`, `trail`, `help`; `src/property-controls.mjs` drives it): a bounded number that is its own slider, with its default's tick, a non-linear scale for wide ranges (`src/ui/value-scale.mjs`), a dial for angles and a reset on a second tap. The effects panel uses it for every number; see docs/design/components.md.
 - **Switches**: `.ds-switch` wraps a checkbox and a label with an optional
   `small` explanation. Use them for behaviour settings that need a sentence of
   explanation. Give the input an explicit `aria-label` when the label has a hint.
