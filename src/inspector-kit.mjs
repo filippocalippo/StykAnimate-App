@@ -199,7 +199,7 @@ function fieldNameAttributes(row, withUnit = false) {
   return reference?.messageKey ? ' ' + messageAttributes(reference.messageKey, reference.messageParams, 'aria-label') : '';
 }
 
-const GLUED_UNITS = new Set(['%', '°', '×']);
+const GLUED_UNITS = new Set(['%', '°', '×', '/f']);
 /** A value with its unit as a person reads it: "100%", "172°", "8 px", "24 fps". */
 export function formatValueWithUnit(value, {unit = '', precision = 2} = {}) {
   const text = formatPropertyValue(value, precision);
@@ -309,6 +309,8 @@ function valueFieldStyle(row, value) {
   if (!row.range || row.mixed) return undefined;
   const range = {scale: row.scale, min: finite(row.min), max: finite(row.max), knee: row.knee, exponent: row.exponent, step: row.step};
   const parts = [`--_p:${positionPercent(valueToPosition(value, range))}`];
+  // A value that runs both ways fills from zero, not from its minimum.
+  if (range.min < 0 && range.max > 0) parts.push(`--_z:${positionPercent(valueToPosition(0, range))}`);
   if (finite(row.default) !== undefined) parts.push(`--_d:${positionPercent(valueToPosition(row.default, range))}`);
   return parts.join(';');
 }
@@ -483,7 +485,8 @@ function color(row, env) {
     // A value field's colour (showLabel) names itself like every field: its label, then the swatch and its hex.
     const label = row.showLabel ? `<span class="ui-field-label"${descriptorAttributes(row, "label")}>${escapeHTML(row.label)}</span>` : '';
     return `<button${attributes({
-      type: 'button', class: `ui-field${span(row)}`, 'data-color': true, 'data-labelled': Boolean(row.showLabel), id: id(row.id), 'data-paint-picker': true,
+      // `owned`: the owner opens its own picker (an effect's paint, with gradients), so the shared one stays away.
+      type: 'button', class: `ui-field${span(row)}`, 'data-color': true, 'data-labelled': Boolean(row.showLabel), id: id(row.id), 'data-paint-picker': row.owned ? undefined : true,
       'aria-label': row.description ?? row.label, 'data-tooltip': row.tip, disabled: Boolean(row.disabled), ...extras(row),
     })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}>${label}${swatch}<span class="ui-field-hex"${row.captionKey ? descriptorAttributes(row, 'caption') : ''}>${caption}</span></button>`;
   }

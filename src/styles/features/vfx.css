@@ -22,6 +22,7 @@
 
   /* ---- The head: the target, and Apply to on the same line ---- */
   .vfx-head {
+    container: vfx-head / inline-size;
     display: flex; flex: none; align-items: center; gap: var(--space-2);
     min-block-size: calc(var(--control-lg) + var(--space-3));
     padding: var(--space-3) calc(var(--island-pad) - var(--space-1)) var(--space-1) var(--island-pad);
@@ -29,6 +30,8 @@
   :where(#vfx-panel) .vfx-scope { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 58%; block-size: var(--control-sm); background: transparent; }
   :where(#vfx-panel) .vfx-scope:where(:hover) { background: var(--surface-hover); }
   :where(#vfx-panel) .vfx-scope > .ui-field-input { color: var(--text-2); font: var(--type-small-strong); text-align: end; field-sizing: content; }
+  /* On a narrow panel the scope's value names itself; "Apply to" stays its tooltip and accessible name. */
+  @container vfx-head (width < 300px) { :where(#vfx-panel) .vfx-scope > .ui-field-label { display: none; } }
 
   /* ---- The list head: what the list shows, and the one way to add ---- */
   .vfx-list-head {
@@ -185,7 +188,7 @@
   .vfx-pair:where(:has(> .ui-field-link)) { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
   .vfx-pair:where([data-single]) { grid-template-columns: minmax(0, 1fr) auto; }
   /* A choice of two to four keeps its words on a narrow card: its label goes above its segments. */
-  @container vfx-fields (width < 244px) {
+  @container vfx-fields (width < 224px) {
     .ui-field:where([data-segments]) { flex-wrap: wrap; block-size: auto; row-gap: var(--space-0-5); padding-block: var(--space-1-5) var(--space-1); }
     .ui-field:where([data-segments]) > .ui-segmented { flex: 1 1 100%; block-size: calc(var(--control-sm) - 2px); }
   }
@@ -321,6 +324,11 @@
   }
   .vfx-catalog-card > span:not(.vfx-catalog-art) { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .vfx-catalog-card > small { flex: none; font: var(--type-small); color: var(--text-3); font-variant-numeric: tabular-nums; }
+  /* A preset's card: its name, and under it whether it is a moment or a look. */
+  .vfx-catalog-card:where(:has(> small)) { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: var(--space-2); row-gap: 0; min-block-size: 40px; }
+  .vfx-catalog-card:where(:has(> small)) > .vfx-catalog-art { grid-row: 1 / 3; }
+  .vfx-catalog-card:where(:has(> small)) > span:not(.vfx-catalog-art) { align-self: end; font: var(--type-small-strong); }
+  .vfx-catalog-card:where(:has(> small)) > small { grid-column: 2; align-self: start; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-micro); font-weight: var(--weight-medium); }
   .vfx-catalog-card:where(:hover, :focus-visible):not(:disabled) { background: var(--surface-hover); outline: none; }
   .vfx-catalog-card:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-ring); }
   .vfx-catalog-card:disabled { opacity: 0.42; }

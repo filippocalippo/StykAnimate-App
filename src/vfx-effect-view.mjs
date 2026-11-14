@@ -119,7 +119,7 @@ function paramHTML(host, ctx, item) {
   if (control === 'color') {
     const paint = vfxPaint(value), solid = paint.type === 'solid', stop = paint.stops[0], hex = `#${stop.color.map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
     const caption = solid ? `${hex.slice(1).toUpperCase()}${stop.opacity < 1 ? ` · ${Math.round(stop.opacity * 100)}%` : ''}` : interfaceText('vfxInspector.gradient');
-    row = {kind: 'color', picker: 'paint', showLabel: true, ...n, value: hex, paint: solid ? undefined : paintCSS(paint), caption, captionKey: solid ? undefined : 'vfxInspector.gradient', data: {'vfx-paint': key}, disabled};
+    row = {kind: 'color', picker: 'paint', owned: true, showLabel: true, ...n, value: hex, paint: solid ? undefined : paintCSS(paint), caption, captionKey: solid ? undefined : 'vfxInspector.gradient', data: {'vfx-paint': key}, disabled};
   } else if (control === 'switch') {
     row = {kind: 'field-switch', ...n, id: `vfx-field-${key}`, checked: Boolean(value), data: {'vfx-toggle': key}, disabled};
   } else if (control === 'segments' || control === 'menu' || control === 'picker') {

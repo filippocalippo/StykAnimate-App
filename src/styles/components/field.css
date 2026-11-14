@@ -119,7 +119,8 @@
      left to right in every language, as numbers do (docs/LOCALIZATION.md). */
   .ui-field[data-range] {
     --_fill: var(--value-fill);
-    background-image: linear-gradient(to right, var(--_fill) 0 var(--_p, 0%), transparent var(--_p, 0%));
+    /* From the start, or from zero for a value that runs both ways (--_z: a gravity, an offset, a strength that can pull). */
+    background-image: linear-gradient(to right, transparent 0 min(var(--_z, 0%), var(--_p, 0%)), var(--_fill) min(var(--_z, 0%), var(--_p, 0%)) max(var(--_z, 0%), var(--_p, 0%)), transparent max(var(--_z, 0%), var(--_p, 0%)));
     cursor: ew-resize; touch-action: none;
     transition: box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
   }
