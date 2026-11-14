@@ -134,7 +134,7 @@ fn paint_covers_and_light_adds_on_any_background() {
         if let Some(argb) = background {
             prims.push(Prim { kind: K_FILL_VIEW, group: 0, color: argb8(argb), paint: NO_PAINT, a: [0.0; 4], b: [0.0; 4], c: [0.0; 4] });
         }
-        let paints = vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 0.0], [0.0; 4], [0.0; 4], [0.0; 4]];
+        let paints = vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 0.0], [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]];
         prims.push(Prim { kind: particle_kind(P_DISC), group: 0, color: 0, paint: 0, a: [16.0, 16.0, 12.0, 0.0], b: [0.0, 0.0, emissive, 0.0], c: [1.0, 0.5, 0.0, 1.0] });
         let end = prims.len() as u32;
         let list = DrawList { prims, paints, groups: vec![Group { parent: 0, depth: 0, opacity: 1.0, bounds: [0.0; 4], layer: NO_LAYER }], passes: vec![Pass { depth: 0, start: 0, end }], background_prims: u32::from(background.is_some()), ..Default::default() };
@@ -166,7 +166,7 @@ fn paint_covers_and_light_adds_on_any_background() {
 fn a_cartoon_shadow_darkens_the_side_away_from_the_light() {
     use styk_draw::*;
     for rotation in [0.0f32, 2.0] {
-        let paints = vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 0.0], [0.0; 4], [0.0, 0.0, 0.0, 1.0], [0.2, 0.4, 0.6, 0.3]];
+        let paints = vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 0.0], [0.0; 4], [0.0; 4], [0.0, 0.0, 0.0, 0.3], [0.2, 0.4, 0.6, 1.0]];
         let prims = vec![
             Prim { kind: K_FILL_VIEW, group: 0, color: argb8(0xffffffff), paint: NO_PAINT, a: [0.0; 4], b: [0.0; 4], c: [0.0; 4] },
             Prim { kind: particle_kind(P_DISC), group: 0, color: 0, paint: 0, a: [32.0, 32.0, 24.0, rotation], b: [0.0; 4], c: [1.0, 0.8, 0.2, 1.0] },
@@ -212,4 +212,29 @@ fn a_beam_darkens_to_its_rim_toward_its_edge() {
         assert!(inside[0] > 60 && inside[1] > 190 && inside[2] > 235, "{name}: the light body inside {inside:?}");
         assert!(sum(edge) + 150 < sum(inside) && edge[2] > edge[1] + 40 && edge[1] > edge[0], "{name}: a deep rim at the edge {edge:?}, inside {inside:?}");
     }
+}
+
+/// A white-hot core (`Spec::core`, the draw's row 4 w; the cartoon shadow has rows 5 and 6) whitens a particle toward its middle and leaves its edge its
+/// own colour, alike on both renderers.
+#[test]
+fn a_hot_core_whitens_the_middle_and_keeps_the_edge() {
+    use styk_draw::*;
+    let draw = |core: f32, x: usize| -> [u8; 4] {
+        let background = Prim { kind: K_FILL_VIEW, group: 0, color: argb8(0xff000000), paint: NO_PAINT, a: [0.0; 4], b: [0.0; 4], c: [0.0; 4] };
+        let paints = vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 0.0], [0.0; 4], [0.0, 0.0, 0.0, core], [0.0; 4], [0.0; 4]];
+        let disc = Prim { kind: particle_kind(P_DISC), group: 0, color: 0, paint: 0, a: [32.0, 16.0, 14.0, 0.0], b: [0.0; 4], c: [1.0, 0.5, 0.0, 1.0] };
+        let list = DrawList { prims: vec![background, disc], paints, groups: vec![Group { parent: 0, depth: 0, opacity: 1.0, bounds: [0.0; 4], layer: NO_LAYER }], passes: vec![Pass { depth: 0, start: 0, end: 2 }], background_prims: 1, ..Default::default() };
+        let (cpu, gpu) = both(&list, [64, 32]);
+        let at = (16 * 64 + x) * 4;
+        if let Some(gpu) = gpu {
+            assert!((0..4).all(|c| gpu[at + c].abs_diff(cpu[at + c]) <= 2), "core {core} at {x}: GPU {:?} CPU {:?}", &gpu[at..at + 4], &cpu[at..at + 4]);
+        }
+        [cpu[at], cpu[at + 1], cpu[at + 2], cpu[at + 3]]
+    };
+    // The middle: 85 % of the way to white.
+    let middle = draw(0.85, 32);
+    assert!(middle[0] == 255 && (230..=240).contains(&middle[1]) && (210..=222).contains(&middle[2]), "{middle:?}");
+    assert_eq!(draw(0.0, 32), [255, 128, 0, 255], "no core: the colour itself");
+    // Near the edge (four fifths out): the colour, core or not.
+    assert_eq!(draw(0.85, 32 + 11), draw(0.0, 32 + 11));
 }

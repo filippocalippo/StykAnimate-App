@@ -258,9 +258,12 @@ struct Rows {
     shape: [f32; 4],
     shade: f32,
     outline: [f32; 4],
-    /// Erosion edge, rim width, rim amount.
+    /// Erosion edge, rim width, rim amount, white-hot core.
     erosion: [f32; 4],
+    /// The rim's colour, the cartoon shadow's depth.
     rim: [f32; 4],
+    /// The cartoon shadow's colour and amount.
+    shadow: [f32; 4],
 }
 
 /// A record's corner `q` (-1..1): its local position, its shading coordinates and
@@ -366,15 +369,21 @@ fn over(top: [f32; 4], under: [f32; 4]) -> [f32; 4] {
 const CEL_LIGHT: [f32; 2] = [-0.45, -0.893];
 
 /// A crisp shape's cartoon shadow side (`cel_shadow` in prim.wgsl): where the shape moved toward the
-/// light no longer covers `uv`, its colour turns to the shadow's, with a hard edge.
+/// light (row 5's w of its size) no longer covers `uv`, its colour turns to the shadow's (row 6), with a hard edge.
 fn cel_shadow(p: &Prim, uv: [f32; 2], shape: u32, px: f32, rows: &Rows) -> [f32; 3] {
     let (sn, cs) = (p.a[3].sin(), p.a[3].cos());
     let depth = rows.rim[3];
     let l = [(CEL_LIGHT[0] * cs + CEL_LIGHT[1] * sn) * depth, (-CEL_LIGHT[0] * sn + CEL_LIGHT[1] * cs) / rows.shape[2].max(0.05) * depth];
     let (x, y) = (uv[0] - l[0], uv[1] - l[1]);
     let d = if shape == P_DISC { len(x, y) - 1.0 } else { shape_distance(shape, x, y, p.color & 0xffff) };
-    let s = (1.0 - (0.5 - d / px).clamp(0.0, 1.0)) * rows.erosion[3];
-    [0, 1, 2].map(|i| mix(p.c[i], rows.rim[i], s))
+    let s = (1.0 - (0.5 - d / px).clamp(0.0, 1.0)) * rows.shadow[3];
+    [0, 1, 2].map(|i| mix(p.c[i], rows.shadow[i], s))
+}
+
+/// `rgb` whiter toward a shape's centre by `core`, at distance `r` from it (1: its edge).
+fn hot(rgb: [f32; 3], core: f32, r: f32) -> [f32; 3] {
+    let k = core * (1.0 - smooth(0.0, 0.5, r));
+    [0, 1, 2].map(|i| mix(rgb[i], 1.0, k))
 }
 
 /// A particle's premultiplied colour at `uv` (`particle_color` in prim.wgsl); its alpha is
@@ -383,11 +392,13 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
     let shape = particle_shape(p.kind);
     let c = p.c;
     let mut rgb = [c[0], c[1], c[2]];
-    if rows.erosion[3] > 0.0 && !matches!(shape, P_SEGMENT | P_STREAK | P_MATERIAL | P_RING | P_BOKEH) {
+    if rows.shadow[3] > 0.0 && !matches!(shape, P_SEGMENT | P_STREAK | P_MATERIAL | P_RING | P_BOKEH) {
         rgb = cel_shadow(p, uv, shape, prm[0], rows);
     }
     let e = p.b[2];
     let softness = rows.shape[0];
+    // A white-hot middle (row 4's w): discs and crisp shapes whiter toward their centre.
+    let mut col = rgb;
     let cov = match shape {
         P_SEGMENT => {
             let (hl, px) = (prm[0], prm[1]);
@@ -440,6 +451,7 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
         P_DISC | P_RING | P_BOKEH => {
             let r = len(uv[0], uv[1]);
             let px = prm[0];
+            col = hot(rgb, rows.erosion[3], r);
             let k = match shape {
                 P_RING => {
                     let hw = softness.max(0.02);
@@ -452,7 +464,7 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
             };
             if rows.shape[3] > 0.0 {
                 let line = edge(r - 1.0 - prm[1], 0.0, px);
-                let fill = lit(rgb, k * c[3], e);
+                let fill = lit(col, k * c[3], e);
                 let band = (line - k.min(1.0)).max(0.0) * rows.outline[3] * c[3];
                 return [fill[0] + rows.outline[0] * band, fill[1] + rows.outline[1] * band, fill[2] + rows.outline[2] * band, fill[3] + band];
             }
@@ -462,22 +474,23 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
             let d = shape_distance(shape, uv[0], uv[1], p.color & 0xffff);
             let px = prm[0];
             let k = edge(d, softness, px);
+            col = hot(rgb, rows.erosion[3], len(uv[0], uv[1]));
             if rows.shape[3] > 0.0 {
                 let line = edge(d - prm[1], 0.0, px);
-                let fill = lit(rgb, k * c[3], e);
+                let fill = lit(col, k * c[3], e);
                 let band = (line - k).max(0.0) * rows.outline[3] * c[3];
                 return [fill[0] + rows.outline[0] * band, fill[1] + rows.outline[1] * band, fill[2] + rows.outline[2] * band, fill[3] + band];
             }
             // A spark's and a sparkle's middle is hotter than its points.
             if shape == P_SPARK || shape == P_SPARKLE {
                 let r = len(uv[0], uv[1]);
-                let core = (1.0 - smooth(0.0, 0.45, r)) * 0.6;
+                let core = (1.0 - smooth(0.0, 0.45, r)) * if rows.erosion[3] > 0.0 { rows.erosion[3] } else { 0.6 };
                 return lit([0, 1, 2].map(|i| mix(rgb[i], 1.0, core)), k * c[3], e);
             }
             k
         }
     };
-    lit(rgb, cov * c[3], e)
+    lit(col, cov * c[3], e)
 }
 
 /// A beam's premultiplied colour at `uv` (`beam_color` in prim.wgsl); `aa` is the pixel in local units.
@@ -543,7 +556,7 @@ pub(crate) fn draw(list: &DrawList, p: &Prim, target: &mut Target, layer: &Layer
     let row = |i: u32| list.paints.get((p.paint + i) as usize).copied().unwrap_or([0.0; 4]);
     let (r0, r1) = (row(0), row(1));
     let beam = p.kind & 255 == K_BEAM;
-    let rows = Rows { shape: row(2), shade: r1[3], outline: row(3), erosion: row(4), rim: row(5) };
+    let rows = Rows { shape: row(2), shade: r1[3], outline: row(3), erosion: row(4), rim: row(5), shadow: row(6) };
     // The layer's pixel in the draw's local units (`px` in prim.wgsl).
     let px = layer.aa / r1[2].max(1e-12);
     let m = layer.m32;

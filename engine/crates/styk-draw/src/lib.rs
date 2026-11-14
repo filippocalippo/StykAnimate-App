@@ -79,16 +79,17 @@ pub fn window_depth(z: f32, z_min: f32, range: f32) -> f32 {
 }
 
 /// One particle of a generated effect (docs/engine/vfx.md, Generated effects), in its
-/// draw's local coordinates. `paint` is the offset of the draw's six rows in
+/// draw's local coordinates. `paint` is the offset of the draw's seven rows in
 /// [`DrawList::paints`]: `[m0, m1, m2, m3]` and `[tx, ty, s, shade]`, its transform to the
 /// world (`x' = m0·x + m2·y + tx`, `y' = m1·x + m3·y + ty`, a movieclip's placement for
 /// effects nested in one, `s` = √|det|) and how much a material's light shades it, then
 /// `[softness, stretch, aspect, outline width]` (the width in local units, 0 for none),
-/// the outline's straight RGBA, `[erosion edge, rim width, rim amount, shadow amount]` and
-/// `[rim or shadow colour, shadow depth]`: a material's rim where it erodes, or a crisp
-/// shape's cartoon shadow side (where the shape moved `depth` of its size toward the light,
-/// up and a little left in the world, does not cover it; a shadow amount of 0 is none).
-/// The particle's shape is [`particle_shape`] (`P_*`); `a` = (x, y, size,
+/// the outline's straight RGBA, `[erosion edge, rim width, rim amount, white-hot core]`,
+/// `[rim colour, shadow depth]` and `[shadow colour, shadow amount]`: a material's rim where it
+/// erodes; a white-hot middle that whitens discs and crisp shapes toward their centre (0 none,
+/// a spark and a sparkle 0.6 of their own); a crisp shape's cartoon shadow side (where the
+/// shape moved `depth` of its size toward the light, up and a little left in the world, does
+/// not cover it; an amount of 0 is none). The particle's shape is [`particle_shape`] (`P_*`); `a` = (x, y, size,
 /// rotation), `b` = (vx, vy, emission, erosion), `c` = straight RGBA in floats (its colour
 /// and opacity), `color` = a material particle's cell (`material << 4 | variant`) or a
 /// shape's seed. Emission 0 paints; 1 adds light (the record's premultiplied colour keeps

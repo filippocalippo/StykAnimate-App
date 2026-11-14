@@ -159,6 +159,18 @@ pub struct Halo {
     pub alpha: f64,
 }
 
+/// A smaller copy of each particle drawn inside it, from the same evaluation (so it is
+/// always centred in it): `scale` of its size, its colour moved `mix` of the way to
+/// `color`, giving off `emissive` of light (a burst's white-hot middle, a cartoon flame's
+/// yellow heart).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Inner {
+    pub scale: f64,
+    pub color: [f64; 3],
+    pub mix: f64,
+    pub emissive: f64,
+}
+
 /// An ink line around each particle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Outline {
@@ -394,6 +406,18 @@ pub struct Spec {
     pub arc_rhythm: f64,
     /// Lightning about a body (an `ARC` layer emitting from the body): how far each bolt reaches.
     pub arc_reach: f64,
+    /// Pixel art: positions on a grid of `snap` times the particle's size at birth, its size in
+    /// half steps of that grid, its colour and opacity in steps (0: smooth).
+    pub snap: f64,
+    /// Each particle is drawn as lightning striking from where it was born to where it is: a
+    /// jagged bolt `arc_amp` of its length rough, forked `arc_branches` times, struck again every
+    /// `arc_rhythm` ticks, its radius `strike` times the particle's size (0: none).
+    pub strike: f64,
+    /// A white-hot middle: discs and crisp shapes turn whiter toward their centre by this much
+    /// (0: none; a spark and a sparkle have 0.6 of their own).
+    pub core: f64,
+    /// A smaller copy of each particle inside it.
+    pub inner: Option<Inner>,
 }
 
 impl Default for Spec {
@@ -488,6 +512,10 @@ impl Default for Spec {
             arc_branches: 0.0,
             arc_rhythm: 2.0,
             arc_reach: 0.0,
+            snap: 0.0,
+            strike: 0.0,
+            core: 0.0,
+            inner: None,
         }
     }
 }

@@ -26,6 +26,18 @@ pub const SEGMENTS: [(u32, u32, f64, bool); 10] = [
     (10, 9, 44.0, false),
 ];
 
+/// The segment whose end is the figure's left hand, and its left foot.
+pub const HAND: u32 = 4;
+pub const FOOT: u32 = 8;
+
+/// Where the end of segment `id` is in a pose.
+pub fn joint(hip: [f64; 2], angles: &[f64; 10], id: u32) -> [f64; 2] {
+    let Some(i) = SEGMENTS.iter().position(|s| s.0 == id) else { return hip };
+    let (_, parent, length, _) = SEGMENTS[i];
+    let from = if parent == 0 { hip } else { joint(hip, angles, parent) };
+    [from[0] + length * angles[i].cos(), from[1] + length * angles[i].sin()]
+}
+
 /// A pose: the hip and every segment's angle (absolute, y down). `arms`: 0 at rest, 1
 /// raised above the head; `stride`: -1..1, legs and arms swinging.
 pub fn pose(hip: [f64; 2], arms: f64, stride: f64) -> ([f64; 2], [f64; 10]) {
@@ -100,6 +112,8 @@ pub struct Key {
 pub struct Clip {
     /// `None`: the scene; otherwise the figure's uid.
     pub target: Option<u32>,
+    /// One node of the figure (a segment id: the joint at its end) instead of all of it.
+    pub node: Option<u32>,
     pub kind: String,
     /// Saved parameters as JSON values (`"1.5"`, `"16747050"`, `"{...}"` for a paint).
     pub params: Vec<(String, String)>,
@@ -111,7 +125,13 @@ pub struct Clip {
 
 impl Clip {
     pub fn new(target: Option<u32>, kind: &str) -> Clip {
-        Clip { target, kind: kind.into(), params: Vec::new(), start: 0.0, duration: None, keys: Vec::new(), include_attached: false }
+        Clip { target, node: None, kind: kind.into(), params: Vec::new(), start: 0.0, duration: None, keys: Vec::new(), include_attached: false }
+    }
+
+    /// Targets one node of the figure (`None`: all of it).
+    pub fn on_node(mut self, node: Option<u32>) -> Clip {
+        self.node = node;
+        self
     }
 
     /// Sets a parameter (a JSON value; `0x…`, `on`, `off` are read as numbers).
@@ -268,9 +288,10 @@ impl Stage {
                 let list: Vec<String> = clip.keys.iter().filter(|k| k.param == name).map(|k| format!(r#"{{"tick":{},"value":{},"interpolation":"linear"}}"#, k.tick, k.value)).collect();
                 keys.push(format!(r#""vfx1:{}:{effect_id}:{name}":[{}]"#, clip.kind, list.join(",")));
             }
-            let target = match clip.target {
-                None => r#"{"kind":"scene"}"#.to_string(),
-                Some(uid) => format!(r#"{{"kind":"figure","uid":{uid}}}"#),
+            let target = match (clip.target, clip.node) {
+                (None, _) => r#"{"kind":"scene"}"#.to_string(),
+                (Some(uid), None) => format!(r#"{{"kind":"figure","uid":{uid}}}"#),
+                (Some(uid), Some(handle)) => format!(r#"{{"kind":"segment","uid":{uid},"handleId":{handle},"figureTypeId":1}}"#),
             };
             clips.push(format!(
                 r#"{{"id":"00000000-0000-4000-8000-{:012x}","name":"","target":{target},"start":{},"duration":{},"offset":0,"enabled":true,"strength":1,"fadeIn":0,"fadeOut":0,"includeAttached":{},"effects":[{{"version":2,"id":"{effect_id}","type":"{}","enabled":true,"params":{{{params}}}}}],"keys":{{{}}}}}"#,
@@ -313,6 +334,8 @@ pub struct Specimen {
     pub erosion: f32,
     /// A cartoon shadow side's strength (crisp shapes).
     pub cel: f32,
+    /// A white-hot middle (`Spec::core`).
+    pub core: f32,
     /// A material's cell (`material << 4 | variant`), or a shape's seed.
     pub cell: u32,
 }
@@ -320,8 +343,8 @@ pub struct Specimen {
 /// Every particle shape and material, each in a few looks: what the renderers must draw alike.
 pub fn specimen_list() -> Vec<Specimen> {
     use styk_draw::*;
-    let s = |label, shape, softness: f32| Specimen { label, shape, softness, outline: 0.0, emissive: 0.0, erosion: 0.0, cel: 0.0, cell: 7 };
-    let m = |label, material: u32, erosion: f32, outline: f32| Specimen { label, shape: P_MATERIAL, softness: 0.0, outline, emissive: 0.0, erosion, cel: 0.0, cell: material << 4 | 1 };
+    let s = |label, shape, softness: f32| Specimen { label, shape, softness, outline: 0.0, emissive: 0.0, erosion: 0.0, cel: 0.0, core: 0.0, cell: 7 };
+    let m = |label, material: u32, erosion: f32, outline: f32| Specimen { label, shape: P_MATERIAL, softness: 0.0, outline, emissive: 0.0, erosion, cel: 0.0, core: 0.0, cell: material << 4 | 1 };
     vec![
         s("SOFT DISC", P_DISC, 1.4),
         s("DISC", P_DISC, 0.0),
@@ -350,6 +373,8 @@ pub fn specimen_list() -> Vec<Specimen> {
         Specimen { outline: 0.12, cel: 0.9, ..s("CEL CLOUD", P_CLOUD, 0.0) },
         Specimen { emissive: 1.0, ..s("LIGHT", P_DISC, 1.4) },
         Specimen { softness: 1.0, ..s("TRAIL", P_SEGMENT, 1.0) },
+        Specimen { core: 0.85, emissive: 0.3, ..s("HOT DISC", P_DISC, 0.9) },
+        Specimen { core: 0.7, ..s("HOT SHARD", P_SHARD, 0.0) },
         m("SMOKE", super::atlas::SMOKE, 0.05, 0.0),
         m("FLAME", super::atlas::FLAME, 0.25, 0.0),
         m("WISP", super::atlas::WISP, 0.1, 0.0),
@@ -386,8 +411,9 @@ pub fn specimens(background: u32, sizes: &[f32], columns: usize) -> (styk_draw::
             let rows = if k == 0 { rows } else { at };
             paints.push([sp.softness, 1.0, 1.0, sp.outline * r]);
             paints.push([0.08, 0.05, 0.1, 1.0]);
-            paints.push([0.12, 0.2, 0.6, sp.cel]);
+            paints.push([0.12, 0.2, 0.6, sp.core]);
             paints.push([0.55, 0.08, 0.02, if sp.cel > 0.0 { 0.3 } else { 0.0 }]);
+            paints.push([0.55, 0.08, 0.02, sp.cel]);
             let cx = x + r;
             let kind = particle_kind(sp.shape) | if sp.shape == P_SEGMENT { F_CAP_START | F_CAP_END } else { 0 };
             let (a, b) = match sp.shape {

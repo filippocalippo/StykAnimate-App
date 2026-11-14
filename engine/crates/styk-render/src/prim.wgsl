@@ -591,28 +591,31 @@ fn material_level(m: f32, v: f32, uv: vec2<f32>, level: f32) -> vec2<f32> {
 const CEL_LIGHT: vec2<f32> = vec2<f32>(-0.45, -0.893);
 
 // A crisp shape's cartoon shadow side: where the shape moved `rim.w` of its size toward the light no
-// longer covers `uv`, its colour turns to `rim.rgb`, `erosion.w` strong, with a hard edge.
-fn cel_shadow(p: Prim, uv: vec2<f32>, shape: u32, px: f32, rotation: f32, aspect: f32, erosion: vec4<f32>, rim: vec4<f32>) -> vec3<f32> {
+// longer covers `uv`, its colour turns to `shadow.rgb`, `shadow.w` strong, with a hard edge.
+fn cel_shadow(p: Prim, uv: vec2<f32>, shape: u32, px: f32, rotation: f32, aspect: f32, rim: vec4<f32>, shadow: vec4<f32>) -> vec3<f32> {
     let cr = vec2<f32>(cos(rotation), sin(rotation));
     // The light in the particle's own (turned, stretched) frame.
     let l = vec2<f32>(CEL_LIGHT.x * cr.x + CEL_LIGHT.y * cr.y, (-CEL_LIGHT.x * cr.y + CEL_LIGHT.y * cr.x) / max(aspect, 0.05)) * rim.w;
     var d = 0.0;
     if (shape == P_DISC) { d = length(uv - l) - 1.0; } else { d = shape_distance(shape, uv - l, p.color & 0xffffu); }
-    let s = (1.0 - clamp(0.5 - d / px, 0.0, 1.0)) * erosion.w;
-    return mix(p.c.rgb, rim.rgb, s);
+    let s = (1.0 - clamp(0.5 - d / px, 0.0, 1.0)) * shadow.w;
+    return mix(p.c.rgb, shadow.rgb, s);
 }
 
-// A generated-effect particle's premultiplied colour; `rows` are the draw's rows 2 to 5.
-fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, shape_row: vec4<f32>, ink: vec4<f32>, erosion: vec4<f32>, rim: vec4<f32>) -> vec4<f32> {
+// A generated-effect particle's premultiplied colour; `rows` are the draw's rows 2 to 6: its shape, its ink, erosion
+// with the white-hot core (`erosion.w`), the rim with the shadow's depth and the cartoon shadow.
+fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, shape_row: vec4<f32>, ink: vec4<f32>, erosion: vec4<f32>, rim: vec4<f32>, shadow: vec4<f32>) -> vec4<f32> {
     let shape = particle_shape_of(p.kind);
     var rgb = p.c.rgb;
-    if (erosion.w > 0.0 && shape != P_SEGMENT && shape != P_STREAK && shape != P_MATERIAL && shape != P_RING && shape != P_BOKEH) {
-        rgb = cel_shadow(p, uv, shape, prm.x, prm.w, shape_row.z, erosion, rim);
+    if (shadow.w > 0.0 && shape != P_SEGMENT && shape != P_STREAK && shape != P_MATERIAL && shape != P_RING && shape != P_BOKEH) {
+        rgb = cel_shadow(p, uv, shape, prm.x, prm.w, shape_row.z, rim, shadow);
     }
     let alpha = p.c.a;
     let e = p.b.z;
     let softness = shape_row.x;
     var cov = 0.0;
+    // A white-hot middle (row 4's w): discs and crisp shapes whiter toward their centre.
+    var col = rgb;
     if (shape == P_SEGMENT) {
         let hl = prm.x;
         let px = prm.y;
@@ -662,6 +665,7 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
     } else if (shape == P_DISC || shape == P_RING || shape == P_BOKEH) {
         let r = length(uv);
         let px = prm.x;
+        col = mix(rgb, vec3<f32>(1.0), erosion.w * (1.0 - smooth01(0.0, 0.5, r)));
         if (shape == P_RING) {
             let hw = max(softness, 0.02);
             let band = clamp(0.5 - (abs(r - 1.0) - hw) / px, 0.0, 1.0);
@@ -675,7 +679,7 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
         }
         if (shape_row.w > 0.0) {
             let line = edge_cov(r - 1.0 - prm.y, 0.0, px);
-            let o = with_outline(rgb, cov, line, e, alpha, ink);
+            let o = with_outline(col, cov, line, e, alpha, ink);
             if (o.a <= 0.0 && max(o.r, max(o.g, o.b)) <= 0.0) { discard; }
             return o;
         }
@@ -683,14 +687,15 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
         let d = shape_distance(shape, uv, p.color & 0xffffu);
         let px = prm.x;
         cov = edge_cov(d, softness, px);
+        col = mix(rgb, vec3<f32>(1.0), erosion.w * (1.0 - smooth01(0.0, 0.5, length(uv))));
         if (shape_row.w > 0.0) {
             let line = edge_cov(d - prm.y, 0.0, px);
-            let o = with_outline(rgb, cov, line, e, alpha, ink);
+            let o = with_outline(col, cov, line, e, alpha, ink);
             if (o.a <= 0.0 && max(o.r, max(o.g, o.b)) <= 0.0) { discard; }
             return o;
         }
         if (shape == P_SPARK || shape == P_SPARKLE) {
-            let core = (1.0 - smooth01(0.0, 0.45, length(uv))) * 0.6;
+            let core = (1.0 - smooth01(0.0, 0.45, length(uv))) * select(0.6, erosion.w, erosion.w > 0.0);
             let k = cov * alpha;
             if (k <= 0.0) { discard; }
             return lit(mix(rgb, vec3<f32>(1.0), core), k, e);
@@ -698,7 +703,7 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
     }
     let k = cov * alpha;
     if (k <= 0.0) { discard; }
-    return lit(rgb, k, e);
+    return lit(col, k, e);
 }
 
 // A beam's premultiplied colour; `aa` is the pixel in local units; rows 2 to 6 of its draw are its
@@ -1577,7 +1582,7 @@ fn fs_particle(in: VsOut) -> @location(0) vec4<f32> {
     if ((p.kind & 255u) == K_BEAM) {
         src = beam_color(p, in.uv, in.a, in.aa / max(paint_row(p.paint + 1u).z, 1e-12));
     } else {
-        src = particle_color(p, in.uv, in.a, paint_row(p.paint + 1u).w, paint_row(p.paint + 2u), paint_row(p.paint + 3u), paint_row(p.paint + 4u), paint_row(p.paint + 5u));
+        src = particle_color(p, in.uv, in.a, paint_row(p.paint + 1u).w, paint_row(p.paint + 2u), paint_row(p.paint + 3u), paint_row(p.paint + 4u), paint_row(p.paint + 5u), paint_row(p.paint + 6u));
     }
     return painted(in, src);
 }

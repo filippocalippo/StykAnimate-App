@@ -28,18 +28,23 @@ pub const FILL_LIMIT: f64 = 48.0;
 /// [`MATERIALS_PENDING`] when a material was not ready).
 pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
     let mut materials = if batch.reduced { MATERIALS_REDUCED } else { 0 };
-    // Every live particle once, so the frame's coverage is known before anything is drawn.
+    // Every live particle once, so the frame's coverage is known before anything is drawn: the
+    // area each covers on the canvas and half a canvas around it (what can be on screen to draw).
     let mut alive: Vec<Vec<(Birth, Particle)>> = Vec::with_capacity(batch.draws.len());
     let mut area = 0.0f64;
     for draw in &batch.draws {
         let mut list = Vec::new();
         if !batch.spec(draw).is_beam() {
             let ev = Evaluator::new(batch, draw);
-            let s2 = draw.scale * draw.scale;
+            let m = batch.matrix(draw);
+            let [w, h] = draw.canvas;
             for i in 0..draw.count {
                 let Some(b) = ev.birth(i) else { continue };
                 if let Some(p) = ev.at_age(&b, ev.local() - b.born) {
-                    area += 4.0 * p.reach * p.reach * s2;
+                    let (x, y, r) = (m[0] * p.x + m[2] * p.y + m[4], m[1] * p.x + m[3] * p.y + m[5], p.reach * draw.scale);
+                    let across = ((x + r).min(w * 1.5) - (x - r).max(-w * 0.5)).max(0.0);
+                    let down = ((y + r).min(h * 1.5) - (y - r).max(-h * 0.5)).max(0.0);
+                    area += across * down;
                     list.push((b, p));
                 }
             }
@@ -64,9 +69,9 @@ pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
     (outs, materials)
 }
 
-/// A draw's six rows: transform, scale and shading, the shape's constants, the outline,
-/// erosion and rim, or a crisp shape's cartoon shadow (styk-draw `K_PARTICLE`). `outline`:
-/// the main drawing of its particles (halos and trails have neither outline nor shadow).
+/// A draw's seven rows: transform, scale and shading, the shape's constants, the outline, erosion
+/// and rim with the white-hot core, the shadow depth, and the cartoon shadow (styk-draw `K_PARTICLE`).
+/// `outline`: the main drawing of its particles (halos and trails have neither outline nor shadow).
 fn rows(out: &mut Out, m: [f64; 6], scale: f64, s: &Spec, softness: f64, outline: bool) -> u32 {
     let at = out.paints.len() as u32;
     let f = |v: f64| v as f32;
@@ -75,18 +80,13 @@ fn rows(out: &mut Out, m: [f64; 6], scale: f64, s: &Spec, softness: f64, outline
     let o = s.outline.filter(|_| outline);
     out.paints.push([f(softness), f(s.stretch), f(s.aspect), f(o.map_or(0.0, |o| o.width))]);
     out.paints.push(o.map_or([0.0; 4], |o| [f(o.color[0]), f(o.color[1]), f(o.color[2]), 1.0]));
-    // A material breaks up (erosion and its rim); a crisp shape may have a shadow side instead.
-    match s.cel.filter(|_| outline && s.shape != MATERIAL) {
-        Some(c) => {
-            out.paints.push([0.0, 0.0, 0.0, f(c.strength)]);
-            out.paints.push([f(c.color[0]), f(c.color[1]), f(c.color[2]), f(c.depth)]);
-        }
-        None => {
-            let e = s.erosion.unwrap_or_default();
-            out.paints.push([f(e.edge), f(e.rim_width), f(e.rim), 0.0]);
-            out.paints.push([f(e.rim_color[0]), f(e.rim_color[1]), f(e.rim_color[2]), 0.0]);
-        }
-    }
+    // A material breaks up (erosion and its rim); discs and crisp shapes may have a white-hot middle, and the particle
+    // itself (not its halo or trail) a cartoon shadow side on a crisp shape: each in its own place of rows 4 to 6.
+    let e = s.erosion.unwrap_or_default();
+    let cel = s.cel.filter(|_| outline && s.shape != MATERIAL);
+    out.paints.push([f(e.edge), f(e.rim_width), f(e.rim), f(s.core)]);
+    out.paints.push([f(e.rim_color[0]), f(e.rim_color[1]), f(e.rim_color[2]), f(cel.map_or(0.0, |c| c.depth))]);
+    out.paints.push(cel.map_or([0.0; 4], |c| [f(c.color[0]), f(c.color[1]), f(c.color[2]), f(c.strength)]));
     at
 }
 
@@ -189,16 +189,22 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
     let main = rows(&mut out, m, scale, s, s.softness, true);
     let halo_rows = s.halo.map(|_| rows(&mut out, m, scale, s, 2.2, false));
     let trail_rows = s.trail.map(|t| rows(&mut out, m, scale, s, t.glow, false));
+    // The smaller copy inside each particle: its shape without the ink line.
+    let inner_rows = s.inner.map(|_| rows(&mut out, m, scale, s, s.softness, false));
+    // Lightning striking out to each particle: its bolt's pieces, with a glow.
+    let strike_rows = (s.strike > 0.0).then(|| rows(&mut out, m, scale, s, 0.9, false));
     // A material not generated yet: soft discs this frame, and the frame is drawn again.
     let fallback_rows = (s.shape == MATERIAL && s.material.and_then(|m| m.noise).is_some_and(|row| atlas::ready(row as usize).is_none())).then(|| rows(&mut out, m, scale, s, 1.5, false));
-    let (mut trails, mut halos, mut mains) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut trails, mut halos, mut mains, mut inners) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let ev = Evaluator::new(batch, draw);
     for (b, p) in alive {
         let mut alpha_scale = 1.0;
         if fill < 1.0 {
             // Thinned evenly by a chance of its own, fading near the threshold rather than popping.
             let h = particle::hash(p.n, 23, seed);
-            alpha_scale = 1.0 - particle::smoothstep(fill - 0.04, fill, h);
+            // The band is a share of what is kept, so even a tiny share keeps its few particles whole.
+            let band = (fill * 0.3).min(0.04);
+            alpha_scale = 1.0 - particle::smoothstep(fill - band, fill, h);
             if alpha_scale <= 0.0 {
                 continue;
             }
@@ -223,6 +229,11 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
             }
         }
         mains.push(prim(particle_kind(shape), p.cell, rows_of, [p.x, p.y, p.size, p.rotation], [p.vx, p.vy, p.emissive, p.erosion], [p.rgba[0], p.rgba[1], p.rgba[2], alpha]));
+        if let (Some(k), Some(r)) = (ps.inner, inner_rows) {
+            let rgb = [0, 1, 2].map(|c| p.rgba[c] + (k.color[c] - p.rgba[c]) * k.mix);
+            let rows_of = if rows_of == main { r } else { rows_of };
+            inners.push(prim(particle_kind(shape), p.cell, rows_of, [p.x, p.y, p.size * k.scale, p.rotation], [p.vx * k.scale, p.vy * k.scale, k.emissive, p.erosion], [rgb[0], rgb[1], rgb[2], alpha]));
+        }
         if let (Some(h), Some(r)) = (ps.halo, halo_rows) {
             let size = p.size * h.scale;
             grow(&mut out, world(p.x, p.y), (size + 1.0) * scale);
@@ -251,11 +262,25 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
                 previous = at;
             }
         }
+        if let Some(r) = strike_rows.filter(|_| ps.strike > 0.0) {
+            // Each bolt is its colour, painted with a glow of light, and a white-hot core of light along it.
+            let pieces = particle::strike(draw, ps, ev.tick(), b.origin(), p);
+            let a = alpha_scale;
+            for (core, piece) in pieces.iter().map(|q| (false, q)).chain(pieces.iter().map(|q| (true, q))) {
+                let (k, rgb, e) = if core { (0.4, [1.0, 1.0, 1.0], 0.9) } else { (1.0, [p.rgba[0], p.rgba[1], p.rgba[2]], p.emissive) };
+                let reach = piece.r0.max(piece.r1) * 3.7 * scale + scale;
+                grow(&mut out, world(piece.p0[0], piece.p0[1]), reach);
+                grow(&mut out, world(piece.p1[0], piece.p1[1]), reach);
+                let caps = if piece.start { F_CAP_START } else { 0 } | if piece.end { F_CAP_END } else { 0 };
+                trails.push(prim(particle_kind(P_SEGMENT) | caps, 0, r, [piece.p0[0], piece.p0[1], piece.p1[0], piece.p1[1]], [piece.r0 * k, piece.r1 * k, e, piece.a1 * a], [rgb[0], rgb[1], rgb[2], piece.a0 * a]));
+            }
+        }
     }
-    // Painter order within the draw: trails, halos, then the particles.
+    // Painter order within the draw: trails, halos, the particles, then their inner copies.
     out.prims.extend(trails);
     out.prims.extend(halos);
     out.prims.extend(mains);
+    out.prims.extend(inners);
     if out.prims.is_empty() {
         return (Out::new(), 0);
     }
