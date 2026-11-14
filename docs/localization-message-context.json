@@ -7336,9 +7336,9 @@
   },
   "common.noResults": {
     "locations": [
-      "src/vfx-inspector.mjs:331"
+      "src/vfx-inspector.mjs:332"
     ],
-    "context": "const draw=()=>{const query=popup.querySelector('input').value.toLowerCase();localizedMarkup(popup.querySelector('.vfx-catalog-results'), (mode==='presets'?myPr"
+    "context": "const list=group.items.filter(item=>!query||item.searchKeys.some(key=>interfaceText(key).toLowerCase().includes(query))||item.aboutKey&&interfaceText(item.about"
   },
   "common.paste": {
     "locations": [
@@ -14653,7 +14653,7 @@
   },
   "errors.inspectorKit.anOwnedHostNeedsAKeyItsData": {
     "locations": [
-      "src/inspector-kit.mjs:599"
+      "src/inspector-kit.mjs:602"
     ],
     "context": "if (!row.key || !DATA_NAME.test(row.key)) throw messageError(new TypeError(''), \"errors.inspectorKit.anOwnedHostNeedsAKeyItsData\", {});"
   },
@@ -14665,19 +14665,19 @@
   },
   "errors.inspectorKit.bareSectionHasNoTitleActionsOrPlace": {
     "locations": [
-      "src/inspector-kit.mjs:811"
+      "src/inspector-kit.mjs:814"
     ],
     "context": "if (section.title || section.actions?.length || section.switch || (section.place ?? 'core') !== 'core') throw messageError(new TypeError(''), \"errors.inspectorK"
   },
   "errors.inspectorKit.coreSectionCannotCarryATitleSwitchMake": {
     "locations": [
-      "src/inspector-kit.mjs:821"
+      "src/inspector-kit.mjs:824"
     ],
     "context": "if (section.switch) throw messageError(new TypeError(''), \"errors.inspectorKit.coreSectionCannotCarryATitleSwitchMake\", {id: section.id});"
   },
   "errors.inspectorKit.duplicateSectionId": {
     "locations": [
-      "src/inspector-kit.mjs:881"
+      "src/inspector-kit.mjs:884"
     ],
     "context": "if (seen.has(section.id)) throw messageError(new TypeError(''), \"errors.inspectorKit.duplicateSectionId\", {id: section.id});"
   },
@@ -14695,19 +14695,19 @@
   },
   "errors.inspectorKit.invalidInspectorKind": {
     "locations": [
-      "src/inspector-kit.mjs:895"
+      "src/inspector-kit.mjs:898"
     ],
     "context": "if (!SECTION_ID.test(kind)) throw messageError(new TypeError(''), \"errors.inspectorKit.invalidInspectorKind\", {kind: kind});"
   },
   "errors.inspectorKit.invalidQuickActionsContext": {
     "locations": [
-      "src/inspector-kit.mjs:861"
+      "src/inspector-kit.mjs:864"
     ],
     "context": "if (!SECTION_ID.test(quick.context)) throw messageError(new TypeError(''), \"errors.inspectorKit.invalidQuickActionsContext\", {context: quick.context});"
   },
   "errors.inspectorKit.invalidSectionId": {
     "locations": [
-      "src/inspector-kit.mjs:809"
+      "src/inspector-kit.mjs:812"
     ],
     "context": "if (!SECTION_ID.test(String(section.id))) throw messageError(new TypeError(''), \"errors.inspectorKit.invalidSectionId\", {id: section.id});"
   },
@@ -14719,43 +14719,43 @@
   },
   "errors.inspectorKit.sectionHasAnUnknownPlace": {
     "locations": [
-      "src/inspector-kit.mjs:816"
+      "src/inspector-kit.mjs:819"
     ],
     "context": "if (!SECTION_PLACES.includes(place)) throw messageError(new TypeError(''), \"errors.inspectorKit.sectionHasAnUnknownPlace\", {id: section.id, place: place});"
   },
   "errors.inspectorKit.sectionHasTitleActionsAtMost": {
     "locations": [
-      "src/inspector-kit.mjs:795"
+      "src/inspector-kit.mjs:798"
     ],
     "context": "if (count > MAX_TITLE_ACTIONS) throw messageError(new TypeError(''), \"errors.inspectorKit.sectionHasTitleActionsAtMost\", {id: section.id, count: count, MAX_TITL"
   },
   "errors.inspectorKit.segmentedInRadioModeNeedsANameOr": {
     "locations": [
-      "src/inspector-kit.mjs:534"
+      "src/inspector-kit.mjs:537"
     ],
     "context": "if (mode === 'radio' && !row.name) throw messageError(new TypeError(''), \"errors.inspectorKit.segmentedInRadioModeNeedsANameOr\", {value: row.label ?? ''});"
   },
   "errors.inspectorKit.segmentedNeeds24OptionsUseASelect": {
     "locations": [
-      "src/inspector-kit.mjs:533"
+      "src/inspector-kit.mjs:536"
     ],
     "context": "if (options.length < 2 || options.length > 4) throw messageError(new TypeError(''), \"errors.inspectorKit.segmentedNeeds24OptionsUseASelect\", {value: row.label ?"
   },
   "errors.inspectorKit.theInspectorKitNeedsARootElement": {
     "locations": [
-      "src/inspector-kit.mjs:1034"
+      "src/inspector-kit.mjs:1037"
     ],
     "context": "if (!root?.addEventListener) throw messageError(new TypeError(''), \"errors.inspectorKit.theInspectorKitNeedsARootElement\", {});"
   },
   "errors.inspectorKit.titledSectionNeedsATitleThatSaysWhat": {
     "locations": [
-      "src/inspector-kit.mjs:825"
+      "src/inspector-kit.mjs:828"
     ],
     "context": "if (!section.title) throw messageError(new TypeError(''), \"errors.inspectorKit.titledSectionNeedsATitleThatSaysWhat\", {id: section.id});"
   },
   "errors.inspectorKit.unknownInspectorRowKind": {
     "locations": [
-      "src/inspector-kit.mjs:704"
+      "src/inspector-kit.mjs:707"
     ],
     "context": "if (!render) throw messageError(new TypeError(''), \"errors.inspectorKit.unknownInspectorRowKind\", {value: row?.kind});"
   },
@@ -21481,33 +21481,33 @@
   },
   "inspector.actions": {
     "locations": [
-      "src/inspector-kit.mjs:863"
+      "src/inspector-kit.mjs:866"
     ],
     "context": "class: 'ui-quick', role: 'toolbar', 'aria-label': quick.label ?? say(env, 'inspector.actions'), 'data-quick-context': quick.context,"
   },
   "inspector.decrease": {
     "locations": [
-      "src/inspector-kit.mjs:358"
+      "src/inspector-kit.mjs:360"
     ],
     "context": "const fallback = {label: say(env, direction < 0 ? 'inspector.decrease' : 'inspector.increase', {name}), labelKey: direction < 0 ? 'inspector.decrease' : 'inspec"
   },
   "inspector.increase": {
     "locations": [
-      "src/inspector-kit.mjs:358"
+      "src/inspector-kit.mjs:360"
     ],
     "context": "const fallback = {label: say(env, direction < 0 ? 'inspector.decrease' : 'inspector.increase', {name}), labelKey: direction < 0 ? 'inspector.decrease' : 'inspec"
   },
   "inspector.mixed": {
     "locations": [
       "src/inspector-kit.mjs:297",
-      "src/inspector-kit.mjs:479"
+      "src/inspector-kit.mjs:481"
     ],
     "context": "placeholder: mixed ? say(env, 'inspector.mixed') : undefined, 'data-mixed': mixed ? String(value) : undefined, ...extras(row),"
   },
   "inspector.scrubHint": {
     "locations": [
       "src/inspector-kit.mjs:100",
-      "src/inspector-kit.mjs:1103"
+      "src/inspector-kit.mjs:1106"
     ],
     "context": "export const SCRUB_HINT = TEXT['inspector.scrubHint'];"
   },
@@ -21527,7 +21527,7 @@
   },
   "inspector.stop": {
     "locations": [
-      "src/inspector-kit.mjs:849"
+      "src/inspector-kit.mjs:852"
     ],
     "context": "const stop = scope.stop ? renderButton({variant: 'ghost', ...scope.stop, label: scope.stop.label ?? say(env, 'inspector.stop')}, env, {size: 'sm'}) : '';"
   },
@@ -35943,12 +35943,6 @@
       "src/vfx-inspector.mjs:101"
     ],
     "context": "? {messageKey:'builderMode.buildingFigure',messageParams:{name:session.figure?.name||{messageKey:'vfxInspector.figure'}}}"
-  },
-  "vfxInspector.generated": {
-    "locations": [
-      "src/vfx-inspector.mjs:310"
-    ],
-    "context": "const effect=type=>{const d=VFX_REGISTRY[type];return tile('add',type,d.name,d.icon,d.category,{messageKey:d.category==='Generate'?'vfxInspector.generated':cate"
   },
   "vfxInspector.gradient": {
     "locations": [
