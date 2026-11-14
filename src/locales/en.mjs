@@ -6395,6 +6395,7 @@ const messages = {
   "vfxPanel.help.common.step": "Animate on ones for smooth motion, or on twos or threes for a hand-drawn feel.",
   "vfxPanel.help.common.speed": "Plays the effect faster or slower.",
   "vfxPanel.help.common.timeSpeed": "Plays the effect faster or slower.",
+  "vfxPanel.help.common.timeScale": "Plays the effect faster or slower: 2 is twice as fast.",
   "vfxPanel.help.common.x": "Where on the stage the effect starts, across.",
   "vfxPanel.help.common.y": "Where on the stage the effect starts, up and down.",
   "vfxPanel.help.common.layer": "Draw the effect in front of its target or behind it.",

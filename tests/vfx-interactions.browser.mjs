@@ -58,8 +58,8 @@ try{
  await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');assert.equal(await snapshot(),before);
  await intensity.click({button:'right'});assert.equal(await page.getByRole('menuitem',{name:'Reset value',exact:true}).count(),1);await page.keyboard.press('Escape');
  // A titled section opens in place and stays open while the panel redraws.
- await glowRow.locator('details[data-vfx-section="core"] > summary').click();await page.evaluate(()=>styk.vfx.sync());
- assert.equal(await glowRow.locator('details[data-vfx-section="core"]').evaluate(d=>d.open),true);
+ await glowRow.locator('details[data-vfx-section="more"] > summary').click();await page.evaluate(()=>styk.vfx.sync());
+ assert.equal(await glowRow.locator('details[data-vfx-section="more"]').evaluate(d=>d.open),true);
  // One effect copied out of the group pastes as its own clip, with its settings, as one undo step.
  await shadowRow.locator(':scope > summary').evaluate(n=>{if(!n.parentElement.open)n.click();});await shadowRow.hover();
  await shadowRow.getByRole('button',{name:'Effect actions',exact:true}).click();await page.getByRole('menuitem',{name:'Copy effect',exact:true}).click();

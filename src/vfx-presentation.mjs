@@ -21,10 +21,10 @@ import {effectMessages} from './vfx-localization.mjs';
 const has = key => Object.hasOwn(english, key);
 
 // Shared parts. `when` shows a value only while it does something: {param: [values]} or (params) => boolean.
-// A generated effect's own clock: when it starts in its clip, its drawing rhythm and (coming) how fast it plays.
-// Particles call their launch speed `speed`, so their clock's speed can only be `timeSpeed`.
-const GENERATOR_TIMING = ['delay', 'step', 'speed', 'timeSpeed'];
-const PARTICLE_TIMING = ['delay', 'step', 'timeSpeed'];
+// A generated effect's own clock: when it starts in its clip, its drawing rhythm and (coming) how fast it plays,
+// `timeScale` on all five. Particles call their launch speed `speed`, so only the others may list it here.
+const GENERATOR_TIMING = ['delay', 'step', 'timeScale', 'speed', 'timeSpeed'];
+const PARTICLE_TIMING = ['delay', 'step', 'timeScale', 'timeSpeed'];
 const VARIATION = ['seed'];
 const SCENE_POSITION = ['x', 'y'];
 
@@ -43,7 +43,7 @@ export const PRESENTATION = Object.freeze({
   },
   shadow: {
     primary: ['color', 'distance', 'angle', 'radius', 'opacity'], strength: false,
-    sections: [['offset', ['offsetX', 'offsetY']], ['style', ['spread', 'mode']], ['blend', ['effectStrength']]],
+    sections: [['style', ['mode', 'spread']], ['offset', ['offsetX', 'offsetY']], ['blend', ['effectStrength']]],
     params: {radius: {scale: 'pow'}, spread: {scale: 'pow'}},
     // Distance and angle are views of the saved offsets (never stored): they write offsetX and offsetY together.
     derived: {distance: {params: ['offsetX', 'offsetY'], min: 0, max: 256, step: 1, unit: 'px', default: Math.hypot(8, 8)}, angle: {params: ['offsetX', 'offsetY'], min: -180, max: 180, step: 1, unit: '°', default: 45, control: 'angle'}},
@@ -283,12 +283,27 @@ export function presentEffect(type, params, {scene = false, group = false, regis
   // Anything this module does not name, in the registry's order: never lost.
   const rest = Object.keys(descriptors).filter(param => !used.has(param) && !primaryNames.includes(param) && !(own.sections ?? []).some(([, names]) => names.includes(param)));
   sections.push({id: 'more', items: rest.map(item).filter(Boolean)});
+  // A small effect (its secondary values, those arriving included, number about six or fewer) keeps them all in one
+  // section, in the order its sections list them: three disclosure rows to reach four values read as clutter. Titled
+  // sections are for the large effects (the generated ones).
+  if (singleSection(type)) return {primary, sections: [{id: 'more', items: sections.flatMap(section => section.items)}].filter(section => section.items.length)};
   // One section per id, in the panel's order, without empty ones.
   const merged = new Map();
   for (const section of sections) merged.set(section.id, [...(merged.get(section.id) ?? []), ...section.items]);
   return {primary, sections: [...merged].filter(([, items]) => items.length).map(([id, items]) => ({id, items}))
     .sort((a, b) => SECTION_IDS.indexOf(a.id) - SECTION_IDS.indexOf(b.id))};
 }
+
+/** How many secondary values an effect's sections name, counting those still arriving in the registry. */
+const SINGLE_SECTION_LIMIT = 7;
+export function secondaryCount(type) {
+  const own = PRESENTATION[type];
+  if (!own) return 0;
+  const size = name => own.pairs?.[name]?.params.length ?? own.derived?.[name]?.params.length ?? 1;
+  return (own.sections ?? []).flatMap(([, names]) => names).filter(name => !own.primary.includes(name)).reduce((n, name) => n + size(name), 0);
+}
+/** Whether an effect shows its secondary values in one section rather than titled ones. */
+export const singleSection = type => (PRESENTATION[type]?.titled ?? secondaryCount(type) > SINGLE_SECTION_LIMIT) === false;
 
 /** Whether an effect type has a seed that Shuffle draws again. */
 export const seeded = type => Boolean(VFX_REGISTRY[type]?.params.seed);

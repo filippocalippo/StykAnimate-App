@@ -6,7 +6,7 @@ import {VFX_PRESETS} from '../src/vfx-presets.mjs';
 import {createVfx} from '../src/vfx.mjs';
 import {
   CATALOGUE, PRESENTATION, SECTION_IDS, catalogueKey, catalogueSections, controlFor, helpKey, isMoment, labelKey, optionLabel, optionRetired,
-  presentEffect, presetTiming, sectionKey, seeded,
+  presentEffect, presetTiming, secondaryCount, sectionKey, seeded, singleSection,
 } from '../src/vfx-presentation.mjs';
 
 // How the effects panel presents each effect (src/vfx-presentation.mjs): every saved value keeps a home, nothing a
@@ -48,8 +48,24 @@ test('an open effect leads with the few values that define it, the rest in title
   const particles = presentEffect('particles', defaults('particles'));
   assert.deepEqual(particles.primary.flatMap(paramsOf), ['look', 'color', 'emission', 'rate', 'size']);
   assert.deepEqual(particles.sections.map(section => section.id), ['motion', 'life', 'look', 'emitter', 'rhythm', 'variation']);
-  // Glow: its colour, size, brightness and placement, then strength; Core, Shape and Blend titled.
-  assert.deepEqual(presentEffect('glow', defaults('glow')).primary.flatMap(paramsOf), ['color', 'radius', 'intensity', 'mode', 'effectStrength']);
+  // Glow: its colour, size, brightness and placement, then strength; the rest in one section.
+  const glow = presentEffect('glow', defaults('glow'));
+  assert.deepEqual(glow.primary.flatMap(paramsOf), ['color', 'radius', 'intensity', 'mode', 'effectStrength']);
+  assert.deepEqual(glow.sections.map(section => section.id), ['more']);
+  assert.deepEqual(glow.sections[0].items.flatMap(paramsOf), ['coreMix', 'spread', 'falloff', 'blend']);
+});
+
+test('a small effect keeps its secondary values in one section; titled sections are for the large ones', () => {
+  for (const type of Object.keys(VFX_REGISTRY)) {
+    const view = presentEffect(type, defaults(type), {group: true}), large = secondaryCount(type) > 7;
+    assert.equal(singleSection(type), !large, type);
+    if (!large) assert.ok(view.sections.length <= 1 && (view.sections[0]?.id ?? 'more') === 'more', `${type} opens one section`);
+    else assert.ok(view.sections.length > 1, `${type} groups its many values under titles`);
+  }
+  // Every filter is small, every generated effect large, counting the values still arriving.
+  for (const type of Object.keys(VFX_REGISTRY)) assert.equal(singleSection(type), !isGeneratorType(type), type);
+  // Shadow's one section reads in a sensible order: placement and spread, then the exact offsets, then its strength in a group.
+  assert.deepEqual(presentEffect('shadow', defaults('shadow'), {group: true}).sections[0].items.flatMap(paramsOf), ['mode', 'spread', 'offsetX', 'offsetY', 'effectStrength']);
 });
 
 test('a value shows only while it does something', () => {
@@ -64,10 +80,10 @@ test('a value shows only while it does something', () => {
   assert.ok(!shown('glow', defaults('glow')).includes('coreColor'), 'the core colour waits for a core');
   assert.ok(shown('glow', {...defaults('glow'), coreMix: 0.3}).includes('coreColor'));
   assert.ok(!shown('blur', defaults('blur')).includes('angle') && shown('blur', {...defaults('blur'), mode: 1}).includes('angle'));
-  // A group's strength is the clip's: a member's own waits in Blend; a lone filter shows it last.
+  // A group's strength is the clip's: a member's own waits in its section; a lone filter shows it last.
   const lone = presentEffect('glow', defaults('glow')), member = presentEffect('glow', defaults('glow'), {group: true});
   assert.equal(lone.primary.at(-1).param, 'effectStrength');
-  assert.ok(!member.primary.some(item => item.param === 'effectStrength') && member.sections.find(section => section.id === 'blend').items.some(item => item.param === 'effectStrength'));
+  assert.ok(!member.primary.some(item => item.param === 'effectStrength') && member.sections.find(section => section.id === 'more').items.some(item => item.param === 'effectStrength'));
 });
 
 test('a parameter the presentation does not know still appears, with a control from its descriptor', () => {
@@ -77,7 +93,7 @@ test('a parameter the presentation does not know still appears, with a control f
     tone: {label: 'Tone', default: 1, min: 0, max: 5, step: 1, type: 'number', discrete: true, options: ['A', 'B', 'C', {label: 'D', retired: true}, 'E', 'F']}}}};
   const view = presentEffect('glow', {...defaults('glow'), shimmer: 0, sparkle: 0, tone: 1}, {registry});
   const more = view.sections.find(section => section.id === 'more');
-  assert.deepEqual(more.items.map(item => [item.param, item.control]), [['shimmer', 'value'], ['sparkle', 'switch'], ['tone', 'menu']]);
+  assert.deepEqual(more.items.slice(-3).map(item => [item.param, item.control]), [['shimmer', 'value'], ['sparkle', 'switch'], ['tone', 'menu']]);
   assert.equal(view.sections.at(-1).id, 'more', 'new values wait at the end, under More settings');
   // Options may be strings or {label, retired}: a retired one is read and drawn, not offered.
   const tone = registry.glow.params.tone;
