@@ -2,8 +2,8 @@
 //! anatomy each style is built from, stated on the review stage (a stick figure 180 pixels
 //! tall, its hip at `HIP`, its head's top at y 202).
 
-use styk_eval::vfx::generated::layers::{material, Placement, BEAM, BEAM_LINE, BEAM_TIP, DISC, POINT};
-use styk_eval::vfx::generated::particle::Evaluator;
+use styk_eval::vfx::generated::layers::{material, Placement, ARC, BEAM, BEAM_LINE, BEAM_TIP, DISC, POINT};
+use styk_eval::vfx::generated::particle::{self, Evaluator};
 use styk_eval::vfx::generated::stage::{Clip, Stage, HIP};
 
 use super::generators::{batch_at, live};
@@ -90,4 +90,33 @@ fn an_energy_beam_has_a_core_a_body_and_a_deep_rim_and_its_orb_swells() {
     };
     let (early, late) = (orb(3.0), orb(11.0));
     assert!(early > 0.0 && early < 0.75 * late, "the orb swells as it charges: {early} then {late}");
+}
+
+/// The electric aura crackles: forked bolts strike out from all over the body, each held for two
+/// frames and struck again elsewhere, white-hot inside a line of the colour.
+#[test]
+fn an_electric_aura_crackles_about_the_body() {
+    let prepared = Stage::new(60.0).clip(Clip::new(Some(1), "aura").set("style", "1").set("color", "0x6fd8ff")).prepare();
+    let bolts = |tick: f64| {
+        let batch = batch_at(&prepared, tick).expect("the aura crackles");
+        let mut pieces = Vec::new();
+        for draw in batch.draws.iter().filter(|d| batch.spec(d).shape == ARC) {
+            let s = batch.spec(draw);
+            let ink = s.outline.expect("an ink line round its bolts");
+            let core = particle::color_at(s, 0.0).0;
+            assert!(luma(ink.color) < luma(core) - 0.3, "the line {:?} is deeper than the core {core:?}", ink.color);
+            pieces.extend(particle::arcs(&batch, draw));
+        }
+        pieces
+    };
+    let (a, b, c) = (bolts(20.0), bolts(21.0), bolts(22.0));
+    assert!(a.len() > 30, "{} pieces of lightning", a.len());
+    assert_eq!(a, b, "a strike holds for two frames");
+    assert_ne!(a, c, "and is struck again elsewhere");
+    // Every bolt is about the body: within reach of the figure (its hip at 300, 180 tall).
+    for p in a.iter().chain(&c) {
+        for [x, y] in [p.p0, p.p1] {
+            assert!((x - HIP[0]).abs() < 180.0 && y > HEAD_TOP - 160.0 && y < HIP[1] + 180.0, "a bolt at ({x}, {y})");
+        }
+    }
 }

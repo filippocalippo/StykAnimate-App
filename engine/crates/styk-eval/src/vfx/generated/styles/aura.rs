@@ -27,6 +27,8 @@ struct AuraInput {
     s: f64,
     t: f64,
     sc: f64,
+    /// Density, for layers that scale a count by it rather than follow it as a rate.
+    density: f64,
     base: Spec,
 }
 
@@ -147,30 +149,69 @@ fn aura_fire(a: &AuraInput) -> AuraParts {
 }
 
 fn aura_electric(a: &AuraInput) -> AuraParts {
-    let AuraInput { col, i, s, t, sc, ref base, .. } = *a;
-    let hot = tone(col, 0.55, WHITE);
+    let AuraInput { col, i, s, t, ref base, .. } = *a;
+    let li = i.min(1.0);
+    let hot = tone(col, 0.75, WHITE);
+    let pale = tone(col, 0.45, WHITE);
+    let deep = deeper(col, 0.7);
+    let light = |auto: f64| match base.blend {
+        ADD => 1.0,
+        NORMAL => 0.0,
+        _ => auto,
+    };
+    // Lightning crackling about the body: white-hot bolts inside a line of the colour, glowing, each
+    // striking out from the body and struck again elsewhere every other frame.
+    let bolts = |reach: f64, arcs: f64, thick: f64, ink: f64, placement: Placement| layer(Spec {
+        placement, shape: ARC, count: (arcs * a.density).round().max(1.0) * 8.0, arc_segs: 8.0,
+        emit_shape: BODY, emit_radius: 5.0, squash: 1.0, spread: 2.2, arc_reach: reach * s, arc_amp: reach * s * (0.18 + 0.08 * t),
+        arc_branches: 1.6, arc_rhythm: 2.0, size0: thick, softness: 1.3 * li.max(0.3),
+        outline: Some(Outline { width: ink, color: deep }),
+        emissive: Some(Curve::three(light(0.3), 0.5, light(0.3), light(0.3))),
+        rate_param: None,
+        ..base.clone()
+    }, stops(&[(hot, 1.0)]));
     AuraParts {
+        // Static on the ground: sparks skittering away from the feet, and its light.
         ground: vec![layer(
-            Spec { rate: 2.5, life_min: 3.0, life_max: 6.0, emit_shape: GROUND, emit_radius: 40.0 * sc, speed_min: 0.0, speed_max: 0.0, material: m("bolt"), rotate: ROTATE_FIXED, frame_rate: 1.0, aspect: 0.7, size0: 16.0 * sc, size1: 16.0 * sc, flicker: 0.6, fade_in: 0.0, fade_out: 0.3, ..base.clone() },
-            stops(&[(WHITE, 2.4 * i), (hot, 2.0 * i), (col, 1.4 * i)]),
+            Spec {
+                rate: 3.0, life_min: 6.0, life_max: 11.0, emit_shape: GROUND, emit_radius: 34.0, speed_min: 3.0, speed_max: 7.0,
+                drag: 0.12, gravity: 0.3, collide: 1.0, bounce: 0.4,
+                shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.0, size0: 1.6, size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.2)),
+                trail: Some(Trail { length: 3.0, segments: 3, width: 0.6, alpha: 0.7, glow: 0.5, emissive: None }),
+                emissive: Some(Curve::three(light(0.5), 0.5, light(0.45), light(0.4))), alpha_over_life: Some(Curve::three(1.0, 0.6, 0.9, 0.0)),
+                ..base.clone()
+            },
+            stops(&[(hot, 1.0), (col, 1.0), (deep, 1.0)]),
         )],
+        // Its cold light on the figure and around it, flickering with the strikes.
         glow: layer(
-            Spec { placement: Placement::Behind, rate: 5.0, life_min: 8.0, life_max: 14.0, emit_shape: BODY, emit_radius: 8.0 * sc, speed_min: 0.2 * sc, speed_max: 0.6 * sc, spread: TAU, size0: 24.0 * s * sc, size1: 34.0 * s * sc, softness: 2.4, alpha: 0.2, flicker: 0.35, fade_in: 0.2, fade_out: 0.5, ..base.clone() },
-            stops(&[(col, 1.4 * i), (col, 1.0 * i), (col, 0.5 * i)]),
+            Spec {
+                placement: Placement::Behind, rate: 4.0, life_min: 6.0, life_max: 10.0, emit_shape: BODY, emit_radius: 4.0,
+                speed_min: 0.1, speed_max: 0.4, spread: TAU, softness: 1.9, rotate: ROTATE_FIXED, aspect: 1.45,
+                size0: 44.0 * s, size_over_life: Some(Curve::three(0.85, 0.4, 1.0, 1.1)), size_jitter: 0.15, flicker: 0.45,
+                // Mostly light; a little paint, so a cold haze shows on a white page too.
+                alpha_over_life: Some(Curve::three(0.0, 0.3, 0.32 * li, 0.0)), emissive: Some(Curve::three(light(0.8), 0.5, light(0.8), light(0.8))),
+                ..base.clone()
+            },
+            stops(&[(pale, 1.0), (col, 1.0)]),
         ),
         main: vec![
-            layer(
-                Spec { placement: Placement::Behind, rate: 9.0, life_min: 3.0, life_max: 6.0, emit_shape: BODY, emit_radius: 10.0 * sc, speed_min: 0.0, speed_max: 0.4 * sc, spread: TAU, curl: 4.0 * t * sc, material: m("bolt"), frame_rate: 1.0, size0: 20.0 * s * sc, size1: 16.0 * s * sc, size_jitter: 0.45, flicker: 0.55, fade_in: 0.0, fade_out: 0.35, ..base.clone() },
-                stops(&[(WHITE, 2.6 * i), (hot, 2.2 * i), (col, 1.6 * i), (col, 1.0 * i)]),
-            ),
-            layer(
-                Spec { rate: 4.0, life_min: 2.0, life_max: 4.0, emit_shape: BODY, emit_radius: 6.0 * sc, speed_min: 0.0, speed_max: 0.3 * sc, spread: TAU, material: m("bolt"), frame_rate: 1.0, size0: 13.0 * s * sc, size1: 11.0 * s * sc, size_jitter: 0.4, flicker: 0.6, fade_in: 0.0, fade_out: 0.3, ..base.clone() },
-                stops(&[(WHITE, 2.8 * i), (hot, 2.2 * i), (col, 1.6 * i)]),
-            ),
+            // Bolts behind the figure, reaching out of it.
+            bolts(62.0, 5.0, 1.3, 1.5, Placement::Behind),
+            // A few short ones crawling over it, thin enough to leave it readable.
+            bolts(30.0, 2.0, 0.75, 1.1, Placement::Front),
         ],
+        // Sparks spat out by the strikes, falling.
         particles: layer(
-            Spec { rate: 5.0, life_min: 5.0, life_max: 11.0, emit_shape: BODY, emit_radius: 12.0 * sc, speed_min: 3.0 * sc, speed_max: 8.0 * sc, spread: TAU, gravity: 0.18 * sc, drag: 0.05, shape: STREAK, stretch: 1.1, size0: 1.6 * sc, size1: 0.6 * sc, softness: 0.7, fade_out: 0.5, ..base.clone() },
-            stops(&[(WHITE, 2.6 * i), (hot, 2.0 * i), (col, 1.4 * i)]),
+            Spec {
+                rate: 4.0, life_min: 5.0, life_max: 10.0, emit_shape: BODY, emit_radius: 12.0, speed_min: 4.0, speed_max: 9.0,
+                spread: TAU, gravity: 0.35, drag: 0.08,
+                shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.4, size0: 1.6, size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.2)), size_jitter: 0.4,
+                trail: Some(Trail { length: 3.0, segments: 3, width: 0.6, alpha: 0.7, glow: 0.5, emissive: None }),
+                emissive: Some(Curve::three(light(0.55), 0.5, light(0.45), light(0.4))), alpha_over_life: Some(Curve::three(1.0, 0.6, 0.9, 0.0)),
+                ..base.clone()
+            },
+            stops(&[(hot, 1.0), (pale, 1.0), (col, 1.0), (deep, 1.0)]),
         ),
     }
 }
@@ -395,7 +436,7 @@ pub(super) fn aura(p: &Aura, ctx: &Context) -> Vec<Spec> {
         ..Spec::default()
     };
     let paint = paint::is_gradient(&p.color).then(|| paint_ramp(&p.color, 1.0));
-    let parts = style(&AuraInput { color: p.color.clone(), col: paint_color(&p.color), paint, i: p.intensity, s: p.height, t: p.turbulence, sc, base });
+    let parts = style(&AuraInput { color: p.color.clone(), col: paint_color(&p.color), paint, i: p.intensity, s: p.height, t: p.turbulence, sc, density: p.density, base });
     let mut out = Vec::new();
     if p.dust {
         out.extend(parts.ground);
@@ -412,6 +453,7 @@ pub(super) fn aura(p: &Aura, ctx: &Context) -> Vec<Spec> {
     for l in &mut out {
         // Width: how far from the body the aura reaches.
         l.emit_radius *= p.width;
+        l.arc_reach *= p.width;
         // Where it draws: as the style places each layer, or all behind or in front of the figure.
         match p.layer {
             EffectPlacement::Behind => l.placement = Placement::Behind,

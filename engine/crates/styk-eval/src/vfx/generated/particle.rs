@@ -217,23 +217,10 @@ impl<'a> Evaluator<'a> {
         let (px, py);
         match s.emit_shape {
             BODY if d.block.is_some() => {
-                let b = d.block.unwrap();
-                let count = b.segments as usize;
-                let row_at = if b.rows > 1 { clamp(fb - b.first, 0.0, (b.rows - 1) as f64) as usize } else { 0 };
-                let o = b.start as usize + row_at * count * SEGMENT;
-                let t = &self.batch.table;
-                let lengths = &t[o + count * 4..o + count * 5];
-                // A place on the outline by length: long limbs emit as much as their length.
-                let total = lengths[count - 1] as f64;
-                let u = h3 * total;
-                let si = lengths.partition_point(|&l| (l as f64) < u).min(count - 1);
-                let before = if si == 0 { 0.0 } else { lengths[si - 1] as f64 };
-                let len = (lengths[si] as f64 - before).max(1e-6);
-                let f = if total > 0.0 { clamp((u - before) / len, 0.0, 1.0) } else { h4 };
-                let s4 = o + si * 4;
+                let [ox, oy] = outline_point(&self.batch.table, d.block.unwrap(), fb, h3, h4);
                 let (dx, dy) = disc_offset(n, seed, sq);
-                px = mix(t[s4] as f64, t[s4 + 2] as f64, f) + dx * er;
-                py = mix(t[s4 + 1] as f64, t[s4 + 3] as f64, f) + dy * er;
+                px = ox + dx * er;
+                py = oy + dy * er;
             }
             BEAM_LINE | BEAM_TIP => {
                 let [bx, by] = beam_tip(d, self.spec, self.now);
@@ -729,11 +716,66 @@ fn jag(a: [f64; 2], b: [f64; 2], amp: f64, depth: u32, key: u32, out: &mut Vec<[
     }
 }
 
+/// A place on outline block `b`'s row for birth tick `fb`, by length (long limbs get as much as
+/// their length): `h` the share of the way along, `h_flat` the place on a piece when the outline
+/// has no length.
+fn outline_point(t: &[f32], b: super::batch::Block, fb: f64, h: f64, h_flat: f64) -> [f64; 2] {
+    let count = b.segments as usize;
+    let row_at = if b.rows > 1 { clamp(fb - b.first, 0.0, (b.rows - 1) as f64) as usize } else { 0 };
+    let o = b.start as usize + row_at * count * SEGMENT;
+    let lengths = &t[o + count * 4..o + count * 5];
+    let total = lengths[count - 1] as f64;
+    let u = h * total;
+    let si = lengths.partition_point(|&l| (l as f64) < u).min(count - 1);
+    let before = if si == 0 { 0.0 } else { lengths[si - 1] as f64 };
+    let len = (lengths[si] as f64 - before).max(1e-6);
+    let f = if total > 0.0 { clamp((u - before) / len, 0.0, 1.0) } else { h_flat };
+    let s4 = o + si * 4;
+    [mix(t[s4] as f64, t[s4 + 2] as f64, f), mix(t[s4 + 1] as f64, t[s4 + 3] as f64, f)]
+}
+
+/// One bolt of arc `arc` from `a` to `b` into `out`: jagged by `amp` (`depth` levels), `r` thick
+/// thinning toward `b`, where it strikes, and forked `branches` times (the fraction a chance), each
+/// fork off at an angle from a point along it, a third of its length or so.
+#[allow(clippy::too_many_arguments)]
+fn bolt(a: [f64; 2], b: [f64; 2], amp: f64, r: f64, alpha: f64, branches: f64, arc: u32, key: u32, depth: u32, path: &mut Vec<[f64; 2]>, out: &mut Vec<ArcPiece>) {
+    let len = fm::hypot(b[0] - a[0], b[1] - a[1]).max(1e-6);
+    path.clear();
+    jag(a, b, amp, depth, key, path);
+    let n = path.len() - 1;
+    for i in 0..n {
+        let (f0, f1) = (i as f64 / n as f64, (i + 1) as f64 / n as f64);
+        let taper = |f: f64| 1.0 - 0.45 * f;
+        out.push(ArcPiece { p0: path[i], p1: path[i + 1], r0: r * taper(f0), r1: r * taper(f1), a0: alpha, a1: alpha, start: i == 0, end: i + 1 == n });
+    }
+    let forks = branches.floor() as u32 + u32::from(hash(arc as f64, 96, key) < branches.fract());
+    for fork in 0..forks {
+        let h = |k: u32| hash((arc * 16 + fork) as f64, k, key);
+        let at = path[(3 + (h(1) * (n as f64 - 6.0).max(0.0)).floor() as usize).min(n - 1)];
+        let (dx, dy) = ((b[0] - a[0]) / len, (b[1] - a[1]) / len);
+        let turn = (0.35 + 0.55 * h(2)) * if h(3) < 0.5 { -1.0 } else { 1.0 };
+        let (sn, cs) = fm::sin_cos(turn);
+        let reach = len * (0.18 + 0.22 * h(4));
+        let end = [at[0] + (dx * cs - dy * sn) * reach, at[1] + (dx * sn + dy * cs) * reach];
+        let mut branch = Vec::new();
+        jag(at, end, amp * 0.6, 3, key ^ (fork + 1).wrapping_mul(0x9E37), &mut branch);
+        let m = branch.len() - 1;
+        for i in 0..m {
+            let (f0, f1) = (i as f64 / m as f64, (i + 1) as f64 / m as f64);
+            out.push(ArcPiece { p0: branch[i], p1: branch[i + 1], r0: r * 0.6 * (1.0 - f0), r1: r * 0.6 * (1.0 - f1), a0: alpha * (1.0 - 0.6 * f0), a1: alpha * (1.0 - 0.6 * f1), start: i == 0, end: i + 1 == m });
+        }
+    }
+}
+
 /// The lightning of an arc draw at its tick: each arc a bolt along the beam (forked
 /// `arc_branches` times), its shape held for `arc_rhythm` ticks (at least the drawing's
-/// step), a fifth of them hidden at any moment so they flicker.
+/// step), a fifth of them hidden at any moment so they flicker. An arc layer that emits from
+/// the body crackles about it instead ([`body_arcs`]).
 pub fn arcs(batch: &Batch, draw: &Draw) -> Vec<ArcPiece> {
     let s = batch.spec(draw);
+    if s.emit_shape == BODY {
+        return draw.block.map_or_else(Vec::new, |b| body_arcs(batch, draw, b));
+    }
     let ev = Evaluator::new(batch, draw);
     let te = ev.local();
     let mut out = Vec::new();
@@ -764,33 +806,61 @@ pub fn arcs(batch: &Batch, draw: &Draw) -> Vec<ArcPiece> {
         }
         let amp = s.arc_amp * (0.6 + 0.8 * hash(arc as f64, 98, key));
         let r = s.size0 * (0.75 + 0.5 * hash(arc as f64, 97, key));
-        path.clear();
-        jag(a, b, amp, 4, key, &mut path);
-        let n = path.len() - 1;
-        for i in 0..n {
-            let (f0, f1) = (i as f64 / n as f64, (i + 1) as f64 / n as f64);
-            // Thinner toward the far end, where it strikes.
-            let taper = |f: f64| 1.0 - 0.45 * f;
-            out.push(ArcPiece { p0: path[i], p1: path[i + 1], r0: r * taper(f0), r1: r * taper(f1), a0: alpha, a1: alpha, start: i == 0, end: i + 1 == n });
+        bolt(a, b, amp, r, alpha, s.arc_branches, arc, key, 4, &mut path, &mut out);
+    }
+    out
+}
+
+/// Lightning about a body (an arc layer emitting from the body): each bolt strikes from a place on
+/// the outline (by length, `emit_radius` out from it) away from the target's root, give or take
+/// half of `spread`, `arc_reach` long, forked `arc_branches` times; its shape is held for
+/// `arc_rhythm` ticks and a fifth of them are dark at any moment, so they crackle. Sizes are the
+/// layer's, scaled by the body's size; the emission row thins them (density, a fade).
+fn body_arcs(batch: &Batch, draw: &Draw, block: super::batch::Block) -> Vec<ArcPiece> {
+    let s = batch.spec(draw);
+    let ev = Evaluator::new(batch, draw);
+    let (te, tick) = (ev.local(), ev.tick());
+    let mut out = Vec::new();
+    if te < s.start || s.emit_dur > 0.0 && te > s.start + s.emit_dur {
+        return out;
+    }
+    let r = batch.row(draw, 0);
+    let emit = r[row::EMIT] as f64 * draw.keep;
+    let (scale, anchor) = (r[row::SCALE] as f64, [r[row::X] as f64, r[row::Y] as f64]);
+    let mut fade = 1.0;
+    if s.clip_fade_in > 0.0 {
+        fade *= clamp((tick - draw.clip[0]) / s.clip_fade_in, 0.0, 1.0);
+    }
+    if s.clip_fade_out > 0.0 {
+        fade *= clamp((draw.clip[1] - tick) / s.clip_fade_out, 0.0, 1.0);
+    }
+    let alpha = draw.alpha * s.alpha * color_at(s, 0.0).1 * fade;
+    if alpha <= 0.0 || emit <= 0.0 {
+        return out;
+    }
+    let segs = (s.arc_segs.max(1.0)) as u32;
+    let count = (draw.count / segs.max(1)).max(1);
+    let rhythm = s.arc_rhythm.max(draw.step).max(1.0);
+    let period = (tick / rhythm).floor();
+    let mut path = Vec::new();
+    for arc in 0..count {
+        let key = pcg(draw.seed.wrapping_add(arc.wrapping_mul(7919)).wrapping_add(int32(period).wrapping_mul(104729)));
+        let h = |k: u32| hash(arc as f64, k, key);
+        if h(99) < 0.2 || h(95) >= emit {
+            continue;
         }
-        // Forks: from a point along the bolt, off at an angle, a third of its length or so.
-        let forks = s.arc_branches.floor() as u32 + u32::from(hash(arc as f64, 96, key) < s.arc_branches.fract());
-        for fork in 0..forks {
-            let h = |k: u32| hash((arc * 16 + fork) as f64, k, key);
-            let at = path[(3 + (h(1) * (n as f64 - 6.0)).floor() as usize).min(n - 1)];
-            let (dx, dy) = ((b[0] - a[0]) / len, (b[1] - a[1]) / len);
-            let turn = (0.35 + 0.55 * h(2)) * if h(3) < 0.5 { -1.0 } else { 1.0 };
-            let (sn, cs) = fm::sin_cos(turn);
-            let reach = len * (0.18 + 0.22 * h(4));
-            let end = [at[0] + (dx * cs - dy * sn) * reach, at[1] + (dx * sn + dy * cs) * reach];
-            let mut branch = Vec::new();
-            jag(at, end, amp * 0.6, 3, key ^ (fork + 1).wrapping_mul(0x9E37), &mut branch);
-            let m = branch.len() - 1;
-            for i in 0..m {
-                let (f0, f1) = (i as f64 / m as f64, (i + 1) as f64 / m as f64);
-                out.push(ArcPiece { p0: branch[i], p1: branch[i + 1], r0: r * 0.6 * (1.0 - f0), r1: r * 0.6 * (1.0 - f1), a0: alpha * (1.0 - 0.6 * f0), a1: alpha * (1.0 - 0.6 * f1), start: i == 0, end: i + 1 == m });
-            }
-        }
+        let on = outline_point(&batch.table, block, tick.floor(), h(94), h(93));
+        let (sn, cs) = fm::sin_cos(h(92) * TAU);
+        let er = s.emit_radius * scale * h(91).sqrt();
+        let a = [on[0] + cs * er, on[1] + sn * er * s.squash.max(0.05)];
+        let (rx, ry) = (a[0] - anchor[0], a[1] - anchor[1]);
+        let out_angle = if rx * rx + ry * ry > 1e-6 { fm::atan2(ry, rx) } else { h(90) * TAU };
+        let (sn, cs) = fm::sin_cos(out_angle + (h(89) - 0.5) * s.spread);
+        let reach = s.arc_reach * scale * (0.6 + 0.8 * h(88));
+        let b = [a[0] + cs * reach, a[1] + sn * reach];
+        let amp = s.arc_amp * scale * (0.6 + 0.8 * h(98));
+        let radius = s.size0 * scale * (0.75 + 0.5 * h(97));
+        bolt(a, b, amp, radius, alpha, s.arc_branches, arc, key, 3, &mut path, &mut out);
     }
     out
 }

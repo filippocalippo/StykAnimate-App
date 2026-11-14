@@ -374,6 +374,8 @@ pub struct Spec {
     /// Lightning: forks per arc, and how many ticks each shape holds.
     pub arc_branches: f64,
     pub arc_rhythm: f64,
+    /// Lightning about a body (an `ARC` layer emitting from the body): how far each bolt reaches.
+    pub arc_reach: f64,
 }
 
 impl Default for Spec {
@@ -465,6 +467,7 @@ impl Default for Spec {
             beam_look: None,
             arc_branches: 0.0,
             arc_rhythm: 2.0,
+            arc_reach: 0.0,
         }
     }
 }
