@@ -105,12 +105,13 @@ engine/target/release/styk vfx-review explosion --style fireball --out sheet.png
 engine/target/release/styk vfx-review aura --style fire --set color=0x66ccff --set width=1.6 --motion arms
 engine/target/release/styk vfx-review smoke --style soft --motion walk --backgrounds white,dark,sky --zooms 1
 engine/target/release/styk vfx-review particles --style spark --scene --set y=0.2 --cpu --out cpu.png
+engine/target/release/styk vfx-review particles --style flame --node hand --zooms 1,3
 engine/target/release/styk vfx-review beam --style energy --seq frames --until 48 --zooms 2
 ```
 
 `styk vfx-review shapes [--sizes 5,18,60] [--columns 8] [--out sheet.png]` draws every particle shape and material (painted and as light, at each size) on white and on dark, on the graphics card and the processor renderer side by side: the sheet to look at after changing a shape, a material or the shading.
 
-Options: `--style <name|index>` (the Particles look), `--set <name>=<value>` (any saved parameter; `0x…` colours, `on`/`off`), `--ticks a,b,…`, `--start`, `--duration <ticks|none>`, `--motion still|walk|run|arms|vanish`, `--scene`, `--backgrounds white,dark,grey,sky,0xRRGGBB`, `--zooms 1,4`, `--focus x,y`, `--cell WxH`, `--cpu`, `--out`, `--seq <folder>`, `--until <tick>`, `--save <file.json>` (the stage as a document the app opens).
+Options: `--style <name|index>` (the Particles look), `--set <name>=<value>` (any saved parameter; `0x…` colours, `on`/`off`), `--ticks a,b,…`, `--start`, `--duration <ticks|none>`, `--motion still|walk|run|arms|vanish`, `--scene`, `--node hand|foot|<segment id>` (the effect on one node of the figure), `--backgrounds white,dark,grey,sky,0xRRGGBB`, `--zooms 1,4`, `--focus x,y`, `--cell WxH`, `--cpu`, `--out`, `--seq <folder>`, `--until <tick>`, `--save <file.json>` (the stage as a document the app opens).
 
 Invariants:
 

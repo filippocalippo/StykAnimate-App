@@ -8,6 +8,7 @@
 //!     --start <tick>            the clip's start (default 0); --duration <ticks|none> its length
 //!     --motion <still|walk|arms|run|vanish|loop>   what the stick figure does (default still)
 //!     --scene                   the effect on the scene instead of the figure (at --set x/y)
+//!     --node <hand|foot|id>     the effect on one node of the figure (a hand, a foot, or a segment id) instead of all of it
 //!     --backgrounds <white,dark,…>  colours: white, dark, grey, sky or 0xRRGGBB (default white,dark)
 //!     --zooms <1,4>             the zooms shown, 1 = one canvas pixel per screen pixel (default 1,4)
 //!     --focus <x,y>             the canvas point zoomed views centre on (default: where the effect is)
@@ -27,7 +28,7 @@ use std::time::Instant;
 
 use styk_eval::eval::Prepared;
 use styk_eval::geometry::build;
-use styk_eval::vfx::generated::stage::{Clip, Motion, Stage, CANVAS, HIP};
+use styk_eval::vfx::generated::stage::{joint, pose, Clip, Motion, Stage, CANVAS, FOOT, HAND, HIP};
 use styk_eval::vfx::registry::{AuraStyle, BeamStyle, ExplosionStyle, ParticleLook, SmokeStyle};
 
 /// What the review shows, read from the command line.
@@ -40,6 +41,7 @@ struct Request {
     duration: Option<f64>,
     motion: String,
     scene: bool,
+    node: Option<u32>,
     backgrounds: Vec<(String, u32)>,
     zooms: Vec<f64>,
     focus: Option<[f64; 2]>,
@@ -76,6 +78,7 @@ fn parse(args: &[String]) -> Result<Request, String> {
         duration: None,
         motion: "still".into(),
         scene: false,
+        node: None,
         backgrounds: vec![background("white").unwrap(), background("dark").unwrap()],
         zooms: vec![1.0, 4.0],
         focus: None,
@@ -105,6 +108,14 @@ fn parse(args: &[String]) -> Result<Request, String> {
                 r.duration = if v == "none" { None } else { Some(v.parse().map_err(|e| format!("--duration: {e}"))?) };
             }
             "--motion" => r.motion = value(i)?,
+            "--node" => {
+                let v = value(i)?;
+                r.node = Some(match v.as_str() {
+                    "hand" => HAND,
+                    "foot" => FOOT,
+                    id => id.parse().map_err(|_| format!("--node {id:?}: hand, foot or a segment id"))?,
+                });
+            }
             "--backgrounds" => r.backgrounds = value(i)?.split(',').map(|b| background(b.trim()).ok_or_else(|| format!("unknown background {b:?}"))).collect::<Result<_, _>>()?,
             "--zooms" => r.zooms = value(i)?.split(',').map(|z| z.trim().parse::<f64>().map_err(|e| format!("--zooms: {e}"))).collect::<Result<_, _>>()?,
             "--focus" => {
@@ -186,6 +197,9 @@ fn stage(r: &Request, background: u32) -> Result<Stage, String> {
     let motion = Motion::parse(&r.motion).ok_or_else(|| format!("unknown motion {:?}: still, walk, run, arms or vanish", r.motion))?;
     let last = r.ticks.iter().copied().fold(0.0f64, f64::max).max(r.until.unwrap_or(0.0)) + 2.0;
     let mut clip = Clip::new(if r.scene { None } else { Some(1) }, &r.kind).set(param, &index.to_string()).timed(r.start, r.duration);
+    if !r.scene {
+        clip = clip.on_node(r.node);
+    }
     for (k, v) in &r.sets {
         clip = clip.set(k, v);
     }
@@ -209,6 +223,10 @@ fn focus(r: &Request) -> [f64; 2] {
     let num = |name: &str| r.sets.iter().find(|(k, _)| k == name).and_then(|(_, v)| v.parse::<f64>().ok());
     if r.scene {
         return [num("x").unwrap_or(0.5) * CANVAS[0], num("y").unwrap_or(0.5) * CANVAS[1]];
+    }
+    if let Some(node) = r.node {
+        let (hip, angles) = pose(HIP, 0.0, 0.0);
+        return joint(hip, &angles, node);
     }
     match r.kind.as_str() {
         "beam" => [HIP[0] + 60.0, HIP[1] - 40.0],
@@ -429,12 +447,26 @@ fn review(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     let [cw, ch] = r.cell;
-    let (label_h, header_h, gap) = (22u32, 46u32, 4u32);
     let rows: Vec<(usize, f64)> = r.zooms.iter().flat_map(|&z| (0..r.backgrounds.len()).map(move |b| (b, z))).collect();
-    let width = 150 + r.ticks.len() as u32 * (cw + gap);
+    let width = 150 + r.ticks.len() as u32 * (cw + GAP);
+    // The settings shown, wrapped to the sheet's width under the title.
+    let per_line = ((width.saturating_sub(20)) / 12).max(20) as usize;
+    let mut sets: Vec<String> = vec![String::new()];
+    for (k, v) in &r.sets {
+        let item = format!("{k}={v}");
+        if !sets.last().unwrap().is_empty() && sets.last().unwrap().len() + 1 + item.len() > per_line {
+            sets.push(String::new());
+        }
+        let line = sets.last_mut().unwrap();
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(&item);
+    }
+    sets.retain(|l| !l.is_empty());
+    let (label_h, header_h, gap) = (22u32, 46u32 + 20 * sets.len() as u32, GAP);
     let height = header_h + rows.len() as u32 * (ch + label_h + gap);
     let mut sheet = Sheet::new(width, height, [40, 41, 46]);
-    let sets = r.sets.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ");
     let mut painter_name = String::new();
     for (b, (bg_name, argb)) in r.backgrounds.iter().enumerate() {
         let p = prepared(&r, *argb)?;
@@ -457,12 +489,23 @@ fn review(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    let title = format!("{} {style} {} {}  MOTION {}  {}", r.kind, if r.scene { "SCENE" } else { "" }, sets, r.motion, painter_name);
+    let target = match (r.scene, r.node) {
+        (true, _) => "SCENE".to_string(),
+        (false, Some(node)) => format!("NODE {node}"),
+        _ => String::new(),
+    };
+    let title = format!("{} {style} {target}  MOTION {}  {}", r.kind, r.motion, painter_name);
     sheet.text(10, 12, &title, 2, [255, 214, 120], None);
+    for (n, line) in sets.iter().enumerate() {
+        sheet.text(10, 34 + 20 * n as u32, line, 2, [200, 200, 210], None);
+    }
     sheet.save(&r.out)?;
     println!("{} × {} pictures of {} {style} → {} ({}, {:.1} s)", rows.len(), r.ticks.len(), r.kind, r.out, painter_name, started.elapsed().as_secs_f64());
     Ok(())
 }
+
+/// The gap between pictures of a sheet.
+const GAP: u32 = 4;
 
 /// At 1× the view keeps the focus in frame but leans toward the canvas centre, so the whole effect shows.
 fn centre_for_unit(focus: [f64; 2]) -> [f64; 2] {
