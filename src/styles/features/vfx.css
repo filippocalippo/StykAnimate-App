@@ -184,11 +184,8 @@
   .vfx-value { position: relative; min-inline-size: 0; border-radius: var(--radius-md); }
   /* The value whose keys the timeline shows: a quiet ring around its field. */
   .vfx-value.is-channel-selected :where(.ui-field) { box-shadow: inset 0 0 0 1px var(--accent-line); }
-  .vfx-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .vfx-pair:where(:has(> .ui-field-link)) { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
-  .vfx-pair:where([data-single]) { grid-template-columns: minmax(0, 1fr) auto; }
   /* A choice of two to four keeps its words on a narrow card: its label goes above its segments. */
-  @container vfx-fields (width < 224px) {
+  @container vfx-fields (width < 236px) {
     .ui-field:where([data-segments]) { flex-wrap: wrap; block-size: auto; row-gap: var(--space-0-5); padding-block: var(--space-1-5) var(--space-1); }
     .ui-field:where([data-segments]) > .ui-segmented { flex: 1 1 100%; block-size: calc(var(--control-sm) - 2px); }
   }

@@ -128,7 +128,8 @@
   .ui-field[data-scrub-anywhere] { cursor: ew-resize; touch-action: none; }
   .ui-field[data-range]:where(:focus-within, [data-scrubbing]) { --_fill: var(--value-fill-active); }
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
-  .ui-field:where([data-range]) > .ui-field-label:where([data-property-scrub]) { text-decoration: none; cursor: inherit; }
+  /* The whole field scrubs (its cursor says so), so its label needs no underline of its own. */
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label:where([data-property-scrub]) { text-decoration: none; cursor: inherit; }
   /* The field's own ring shows its focus; its label never draws a second one. */
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label:where(:focus-visible) { outline: none; }
   .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-input { flex: 0 1 auto; inline-size: auto; field-sizing: content; min-inline-size: 1ch; text-align: end; cursor: inherit; }
@@ -177,7 +178,7 @@
   .ui-field[data-segments] { padding-inline-end: var(--space-0-5); }
   .ui-field:where([data-segments]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
   .ui-field:where([data-segments]) > .ui-segmented { flex: 0 1 auto; min-inline-size: 0; block-size: calc(100% - 6px); padding: 0; background: transparent; }
-  .ui-field:where([data-segments]) .ui-segmented-item { min-inline-size: 0; padding-inline: var(--space-2); font: var(--type-small-strong); }
+  .ui-field:where([data-segments]) .ui-segmented-item { min-inline-size: 0; padding-inline: var(--space-1-5); font: var(--type-small-strong); }
   .ui-field:where([data-segments]) .ui-segmented-item > :where(.ui-label) { overflow: hidden; text-overflow: ellipsis; }
 
   /* A colour field that names itself (a value field's colour): the label, then the swatch and the hex at the end. */
@@ -187,9 +188,10 @@
   .ui-field:where([data-color]) > .ui-swatch:where([data-gradient]) { --_s: 16px; inline-size: 28px; }
 
   /* A linked pair: two fields with the link between them; one field spans while linked. */
-  .ui-field-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--space-1); min-inline-size: 0; }
-  .ui-field-pair[data-single] { grid-template-columns: minmax(0, 1fr) auto; }
-  .ui-field-pair > .ui-field-link { color: var(--text-3); }
+  /* Two values stack, each whole (a narrow panel never cuts "Height 12 px"); their link spans both at their side. */
+  .ui-field-pair { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: var(--space-1); min-inline-size: 0; }
+  .ui-field-pair:where(:has(> .ui-field-link)) { grid-template-columns: minmax(0, 1fr) auto; }
+  .ui-field-pair > .ui-field-link { grid-column: 2; grid-row: 1 / span 2; color: var(--text-3); }
   .ui-field-pair > .ui-field-link:where([aria-pressed="true"]) { color: var(--accent-text); }
 
   /* Inline field (header rows: the tool options' Size, Opacity; the frame rate): 28px, sized to its label and value. */

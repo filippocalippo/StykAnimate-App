@@ -17,6 +17,9 @@ import {clipTime} from './vfx-clips.mjs';
 import {vfxPaint} from './vfx-paint.mjs';
 import {paintCSS} from './paint.mjs';
 import {icon} from './icons.mjs';
+import {vfxIcon} from './vfx-icons.mjs';
+/** The kit draws app glyphs; a seed's shuffle is the effects' own dice. */
+const ENV = {icon: (name, className) => (name === 'dice' ? vfxIcon('dice') : icon(name, className))};
 import {findFigureType} from './figure-types.mjs';
 import {presentEffect, labelKey, helpKey, sectionKey, optionLabel, optionRetired, PRESENTATION} from './vfx-presentation.mjs';
 
@@ -144,9 +147,9 @@ function paramHTML(host, ctx, item) {
       precision: d.discrete ? 0 : places + 2, displayPrecision: d.discrete ? 0 : places, default: d.default * factor, field: false,
       range: control === 'value', angle: control === 'angle', scrubAnywhere: true, scale: item.scale, knee: item.knee, exponent: item.exponent, disabled};
     // Every seed draws a new pattern with the same settings (VfxInspector's shuffle).
-    if (param === 'seed') trail.push({label: interfaceText('vfxPanel.shuffleTip'), labelKey: 'vfxPanel.shuffleTip', icon: 'rotate', className: 'vfx-shuffle', data: {'vfx-shuffle': key}, disabled});
+    if (param === 'seed') trail.push({label: interfaceText('vfxPanel.shuffleTip'), labelKey: 'vfxPanel.shuffleTip', icon: 'dice', className: 'vfx-shuffle', data: {'vfx-shuffle': key}, disabled});
   }
-  return valueWrap(host, key, binding, renderRow({...row, trail}));
+  return valueWrap(host, key, binding, renderRow({...row, trail}, ENV));
 }
 
 /** Shadow distance and angle: one control each that writes both offsets. */
@@ -174,7 +177,7 @@ function pairHTML(host, ctx, item) {
     link = `<button type="button" class="ui-icon-button ui-field-link" data-size="xs" data-vfx-link="${escapeHTML(key)}" aria-pressed="${linked}" aria-label="${escapeHTML(interfaceText('vfxPanel.linkTip'))}" data-tooltip="${escapeHTML(interfaceText('vfxPanel.linkTip'))}" ${messageAttributes('vfxPanel.linkTip', {}, 'aria-label')} ${messageAttributes('vfxPanel.linkTip', {}, 'data-tooltip')}${ctx.locked ? ' disabled' : ''}>${icon(linked ? 'link' : 'detach')}</button>`;
   }
   const shown = linked ? members.slice(0, 1) : members;
-  return `<div class="ui-field-pair vfx-pair"${shown.length === 1 ? ' data-single' : ''} role="group" aria-label="${escapeHTML(pairName)}">${shown[0]}${link}${shown[1] ?? ''}</div>`;
+  return `<div class="ui-field-pair vfx-pair"${shown.length === 1 ? ' data-single' : ''} role="group" aria-label="${escapeHTML(pairName)}">${shown[0]}${shown[1] ?? ''}${link}</div>`;
 }
 
 /** A beam's target: a node or figure locked on the stage, or a point (its X and Y below). */

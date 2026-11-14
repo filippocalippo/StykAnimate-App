@@ -49,7 +49,7 @@ export function openGroupMenu(host,clip,id,anchor){
   [{label:interfaceText("vfxClipControls.enabled"), labelKey: "vfxClipControls.enabled", labelParams: {},symbol:'eye',checked:host.editor.sampleVfxClip(clip.id).find(e=>e.id===id).enabled,action:action('effect-enable')}],
   [index>0&&{label:interfaceText("vfxClipControls.moveUp"), labelKey: "vfxClipControls.moveUp", labelParams: {},symbol:'chevron-up',action:action('effect-up')},index<clip.effects.length-1&&{label:interfaceText("vfxClipControls.moveDown"), labelKey: "vfxClipControls.moveDown", labelParams: {},symbol:'chevron-down',action:action('effect-down')}],
   [{label:interfaceText('vfxInspector.copyEffect'),labelKey:'vfxInspector.copyEffect',symbol:'duplicate',action:action('effect-copy')}],
-  [...(seeded(clip.effects[index]?.type)?[{label:interfaceText('vfxPanel.shuffle'),labelKey:'vfxPanel.shuffle',symbol:'rotate',action:()=>host.shuffleEffect(clip,id)}]:[]),{label:interfaceText('vfxPanel.resetEffect'),labelKey:'vfxPanel.resetEffect',symbol:'reset',action:()=>host.resetEffect(clip,id)},
+  [...(seeded(clip.effects[index]?.type)?[{label:interfaceText('vfxPanel.shuffle'),labelKey:'vfxPanel.shuffle',action:()=>host.shuffleEffect(clip,id)}]:[]),{label:interfaceText('vfxPanel.resetEffect'),labelKey:'vfxPanel.resetEffect',symbol:'reset',action:()=>host.resetEffect(clip,id)},
    {label:interfaceText("vfxClipControls.remove"), labelKey: "vfxClipControls.remove", labelParams: {},symbol:'trash',danger:true,action:action('effect-delete')}],
  ]);
 }

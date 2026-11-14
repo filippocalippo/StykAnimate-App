@@ -35383,7 +35383,7 @@
   },
   "vfxChannels.aimTarget": {
     "locations": [
-      "src/vfx-effect-view.mjs:188"
+      "src/vfx-effect-view.mjs:191"
     ],
     "context": "aim = {messageKey: 'vfxChannels.aimTarget', messageParams: {figure: figure?.name || {messageKey: 'vfxChannels.figure', messageParams: {id: p.aimUid}}, node: p.a"
   },
@@ -35419,7 +35419,7 @@
   },
   "vfxChannels.figure": {
     "locations": [
-      "src/vfx-effect-view.mjs:188"
+      "src/vfx-effect-view.mjs:191"
     ],
     "context": "aim = {messageKey: 'vfxChannels.aimTarget', messageParams: {figure: figure?.name || {messageKey: 'vfxChannels.figure', messageParams: {id: p.aimUid}}, node: p.a"
   },
@@ -35431,7 +35431,7 @@
   },
   "vfxChannels.node": {
     "locations": [
-      "src/vfx-effect-view.mjs:188"
+      "src/vfx-effect-view.mjs:191"
     ],
     "context": "aim = {messageKey: 'vfxChannels.aimTarget', messageParams: {figure: figure?.name || {messageKey: 'vfxChannels.figure', messageParams: {id: p.aimUid}}, node: p.a"
   },
@@ -35449,7 +35449,7 @@
   },
   "vfxChannels.origin": {
     "locations": [
-      "src/vfx-effect-view.mjs:188"
+      "src/vfx-effect-view.mjs:191"
     ],
     "context": "aim = {messageKey: 'vfxChannels.aimTarget', messageParams: {figure: figure?.name || {messageKey: 'vfxChannels.figure', messageParams: {id: p.aimUid}}, node: p.a"
   },
@@ -35499,7 +35499,7 @@
   "vfxClipInspector.add": {
     "locations": [
       "src/vfx-clip-inspector.mjs:50",
-      "src/vfx-effect-view.mjs:97"
+      "src/vfx-effect-view.mjs:100"
     ],
     "context": "return `<div class=\"vfx-key-navigation\"><button type=\"button\" class=\"vfx-channel-trigger\" data-clip-action=\"channels\" aria-label=\"Visible effect keys\" aria-hasp"
   },
@@ -35512,7 +35512,7 @@
   "vfxClipInspector.addKey": {
     "locations": [
       "src/vfx-clip-inspector.mjs:173",
-      "src/vfx-effect-view.mjs:97"
+      "src/vfx-effect-view.mjs:100"
     ],
     "context": "else e.movieclipBatch(interfaceText('vfxClipInspector.addKey'),()=>{for(const property of properties)e.toggleVfxClipKey(b.clip,property);});"
   },
@@ -35524,25 +35524,25 @@
   },
   "vfxClipInspector.aimAt": {
     "locations": [
-      "src/vfx-effect-view.mjs:191"
+      "src/vfx-effect-view.mjs:194"
     ],
     "context": "const field = `<div class=\"ui-field vfx-aim\" data-aim><span class=\"ui-field-label\" ${messageAttributes('vfxClipInspector.aimAt')}>${escapeHTML(interfaceText('vf"
   },
   "vfxClipInspector.aimAtAStagePointInstead": {
     "locations": [
-      "src/vfx-effect-view.mjs:192"
+      "src/vfx-effect-view.mjs:195"
     ],
     "context": "`${p.aimUid ? `<button type=\"button\" class=\"ui-icon-button\" data-size=\"xs\" data-clip-action=\"aim-clear\" data-effect-id=\"${effect.id}\" aria-label=\"${escapeHTML(i"
   },
   "vfxClipInspector.clickANodeAFigureOriginOrAny": {
     "locations": [
-      "src/vfx-effect-view.mjs:193"
+      "src/vfx-effect-view.mjs:196"
     ],
     "context": "`<button type=\"button\" class=\"ui-button vfx-aim-pick\" data-size=\"xs\" data-variant=\"${picking ? 'accent' : 'ghost'}\" data-clip-action=\"aim-pick\" data-effect-id=\""
   },
   "vfxClipInspector.clickTheStage": {
     "locations": [
-      "src/vfx-effect-view.mjs:193"
+      "src/vfx-effect-view.mjs:196"
     ],
     "context": "`<button type=\"button\" class=\"ui-button vfx-aim-pick\" data-size=\"xs\" data-variant=\"${picking ? 'accent' : 'ghost'}\" data-clip-action=\"aim-pick\" data-effect-id=\""
   },
@@ -35650,7 +35650,7 @@
   },
   "vfxClipInspector.key": {
     "locations": [
-      "src/vfx-effect-view.mjs:99"
+      "src/vfx-effect-view.mjs:102"
     ],
     "context": "return {label: interfaceText('vfxClipInspector.key', {value: {messageKey: verb}, label: labelMessage ?? label}), labelKey: 'vfxClipInspector.key', labelParams: "
   },
@@ -35693,7 +35693,7 @@
   },
   "vfxClipInspector.pick": {
     "locations": [
-      "src/vfx-effect-view.mjs:193"
+      "src/vfx-effect-view.mjs:196"
     ],
     "context": "`<button type=\"button\" class=\"ui-button vfx-aim-pick\" data-size=\"xs\" data-variant=\"${picking ? 'accent' : 'ghost'}\" data-clip-action=\"aim-pick\" data-effect-id=\""
   },
@@ -35711,7 +35711,7 @@
   },
   "vfxClipInspector.pointOnStage": {
     "locations": [
-      "src/vfx-effect-view.mjs:185"
+      "src/vfx-effect-view.mjs:188"
     ],
     "context": "let aim = {messageKey: 'vfxClipInspector.pointOnStage'};"
   },
@@ -35724,13 +35724,13 @@
   "vfxClipInspector.remove": {
     "locations": [
       "src/vfx-clip-inspector.mjs:50",
-      "src/vfx-effect-view.mjs:97"
+      "src/vfx-effect-view.mjs:100"
     ],
     "context": "return `<div class=\"vfx-key-navigation\"><button type=\"button\" class=\"vfx-channel-trigger\" data-clip-action=\"channels\" aria-label=\"Visible effect keys\" aria-hasp"
   },
   "vfxClipInspector.removeKey": {
     "locations": [
-      "src/vfx-effect-view.mjs:97"
+      "src/vfx-effect-view.mjs:100"
     ],
     "context": "const action = on ? 'vfxClipInspector.removeKey' : 'vfxClipInspector.addKey', verb = on ? 'vfxClipInspector.remove' : 'vfxClipInspector.add';"
   },
@@ -35854,7 +35854,7 @@
   },
   "vfxInspector.angle": {
     "locations": [
-      "src/vfx-effect-view.mjs:155"
+      "src/vfx-effect-view.mjs:158"
     ],
     "context": "const n = names(effect.type, item.name, interfaceText(item.name === 'angle' ? 'vfxInspector.angle' : 'vfxInspector.distance'));"
   },
@@ -35892,7 +35892,7 @@
   },
   "vfxInspector.distance": {
     "locations": [
-      "src/vfx-effect-view.mjs:155"
+      "src/vfx-effect-view.mjs:158"
     ],
     "context": "const n = names(effect.type, item.name, interfaceText(item.name === 'angle' ? 'vfxInspector.angle' : 'vfxInspector.distance'));"
   },
@@ -35905,7 +35905,7 @@
   },
   "vfxInspector.effectParameterLabel": {
     "locations": [
-      "src/vfx-effect-view.mjs:86"
+      "src/vfx-effect-view.mjs:89"
     ],
     "context": "descriptionKey: nameKey && key ? 'vfxInspector.effectParameterLabel' : undefined,"
   },
@@ -35946,8 +35946,8 @@
   },
   "vfxInspector.gradient": {
     "locations": [
-      "src/vfx-effect-view.mjs:121",
-      "src/vfx-effect-view.mjs:122"
+      "src/vfx-effect-view.mjs:124",
+      "src/vfx-effect-view.mjs:125"
     ],
     "context": "const caption = solid ? `${hex.slice(1).toUpperCase()}${stop.opacity < 1 ? ` · ${Math.round(stop.opacity * 100)}%` : ''}` : interfaceText('vfxInspector.gradient"
   },
@@ -36247,7 +36247,7 @@
   },
   "vfxPanel.linkTip": {
     "locations": [
-      "src/vfx-effect-view.mjs:174"
+      "src/vfx-effect-view.mjs:177"
     ],
     "context": "link = `<button type=\"button\" class=\"ui-icon-button ui-field-link\" data-size=\"xs\" data-vfx-link=\"${escapeHTML(key)}\" aria-pressed=\"${linked}\" aria-label=\"${esca"
   },
@@ -36318,7 +36318,7 @@
       "src/vfx-clip-inspector.mjs:136",
       "src/vfx-inspector.mjs:159"
     ],
-    "context": "[...(seeded(clip.effects[index]?.type)?[{label:interfaceText('vfxPanel.shuffle'),labelKey:'vfxPanel.shuffle',symbol:'rotate',action:()=>host.shuffleEffect(clip,"
+    "context": "[...(seeded(clip.effects[index]?.type)?[{label:interfaceText('vfxPanel.shuffle'),labelKey:'vfxPanel.shuffle',action:()=>host.shuffleEffect(clip,id)}]:[]),{label"
   },
   "vfxPanel.resetValue": {
     "locations": [
@@ -36334,7 +36334,7 @@
   },
   "vfxPanel.retiredOption": {
     "locations": [
-      "src/vfx-effect-view.mjs:131"
+      "src/vfx-effect-view.mjs:134"
     ],
     "context": "return optionRetired(d, i) ? {label: interfaceText('vfxPanel.retiredOption', {name: label}), labelKey: 'vfxPanel.retiredOption', labelParams: {name: optionKeys?"
   },
@@ -36346,7 +36346,7 @@
   },
   "vfxPanel.section.more": {
     "locations": [
-      "src/vfx-effect-view.mjs:67"
+      "src/vfx-effect-view.mjs:70"
     ],
     "context": "const title = section.id === 'more' ? 'vfxPanel.section.more' : sectionKey(section.id);"
   },
@@ -36356,12 +36356,12 @@
       "src/vfx-clip-inspector.mjs:70",
       "src/vfx-clip-inspector.mjs:135"
     ],
-    "context": "[...(seeded(clip.effects[index]?.type)?[{label:interfaceText('vfxPanel.shuffle'),labelKey:'vfxPanel.shuffle',symbol:'rotate',action:()=>host.shuffleEffect(clip,"
+    "context": "[...(seeded(clip.effects[index]?.type)?[{label:interfaceText('vfxPanel.shuffle'),labelKey:'vfxPanel.shuffle',action:()=>host.shuffleEffect(clip,id)}]:[]),{label"
   },
   "vfxPanel.shuffleTip": {
     "locations": [
       "src/vfx-clip-inspector.mjs:70",
-      "src/vfx-effect-view.mjs:147",
+      "src/vfx-effect-view.mjs:150",
       "src/vfx-inspector.mjs:159"
     ],
     "context": "const own=(effect&&seeded(effect.type)?footButton('shuffle',vfxIcon('dice'),'vfxPanel.shuffle',{disabled:locked,tipKey:'vfxPanel.shuffleTip',word:false,effectId"
