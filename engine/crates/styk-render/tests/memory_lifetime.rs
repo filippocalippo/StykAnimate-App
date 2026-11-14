@@ -96,7 +96,7 @@ fn effect_textures_are_reused_released_and_freed() {
         let run = record(&mut records, &stack(radius), Frame { scale: 1.0, origin: [0.0; 2], output_size: size.map(|n| n as f64) }, size);
         (records, run)
     };
-    let mut effects = styk_render::effects::executor::Executor::new(device);
+    let mut effects = styk_render::effects::executor::Executor::new(device, true);
     let (records, run) = frame([256, 256], 30.0);
     effects.prepare(device, queue, records, &[&run]);
     let held = effects.stats.slot_bytes;

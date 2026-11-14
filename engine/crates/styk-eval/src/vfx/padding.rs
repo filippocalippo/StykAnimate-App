@@ -31,7 +31,8 @@ fn stack(stack: &[Arc<Effect>], scale: f64, extent: f64, sampling: bool) -> f64 
             Params::Glow(p) => blur_padding(p.radius * scale, sampling) + p.spread * scale,
             Params::Bloom(p) => blur_padding(p.radius * scale, sampling),
             Params::Shadow(p) => blur_padding(p.radius * scale, sampling) + p.spread * scale + p.offset_x.abs().max(p.offset_y.abs()) * scale,
-            Params::Outline(p) => p.width * scale,
+            // A feathered outline reaches half its feather beyond its width.
+            Params::Outline(p) => p.width * scale * (1.0 + p.softness / 2.0),
             Params::Pixelate(p) => 1f64.max(p.size * scale).max(if p.linked { p.size } else { p.size_y } * scale),
             Params::RgbSplit(p) => p.amount * p.red.abs().max(p.green.abs()).max(p.blue.abs()) * scale,
             Params::Turbulence(p) => p.amount * scale,

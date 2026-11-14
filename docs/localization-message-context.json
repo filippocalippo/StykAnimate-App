@@ -32660,192 +32660,192 @@
   },
   "vfxCatalog.category.blur": {
     "locations": [
-      "src/vfx-localization.mjs:176",
-      "src/vfx-localization.mjs:1193"
+      "src/vfx-localization.mjs:200",
+      "src/vfx-localization.mjs:1245"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.blur\","
   },
   "vfxCatalog.category.color": {
     "locations": [
-      "src/vfx-localization.mjs:41",
-      "src/vfx-localization.mjs:206",
-      "src/vfx-localization.mjs:308",
-      "src/vfx-localization.mjs:1191"
+      "src/vfx-localization.mjs:44",
+      "src/vfx-localization.mjs:230",
+      "src/vfx-localization.mjs:338",
+      "src/vfx-localization.mjs:1243"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.color\","
   },
   "vfxCatalog.category.distort": {
     "locations": [
       "src/vfx-localization.mjs:17",
-      "src/vfx-localization.mjs:341",
-      "src/vfx-localization.mjs:368",
-      "src/vfx-localization.mjs:392",
-      "src/vfx-localization.mjs:413",
-      "src/vfx-localization.mjs:1190"
+      "src/vfx-localization.mjs:371",
+      "src/vfx-localization.mjs:404",
+      "src/vfx-localization.mjs:428",
+      "src/vfx-localization.mjs:452",
+      "src/vfx-localization.mjs:1242"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.distort\","
   },
   "vfxCatalog.category.generate": {
     "locations": [
-      "src/vfx-localization.mjs:518",
-      "src/vfx-localization.mjs:732",
-      "src/vfx-localization.mjs:826",
-      "src/vfx-localization.mjs:938",
-      "src/vfx-localization.mjs:1031",
-      "src/vfx-localization.mjs:1195"
+      "src/vfx-localization.mjs:570",
+      "src/vfx-localization.mjs:784",
+      "src/vfx-localization.mjs:878",
+      "src/vfx-localization.mjs:990",
+      "src/vfx-localization.mjs:1083",
+      "src/vfx-localization.mjs:1247"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.generate\","
   },
   "vfxCatalog.category.light": {
     "locations": [
-      "src/vfx-localization.mjs:56",
-      "src/vfx-localization.mjs:102",
-      "src/vfx-localization.mjs:142",
-      "src/vfx-localization.mjs:440",
-      "src/vfx-localization.mjs:464",
-      "src/vfx-localization.mjs:1192"
+      "src/vfx-localization.mjs:70",
+      "src/vfx-localization.mjs:123",
+      "src/vfx-localization.mjs:166",
+      "src/vfx-localization.mjs:479",
+      "src/vfx-localization.mjs:503",
+      "src/vfx-localization.mjs:1244"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.light\","
   },
   "vfxCatalog.category.looks": {
     "locations": [
-      "src/vfx-localization.mjs:1138",
-      "src/vfx-localization.mjs:1142",
-      "src/vfx-localization.mjs:1146",
-      "src/vfx-localization.mjs:1150",
-      "src/vfx-localization.mjs:1154",
-      "src/vfx-localization.mjs:1158",
-      "src/vfx-localization.mjs:1162",
-      "src/vfx-localization.mjs:1166",
-      "src/vfx-localization.mjs:1170",
-      "src/vfx-localization.mjs:1174",
-      "src/vfx-localization.mjs:1178",
-      "src/vfx-localization.mjs:1182",
-      "src/vfx-localization.mjs:1186",
-      "src/vfx-localization.mjs:1196"
+      "src/vfx-localization.mjs:1190",
+      "src/vfx-localization.mjs:1194",
+      "src/vfx-localization.mjs:1198",
+      "src/vfx-localization.mjs:1202",
+      "src/vfx-localization.mjs:1206",
+      "src/vfx-localization.mjs:1210",
+      "src/vfx-localization.mjs:1214",
+      "src/vfx-localization.mjs:1218",
+      "src/vfx-localization.mjs:1222",
+      "src/vfx-localization.mjs:1226",
+      "src/vfx-localization.mjs:1230",
+      "src/vfx-localization.mjs:1234",
+      "src/vfx-localization.mjs:1238",
+      "src/vfx-localization.mjs:1248"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.looks\""
   },
   "vfxCatalog.category.texture": {
     "locations": [
-      "src/vfx-localization.mjs:239",
-      "src/vfx-localization.mjs:267",
-      "src/vfx-localization.mjs:491",
-      "src/vfx-localization.mjs:1194"
+      "src/vfx-localization.mjs:266",
+      "src/vfx-localization.mjs:294",
+      "src/vfx-localization.mjs:540",
+      "src/vfx-localization.mjs:1246"
     ],
     "context": "\"categoryKey\": \"vfxCatalog.category.texture\","
   },
   "vfxCatalog.effect.aura": {
     "locations": [
-      "src/vfx-localization.mjs:731"
+      "src/vfx-localization.mjs:783"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.aura\","
   },
   "vfxCatalog.effect.beam": {
     "locations": [
-      "src/vfx-localization.mjs:825"
+      "src/vfx-localization.mjs:877"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.beam\","
   },
   "vfxCatalog.effect.bloom": {
     "locations": [
-      "src/vfx-localization.mjs:439"
+      "src/vfx-localization.mjs:478"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.bloom\","
   },
   "vfxCatalog.effect.blur": {
     "locations": [
-      "src/vfx-localization.mjs:175"
+      "src/vfx-localization.mjs:199"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.blur\","
   },
   "vfxCatalog.effect.crt": {
     "locations": [
-      "src/vfx-localization.mjs:490"
+      "src/vfx-localization.mjs:539"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.crt\","
   },
   "vfxCatalog.effect.dissolve": {
     "locations": [
-      "src/vfx-localization.mjs:340"
+      "src/vfx-localization.mjs:370"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.dissolve\","
   },
   "vfxCatalog.effect.explosion": {
     "locations": [
-      "src/vfx-localization.mjs:1030"
+      "src/vfx-localization.mjs:1082"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.explosion\","
   },
   "vfxCatalog.effect.glow": {
     "locations": [
-      "src/vfx-localization.mjs:55"
+      "src/vfx-localization.mjs:69"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.glow\","
   },
   "vfxCatalog.effect.grade": {
     "locations": [
-      "src/vfx-localization.mjs:205"
+      "src/vfx-localization.mjs:229"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.grade\","
   },
   "vfxCatalog.effect.lightSweep": {
     "locations": [
-      "src/vfx-localization.mjs:463"
+      "src/vfx-localization.mjs:502"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.lightSweep\","
   },
   "vfxCatalog.effect.noise": {
     "locations": [
-      "src/vfx-localization.mjs:266"
+      "src/vfx-localization.mjs:293"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.noise\","
   },
   "vfxCatalog.effect.outline": {
     "locations": [
-      "src/vfx-localization.mjs:101"
+      "src/vfx-localization.mjs:122"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.outline\","
   },
   "vfxCatalog.effect.particles": {
     "locations": [
-      "src/vfx-localization.mjs:517"
+      "src/vfx-localization.mjs:569"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.particles\","
   },
   "vfxCatalog.effect.pixelate": {
     "locations": [
-      "src/vfx-localization.mjs:238"
+      "src/vfx-localization.mjs:265"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.pixelate\","
   },
   "vfxCatalog.effect.rgbSplit": {
     "locations": [
-      "src/vfx-localization.mjs:367"
+      "src/vfx-localization.mjs:403"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.rgbSplit\","
   },
   "vfxCatalog.effect.shadow": {
     "locations": [
-      "src/vfx-localization.mjs:141"
+      "src/vfx-localization.mjs:165"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.shadow\","
   },
   "vfxCatalog.effect.shockwave": {
     "locations": [
-      "src/vfx-localization.mjs:412"
+      "src/vfx-localization.mjs:451"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.shockwave\","
   },
   "vfxCatalog.effect.smoke": {
     "locations": [
-      "src/vfx-localization.mjs:937"
+      "src/vfx-localization.mjs:989"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.smoke\","
   },
   "vfxCatalog.effect.tint": {
     "locations": [
-      "src/vfx-localization.mjs:40"
+      "src/vfx-localization.mjs:43"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.tint\","
   },
@@ -32857,2324 +32857,2444 @@
   },
   "vfxCatalog.effect.vignette": {
     "locations": [
-      "src/vfx-localization.mjs:307"
+      "src/vfx-localization.mjs:337"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.vignette\","
   },
   "vfxCatalog.effect.wave": {
     "locations": [
-      "src/vfx-localization.mjs:391"
+      "src/vfx-localization.mjs:427"
     ],
     "context": "\"nameKey\": \"vfxCatalog.effect.wave\","
   },
   "vfxCatalog.parameter.aura.blend.label": {
     "locations": [
-      "src/vfx-localization.mjs:801"
+      "src/vfx-localization.mjs:853"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.blend.label\","
   },
   "vfxCatalog.parameter.aura.blend.option.auto": {
     "locations": [
-      "src/vfx-localization.mjs:803"
+      "src/vfx-localization.mjs:855"
     ],
     "context": "\"vfxCatalog.parameter.aura.blend.option.auto\","
   },
   "vfxCatalog.parameter.aura.blend.option.glow": {
     "locations": [
-      "src/vfx-localization.mjs:804"
+      "src/vfx-localization.mjs:856"
     ],
     "context": "\"vfxCatalog.parameter.aura.blend.option.glow\","
   },
   "vfxCatalog.parameter.aura.blend.option.solid": {
     "locations": [
-      "src/vfx-localization.mjs:805"
+      "src/vfx-localization.mjs:857"
     ],
     "context": "\"vfxCatalog.parameter.aura.blend.option.solid\""
   },
   "vfxCatalog.parameter.aura.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:751"
+      "src/vfx-localization.mjs:803"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.color.label\""
   },
   "vfxCatalog.parameter.aura.delay.label": {
     "locations": [
-      "src/vfx-localization.mjs:809"
+      "src/vfx-localization.mjs:861"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.delay.label\""
   },
   "vfxCatalog.parameter.aura.density.label": {
     "locations": [
-      "src/vfx-localization.mjs:760"
+      "src/vfx-localization.mjs:812"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.density.label\""
   },
   "vfxCatalog.parameter.aura.dust.label": {
     "locations": [
-      "src/vfx-localization.mjs:766"
+      "src/vfx-localization.mjs:818"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.dust.label\","
   },
   "vfxCatalog.parameter.aura.dust.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:768"
+      "src/vfx-localization.mjs:820"
     ],
     "context": "\"vfxCatalog.parameter.aura.dust.option.off\","
   },
   "vfxCatalog.parameter.aura.dust.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:769"
+      "src/vfx-localization.mjs:821"
     ],
     "context": "\"vfxCatalog.parameter.aura.dust.option.on\""
   },
   "vfxCatalog.parameter.aura.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:735"
+      "src/vfx-localization.mjs:787"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.effectStrength.label\""
   },
   "vfxCatalog.parameter.aura.embers.label": {
     "locations": [
-      "src/vfx-localization.mjs:787"
+      "src/vfx-localization.mjs:839"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.embers.label\","
   },
   "vfxCatalog.parameter.aura.embers.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:789"
+      "src/vfx-localization.mjs:841"
     ],
     "context": "\"vfxCatalog.parameter.aura.embers.option.off\","
   },
   "vfxCatalog.parameter.aura.embers.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:790"
+      "src/vfx-localization.mjs:842"
     ],
     "context": "\"vfxCatalog.parameter.aura.embers.option.on\""
   },
   "vfxCatalog.parameter.aura.flames.label": {
     "locations": [
-      "src/vfx-localization.mjs:773"
+      "src/vfx-localization.mjs:825"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.flames.label\","
   },
   "vfxCatalog.parameter.aura.flames.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:775"
+      "src/vfx-localization.mjs:827"
     ],
     "context": "\"vfxCatalog.parameter.aura.flames.option.off\","
   },
   "vfxCatalog.parameter.aura.flames.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:776"
+      "src/vfx-localization.mjs:828"
     ],
     "context": "\"vfxCatalog.parameter.aura.flames.option.on\""
   },
   "vfxCatalog.parameter.aura.glow.label": {
     "locations": [
-      "src/vfx-localization.mjs:780"
+      "src/vfx-localization.mjs:832"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.glow.label\","
   },
   "vfxCatalog.parameter.aura.glow.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:782"
+      "src/vfx-localization.mjs:834"
     ],
     "context": "\"vfxCatalog.parameter.aura.glow.option.off\","
   },
   "vfxCatalog.parameter.aura.glow.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:783"
+      "src/vfx-localization.mjs:835"
     ],
     "context": "\"vfxCatalog.parameter.aura.glow.option.on\""
   },
   "vfxCatalog.parameter.aura.height.label": {
     "locations": [
-      "src/vfx-localization.mjs:757"
+      "src/vfx-localization.mjs:809"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.height.label\""
   },
   "vfxCatalog.parameter.aura.intensity.label": {
     "locations": [
-      "src/vfx-localization.mjs:754"
+      "src/vfx-localization.mjs:806"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.intensity.label\""
   },
   "vfxCatalog.parameter.aura.seed.label": {
     "locations": [
-      "src/vfx-localization.mjs:820"
+      "src/vfx-localization.mjs:872"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.seed.label\""
   },
   "vfxCatalog.parameter.aura.step.label": {
     "locations": [
-      "src/vfx-localization.mjs:812"
+      "src/vfx-localization.mjs:864"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.step.label\","
   },
   "vfxCatalog.parameter.aura.step.option.onesSmooth": {
     "locations": [
-      "src/vfx-localization.mjs:814"
+      "src/vfx-localization.mjs:866"
     ],
     "context": "\"vfxCatalog.parameter.aura.step.option.onesSmooth\","
   },
   "vfxCatalog.parameter.aura.step.option.threes": {
     "locations": [
-      "src/vfx-localization.mjs:816"
+      "src/vfx-localization.mjs:868"
     ],
     "context": "\"vfxCatalog.parameter.aura.step.option.threes\""
   },
   "vfxCatalog.parameter.aura.step.option.twos": {
     "locations": [
-      "src/vfx-localization.mjs:815"
+      "src/vfx-localization.mjs:867"
     ],
     "context": "\"vfxCatalog.parameter.aura.step.option.twos\","
   },
   "vfxCatalog.parameter.aura.style.label": {
     "locations": [
-      "src/vfx-localization.mjs:738"
+      "src/vfx-localization.mjs:790"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.style.label\","
   },
   "vfxCatalog.parameter.aura.style.option.cartoon": {
     "locations": [
-      "src/vfx-localization.mjs:746"
+      "src/vfx-localization.mjs:798"
     ],
     "context": "\"vfxCatalog.parameter.aura.style.option.cartoon\","
   },
   "vfxCatalog.parameter.aura.style.option.electric": {
     "locations": [
-      "src/vfx-localization.mjs:741"
+      "src/vfx-localization.mjs:793"
     ],
     "context": "\"vfxCatalog.parameter.aura.style.option.electric\","
   },
   "vfxCatalog.parameter.aura.style.option.fire": {
     "locations": [
-      "src/vfx-localization.mjs:740"
+      "src/vfx-localization.mjs:792"
     ],
     "context": "\"vfxCatalog.parameter.aura.style.option.fire\","
   },
   "vfxCatalog.parameter.aura.style.option.holy": {
     "locations": [
-      "src/vfx-localization.mjs:743"
+      "src/vfx-localization.mjs:795"
     ],
     "context": "\"vfxCatalog.parameter.aura.style.option.holy\","
   },
   "vfxCatalog.parameter.aura.style.option.ice": {
     "locations": [
-      "src/vfx-localization.mjs:744"
+      "src/vfx-localization.mjs:796"
     ],
     "context": "\"vfxCatalog.parameter.aura.style.option.ice\","
   },
   "vfxCatalog.parameter.aura.style.option.shadow": {
     "locations": [
-      "src/vfx-localization.mjs:742"
+      "src/vfx-localization.mjs:794"
     ],
     "context": "\"vfxCatalog.parameter.aura.style.option.shadow\","
   },
   "vfxCatalog.parameter.aura.style.option.spirit": {
     "locations": [
-      "src/vfx-localization.mjs:747"
+      "src/vfx-localization.mjs:799"
     ],
     "context": "\"vfxCatalog.parameter.aura.style.option.spirit\""
   },
   "vfxCatalog.parameter.aura.style.option.wind": {
     "locations": [
-      "src/vfx-localization.mjs:745"
+      "src/vfx-localization.mjs:797"
     ],
     "context": "\"vfxCatalog.parameter.aura.style.option.wind\","
   },
   "vfxCatalog.parameter.aura.trail.label": {
     "locations": [
-      "src/vfx-localization.mjs:794"
+      "src/vfx-localization.mjs:846"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.trail.label\","
   },
   "vfxCatalog.parameter.aura.trail.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:796"
+      "src/vfx-localization.mjs:848"
     ],
     "context": "\"vfxCatalog.parameter.aura.trail.option.off\","
   },
   "vfxCatalog.parameter.aura.trail.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:797"
+      "src/vfx-localization.mjs:849"
     ],
     "context": "\"vfxCatalog.parameter.aura.trail.option.on\""
   },
   "vfxCatalog.parameter.aura.turbulence.label": {
     "locations": [
-      "src/vfx-localization.mjs:763"
+      "src/vfx-localization.mjs:815"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.aura.turbulence.label\""
   },
   "vfxCatalog.parameter.beam.aimHandle.label": {
     "locations": [
-      "src/vfx-localization.mjs:870"
+      "src/vfx-localization.mjs:922"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.aimHandle.label\""
   },
   "vfxCatalog.parameter.beam.aimUid.label": {
     "locations": [
-      "src/vfx-localization.mjs:867"
+      "src/vfx-localization.mjs:919"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.aimUid.label\""
   },
   "vfxCatalog.parameter.beam.aimX.label": {
     "locations": [
-      "src/vfx-localization.mjs:861"
+      "src/vfx-localization.mjs:913"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.aimX.label\""
   },
   "vfxCatalog.parameter.beam.aimY.label": {
     "locations": [
-      "src/vfx-localization.mjs:864"
+      "src/vfx-localization.mjs:916"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.aimY.label\""
   },
   "vfxCatalog.parameter.beam.arcs.label": {
     "locations": [
-      "src/vfx-localization.mjs:873"
+      "src/vfx-localization.mjs:925"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.arcs.label\""
   },
   "vfxCatalog.parameter.beam.blend.label": {
     "locations": [
-      "src/vfx-localization.mjs:907"
+      "src/vfx-localization.mjs:959"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.blend.label\","
   },
   "vfxCatalog.parameter.beam.blend.option.auto": {
     "locations": [
-      "src/vfx-localization.mjs:909"
+      "src/vfx-localization.mjs:961"
     ],
     "context": "\"vfxCatalog.parameter.beam.blend.option.auto\","
   },
   "vfxCatalog.parameter.beam.blend.option.glow": {
     "locations": [
-      "src/vfx-localization.mjs:910"
+      "src/vfx-localization.mjs:962"
     ],
     "context": "\"vfxCatalog.parameter.beam.blend.option.glow\","
   },
   "vfxCatalog.parameter.beam.blend.option.solid": {
     "locations": [
-      "src/vfx-localization.mjs:911"
+      "src/vfx-localization.mjs:963"
     ],
     "context": "\"vfxCatalog.parameter.beam.blend.option.solid\""
   },
   "vfxCatalog.parameter.beam.charge.label": {
     "locations": [
-      "src/vfx-localization.mjs:852"
+      "src/vfx-localization.mjs:904"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.charge.label\""
   },
   "vfxCatalog.parameter.beam.chargeParticles.label": {
     "locations": [
-      "src/vfx-localization.mjs:879"
+      "src/vfx-localization.mjs:931"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.chargeParticles.label\","
   },
   "vfxCatalog.parameter.beam.chargeParticles.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:881"
+      "src/vfx-localization.mjs:933"
     ],
     "context": "\"vfxCatalog.parameter.beam.chargeParticles.option.off\","
   },
   "vfxCatalog.parameter.beam.chargeParticles.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:882"
+      "src/vfx-localization.mjs:934"
     ],
     "context": "\"vfxCatalog.parameter.beam.chargeParticles.option.on\""
   },
   "vfxCatalog.parameter.beam.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:843"
+      "src/vfx-localization.mjs:895"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.color.label\""
   },
   "vfxCatalog.parameter.beam.delay.label": {
     "locations": [
-      "src/vfx-localization.mjs:915"
+      "src/vfx-localization.mjs:967"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.delay.label\""
   },
   "vfxCatalog.parameter.beam.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:829"
+      "src/vfx-localization.mjs:881"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.effectStrength.label\""
   },
   "vfxCatalog.parameter.beam.intensity.label": {
     "locations": [
-      "src/vfx-localization.mjs:849"
+      "src/vfx-localization.mjs:901"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.intensity.label\""
   },
   "vfxCatalog.parameter.beam.layer.label": {
     "locations": [
-      "src/vfx-localization.mjs:900"
+      "src/vfx-localization.mjs:952"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.layer.label\","
   },
   "vfxCatalog.parameter.beam.layer.option.behindTarget": {
     "locations": [
-      "src/vfx-localization.mjs:903"
+      "src/vfx-localization.mjs:955"
     ],
     "context": "\"vfxCatalog.parameter.beam.layer.option.behindTarget\""
   },
   "vfxCatalog.parameter.beam.layer.option.inFrontOfTarget": {
     "locations": [
-      "src/vfx-localization.mjs:902"
+      "src/vfx-localization.mjs:954"
     ],
     "context": "\"vfxCatalog.parameter.beam.layer.option.inFrontOfTarget\","
   },
   "vfxCatalog.parameter.beam.orb.label": {
     "locations": [
-      "src/vfx-localization.mjs:886"
+      "src/vfx-localization.mjs:938"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.orb.label\","
   },
   "vfxCatalog.parameter.beam.orb.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:888"
+      "src/vfx-localization.mjs:940"
     ],
     "context": "\"vfxCatalog.parameter.beam.orb.option.off\","
   },
   "vfxCatalog.parameter.beam.orb.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:889"
+      "src/vfx-localization.mjs:941"
     ],
     "context": "\"vfxCatalog.parameter.beam.orb.option.on\""
   },
   "vfxCatalog.parameter.beam.seed.label": {
     "locations": [
-      "src/vfx-localization.mjs:926"
+      "src/vfx-localization.mjs:978"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.seed.label\""
   },
   "vfxCatalog.parameter.beam.sparks.label": {
     "locations": [
-      "src/vfx-localization.mjs:876"
+      "src/vfx-localization.mjs:928"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.sparks.label\""
   },
   "vfxCatalog.parameter.beam.splash.label": {
     "locations": [
-      "src/vfx-localization.mjs:893"
+      "src/vfx-localization.mjs:945"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.splash.label\","
   },
   "vfxCatalog.parameter.beam.splash.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:895"
+      "src/vfx-localization.mjs:947"
     ],
     "context": "\"vfxCatalog.parameter.beam.splash.option.off\","
   },
   "vfxCatalog.parameter.beam.splash.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:896"
+      "src/vfx-localization.mjs:948"
     ],
     "context": "\"vfxCatalog.parameter.beam.splash.option.on\""
   },
   "vfxCatalog.parameter.beam.step.label": {
     "locations": [
-      "src/vfx-localization.mjs:918"
+      "src/vfx-localization.mjs:970"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.step.label\","
   },
   "vfxCatalog.parameter.beam.step.option.onesSmooth": {
     "locations": [
-      "src/vfx-localization.mjs:920"
+      "src/vfx-localization.mjs:972"
     ],
     "context": "\"vfxCatalog.parameter.beam.step.option.onesSmooth\","
   },
   "vfxCatalog.parameter.beam.step.option.threes": {
     "locations": [
-      "src/vfx-localization.mjs:922"
+      "src/vfx-localization.mjs:974"
     ],
     "context": "\"vfxCatalog.parameter.beam.step.option.threes\""
   },
   "vfxCatalog.parameter.beam.step.option.twos": {
     "locations": [
-      "src/vfx-localization.mjs:921"
+      "src/vfx-localization.mjs:973"
     ],
     "context": "\"vfxCatalog.parameter.beam.step.option.twos\","
   },
   "vfxCatalog.parameter.beam.style.label": {
     "locations": [
-      "src/vfx-localization.mjs:832"
+      "src/vfx-localization.mjs:884"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.style.label\","
   },
   "vfxCatalog.parameter.beam.style.option.cartoon": {
     "locations": [
-      "src/vfx-localization.mjs:836"
+      "src/vfx-localization.mjs:888"
     ],
     "context": "\"vfxCatalog.parameter.beam.style.option.cartoon\","
   },
   "vfxCatalog.parameter.beam.style.option.energy": {
     "locations": [
-      "src/vfx-localization.mjs:834"
+      "src/vfx-localization.mjs:886"
     ],
     "context": "\"vfxCatalog.parameter.beam.style.option.energy\","
   },
   "vfxCatalog.parameter.beam.style.option.fireBreath": {
     "locations": [
-      "src/vfx-localization.mjs:839"
+      "src/vfx-localization.mjs:891"
     ],
     "context": "\"vfxCatalog.parameter.beam.style.option.fireBreath\""
   },
   "vfxCatalog.parameter.beam.style.option.laser": {
     "locations": [
-      "src/vfx-localization.mjs:835"
+      "src/vfx-localization.mjs:887"
     ],
     "context": "\"vfxCatalog.parameter.beam.style.option.laser\","
   },
   "vfxCatalog.parameter.beam.style.option.lightning": {
     "locations": [
-      "src/vfx-localization.mjs:838"
+      "src/vfx-localization.mjs:890"
     ],
     "context": "\"vfxCatalog.parameter.beam.style.option.lightning\","
   },
   "vfxCatalog.parameter.beam.style.option.spiral": {
     "locations": [
-      "src/vfx-localization.mjs:837"
+      "src/vfx-localization.mjs:889"
     ],
     "context": "\"vfxCatalog.parameter.beam.style.option.spiral\","
   },
   "vfxCatalog.parameter.beam.travel.label": {
     "locations": [
-      "src/vfx-localization.mjs:855"
+      "src/vfx-localization.mjs:907"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.travel.label\""
   },
   "vfxCatalog.parameter.beam.width.label": {
     "locations": [
-      "src/vfx-localization.mjs:846"
+      "src/vfx-localization.mjs:898"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.width.label\""
   },
   "vfxCatalog.parameter.beam.wobble.label": {
     "locations": [
-      "src/vfx-localization.mjs:858"
+      "src/vfx-localization.mjs:910"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.wobble.label\""
   },
   "vfxCatalog.parameter.beam.x.label": {
     "locations": [
-      "src/vfx-localization.mjs:929"
+      "src/vfx-localization.mjs:981"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.x.label\""
   },
   "vfxCatalog.parameter.beam.y.label": {
     "locations": [
-      "src/vfx-localization.mjs:932"
+      "src/vfx-localization.mjs:984"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.beam.y.label\""
   },
   "vfxCatalog.parameter.bloom.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:458"
+      "src/vfx-localization.mjs:497"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.bloom.color.label\""
   },
   "vfxCatalog.parameter.bloom.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:443"
+      "src/vfx-localization.mjs:482"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.bloom.effectStrength.label\""
   },
   "vfxCatalog.parameter.bloom.intensity.label": {
     "locations": [
-      "src/vfx-localization.mjs:455"
+      "src/vfx-localization.mjs:494"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.bloom.intensity.label\""
   },
   "vfxCatalog.parameter.bloom.radius.label": {
     "locations": [
-      "src/vfx-localization.mjs:452"
+      "src/vfx-localization.mjs:491"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.bloom.radius.label\""
   },
   "vfxCatalog.parameter.bloom.softness.label": {
     "locations": [
-      "src/vfx-localization.mjs:449"
+      "src/vfx-localization.mjs:488"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.bloom.softness.label\""
   },
   "vfxCatalog.parameter.bloom.threshold.label": {
     "locations": [
-      "src/vfx-localization.mjs:446"
+      "src/vfx-localization.mjs:485"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.bloom.threshold.label\""
   },
   "vfxCatalog.parameter.blur.angle.label": {
     "locations": [
-      "src/vfx-localization.mjs:194"
+      "src/vfx-localization.mjs:218"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.blur.angle.label\""
   },
   "vfxCatalog.parameter.blur.centerX.label": {
     "locations": [
-      "src/vfx-localization.mjs:197"
+      "src/vfx-localization.mjs:221"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.blur.centerX.label\""
   },
   "vfxCatalog.parameter.blur.centerY.label": {
     "locations": [
-      "src/vfx-localization.mjs:200"
+      "src/vfx-localization.mjs:224"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.blur.centerY.label\""
   },
   "vfxCatalog.parameter.blur.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:179"
+      "src/vfx-localization.mjs:203"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.blur.effectStrength.label\""
   },
   "vfxCatalog.parameter.blur.mode.label": {
     "locations": [
-      "src/vfx-localization.mjs:182"
+      "src/vfx-localization.mjs:206"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.blur.mode.label\","
   },
   "vfxCatalog.parameter.blur.mode.option.directional": {
     "locations": [
-      "src/vfx-localization.mjs:185"
+      "src/vfx-localization.mjs:209"
     ],
     "context": "\"vfxCatalog.parameter.blur.mode.option.directional\","
   },
   "vfxCatalog.parameter.blur.mode.option.gaussian": {
     "locations": [
-      "src/vfx-localization.mjs:184"
+      "src/vfx-localization.mjs:208"
     ],
     "context": "\"vfxCatalog.parameter.blur.mode.option.gaussian\","
   },
   "vfxCatalog.parameter.blur.mode.option.radial": {
     "locations": [
-      "src/vfx-localization.mjs:187"
+      "src/vfx-localization.mjs:211"
     ],
     "context": "\"vfxCatalog.parameter.blur.mode.option.radial\""
   },
   "vfxCatalog.parameter.blur.mode.option.zoom": {
     "locations": [
-      "src/vfx-localization.mjs:186"
+      "src/vfx-localization.mjs:210"
     ],
     "context": "\"vfxCatalog.parameter.blur.mode.option.zoom\","
   },
   "vfxCatalog.parameter.blur.radius.label": {
     "locations": [
-      "src/vfx-localization.mjs:191"
+      "src/vfx-localization.mjs:215"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.blur.radius.label\""
   },
   "vfxCatalog.parameter.crt.amount.label": {
     "locations": [
-      "src/vfx-localization.mjs:497"
+      "src/vfx-localization.mjs:546"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.crt.amount.label\""
   },
   "vfxCatalog.parameter.crt.chromatic.label": {
     "locations": [
-      "src/vfx-localization.mjs:506"
+      "src/vfx-localization.mjs:555"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.crt.chromatic.label\""
   },
   "vfxCatalog.parameter.crt.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:512"
+      "src/vfx-localization.mjs:561"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.crt.color.label\""
   },
   "vfxCatalog.parameter.crt.curvature.label": {
     "locations": [
-      "src/vfx-localization.mjs:503"
+      "src/vfx-localization.mjs:552"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.crt.curvature.label\""
   },
   "vfxCatalog.parameter.crt.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:494"
+      "src/vfx-localization.mjs:543"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.crt.effectStrength.label\""
   },
   "vfxCatalog.parameter.crt.phase.label": {
     "locations": [
-      "src/vfx-localization.mjs:509"
+      "src/vfx-localization.mjs:558"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.crt.phase.label\""
   },
+  "vfxCatalog.parameter.crt.roll.label": {
+    "locations": [
+      "src/vfx-localization.mjs:564"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.crt.roll.label\""
+  },
   "vfxCatalog.parameter.crt.spacing.label": {
     "locations": [
-      "src/vfx-localization.mjs:500"
+      "src/vfx-localization.mjs:549"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.crt.spacing.label\""
   },
+  "vfxCatalog.parameter.dissolve.angle.label": {
+    "locations": [
+      "src/vfx-localization.mjs:398"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.angle.label\""
+  },
   "vfxCatalog.parameter.dissolve.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:356"
+      "src/vfx-localization.mjs:386"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.color.label\""
   },
+  "vfxCatalog.parameter.dissolve.directional.label": {
+    "locations": [
+      "src/vfx-localization.mjs:395"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.directional.label\""
+  },
   "vfxCatalog.parameter.dissolve.edge.label": {
     "locations": [
-      "src/vfx-localization.mjs:353"
+      "src/vfx-localization.mjs:383"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.edge.label\""
   },
   "vfxCatalog.parameter.dissolve.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:344"
+      "src/vfx-localization.mjs:374"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.effectStrength.label\""
   },
   "vfxCatalog.parameter.dissolve.progress.label": {
     "locations": [
-      "src/vfx-localization.mjs:347"
+      "src/vfx-localization.mjs:377"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.progress.label\""
   },
   "vfxCatalog.parameter.dissolve.seed.label": {
     "locations": [
-      "src/vfx-localization.mjs:362"
+      "src/vfx-localization.mjs:392"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.seed.label\""
   },
   "vfxCatalog.parameter.dissolve.size.label": {
     "locations": [
-      "src/vfx-localization.mjs:350"
+      "src/vfx-localization.mjs:380"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.size.label\""
   },
   "vfxCatalog.parameter.dissolve.softness.label": {
     "locations": [
-      "src/vfx-localization.mjs:359"
+      "src/vfx-localization.mjs:389"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.dissolve.softness.label\""
   },
   "vfxCatalog.parameter.explosion.blend.label": {
     "locations": [
-      "src/vfx-localization.mjs:1105"
+      "src/vfx-localization.mjs:1157"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.blend.label\","
   },
   "vfxCatalog.parameter.explosion.blend.option.auto": {
     "locations": [
-      "src/vfx-localization.mjs:1107"
+      "src/vfx-localization.mjs:1159"
     ],
     "context": "\"vfxCatalog.parameter.explosion.blend.option.auto\","
   },
   "vfxCatalog.parameter.explosion.blend.option.glow": {
     "locations": [
-      "src/vfx-localization.mjs:1108"
+      "src/vfx-localization.mjs:1160"
     ],
     "context": "\"vfxCatalog.parameter.explosion.blend.option.glow\","
   },
   "vfxCatalog.parameter.explosion.blend.option.solid": {
     "locations": [
-      "src/vfx-localization.mjs:1109"
+      "src/vfx-localization.mjs:1161"
     ],
     "context": "\"vfxCatalog.parameter.explosion.blend.option.solid\""
   },
   "vfxCatalog.parameter.explosion.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:1052"
+      "src/vfx-localization.mjs:1104"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.color.label\""
   },
   "vfxCatalog.parameter.explosion.debris.label": {
     "locations": [
-      "src/vfx-localization.mjs:1064"
+      "src/vfx-localization.mjs:1116"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.debris.label\""
   },
   "vfxCatalog.parameter.explosion.delay.label": {
     "locations": [
-      "src/vfx-localization.mjs:1113"
+      "src/vfx-localization.mjs:1165"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.delay.label\""
   },
   "vfxCatalog.parameter.explosion.density.label": {
     "locations": [
-      "src/vfx-localization.mjs:1061"
+      "src/vfx-localization.mjs:1113"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.density.label\""
   },
   "vfxCatalog.parameter.explosion.dust.label": {
     "locations": [
-      "src/vfx-localization.mjs:1077"
+      "src/vfx-localization.mjs:1129"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.dust.label\","
   },
   "vfxCatalog.parameter.explosion.dust.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:1079"
+      "src/vfx-localization.mjs:1131"
     ],
     "context": "\"vfxCatalog.parameter.explosion.dust.option.off\","
   },
   "vfxCatalog.parameter.explosion.dust.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:1080"
+      "src/vfx-localization.mjs:1132"
     ],
     "context": "\"vfxCatalog.parameter.explosion.dust.option.on\""
   },
   "vfxCatalog.parameter.explosion.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:1034"
+      "src/vfx-localization.mjs:1086"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.effectStrength.label\""
   },
   "vfxCatalog.parameter.explosion.fireball.label": {
     "locations": [
-      "src/vfx-localization.mjs:1098"
+      "src/vfx-localization.mjs:1150"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.fireball.label\","
   },
   "vfxCatalog.parameter.explosion.fireball.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:1100"
+      "src/vfx-localization.mjs:1152"
     ],
     "context": "\"vfxCatalog.parameter.explosion.fireball.option.off\","
   },
   "vfxCatalog.parameter.explosion.fireball.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:1101"
+      "src/vfx-localization.mjs:1153"
     ],
     "context": "\"vfxCatalog.parameter.explosion.fireball.option.on\""
   },
   "vfxCatalog.parameter.explosion.flash.label": {
     "locations": [
-      "src/vfx-localization.mjs:1084"
+      "src/vfx-localization.mjs:1136"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.flash.label\","
   },
   "vfxCatalog.parameter.explosion.flash.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:1086"
+      "src/vfx-localization.mjs:1138"
     ],
     "context": "\"vfxCatalog.parameter.explosion.flash.option.off\","
   },
   "vfxCatalog.parameter.explosion.flash.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:1087"
+      "src/vfx-localization.mjs:1139"
     ],
     "context": "\"vfxCatalog.parameter.explosion.flash.option.on\""
   },
   "vfxCatalog.parameter.explosion.intensity.label": {
     "locations": [
-      "src/vfx-localization.mjs:1058"
+      "src/vfx-localization.mjs:1110"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.intensity.label\""
   },
   "vfxCatalog.parameter.explosion.ring.label": {
     "locations": [
-      "src/vfx-localization.mjs:1091"
+      "src/vfx-localization.mjs:1143"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.ring.label\","
   },
   "vfxCatalog.parameter.explosion.ring.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:1093"
+      "src/vfx-localization.mjs:1145"
     ],
     "context": "\"vfxCatalog.parameter.explosion.ring.option.off\","
   },
   "vfxCatalog.parameter.explosion.ring.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:1094"
+      "src/vfx-localization.mjs:1146"
     ],
     "context": "\"vfxCatalog.parameter.explosion.ring.option.on\""
   },
   "vfxCatalog.parameter.explosion.seed.label": {
     "locations": [
-      "src/vfx-localization.mjs:1124"
+      "src/vfx-localization.mjs:1176"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.seed.label\""
   },
   "vfxCatalog.parameter.explosion.size.label": {
     "locations": [
-      "src/vfx-localization.mjs:1055"
+      "src/vfx-localization.mjs:1107"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.size.label\""
   },
   "vfxCatalog.parameter.explosion.smoke.label": {
     "locations": [
-      "src/vfx-localization.mjs:1067"
+      "src/vfx-localization.mjs:1119"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.smoke.label\""
   },
   "vfxCatalog.parameter.explosion.sparks.label": {
     "locations": [
-      "src/vfx-localization.mjs:1070"
+      "src/vfx-localization.mjs:1122"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.sparks.label\","
   },
   "vfxCatalog.parameter.explosion.sparks.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:1072"
+      "src/vfx-localization.mjs:1124"
     ],
     "context": "\"vfxCatalog.parameter.explosion.sparks.option.off\","
   },
   "vfxCatalog.parameter.explosion.sparks.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:1073"
+      "src/vfx-localization.mjs:1125"
     ],
     "context": "\"vfxCatalog.parameter.explosion.sparks.option.on\""
   },
   "vfxCatalog.parameter.explosion.step.label": {
     "locations": [
-      "src/vfx-localization.mjs:1116"
+      "src/vfx-localization.mjs:1168"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.step.label\","
   },
   "vfxCatalog.parameter.explosion.step.option.onesSmooth": {
     "locations": [
-      "src/vfx-localization.mjs:1118"
+      "src/vfx-localization.mjs:1170"
     ],
     "context": "\"vfxCatalog.parameter.explosion.step.option.onesSmooth\","
   },
   "vfxCatalog.parameter.explosion.step.option.threes": {
     "locations": [
-      "src/vfx-localization.mjs:1120"
+      "src/vfx-localization.mjs:1172"
     ],
     "context": "\"vfxCatalog.parameter.explosion.step.option.threes\""
   },
   "vfxCatalog.parameter.explosion.step.option.twos": {
     "locations": [
-      "src/vfx-localization.mjs:1119"
+      "src/vfx-localization.mjs:1171"
     ],
     "context": "\"vfxCatalog.parameter.explosion.step.option.twos\","
   },
   "vfxCatalog.parameter.explosion.style.label": {
     "locations": [
-      "src/vfx-localization.mjs:1037"
+      "src/vfx-localization.mjs:1089"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.style.label\","
   },
   "vfxCatalog.parameter.explosion.style.option.cartoon": {
     "locations": [
-      "src/vfx-localization.mjs:1040"
+      "src/vfx-localization.mjs:1092"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.cartoon\","
   },
   "vfxCatalog.parameter.explosion.style.option.dust": {
     "locations": [
-      "src/vfx-localization.mjs:1047"
+      "src/vfx-localization.mjs:1099"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.dust\","
   },
   "vfxCatalog.parameter.explosion.style.option.electric": {
     "locations": [
-      "src/vfx-localization.mjs:1045"
+      "src/vfx-localization.mjs:1097"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.electric\","
   },
   "vfxCatalog.parameter.explosion.style.option.fireball": {
     "locations": [
-      "src/vfx-localization.mjs:1039"
+      "src/vfx-localization.mjs:1091"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.fireball\","
   },
   "vfxCatalog.parameter.explosion.style.option.firework": {
     "locations": [
-      "src/vfx-localization.mjs:1044"
+      "src/vfx-localization.mjs:1096"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.firework\","
   },
   "vfxCatalog.parameter.explosion.style.option.magic": {
     "locations": [
-      "src/vfx-localization.mjs:1046"
+      "src/vfx-localization.mjs:1098"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.magic\","
   },
   "vfxCatalog.parameter.explosion.style.option.mushroomCloud": {
     "locations": [
-      "src/vfx-localization.mjs:1043"
+      "src/vfx-localization.mjs:1095"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.mushroomCloud\","
   },
   "vfxCatalog.parameter.explosion.style.option.pixel": {
     "locations": [
-      "src/vfx-localization.mjs:1048"
+      "src/vfx-localization.mjs:1100"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.pixel\""
   },
   "vfxCatalog.parameter.explosion.style.option.plasma": {
     "locations": [
-      "src/vfx-localization.mjs:1041"
+      "src/vfx-localization.mjs:1093"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.plasma\","
   },
   "vfxCatalog.parameter.explosion.style.option.smokeBomb": {
     "locations": [
-      "src/vfx-localization.mjs:1042"
+      "src/vfx-localization.mjs:1094"
     ],
     "context": "\"vfxCatalog.parameter.explosion.style.option.smokeBomb\","
   },
   "vfxCatalog.parameter.explosion.x.label": {
     "locations": [
-      "src/vfx-localization.mjs:1127"
+      "src/vfx-localization.mjs:1179"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.x.label\""
   },
   "vfxCatalog.parameter.explosion.y.label": {
     "locations": [
-      "src/vfx-localization.mjs:1130"
+      "src/vfx-localization.mjs:1182"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.explosion.y.label\""
   },
   "vfxCatalog.parameter.glow.blend.label": {
     "locations": [
-      "src/vfx-localization.mjs:91"
+      "src/vfx-localization.mjs:105"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.blend.label\","
   },
   "vfxCatalog.parameter.glow.blend.option.add": {
     "locations": [
-      "src/vfx-localization.mjs:94"
+      "src/vfx-localization.mjs:108"
     ],
     "context": "\"vfxCatalog.parameter.glow.blend.option.add\","
   },
   "vfxCatalog.parameter.glow.blend.option.normal": {
     "locations": [
-      "src/vfx-localization.mjs:93"
+      "src/vfx-localization.mjs:107"
     ],
     "context": "\"vfxCatalog.parameter.glow.blend.option.normal\","
   },
   "vfxCatalog.parameter.glow.blend.option.screen": {
     "locations": [
-      "src/vfx-localization.mjs:95"
+      "src/vfx-localization.mjs:109"
     ],
     "context": "\"vfxCatalog.parameter.glow.blend.option.screen\""
   },
   "vfxCatalog.parameter.glow.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:62"
+      "src/vfx-localization.mjs:76"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.color.label\""
   },
   "vfxCatalog.parameter.glow.coreColor.label": {
     "locations": [
-      "src/vfx-localization.mjs:85"
+      "src/vfx-localization.mjs:99"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.coreColor.label\""
   },
   "vfxCatalog.parameter.glow.coreMix.label": {
     "locations": [
-      "src/vfx-localization.mjs:88"
+      "src/vfx-localization.mjs:102"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.coreMix.label\""
   },
   "vfxCatalog.parameter.glow.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:59"
+      "src/vfx-localization.mjs:73"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.effectStrength.label\""
   },
   "vfxCatalog.parameter.glow.falloff.label": {
     "locations": [
-      "src/vfx-localization.mjs:82"
+      "src/vfx-localization.mjs:96"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.falloff.label\""
   },
   "vfxCatalog.parameter.glow.intensity.label": {
     "locations": [
-      "src/vfx-localization.mjs:68"
+      "src/vfx-localization.mjs:82"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.intensity.label\""
   },
   "vfxCatalog.parameter.glow.mode.label": {
     "locations": [
-      "src/vfx-localization.mjs:71"
+      "src/vfx-localization.mjs:85"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.mode.label\","
   },
   "vfxCatalog.parameter.glow.mode.option.both": {
     "locations": [
-      "src/vfx-localization.mjs:75"
+      "src/vfx-localization.mjs:89"
     ],
     "context": "\"vfxCatalog.parameter.glow.mode.option.both\""
   },
   "vfxCatalog.parameter.glow.mode.option.inner": {
     "locations": [
-      "src/vfx-localization.mjs:74"
+      "src/vfx-localization.mjs:88"
     ],
     "context": "\"vfxCatalog.parameter.glow.mode.option.inner\","
   },
   "vfxCatalog.parameter.glow.mode.option.outer": {
     "locations": [
-      "src/vfx-localization.mjs:73"
+      "src/vfx-localization.mjs:87"
     ],
     "context": "\"vfxCatalog.parameter.glow.mode.option.outer\","
   },
   "vfxCatalog.parameter.glow.radius.label": {
     "locations": [
-      "src/vfx-localization.mjs:65"
+      "src/vfx-localization.mjs:79"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.radius.label\""
   },
+  "vfxCatalog.parameter.glow.source.label": {
+    "locations": [
+      "src/vfx-localization.mjs:113"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.glow.source.label\","
+  },
+  "vfxCatalog.parameter.glow.source.option.artwork": {
+    "locations": [
+      "src/vfx-localization.mjs:116"
+    ],
+    "context": "\"vfxCatalog.parameter.glow.source.option.artwork\""
+  },
+  "vfxCatalog.parameter.glow.source.option.color": {
+    "locations": [
+      "src/vfx-localization.mjs:115"
+    ],
+    "context": "\"vfxCatalog.parameter.glow.source.option.color\","
+  },
   "vfxCatalog.parameter.glow.spread.label": {
     "locations": [
-      "src/vfx-localization.mjs:79"
+      "src/vfx-localization.mjs:93"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.glow.spread.label\""
   },
   "vfxCatalog.parameter.grade.contrast.label": {
     "locations": [
-      "src/vfx-localization.mjs:215"
+      "src/vfx-localization.mjs:239"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.contrast.label\""
   },
   "vfxCatalog.parameter.grade.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:209"
+      "src/vfx-localization.mjs:233"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.effectStrength.label\""
   },
   "vfxCatalog.parameter.grade.exposure.label": {
     "locations": [
-      "src/vfx-localization.mjs:212"
+      "src/vfx-localization.mjs:236"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.exposure.label\""
   },
   "vfxCatalog.parameter.grade.gamma.label": {
     "locations": [
-      "src/vfx-localization.mjs:233"
+      "src/vfx-localization.mjs:257"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.gamma.label\""
   },
   "vfxCatalog.parameter.grade.highlights.label": {
     "locations": [
-      "src/vfx-localization.mjs:230"
+      "src/vfx-localization.mjs:254"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.highlights.label\""
   },
+  "vfxCatalog.parameter.grade.hue.label": {
+    "locations": [
+      "src/vfx-localization.mjs:260"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.grade.hue.label\""
+  },
   "vfxCatalog.parameter.grade.saturation.label": {
     "locations": [
-      "src/vfx-localization.mjs:218"
+      "src/vfx-localization.mjs:242"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.saturation.label\""
   },
   "vfxCatalog.parameter.grade.shadows.label": {
     "locations": [
-      "src/vfx-localization.mjs:227"
+      "src/vfx-localization.mjs:251"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.shadows.label\""
   },
   "vfxCatalog.parameter.grade.temperature.label": {
     "locations": [
-      "src/vfx-localization.mjs:221"
+      "src/vfx-localization.mjs:245"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.temperature.label\""
   },
   "vfxCatalog.parameter.grade.tint.label": {
     "locations": [
-      "src/vfx-localization.mjs:224"
+      "src/vfx-localization.mjs:248"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.grade.tint.label\""
   },
   "vfxCatalog.parameter.lightSweep.angle.label": {
     "locations": [
-      "src/vfx-localization.mjs:473"
+      "src/vfx-localization.mjs:512"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.angle.label\""
   },
   "vfxCatalog.parameter.lightSweep.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:485"
+      "src/vfx-localization.mjs:524"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.color.label\""
   },
   "vfxCatalog.parameter.lightSweep.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:467"
+      "src/vfx-localization.mjs:506"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.effectStrength.label\""
   },
   "vfxCatalog.parameter.lightSweep.intensity.label": {
     "locations": [
-      "src/vfx-localization.mjs:482"
+      "src/vfx-localization.mjs:521"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.intensity.label\""
   },
+  "vfxCatalog.parameter.lightSweep.loop.label": {
+    "locations": [
+      "src/vfx-localization.mjs:530"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.loop.label\","
+  },
+  "vfxCatalog.parameter.lightSweep.loop.option.off": {
+    "locations": [
+      "src/vfx-localization.mjs:532"
+    ],
+    "context": "\"vfxCatalog.parameter.lightSweep.loop.option.off\","
+  },
+  "vfxCatalog.parameter.lightSweep.loop.option.on": {
+    "locations": [
+      "src/vfx-localization.mjs:533"
+    ],
+    "context": "\"vfxCatalog.parameter.lightSweep.loop.option.on\""
+  },
   "vfxCatalog.parameter.lightSweep.position.label": {
     "locations": [
-      "src/vfx-localization.mjs:470"
+      "src/vfx-localization.mjs:509"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.position.label\""
   },
   "vfxCatalog.parameter.lightSweep.softness.label": {
     "locations": [
-      "src/vfx-localization.mjs:479"
+      "src/vfx-localization.mjs:518"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.softness.label\""
   },
+  "vfxCatalog.parameter.lightSweep.speed.label": {
+    "locations": [
+      "src/vfx-localization.mjs:527"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.speed.label\""
+  },
   "vfxCatalog.parameter.lightSweep.width.label": {
     "locations": [
-      "src/vfx-localization.mjs:476"
+      "src/vfx-localization.mjs:515"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.lightSweep.width.label\""
   },
   "vfxCatalog.parameter.noise.amount.label": {
     "locations": [
-      "src/vfx-localization.mjs:273"
+      "src/vfx-localization.mjs:300"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.amount.label\""
   },
   "vfxCatalog.parameter.noise.colored.label": {
     "locations": [
-      "src/vfx-localization.mjs:279"
+      "src/vfx-localization.mjs:306"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.colored.label\","
   },
   "vfxCatalog.parameter.noise.colored.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:281"
+      "src/vfx-localization.mjs:308"
     ],
     "context": "\"vfxCatalog.parameter.noise.colored.option.off\","
   },
   "vfxCatalog.parameter.noise.colored.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:282"
+      "src/vfx-localization.mjs:309"
     ],
     "context": "\"vfxCatalog.parameter.noise.colored.option.on\""
   },
   "vfxCatalog.parameter.noise.contrast.label": {
     "locations": [
-      "src/vfx-localization.mjs:293"
+      "src/vfx-localization.mjs:320"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.contrast.label\""
   },
   "vfxCatalog.parameter.noise.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:270"
+      "src/vfx-localization.mjs:297"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.effectStrength.label\""
   },
   "vfxCatalog.parameter.noise.pattern.label": {
     "locations": [
-      "src/vfx-localization.mjs:286"
+      "src/vfx-localization.mjs:313"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.pattern.label\","
   },
   "vfxCatalog.parameter.noise.pattern.option.clouds": {
     "locations": [
-      "src/vfx-localization.mjs:289"
+      "src/vfx-localization.mjs:316"
     ],
     "context": "\"vfxCatalog.parameter.noise.pattern.option.clouds\""
   },
   "vfxCatalog.parameter.noise.pattern.option.grain": {
     "locations": [
-      "src/vfx-localization.mjs:288"
+      "src/vfx-localization.mjs:315"
     ],
     "context": "\"vfxCatalog.parameter.noise.pattern.option.grain\","
   },
   "vfxCatalog.parameter.noise.phase.label": {
     "locations": [
-      "src/vfx-localization.mjs:302"
+      "src/vfx-localization.mjs:329"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.phase.label\""
   },
   "vfxCatalog.parameter.noise.seed.label": {
     "locations": [
-      "src/vfx-localization.mjs:299"
+      "src/vfx-localization.mjs:326"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.seed.label\""
   },
   "vfxCatalog.parameter.noise.size.label": {
     "locations": [
-      "src/vfx-localization.mjs:276"
+      "src/vfx-localization.mjs:303"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.size.label\""
   },
   "vfxCatalog.parameter.noise.softness.label": {
     "locations": [
-      "src/vfx-localization.mjs:296"
+      "src/vfx-localization.mjs:323"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.noise.softness.label\""
   },
+  "vfxCatalog.parameter.noise.speed.label": {
+    "locations": [
+      "src/vfx-localization.mjs:332"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.noise.speed.label\""
+  },
   "vfxCatalog.parameter.outline.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:108"
+      "src/vfx-localization.mjs:129"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.outline.color.label\""
   },
   "vfxCatalog.parameter.outline.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:105"
+      "src/vfx-localization.mjs:126"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.outline.effectStrength.label\""
   },
   "vfxCatalog.parameter.outline.mode.label": {
     "locations": [
-      "src/vfx-localization.mjs:117"
+      "src/vfx-localization.mjs:138"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.outline.mode.label\","
   },
   "vfxCatalog.parameter.outline.mode.option.center": {
     "locations": [
-      "src/vfx-localization.mjs:121"
+      "src/vfx-localization.mjs:142"
     ],
     "context": "\"vfxCatalog.parameter.outline.mode.option.center\""
   },
   "vfxCatalog.parameter.outline.mode.option.inside": {
     "locations": [
-      "src/vfx-localization.mjs:120"
+      "src/vfx-localization.mjs:141"
     ],
     "context": "\"vfxCatalog.parameter.outline.mode.option.inside\","
   },
   "vfxCatalog.parameter.outline.mode.option.outside": {
     "locations": [
-      "src/vfx-localization.mjs:119"
+      "src/vfx-localization.mjs:140"
     ],
     "context": "\"vfxCatalog.parameter.outline.mode.option.outside\","
   },
   "vfxCatalog.parameter.outline.only.label": {
     "locations": [
-      "src/vfx-localization.mjs:132"
+      "src/vfx-localization.mjs:153"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.outline.only.label\","
   },
   "vfxCatalog.parameter.outline.only.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:134"
+      "src/vfx-localization.mjs:155"
     ],
     "context": "\"vfxCatalog.parameter.outline.only.option.off\","
   },
   "vfxCatalog.parameter.outline.only.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:135"
+      "src/vfx-localization.mjs:156"
     ],
     "context": "\"vfxCatalog.parameter.outline.only.option.on\""
   },
   "vfxCatalog.parameter.outline.opacity.label": {
     "locations": [
-      "src/vfx-localization.mjs:114"
+      "src/vfx-localization.mjs:135"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.outline.opacity.label\""
   },
   "vfxCatalog.parameter.outline.rounded.label": {
     "locations": [
-      "src/vfx-localization.mjs:125"
+      "src/vfx-localization.mjs:146"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.outline.rounded.label\","
   },
   "vfxCatalog.parameter.outline.rounded.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:127"
+      "src/vfx-localization.mjs:148"
     ],
     "context": "\"vfxCatalog.parameter.outline.rounded.option.off\","
   },
   "vfxCatalog.parameter.outline.rounded.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:128"
+      "src/vfx-localization.mjs:149"
     ],
     "context": "\"vfxCatalog.parameter.outline.rounded.option.on\""
   },
+  "vfxCatalog.parameter.outline.softness.label": {
+    "locations": [
+      "src/vfx-localization.mjs:160"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.outline.softness.label\""
+  },
   "vfxCatalog.parameter.outline.width.label": {
     "locations": [
-      "src/vfx-localization.mjs:111"
+      "src/vfx-localization.mjs:132"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.outline.width.label\""
   },
   "vfxCatalog.parameter.particles.blend.label": {
     "locations": [
-      "src/vfx-localization.mjs:680"
+      "src/vfx-localization.mjs:732"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.blend.label\","
   },
   "vfxCatalog.parameter.particles.blend.option.auto": {
     "locations": [
-      "src/vfx-localization.mjs:682"
+      "src/vfx-localization.mjs:734"
     ],
     "context": "\"vfxCatalog.parameter.particles.blend.option.auto\","
   },
   "vfxCatalog.parameter.particles.blend.option.glow": {
     "locations": [
-      "src/vfx-localization.mjs:683"
+      "src/vfx-localization.mjs:735"
     ],
     "context": "\"vfxCatalog.parameter.particles.blend.option.glow\","
   },
   "vfxCatalog.parameter.particles.blend.option.solid": {
     "locations": [
-      "src/vfx-localization.mjs:684"
+      "src/vfx-localization.mjs:736"
     ],
     "context": "\"vfxCatalog.parameter.particles.blend.option.solid\""
   },
   "vfxCatalog.parameter.particles.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:568"
+      "src/vfx-localization.mjs:620"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.color.label\""
   },
   "vfxCatalog.parameter.particles.colorMode.label": {
     "locations": [
-      "src/vfx-localization.mjs:673"
+      "src/vfx-localization.mjs:725"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.colorMode.label\","
   },
   "vfxCatalog.parameter.particles.colorMode.option.overLifetime": {
     "locations": [
-      "src/vfx-localization.mjs:675"
+      "src/vfx-localization.mjs:727"
     ],
     "context": "\"vfxCatalog.parameter.particles.colorMode.option.overLifetime\","
   },
   "vfxCatalog.parameter.particles.colorMode.option.randomPerParticle": {
     "locations": [
-      "src/vfx-localization.mjs:676"
+      "src/vfx-localization.mjs:728"
     ],
     "context": "\"vfxCatalog.parameter.particles.colorMode.option.randomPerParticle\""
   },
   "vfxCatalog.parameter.particles.count.label": {
     "locations": [
-      "src/vfx-localization.mjs:534"
+      "src/vfx-localization.mjs:586"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.count.label\""
   },
   "vfxCatalog.parameter.particles.delay.label": {
     "locations": [
-      "src/vfx-localization.mjs:709"
+      "src/vfx-localization.mjs:761"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.delay.label\""
   },
   "vfxCatalog.parameter.particles.direction.label": {
     "locations": [
-      "src/vfx-localization.mjs:577"
+      "src/vfx-localization.mjs:629"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.direction.label\""
   },
   "vfxCatalog.parameter.particles.drag.label": {
     "locations": [
-      "src/vfx-localization.mjs:614"
+      "src/vfx-localization.mjs:666"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.drag.label\""
   },
   "vfxCatalog.parameter.particles.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:521"
+      "src/vfx-localization.mjs:573"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.effectStrength.label\""
   },
   "vfxCatalog.parameter.particles.emission.label": {
     "locations": [
-      "src/vfx-localization.mjs:524"
+      "src/vfx-localization.mjs:576"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.emission.label\","
   },
   "vfxCatalog.parameter.particles.emission.option.burst": {
     "locations": [
-      "src/vfx-localization.mjs:527"
+      "src/vfx-localization.mjs:579"
     ],
     "context": "\"vfxCatalog.parameter.particles.emission.option.burst\""
   },
   "vfxCatalog.parameter.particles.emission.option.continuous": {
     "locations": [
-      "src/vfx-localization.mjs:526"
+      "src/vfx-localization.mjs:578"
     ],
     "context": "\"vfxCatalog.parameter.particles.emission.option.continuous\","
   },
   "vfxCatalog.parameter.particles.endSize.label": {
     "locations": [
-      "src/vfx-localization.mjs:598"
+      "src/vfx-localization.mjs:650"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.endSize.label\""
   },
   "vfxCatalog.parameter.particles.fade.label": {
     "locations": [
-      "src/vfx-localization.mjs:645"
+      "src/vfx-localization.mjs:697"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.fade.label\""
   },
   "vfxCatalog.parameter.particles.flow.label": {
     "locations": [
-      "src/vfx-localization.mjs:623"
+      "src/vfx-localization.mjs:675"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.flow.label\""
   },
   "vfxCatalog.parameter.particles.glow.label": {
     "locations": [
-      "src/vfx-localization.mjs:654"
+      "src/vfx-localization.mjs:706"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.glow.label\""
   },
   "vfxCatalog.parameter.particles.gravity.label": {
     "locations": [
-      "src/vfx-localization.mjs:583"
+      "src/vfx-localization.mjs:635"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.gravity.label\""
   },
   "vfxCatalog.parameter.particles.ground.label": {
     "locations": [
-      "src/vfx-localization.mjs:695"
+      "src/vfx-localization.mjs:747"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.ground.label\","
   },
   "vfxCatalog.parameter.particles.ground.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:697"
+      "src/vfx-localization.mjs:749"
     ],
     "context": "\"vfxCatalog.parameter.particles.ground.option.off\","
   },
   "vfxCatalog.parameter.particles.ground.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:698"
+      "src/vfx-localization.mjs:750"
     ],
     "context": "\"vfxCatalog.parameter.particles.ground.option.on\""
   },
   "vfxCatalog.parameter.particles.layer.label": {
     "locations": [
-      "src/vfx-localization.mjs:702"
+      "src/vfx-localization.mjs:754"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.layer.label\","
   },
   "vfxCatalog.parameter.particles.layer.option.behindTarget": {
     "locations": [
-      "src/vfx-localization.mjs:705"
+      "src/vfx-localization.mjs:757"
     ],
     "context": "\"vfxCatalog.parameter.particles.layer.option.behindTarget\""
   },
   "vfxCatalog.parameter.particles.layer.option.inFrontOfTarget": {
     "locations": [
-      "src/vfx-localization.mjs:704"
+      "src/vfx-localization.mjs:756"
     ],
     "context": "\"vfxCatalog.parameter.particles.layer.option.inFrontOfTarget\","
   },
   "vfxCatalog.parameter.particles.life.label": {
     "locations": [
-      "src/vfx-localization.mjs:537"
+      "src/vfx-localization.mjs:589"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.life.label\""
   },
   "vfxCatalog.parameter.particles.look.label": {
     "locations": [
-      "src/vfx-localization.mjs:540"
+      "src/vfx-localization.mjs:592"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.look.label\","
   },
   "vfxCatalog.parameter.particles.look.option.bokeh": {
     "locations": [
-      "src/vfx-localization.mjs:549"
+      "src/vfx-localization.mjs:601"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.bokeh\","
   },
   "vfxCatalog.parameter.particles.look.option.burst": {
     "locations": [
-      "src/vfx-localization.mjs:564"
+      "src/vfx-localization.mjs:616"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.burst\""
   },
   "vfxCatalog.parameter.particles.look.option.cartoonCloud": {
     "locations": [
-      "src/vfx-localization.mjs:551"
+      "src/vfx-localization.mjs:603"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.cartoonCloud\","
   },
   "vfxCatalog.parameter.particles.look.option.cartoonFlame": {
     "locations": [
-      "src/vfx-localization.mjs:552"
+      "src/vfx-localization.mjs:604"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.cartoonFlame\","
   },
   "vfxCatalog.parameter.particles.look.option.cartoonStar": {
     "locations": [
-      "src/vfx-localization.mjs:558"
+      "src/vfx-localization.mjs:610"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.cartoonStar\","
   },
   "vfxCatalog.parameter.particles.look.option.dot": {
     "locations": [
-      "src/vfx-localization.mjs:544"
+      "src/vfx-localization.mjs:596"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.dot\","
   },
   "vfxCatalog.parameter.particles.look.option.drop": {
     "locations": [
-      "src/vfx-localization.mjs:556"
+      "src/vfx-localization.mjs:608"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.drop\","
   },
   "vfxCatalog.parameter.particles.look.option.flame": {
     "locations": [
-      "src/vfx-localization.mjs:550"
+      "src/vfx-localization.mjs:602"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.flame\","
   },
   "vfxCatalog.parameter.particles.look.option.heart": {
     "locations": [
-      "src/vfx-localization.mjs:557"
+      "src/vfx-localization.mjs:609"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.heart\","
   },
   "vfxCatalog.parameter.particles.look.option.leaf": {
     "locations": [
-      "src/vfx-localization.mjs:553"
+      "src/vfx-localization.mjs:605"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.leaf\","
   },
   "vfxCatalog.parameter.particles.look.option.lightning": {
     "locations": [
-      "src/vfx-localization.mjs:560"
+      "src/vfx-localization.mjs:612"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.lightning\","
   },
   "vfxCatalog.parameter.particles.look.option.petal": {
     "locations": [
-      "src/vfx-localization.mjs:554"
+      "src/vfx-localization.mjs:606"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.petal\","
   },
   "vfxCatalog.parameter.particles.look.option.pixel": {
     "locations": [
-      "src/vfx-localization.mjs:559"
+      "src/vfx-localization.mjs:611"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.pixel\","
   },
   "vfxCatalog.parameter.particles.look.option.ring": {
     "locations": [
-      "src/vfx-localization.mjs:545"
+      "src/vfx-localization.mjs:597"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.ring\","
   },
   "vfxCatalog.parameter.particles.look.option.rock": {
     "locations": [
-      "src/vfx-localization.mjs:562"
+      "src/vfx-localization.mjs:614"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.rock\","
   },
   "vfxCatalog.parameter.particles.look.option.shard": {
     "locations": [
-      "src/vfx-localization.mjs:546"
+      "src/vfx-localization.mjs:598"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.shard\","
   },
   "vfxCatalog.parameter.particles.look.option.smoke": {
     "locations": [
-      "src/vfx-localization.mjs:547"
+      "src/vfx-localization.mjs:599"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.smoke\","
   },
   "vfxCatalog.parameter.particles.look.option.snowflake": {
     "locations": [
-      "src/vfx-localization.mjs:555"
+      "src/vfx-localization.mjs:607"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.snowflake\","
   },
   "vfxCatalog.parameter.particles.look.option.softGlow": {
     "locations": [
-      "src/vfx-localization.mjs:542"
+      "src/vfx-localization.mjs:594"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.softGlow\","
   },
   "vfxCatalog.parameter.particles.look.option.spark": {
     "locations": [
-      "src/vfx-localization.mjs:543"
+      "src/vfx-localization.mjs:595"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.spark\","
   },
   "vfxCatalog.parameter.particles.look.option.splat": {
     "locations": [
-      "src/vfx-localization.mjs:563"
+      "src/vfx-localization.mjs:615"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.splat\","
   },
   "vfxCatalog.parameter.particles.look.option.star": {
     "locations": [
-      "src/vfx-localization.mjs:548"
+      "src/vfx-localization.mjs:600"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.star\","
   },
   "vfxCatalog.parameter.particles.look.option.wisp": {
     "locations": [
-      "src/vfx-localization.mjs:561"
+      "src/vfx-localization.mjs:613"
     ],
     "context": "\"vfxCatalog.parameter.particles.look.option.wisp\","
   },
   "vfxCatalog.parameter.particles.outline.label": {
     "locations": [
-      "src/vfx-localization.mjs:660"
+      "src/vfx-localization.mjs:712"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.outline.label\","
   },
   "vfxCatalog.parameter.particles.outline.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:662"
+      "src/vfx-localization.mjs:714"
     ],
     "context": "\"vfxCatalog.parameter.particles.outline.option.off\","
   },
   "vfxCatalog.parameter.particles.outline.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:663"
+      "src/vfx-localization.mjs:715"
     ],
     "context": "\"vfxCatalog.parameter.particles.outline.option.on\""
   },
   "vfxCatalog.parameter.particles.outlineColor.label": {
     "locations": [
-      "src/vfx-localization.mjs:667"
+      "src/vfx-localization.mjs:719"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.outlineColor.label\""
   },
   "vfxCatalog.parameter.particles.outlineWidth.label": {
     "locations": [
-      "src/vfx-localization.mjs:670"
+      "src/vfx-localization.mjs:722"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.outlineWidth.label\""
   },
   "vfxCatalog.parameter.particles.radius.label": {
     "locations": [
-      "src/vfx-localization.mjs:595"
+      "src/vfx-localization.mjs:647"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.radius.label\""
   },
   "vfxCatalog.parameter.particles.rate.label": {
     "locations": [
-      "src/vfx-localization.mjs:531"
+      "src/vfx-localization.mjs:583"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.rate.label\""
   },
   "vfxCatalog.parameter.particles.rotation.label": {
     "locations": [
-      "src/vfx-localization.mjs:629"
+      "src/vfx-localization.mjs:681"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.rotation.label\","
   },
   "vfxCatalog.parameter.particles.rotation.option.auto": {
     "locations": [
-      "src/vfx-localization.mjs:631"
+      "src/vfx-localization.mjs:683"
     ],
     "context": "\"vfxCatalog.parameter.particles.rotation.option.auto\","
   },
   "vfxCatalog.parameter.particles.rotation.option.followMotion": {
     "locations": [
-      "src/vfx-localization.mjs:633"
+      "src/vfx-localization.mjs:685"
     ],
     "context": "\"vfxCatalog.parameter.particles.rotation.option.followMotion\","
   },
   "vfxCatalog.parameter.particles.rotation.option.none": {
     "locations": [
-      "src/vfx-localization.mjs:635"
+      "src/vfx-localization.mjs:687"
     ],
     "context": "\"vfxCatalog.parameter.particles.rotation.option.none\""
   },
   "vfxCatalog.parameter.particles.rotation.option.random": {
     "locations": [
-      "src/vfx-localization.mjs:632"
+      "src/vfx-localization.mjs:684"
     ],
     "context": "\"vfxCatalog.parameter.particles.rotation.option.random\","
   },
   "vfxCatalog.parameter.particles.rotation.option.upright": {
     "locations": [
-      "src/vfx-localization.mjs:634"
+      "src/vfx-localization.mjs:686"
     ],
     "context": "\"vfxCatalog.parameter.particles.rotation.option.upright\","
   },
   "vfxCatalog.parameter.particles.seed.label": {
     "locations": [
       "src/camera-motion-localization.mjs:10",
-      "src/vfx-localization.mjs:720"
+      "src/vfx-localization.mjs:772"
     ],
     "context": "seed:'vfxCatalog.parameter.particles.seed.label',followX:'cameraMotionUi.horizontal',followY:'cameraMotionUi.vertical',"
   },
   "vfxCatalog.parameter.particles.shading.label": {
     "locations": [
-      "src/vfx-localization.mjs:651"
+      "src/vfx-localization.mjs:703"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.shading.label\""
   },
   "vfxCatalog.parameter.particles.shape.label": {
     "locations": [
-      "src/vfx-localization.mjs:586"
+      "src/vfx-localization.mjs:638"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.shape.label\","
   },
   "vfxCatalog.parameter.particles.shape.option.body": {
     "locations": [
-      "src/vfx-localization.mjs:590"
+      "src/vfx-localization.mjs:642"
     ],
     "context": "\"vfxCatalog.parameter.particles.shape.option.body\","
   },
   "vfxCatalog.parameter.particles.shape.option.circle": {
     "locations": [
-      "src/vfx-localization.mjs:589"
+      "src/vfx-localization.mjs:641"
     ],
     "context": "\"vfxCatalog.parameter.particles.shape.option.circle\","
   },
   "vfxCatalog.parameter.particles.shape.option.line": {
     "locations": [
-      "src/vfx-localization.mjs:591"
+      "src/vfx-localization.mjs:643"
     ],
     "context": "\"vfxCatalog.parameter.particles.shape.option.line\""
   },
   "vfxCatalog.parameter.particles.shape.option.targetPoint": {
     "locations": [
-      "src/vfx-localization.mjs:588"
+      "src/vfx-localization.mjs:640"
     ],
     "context": "\"vfxCatalog.parameter.particles.shape.option.targetPoint\","
   },
   "vfxCatalog.parameter.particles.size.label": {
     "locations": [
-      "src/vfx-localization.mjs:571"
+      "src/vfx-localization.mjs:623"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.size.label\""
   },
   "vfxCatalog.parameter.particles.sizeMode.label": {
     "locations": [
-      "src/vfx-localization.mjs:601"
+      "src/vfx-localization.mjs:653"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.sizeMode.label\","
   },
   "vfxCatalog.parameter.particles.sizeMode.option.auto": {
     "locations": [
-      "src/vfx-localization.mjs:603"
+      "src/vfx-localization.mjs:655"
     ],
     "context": "\"vfxCatalog.parameter.particles.sizeMode.option.auto\","
   },
   "vfxCatalog.parameter.particles.sizeMode.option.flicker": {
     "locations": [
-      "src/vfx-localization.mjs:607"
+      "src/vfx-localization.mjs:659"
     ],
     "context": "\"vfxCatalog.parameter.particles.sizeMode.option.flicker\""
   },
   "vfxCatalog.parameter.particles.sizeMode.option.growOrShrink": {
     "locations": [
-      "src/vfx-localization.mjs:604"
+      "src/vfx-localization.mjs:656"
     ],
     "context": "\"vfxCatalog.parameter.particles.sizeMode.option.growOrShrink\","
   },
   "vfxCatalog.parameter.particles.sizeMode.option.pop": {
     "locations": [
-      "src/vfx-localization.mjs:606"
+      "src/vfx-localization.mjs:658"
     ],
     "context": "\"vfxCatalog.parameter.particles.sizeMode.option.pop\","
   },
   "vfxCatalog.parameter.particles.sizeMode.option.puffOut": {
     "locations": [
-      "src/vfx-localization.mjs:605"
+      "src/vfx-localization.mjs:657"
     ],
     "context": "\"vfxCatalog.parameter.particles.sizeMode.option.puffOut\","
   },
   "vfxCatalog.parameter.particles.space.label": {
     "locations": [
-      "src/vfx-localization.mjs:688"
+      "src/vfx-localization.mjs:740"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.space.label\","
   },
   "vfxCatalog.parameter.particles.space.option.followTarget": {
     "locations": [
-      "src/vfx-localization.mjs:691"
+      "src/vfx-localization.mjs:743"
     ],
     "context": "\"vfxCatalog.parameter.particles.space.option.followTarget\""
   },
   "vfxCatalog.parameter.particles.space.option.leaveATrail": {
     "locations": [
-      "src/vfx-localization.mjs:690"
+      "src/vfx-localization.mjs:742"
     ],
     "context": "\"vfxCatalog.parameter.particles.space.option.leaveATrail\","
   },
   "vfxCatalog.parameter.particles.speed.label": {
     "locations": [
-      "src/vfx-localization.mjs:574"
+      "src/vfx-localization.mjs:626"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.speed.label\""
   },
   "vfxCatalog.parameter.particles.spin.label": {
     "locations": [
-      "src/vfx-localization.mjs:639"
+      "src/vfx-localization.mjs:691"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.spin.label\""
   },
   "vfxCatalog.parameter.particles.spread.label": {
     "locations": [
-      "src/vfx-localization.mjs:580"
+      "src/vfx-localization.mjs:632"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.spread.label\""
   },
   "vfxCatalog.parameter.particles.step.label": {
     "locations": [
-      "src/vfx-localization.mjs:712"
+      "src/vfx-localization.mjs:764"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.step.label\","
   },
   "vfxCatalog.parameter.particles.step.option.onesSmooth": {
     "locations": [
-      "src/vfx-localization.mjs:714"
+      "src/vfx-localization.mjs:766"
     ],
     "context": "\"vfxCatalog.parameter.particles.step.option.onesSmooth\","
   },
   "vfxCatalog.parameter.particles.step.option.threes": {
     "locations": [
-      "src/vfx-localization.mjs:716"
+      "src/vfx-localization.mjs:768"
     ],
     "context": "\"vfxCatalog.parameter.particles.step.option.threes\""
   },
   "vfxCatalog.parameter.particles.step.option.twos": {
     "locations": [
-      "src/vfx-localization.mjs:715"
+      "src/vfx-localization.mjs:767"
     ],
     "context": "\"vfxCatalog.parameter.particles.step.option.twos\","
   },
   "vfxCatalog.parameter.particles.stretch.label": {
     "locations": [
-      "src/vfx-localization.mjs:642"
+      "src/vfx-localization.mjs:694"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.stretch.label\""
   },
   "vfxCatalog.parameter.particles.swirl.label": {
     "locations": [
-      "src/vfx-localization.mjs:626"
+      "src/vfx-localization.mjs:678"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.swirl.label\""
   },
   "vfxCatalog.parameter.particles.trail.label": {
     "locations": [
-      "src/vfx-localization.mjs:657"
+      "src/vfx-localization.mjs:709"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.trail.label\""
   },
   "vfxCatalog.parameter.particles.turbulence.label": {
     "locations": [
-      "src/vfx-localization.mjs:620"
+      "src/vfx-localization.mjs:672"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.turbulence.label\""
   },
   "vfxCatalog.parameter.particles.twinkle.label": {
     "locations": [
-      "src/vfx-localization.mjs:648"
+      "src/vfx-localization.mjs:700"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.twinkle.label\""
   },
   "vfxCatalog.parameter.particles.variation.label": {
     "locations": [
-      "src/vfx-localization.mjs:611"
+      "src/vfx-localization.mjs:663"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.variation.label\""
   },
   "vfxCatalog.parameter.particles.wind.label": {
     "locations": [
-      "src/vfx-localization.mjs:617"
+      "src/vfx-localization.mjs:669"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.wind.label\""
   },
   "vfxCatalog.parameter.particles.x.label": {
     "locations": [
-      "src/vfx-localization.mjs:723"
+      "src/vfx-localization.mjs:775"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.x.label\""
   },
   "vfxCatalog.parameter.particles.y.label": {
     "locations": [
-      "src/vfx-localization.mjs:726"
+      "src/vfx-localization.mjs:778"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.particles.y.label\""
   },
   "vfxCatalog.parameter.pixelate.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:242"
+      "src/vfx-localization.mjs:269"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.pixelate.effectStrength.label\""
   },
   "vfxCatalog.parameter.pixelate.linked.label": {
     "locations": [
-      "src/vfx-localization.mjs:248"
+      "src/vfx-localization.mjs:275"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.pixelate.linked.label\","
   },
   "vfxCatalog.parameter.pixelate.linked.option.off": {
     "locations": [
-      "src/vfx-localization.mjs:250"
+      "src/vfx-localization.mjs:277"
     ],
     "context": "\"vfxCatalog.parameter.pixelate.linked.option.off\","
   },
   "vfxCatalog.parameter.pixelate.linked.option.on": {
     "locations": [
-      "src/vfx-localization.mjs:251"
+      "src/vfx-localization.mjs:278"
     ],
     "context": "\"vfxCatalog.parameter.pixelate.linked.option.on\""
   },
   "vfxCatalog.parameter.pixelate.offsetX.label": {
     "locations": [
-      "src/vfx-localization.mjs:258"
+      "src/vfx-localization.mjs:285"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.pixelate.offsetX.label\""
   },
   "vfxCatalog.parameter.pixelate.offsetY.label": {
     "locations": [
-      "src/vfx-localization.mjs:261"
+      "src/vfx-localization.mjs:288"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.pixelate.offsetY.label\""
   },
   "vfxCatalog.parameter.pixelate.size.label": {
     "locations": [
-      "src/vfx-localization.mjs:245"
+      "src/vfx-localization.mjs:272"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.pixelate.size.label\""
   },
   "vfxCatalog.parameter.pixelate.sizeY.label": {
     "locations": [
-      "src/vfx-localization.mjs:255"
+      "src/vfx-localization.mjs:282"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.pixelate.sizeY.label\""
   },
   "vfxCatalog.parameter.rgbSplit.amount.label": {
     "locations": [
-      "src/vfx-localization.mjs:374"
+      "src/vfx-localization.mjs:410"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.rgbSplit.amount.label\""
   },
   "vfxCatalog.parameter.rgbSplit.angle.label": {
     "locations": [
-      "src/vfx-localization.mjs:377"
+      "src/vfx-localization.mjs:413"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.rgbSplit.angle.label\""
   },
   "vfxCatalog.parameter.rgbSplit.blue.label": {
     "locations": [
-      "src/vfx-localization.mjs:386"
+      "src/vfx-localization.mjs:422"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.rgbSplit.blue.label\""
   },
   "vfxCatalog.parameter.rgbSplit.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:371"
+      "src/vfx-localization.mjs:407"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.rgbSplit.effectStrength.label\""
   },
   "vfxCatalog.parameter.rgbSplit.green.label": {
     "locations": [
-      "src/vfx-localization.mjs:383"
+      "src/vfx-localization.mjs:419"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.rgbSplit.green.label\""
   },
   "vfxCatalog.parameter.rgbSplit.red.label": {
     "locations": [
-      "src/vfx-localization.mjs:380"
+      "src/vfx-localization.mjs:416"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.rgbSplit.red.label\""
   },
   "vfxCatalog.parameter.shadow.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:148"
+      "src/vfx-localization.mjs:172"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shadow.color.label\""
   },
   "vfxCatalog.parameter.shadow.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:145"
+      "src/vfx-localization.mjs:169"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shadow.effectStrength.label\""
   },
   "vfxCatalog.parameter.shadow.mode.label": {
     "locations": [
-      "src/vfx-localization.mjs:166"
+      "src/vfx-localization.mjs:190"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shadow.mode.label\","
   },
   "vfxCatalog.parameter.shadow.mode.option.inner": {
     "locations": [
-      "src/vfx-localization.mjs:169"
+      "src/vfx-localization.mjs:193"
     ],
     "context": "\"vfxCatalog.parameter.shadow.mode.option.inner\""
   },
   "vfxCatalog.parameter.shadow.mode.option.outer": {
     "locations": [
-      "src/vfx-localization.mjs:168"
+      "src/vfx-localization.mjs:192"
     ],
     "context": "\"vfxCatalog.parameter.shadow.mode.option.outer\","
   },
   "vfxCatalog.parameter.shadow.offsetX.label": {
     "locations": [
-      "src/vfx-localization.mjs:154"
+      "src/vfx-localization.mjs:178"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shadow.offsetX.label\""
   },
   "vfxCatalog.parameter.shadow.offsetY.label": {
     "locations": [
-      "src/vfx-localization.mjs:157"
+      "src/vfx-localization.mjs:181"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shadow.offsetY.label\""
   },
   "vfxCatalog.parameter.shadow.opacity.label": {
     "locations": [
-      "src/vfx-localization.mjs:160"
+      "src/vfx-localization.mjs:184"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shadow.opacity.label\""
   },
   "vfxCatalog.parameter.shadow.radius.label": {
     "locations": [
-      "src/vfx-localization.mjs:151"
+      "src/vfx-localization.mjs:175"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shadow.radius.label\""
   },
   "vfxCatalog.parameter.shadow.spread.label": {
     "locations": [
-      "src/vfx-localization.mjs:163"
+      "src/vfx-localization.mjs:187"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shadow.spread.label\""
   },
   "vfxCatalog.parameter.shockwave.centerX.label": {
     "locations": [
-      "src/vfx-localization.mjs:428"
+      "src/vfx-localization.mjs:467"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shockwave.centerX.label\""
   },
   "vfxCatalog.parameter.shockwave.centerY.label": {
     "locations": [
-      "src/vfx-localization.mjs:431"
+      "src/vfx-localization.mjs:470"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shockwave.centerY.label\""
   },
   "vfxCatalog.parameter.shockwave.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:416"
+      "src/vfx-localization.mjs:455"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shockwave.effectStrength.label\""
   },
   "vfxCatalog.parameter.shockwave.falloff.label": {
     "locations": [
-      "src/vfx-localization.mjs:434"
+      "src/vfx-localization.mjs:473"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shockwave.falloff.label\""
   },
   "vfxCatalog.parameter.shockwave.radius.label": {
     "locations": [
-      "src/vfx-localization.mjs:419"
+      "src/vfx-localization.mjs:458"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shockwave.radius.label\""
   },
   "vfxCatalog.parameter.shockwave.strength.label": {
     "locations": [
-      "src/vfx-localization.mjs:425"
+      "src/vfx-localization.mjs:464"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shockwave.strength.label\""
   },
   "vfxCatalog.parameter.shockwave.thickness.label": {
     "locations": [
-      "src/vfx-localization.mjs:422"
+      "src/vfx-localization.mjs:461"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.shockwave.thickness.label\""
   },
   "vfxCatalog.parameter.smoke.amount.label": {
     "locations": [
-      "src/vfx-localization.mjs:957"
+      "src/vfx-localization.mjs:1009"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.amount.label\""
   },
   "vfxCatalog.parameter.smoke.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:954"
+      "src/vfx-localization.mjs:1006"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.color.label\""
   },
   "vfxCatalog.parameter.smoke.count.label": {
     "locations": [
-      "src/vfx-localization.mjs:979"
+      "src/vfx-localization.mjs:1031"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.count.label\""
   },
   "vfxCatalog.parameter.smoke.delay.label": {
     "locations": [
-      "src/vfx-localization.mjs:1008"
+      "src/vfx-localization.mjs:1060"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.delay.label\""
   },
   "vfxCatalog.parameter.smoke.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:941"
+      "src/vfx-localization.mjs:993"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.effectStrength.label\""
   },
   "vfxCatalog.parameter.smoke.emission.label": {
     "locations": [
-      "src/vfx-localization.mjs:972"
+      "src/vfx-localization.mjs:1024"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.emission.label\","
   },
   "vfxCatalog.parameter.smoke.emission.option.burst": {
     "locations": [
-      "src/vfx-localization.mjs:975"
+      "src/vfx-localization.mjs:1027"
     ],
     "context": "\"vfxCatalog.parameter.smoke.emission.option.burst\""
   },
   "vfxCatalog.parameter.smoke.emission.option.continuous": {
     "locations": [
-      "src/vfx-localization.mjs:974"
+      "src/vfx-localization.mjs:1026"
     ],
     "context": "\"vfxCatalog.parameter.smoke.emission.option.continuous\","
   },
   "vfxCatalog.parameter.smoke.growth.label": {
     "locations": [
-      "src/vfx-localization.mjs:985"
+      "src/vfx-localization.mjs:1037"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.growth.label\""
   },
   "vfxCatalog.parameter.smoke.layer.label": {
     "locations": [
-      "src/vfx-localization.mjs:1001"
+      "src/vfx-localization.mjs:1053"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.layer.label\","
   },
   "vfxCatalog.parameter.smoke.layer.option.behindTarget": {
     "locations": [
-      "src/vfx-localization.mjs:1004"
+      "src/vfx-localization.mjs:1056"
     ],
     "context": "\"vfxCatalog.parameter.smoke.layer.option.behindTarget\""
   },
   "vfxCatalog.parameter.smoke.layer.option.inFrontOfTarget": {
     "locations": [
-      "src/vfx-localization.mjs:1003"
+      "src/vfx-localization.mjs:1055"
     ],
     "context": "\"vfxCatalog.parameter.smoke.layer.option.inFrontOfTarget\","
   },
   "vfxCatalog.parameter.smoke.life.label": {
     "locations": [
-      "src/vfx-localization.mjs:969"
+      "src/vfx-localization.mjs:1021"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.life.label\""
   },
   "vfxCatalog.parameter.smoke.rise.label": {
     "locations": [
-      "src/vfx-localization.mjs:963"
+      "src/vfx-localization.mjs:1015"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.rise.label\""
   },
   "vfxCatalog.parameter.smoke.seed.label": {
     "locations": [
-      "src/vfx-localization.mjs:1019"
+      "src/vfx-localization.mjs:1071"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.seed.label\""
   },
   "vfxCatalog.parameter.smoke.shading.label": {
     "locations": [
-      "src/vfx-localization.mjs:991"
+      "src/vfx-localization.mjs:1043"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.shading.label\""
   },
   "vfxCatalog.parameter.smoke.size.label": {
     "locations": [
-      "src/vfx-localization.mjs:960"
+      "src/vfx-localization.mjs:1012"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.size.label\""
   },
   "vfxCatalog.parameter.smoke.space.label": {
     "locations": [
-      "src/vfx-localization.mjs:994"
+      "src/vfx-localization.mjs:1046"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.space.label\","
   },
   "vfxCatalog.parameter.smoke.space.option.followTarget": {
     "locations": [
-      "src/vfx-localization.mjs:997"
+      "src/vfx-localization.mjs:1049"
     ],
     "context": "\"vfxCatalog.parameter.smoke.space.option.followTarget\""
   },
   "vfxCatalog.parameter.smoke.space.option.leaveATrail": {
     "locations": [
-      "src/vfx-localization.mjs:996"
+      "src/vfx-localization.mjs:1048"
     ],
     "context": "\"vfxCatalog.parameter.smoke.space.option.leaveATrail\","
   },
   "vfxCatalog.parameter.smoke.spread.label": {
     "locations": [
-      "src/vfx-localization.mjs:982"
+      "src/vfx-localization.mjs:1034"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.spread.label\""
   },
   "vfxCatalog.parameter.smoke.step.label": {
     "locations": [
-      "src/vfx-localization.mjs:1011"
+      "src/vfx-localization.mjs:1063"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.step.label\","
   },
   "vfxCatalog.parameter.smoke.step.option.onesSmooth": {
     "locations": [
-      "src/vfx-localization.mjs:1013"
+      "src/vfx-localization.mjs:1065"
     ],
     "context": "\"vfxCatalog.parameter.smoke.step.option.onesSmooth\","
   },
   "vfxCatalog.parameter.smoke.step.option.threes": {
     "locations": [
-      "src/vfx-localization.mjs:1015"
+      "src/vfx-localization.mjs:1067"
     ],
     "context": "\"vfxCatalog.parameter.smoke.step.option.threes\""
   },
   "vfxCatalog.parameter.smoke.step.option.twos": {
     "locations": [
-      "src/vfx-localization.mjs:1014"
+      "src/vfx-localization.mjs:1066"
     ],
     "context": "\"vfxCatalog.parameter.smoke.step.option.twos\","
   },
   "vfxCatalog.parameter.smoke.style.label": {
     "locations": [
-      "src/vfx-localization.mjs:944"
+      "src/vfx-localization.mjs:996"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.style.label\","
   },
   "vfxCatalog.parameter.smoke.style.option.cartoon": {
     "locations": [
-      "src/vfx-localization.mjs:949"
+      "src/vfx-localization.mjs:1001"
     ],
     "context": "\"vfxCatalog.parameter.smoke.style.option.cartoon\","
   },
   "vfxCatalog.parameter.smoke.style.option.dust": {
     "locations": [
-      "src/vfx-localization.mjs:950"
+      "src/vfx-localization.mjs:1002"
     ],
     "context": "\"vfxCatalog.parameter.smoke.style.option.dust\""
   },
   "vfxCatalog.parameter.smoke.style.option.soft": {
     "locations": [
-      "src/vfx-localization.mjs:946"
+      "src/vfx-localization.mjs:998"
     ],
     "context": "\"vfxCatalog.parameter.smoke.style.option.soft\","
   },
   "vfxCatalog.parameter.smoke.style.option.steam": {
     "locations": [
-      "src/vfx-localization.mjs:948"
+      "src/vfx-localization.mjs:1000"
     ],
     "context": "\"vfxCatalog.parameter.smoke.style.option.steam\","
   },
   "vfxCatalog.parameter.smoke.style.option.thick": {
     "locations": [
-      "src/vfx-localization.mjs:947"
+      "src/vfx-localization.mjs:999"
     ],
     "context": "\"vfxCatalog.parameter.smoke.style.option.thick\","
   },
   "vfxCatalog.parameter.smoke.turbulence.label": {
     "locations": [
-      "src/vfx-localization.mjs:988"
+      "src/vfx-localization.mjs:1040"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.turbulence.label\""
   },
   "vfxCatalog.parameter.smoke.wind.label": {
     "locations": [
-      "src/vfx-localization.mjs:966"
+      "src/vfx-localization.mjs:1018"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.wind.label\""
   },
   "vfxCatalog.parameter.smoke.x.label": {
     "locations": [
-      "src/vfx-localization.mjs:1022"
+      "src/vfx-localization.mjs:1074"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.x.label\""
   },
   "vfxCatalog.parameter.smoke.y.label": {
     "locations": [
-      "src/vfx-localization.mjs:1025"
+      "src/vfx-localization.mjs:1077"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.smoke.y.label\""
   },
+  "vfxCatalog.parameter.tint.blend.label": {
+    "locations": [
+      "src/vfx-localization.mjs:56"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.tint.blend.label\","
+  },
+  "vfxCatalog.parameter.tint.blend.option.add": {
+    "locations": [
+      "src/vfx-localization.mjs:63"
+    ],
+    "context": "\"vfxCatalog.parameter.tint.blend.option.add\""
+  },
+  "vfxCatalog.parameter.tint.blend.option.color": {
+    "locations": [
+      "src/vfx-localization.mjs:62"
+    ],
+    "context": "\"vfxCatalog.parameter.tint.blend.option.color\","
+  },
+  "vfxCatalog.parameter.tint.blend.option.multiply": {
+    "locations": [
+      "src/vfx-localization.mjs:59"
+    ],
+    "context": "\"vfxCatalog.parameter.tint.blend.option.multiply\","
+  },
+  "vfxCatalog.parameter.tint.blend.option.normal": {
+    "locations": [
+      "src/vfx-localization.mjs:58"
+    ],
+    "context": "\"vfxCatalog.parameter.tint.blend.option.normal\","
+  },
+  "vfxCatalog.parameter.tint.blend.option.overlay": {
+    "locations": [
+      "src/vfx-localization.mjs:61"
+    ],
+    "context": "\"vfxCatalog.parameter.tint.blend.option.overlay\","
+  },
+  "vfxCatalog.parameter.tint.blend.option.screen": {
+    "locations": [
+      "src/vfx-localization.mjs:60"
+    ],
+    "context": "\"vfxCatalog.parameter.tint.blend.option.screen\","
+  },
   "vfxCatalog.parameter.tint.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:47"
+      "src/vfx-localization.mjs:50"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.tint.color.label\""
   },
   "vfxCatalog.parameter.tint.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:44"
+      "src/vfx-localization.mjs:47"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.tint.effectStrength.label\""
   },
   "vfxCatalog.parameter.tint.mix.label": {
     "locations": [
-      "src/vfx-localization.mjs:50"
+      "src/vfx-localization.mjs:53"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.tint.mix.label\""
   },
@@ -35214,165 +35334,177 @@
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.turbulence.size.label\""
   },
+  "vfxCatalog.parameter.turbulence.speed.label": {
+    "locations": [
+      "src/vfx-localization.mjs:38"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.turbulence.speed.label\""
+  },
   "vfxCatalog.parameter.vignette.amount.label": {
     "locations": [
-      "src/vfx-localization.mjs:314"
+      "src/vfx-localization.mjs:344"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.amount.label\""
   },
   "vfxCatalog.parameter.vignette.aspect.label": {
     "locations": [
-      "src/vfx-localization.mjs:332"
+      "src/vfx-localization.mjs:362"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.aspect.label\""
   },
   "vfxCatalog.parameter.vignette.centerX.label": {
     "locations": [
-      "src/vfx-localization.mjs:323"
+      "src/vfx-localization.mjs:353"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.centerX.label\""
   },
   "vfxCatalog.parameter.vignette.centerY.label": {
     "locations": [
-      "src/vfx-localization.mjs:326"
+      "src/vfx-localization.mjs:356"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.centerY.label\""
   },
   "vfxCatalog.parameter.vignette.color.label": {
     "locations": [
-      "src/vfx-localization.mjs:320"
+      "src/vfx-localization.mjs:350"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.color.label\""
   },
   "vfxCatalog.parameter.vignette.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:311"
+      "src/vfx-localization.mjs:341"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.effectStrength.label\""
   },
   "vfxCatalog.parameter.vignette.radius.label": {
     "locations": [
-      "src/vfx-localization.mjs:335"
+      "src/vfx-localization.mjs:365"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.radius.label\""
   },
   "vfxCatalog.parameter.vignette.roundness.label": {
     "locations": [
-      "src/vfx-localization.mjs:329"
+      "src/vfx-localization.mjs:359"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.roundness.label\""
   },
   "vfxCatalog.parameter.vignette.softness.label": {
     "locations": [
-      "src/vfx-localization.mjs:317"
+      "src/vfx-localization.mjs:347"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.vignette.softness.label\""
   },
   "vfxCatalog.parameter.wave.angle.label": {
     "locations": [
-      "src/vfx-localization.mjs:404"
+      "src/vfx-localization.mjs:440"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.wave.angle.label\""
   },
   "vfxCatalog.parameter.wave.effectStrength.label": {
     "locations": [
-      "src/vfx-localization.mjs:395"
+      "src/vfx-localization.mjs:431"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.wave.effectStrength.label\""
   },
   "vfxCatalog.parameter.wave.phase.label": {
     "locations": [
-      "src/vfx-localization.mjs:407"
+      "src/vfx-localization.mjs:443"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.wave.phase.label\""
   },
+  "vfxCatalog.parameter.wave.speed.label": {
+    "locations": [
+      "src/vfx-localization.mjs:446"
+    ],
+    "context": "\"labelKey\": \"vfxCatalog.parameter.wave.speed.label\""
+  },
   "vfxCatalog.parameter.wave.strength.label": {
     "locations": [
-      "src/vfx-localization.mjs:398"
+      "src/vfx-localization.mjs:434"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.wave.strength.label\""
   },
   "vfxCatalog.parameter.wave.wavelength.label": {
     "locations": [
-      "src/vfx-localization.mjs:401"
+      "src/vfx-localization.mjs:437"
     ],
     "context": "\"labelKey\": \"vfxCatalog.parameter.wave.wavelength.label\""
   },
   "vfxCatalog.preset.energy": {
     "locations": [
-      "src/vfx-localization.mjs:1173"
+      "src/vfx-localization.mjs:1225"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.energy\","
   },
   "vfxCatalog.preset.ghost": {
     "locations": [
-      "src/vfx-localization.mjs:1181"
+      "src/vfx-localization.mjs:1233"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.ghost\","
   },
   "vfxCatalog.preset.goldenHour": {
     "locations": [
-      "src/vfx-localization.mjs:1165"
+      "src/vfx-localization.mjs:1217"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.goldenHour\","
   },
   "vfxCatalog.preset.hitFlash": {
     "locations": [
-      "src/vfx-localization.mjs:1177"
+      "src/vfx-localization.mjs:1229"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.hitFlash\","
   },
   "vfxCatalog.preset.hologram": {
     "locations": [
-      "src/vfx-localization.mjs:1149"
+      "src/vfx-localization.mjs:1201"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.hologram\","
   },
   "vfxCatalog.preset.ice": {
     "locations": [
-      "src/vfx-localization.mjs:1153"
+      "src/vfx-localization.mjs:1205"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.ice\","
   },
   "vfxCatalog.preset.impact": {
     "locations": [
-      "src/vfx-localization.mjs:1145"
+      "src/vfx-localization.mjs:1197"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.impact\","
   },
   "vfxCatalog.preset.neon": {
     "locations": [
-      "src/vfx-localization.mjs:1161"
+      "src/vfx-localization.mjs:1213"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.neon\","
   },
   "vfxCatalog.preset.poison": {
     "locations": [
-      "src/vfx-localization.mjs:1157"
+      "src/vfx-localization.mjs:1209"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.poison\","
   },
   "vfxCatalog.preset.powerUp": {
     "locations": [
-      "src/vfx-localization.mjs:1137"
+      "src/vfx-localization.mjs:1189"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.powerUp\","
   },
   "vfxCatalog.preset.retro": {
     "locations": [
-      "src/vfx-localization.mjs:1185"
+      "src/vfx-localization.mjs:1237"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.retro\","
   },
   "vfxCatalog.preset.retroScreen": {
     "locations": [
-      "src/vfx-localization.mjs:1169"
+      "src/vfx-localization.mjs:1221"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.retroScreen\","
   },
   "vfxCatalog.preset.teleport": {
     "locations": [
-      "src/vfx-localization.mjs:1141"
+      "src/vfx-localization.mjs:1193"
     ],
     "context": "\"nameKey\": \"vfxCatalog.preset.teleport\","
   },

@@ -27,7 +27,9 @@ fn recorded_frames_match() {
             let tick = entry.get("tick").unwrap().as_f64().unwrap();
             total += 1;
             match records.recorded(&entry) {
-                Ok(value) => {
+                Ok(mut value) => {
+                    // The editor recorded before the effect parameters added since: those at their defaults are not in its bytes.
+                    styk_eval::vfx::registry::without_added_defaults(&mut value);
                     let (got, want) = (styk_doc::json::to_string(&value), entry.get("json").unwrap().as_str().unwrap().to_string());
                     let at = got.bytes().zip(want.bytes()).position(|(a, b)| a != b).unwrap_or(got.len().min(want.len()));
                     let near = |text: &str| text[text.floor_char_boundary(at.saturating_sub(80))..text.floor_char_boundary((at + 80).min(text.len()))].to_string();

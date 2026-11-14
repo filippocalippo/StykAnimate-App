@@ -52,6 +52,7 @@ impl Renderer {
     pub fn with_edges(device: &wgpu::Device, queue: &wgpu::Queue, present_format: wgpu::TextureFormat, edges: Edges) -> Renderer {
         let samples = if edges == Edges::Crisp { 1 } else { SAMPLES };
         let device = device.clone();
+        let float_effects = crate::effects::executor::float_by_default(&device);
         let queue = queue.clone();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("styk prims"),
@@ -224,6 +225,7 @@ impl Renderer {
             page_frame: [0, 0],
             exact_sizes: false,
             executor: None,
+            float_effects,
             stats: Stats { prims: 0, groups: 0, passes: 0, downscaled: false, rounds: 0, effect_layers: 0, effect_passes: 0, effect_bytes: 0, layer_bytes: 0, depth_bytes: 0, material_bytes: 0, glyph_masks: 0, glyph_masks_filled: 0, glyph_bytes: 0, part: false },
         }
     }

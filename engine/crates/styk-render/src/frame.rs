@@ -485,7 +485,7 @@ impl Renderer {
                     work.push(Work { group: g, round: r, depth: list.groups[g].depth, page: slot.page, at: [slot.offset[0] as u32, slot.offset[1] as u32], size: at, run });
                 }
             }
-        let effect_bytes = Placement::of(&work.iter().map(|w| &w.run).collect::<Vec<_>>()).bytes();
+        let effect_bytes = Placement::of(&work.iter().map(|w| &w.run).collect::<Vec<_>>()).bytes(crate::effects::executor::work_bytes(self.float_effects));
         FramePlan { list: list.clone(), view: *view, size, planned, page, rounds, work, records, effect_bytes }
     }
 
@@ -544,7 +544,8 @@ impl Renderer {
         }
         // The frame's effect runs placed in the executor's textures (a frame without any releases them).
         if !work.is_empty() || self.executor.is_some() {
-            let executor = self.executor.get_or_insert_with(|| Executor::new(&self.device));
+            let float = self.float_effects;
+            let executor = self.executor.get_or_insert_with(|| Executor::new(&self.device, float));
             executor.prepare(&self.device, &self.queue, records, &work.iter().map(|w| &w.run).collect::<Vec<_>>());
         }
         // Each group's prims are one run inside its depth's pass (the encoder emits them by group).

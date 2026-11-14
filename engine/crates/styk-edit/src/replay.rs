@@ -76,7 +76,7 @@ fn replay_with_worker(reference: &Value, worker: bool, max_source_bytes: usize) 
     }
     editor.set_selection_metadata(state).map_err(|error| format!("{error:?}"))?;
     let mut outcome = Outcome { scenario: reference.get("scenario").and_then(Value::as_str).unwrap_or("").to_string(), steps: steps.len() - 1, ..Outcome::default() };
-    if editor.report_json() != expected {
+    if as_recorded(editor.report()) != expected {
         outcome.mismatches.push("step 0: the loaded document does not survive the engine's store byte for byte".into());
         return Ok(outcome);
     }
@@ -200,7 +200,7 @@ fn replay_with_worker(reference: &Value, worker: bool, max_source_bytes: usize) 
         if let Err(difference) = crate::rebuild_check::rebuilt_whole(&editor) {
             differences.push(difference);
         }
-        let actual = editor.report_json();
+        let actual = as_recorded(editor.report());
         if actual != expected {
             differences.push(format!("document differs: {}", first_difference(&actual, &expected)));
         }
@@ -264,6 +264,14 @@ fn json(value: &Value) -> String {
 
 fn short(text: &str) -> String {
     if text.len() <= 400 { text.to_string() } else { format!("{}…", &text[..text.floor_char_boundary(400)]) }
+}
+
+/// `report` as the editor's recordings hold it: the effect parameters added since they were made (`registry::ADDED`) taken out
+/// of every effect where they are at their defaults. A recording compares with this; any other difference stays one.
+pub fn as_recorded(report: &Value) -> String {
+    let mut report = crate::record::without_runtime(report);
+    styk_eval::vfx::registry::without_added_defaults(&mut report);
+    styk_doc::json::to_string(&report)
 }
 
 fn first_difference(actual: &str, expected: &str) -> String {

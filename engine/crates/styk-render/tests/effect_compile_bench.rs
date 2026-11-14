@@ -48,7 +48,8 @@ fn effect_pipelines_compile() {
         ("grade", vec![effect(Params::Grade(Grade { contrast: 1.2, ..Default::default() }))]),
     ];
     // One executor for the whole run, as the stage has: a case pays only for the pipelines the cases before it did not create.
-    let mut executor = Executor::new(&device);
+    let float = std::env::var("STYK_EFFECTS_EIGHT_BITS").is_err();
+    let mut executor = Executor::new(&device, float);
     let started = Instant::now();
     for (name, stack) in &cases {
         let mut records = Vec::new();

@@ -182,6 +182,8 @@ pub struct Renderer {
     pub(crate) exact_sizes: bool,
     /// Effect passes, created with the first frame that filters.
     pub(crate) executor: Option<effects::executor::Executor>,
+    /// Effect images between passes are half floats (`effects::executor`, Precision).
+    pub(crate) float_effects: bool,
     /// Depth runs (docs/engine/spatial.md): the pipelines and multisampled depth
     /// buffers of passes with depth-tested faces, created with the first list that has any.
     pub(crate) depth_pipelines: Option<pipeline::DepthPipelines>,
@@ -237,6 +239,17 @@ impl Renderer {
     /// Capacity and unused owners stay until document/export teardown; page count and primitive capacity never shrink per frame.
     pub fn set_exact_sizes(&mut self, exact: bool) {
         self.exact_sizes = exact;
+    }
+
+    /// Whether effect images between passes are half floats: the default is what the device's backend always allows (WebGPU and
+    /// native, not WebGL2). A host whose WebGL2 context renders to and filters half floats (`EXT_color_buffer_float`, what
+    /// `Adapter::get_texture_format_features` reports for `Rgba16Float`) may turn it on; without it effects use eight bits,
+    /// dithered.
+    pub fn set_float_effects(&mut self, float: bool) {
+        if self.float_effects != float {
+            self.float_effects = float;
+            self.executor = None;
+        }
     }
 
     /// Rotates and mirrors the workspace view: `orientation` maps the neutral view's screen pixels

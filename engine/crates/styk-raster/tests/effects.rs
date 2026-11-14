@@ -51,7 +51,8 @@ fn a_blur_spreads_the_layer() {
     assert_eq!(at(&plain, 17, 32)[3], 0);
     assert!(at(&blurred, 17, 32)[3] > 20, "the blur reaches past the square's edge: {:?}", at(&blurred, 17, 32));
     assert!(at(&blurred, 21, 32)[3] < 255, "and softens it: {:?}", at(&blurred, 21, 32));
-    assert_eq!(at(&blurred, 32, 32), [255, 0, 0, 255], "the middle stays red");
+    let middle = at(&blurred, 32, 32);
+    assert!(middle[0] >= 254 && middle[1] == 0 && middle[2] == 0 && middle[3] >= 254, "the middle stays red (a Gaussian's tail takes less than a level): {middle:?}");
 }
 
 // ---- Both renderers ------------------------------------------------------------------------------------------------------
