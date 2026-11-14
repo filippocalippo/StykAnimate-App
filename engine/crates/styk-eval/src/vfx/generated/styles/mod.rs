@@ -50,6 +50,36 @@ pub(super) fn glow_blend(blend: GeneratorBlend) -> u8 {
     }
 }
 
+/// Fire's temperatures from its colour: white-hot, the heat, the flame cooling a step, its embers and
+/// their dark: each a deeper turn of the colour's own hue, so gold fire cools through orange to red,
+/// blue fire to indigo and green fire to teal, never to a grey between the colour and orange.
+pub(super) struct FireTones {
+    pub white_hot: [f64; 3],
+    pub heat: [f64; 3],
+    pub orange: [f64; 3],
+    pub ember: [f64; 3],
+    pub deep: [f64; 3],
+}
+
+pub(super) fn fire_tones(col: [f64; 3]) -> FireTones {
+    let orange = deeper(col, 1.0);
+    let ember = deeper(deeper(col, 0.9), 0.62);
+    FireTones { white_hot: tone(col, 0.75, WHITE), heat: tone(col, 0.45, WHITE), orange, ember, deep: ember.map(|v| v * 0.5) }
+}
+
+/// Size over life of a shape that pops in, holds and shrinks away (a cartoon flame, a star, a glint).
+pub(super) const POP: Curve = Curve::four(0.25, 0.12, 1.0, 0.75, 1.0, 0.0);
+
+/// How much light a layer gives off for blend `blend`: Glow is all light, Solid all paint, Auto the
+/// style's own share `auto`.
+pub(super) fn light_share(blend: u8, auto: f64) -> f64 {
+    match blend {
+        ADD => 1.0,
+        NORMAL => 0.0,
+        _ => auto,
+    }
+}
+
 /// Figures are authored at many scales; auras follow the target's size (`Anchor::measure`,
 /// which its pose does not change): the scale of a layer with `body_scaled` at a birth.
 pub fn body_scale(measure: f64) -> f64 {
@@ -58,6 +88,30 @@ pub fn body_scale(measure: f64) -> f64 {
 }
 
 pub(super) const ROCK_COLOR: [f64; 3] = [0.42, 0.38, 0.36];
+
+/// A deeper tone of `c` for the edges and undersides of light colours, so they read on a light
+/// page: more saturated and darker (`value`, the brightest channel), its hue turned a little toward
+/// whichever neighbour is darker (cyan toward blue, gold toward orange).
+pub(super) fn deeper(c: [f64; 3], value: f64) -> [f64; 3] {
+    // A twentieth of a turn either way about the grey axis.
+    let (cs, sn) = (0.951_056_516_295_153_6, 0.309_016_994_374_947_4);
+    let turn = |sn: f64| {
+        let k = (1.0 - cs) / 3.0;
+        let r = 0.577_350_269_189_625_8 * sn;
+        let m = [[cs + k, k - r, k + r], [k + r, cs + k, k - r], [k - r, k + r, cs + k]];
+        [0, 1, 2].map(|i| clamp(m[i][0] * c[0] + m[i][1] * c[1] + m[i][2] * c[2], 0.0, 1.0))
+    };
+    let luma = |c: [f64; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let (a, b) = (turn(sn), turn(-sn));
+    let h = if luma(a) <= luma(b) { a } else { b };
+    let (hi, lo) = (h[0].max(h[1]).max(h[2]), h[0].min(h[1]).min(h[2]));
+    if hi - lo < 1e-3 {
+        return c.map(|v| v * value);
+    }
+    // Saturated: pushed away from its least channel, brightest channel at `value`.
+    let floor = lo * 0.85;
+    h.map(|v| clamp((v - floor) / (hi - floor), 0.0, 1.0) * value)
+}
 
 pub(super) fn m(name: &str) -> Option<Material> {
     Some(material(name))
@@ -87,13 +141,19 @@ pub fn compile(params: &Params, ctx: &Context) -> Vec<Spec> {
         Params::Smoke(p) => smoke(p, ctx),
         _ => Vec::new(),
     };
+    // A beam that charges plays its charge from nothing; one that starts firing starts running.
+    let prefill = match params {
+        Params::Beam(p) => ctx.prefill && beam::fires_at_once(p, ctx),
+        _ => ctx.prefill,
+    };
     layers
         .into_iter()
         .filter(|l| l.shape == BEAM || l.shape == ARC || l.count > 0.0 || l.rate > 0.0 || l.rate_param.is_some())
         .map(|mut l| {
             // Started already running: continuous layers emitted for a lifetime before the
-            // effect's start, so nothing fades in from empty.
-            if ctx.prefill && l.emit_dur > 0.0 && !l.is_beam() {
+            // effect's start, so nothing fades in from empty. Layers that begin later (a beam's
+            // sparks once it fires, an impact) are events of the effect and wait for their moment.
+            if prefill && l.emit_dur > 0.0 && !l.is_beam() && l.start <= ctx.start {
                 l.prewarm = 1.0;
                 l.clip_fade_in = 0.0;
             }

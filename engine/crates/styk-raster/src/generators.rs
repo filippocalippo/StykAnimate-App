@@ -481,7 +481,7 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
 }
 
 /// A beam's premultiplied colour at `uv` (`beam_color` in prim.wgsl); `aa` is the pixel in local units.
-fn beam_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], aa: f32, colors: &[[f32; 4]; 4]) -> [f32; 4] {
+fn beam_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], aa: f32, colors: &[[f32; 4]; 5]) -> [f32; 4] {
     let (l, w) = (prm[0], prm[1]);
     if w <= 0.05 {
         return [0.0; 4];
@@ -489,7 +489,7 @@ fn beam_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], aa: f32, colors: &[[f32; 4]
     let (t, x, style, opacity) = (p.b[3], uv[0], p.c[1] as u32, p.c[0]);
     let seed = prm[3];
     let strands = p.c[2];
-    let [core_c, body_c, glow_c, extra] = *colors;
+    let [core_c, body_c, glow_c, extra, rim_c] = *colors;
     let wob = (vnoise(x * 0.018 - t * 0.55, seed) - 0.5) * 2.0 * prm[2] * w * smooth(0.0, 80.0, x);
     let y = uv[1] - wob;
     // Thin at the muzzle, full along the body, a rounded swell at the travelling head.
@@ -516,7 +516,11 @@ fn beam_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], aa: f32, colors: &[[f32; 4]
     let glow = (-(d - ww * body_w * 0.8).max(0.0) / (ww * glow_w + 1.0)).exp() * 0.55 * (1.0 - smooth(halo * 0.6, halo, d));
     let mut out = lit([glow_c[0], glow_c[1], glow_c[2]], glow * opacity, glow_c[3]);
     let bright = if style == 1 { 1.0 } else { flow };
-    out = over(lit(body_c[..3].try_into().unwrap(), body * opacity * bright.min(1.0), body_c[3]), out);
+    // The body turns to its rim colour over its outer half: a deeper tone of the hue gives a light
+    // beam an edge that reads on a light page.
+    let edge = smooth(ww * body_w * 0.4, ww * body_w, d);
+    let body_rgb = [0, 1, 2].map(|i| mix(body_c[i], rim_c[i], edge));
+    out = over(lit(body_rgb, body * opacity * bright.min(1.0), mix(body_c[3], rim_c[3], edge)), out);
     if strands > 0.5 {
         // Two strands winding round the body.
         let period = (w * 3.2).max(24.0);
@@ -559,7 +563,7 @@ pub(crate) fn draw(list: &DrawList, p: &Prim, target: &mut Target, layer: &Layer
     }
     let to_q = invert(from_q);
     let (uv0, uv1, uv2) = (shaped[0].1, shaped[1].1, shaped[2].1);
-    let colors = [row(2), row(3), row(4), row(5)];
+    let colors = [row(2), row(3), row(4), row(5), row(6)];
     let width = target.width;
     quad(corners, clip, positions, |x, y, mask| {
         let (cx, cy) = (x as f64 + 0.5, y as f64 + 0.5);

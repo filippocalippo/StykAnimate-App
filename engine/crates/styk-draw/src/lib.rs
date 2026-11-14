@@ -108,7 +108,8 @@ pub const K_PARTICLE: u32 = 13;
 /// A beam of a generated effect, in local coordinates as [`K_PARTICLE`]: `a` = (origin x,
 /// origin y, tip x, tip y), `b` = (width, wobble, seed, time), `c` = (opacity, style,
 /// strands, ink width); `paint` = the draw's two transform rows, then its core, body and
-/// glow colours (straight RGB, how much light each emits) and `[head swell, ink RGB]`.
+/// glow colours (straight RGB, how much light each emits), `[head swell, ink RGB]` and the
+/// rim colour the body turns to over its outer half (straight RGB, light).
 /// Styles: 0 energy, 1 laser, 2 cartoon.
 pub const K_BEAM: u32 = 14;
 /// A lone solid glyph drawn from its coverage mask ([`GlyphMask`], docs/engine/rendering.md):

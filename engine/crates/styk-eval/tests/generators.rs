@@ -43,12 +43,12 @@ fn batch_with(prepared: &Prepared, tick: f64, sampler: &dyn Sampler) -> Option<B
     generated::build(prepared, &frame, &scene, Some(tick), Some(sampler), 1.0)
 }
 
-fn batch_at(prepared: &Prepared, tick: f64) -> Option<Batch> {
+pub(crate) fn batch_at(prepared: &Prepared, tick: f64) -> Option<Batch> {
     batch_with(prepared, tick, &Evaluate)
 }
 
 /// Every live particle: (draw, instance, particle).
-fn live(batch: &Batch) -> Vec<(usize, u32, Particle)> {
+pub(crate) fn live(batch: &Batch) -> Vec<(usize, u32, Particle)> {
     let mut out = Vec::new();
     for (d, draw) in batch.draws.iter().enumerate() {
         if batch.spec(draw).is_beam() {
@@ -456,7 +456,9 @@ fn batch_bounds_hold_every_live_particle() {
             for draw in &batch.draws {
                 let [a, b, c, d, e, f] = batch.matrix(draw);
                 let s = batch.spec(draw);
-                let points: Vec<[f64; 2]> = if s.is_beam() {
+                let points: Vec<[f64; 2]> = if s.shape == styk_eval::vfx::generated::layers::ARC {
+                    particle::arcs(&batch, draw).iter().flat_map(|p| [p.p0, p.p1]).collect()
+                } else if s.is_beam() {
                     vec![draw.point, particle::beam_tip(draw, s, Evaluator::new(&batch, draw).local())]
                 } else {
                     let ev = Evaluator::new(&batch, draw);

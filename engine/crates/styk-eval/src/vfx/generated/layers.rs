@@ -229,13 +229,15 @@ impl Curve {
     }
 }
 
-/// A beam's look: its core, body and glow colours and how much light each gives off,
-/// how much its head swells, spiral strands, an ink line (cartoon).
+/// A beam's look: its core, body and glow colours and how much light each gives off, the
+/// rim colour its body turns to toward its edge (a deeper tone of a light hue reads on a light
+/// page), how much its head swells, spiral strands, an ink line (cartoon).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamLook {
     pub core: [f64; 4],
     pub body: [f64; 4],
     pub glow: [f64; 4],
+    pub rim: [f64; 4],
     pub head: f64,
     pub strands: bool,
     pub ink: Option<([f64; 3], f64)>,
@@ -285,6 +287,9 @@ pub struct Spec {
     pub drag: f64,
     /// Bends the launch away from (+) or toward (−) the emitter's centre.
     pub radial: f64,
+    /// Bends it from a point this far above the target's lowest point instead (units of the layer, so
+    /// scaled like its sizes): an aura's flames all lean in to a point above the head.
+    pub radial_above: Option<f64>,
     pub turb: f64,
     pub turb_scale: f64,
     pub spin: f64,
@@ -387,6 +392,8 @@ pub struct Spec {
     /// Lightning: forks per arc, and how many ticks each shape holds.
     pub arc_branches: f64,
     pub arc_rhythm: f64,
+    /// Lightning about a body (an `ARC` layer emitting from the body): how far each bolt reaches.
+    pub arc_reach: f64,
 }
 
 impl Default for Spec {
@@ -407,6 +414,7 @@ impl Default for Spec {
             wind: 0.0,
             drag: 0.0,
             radial: 0.0,
+            radial_above: None,
             turb: 0.0,
             turb_scale: 0.01,
             spin: 0.0,
@@ -479,6 +487,7 @@ impl Default for Spec {
             grid: 0.0,
             arc_branches: 0.0,
             arc_rhythm: 2.0,
+            arc_reach: 0.0,
         }
     }
 }

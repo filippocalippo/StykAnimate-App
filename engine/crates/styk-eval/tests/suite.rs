@@ -1,6 +1,7 @@
 //! Every integration test of styk-eval as one binary: one link instead of one per file. Each file below is a module, so
 //! `cargo test -p styk-eval --test suite <file>::` runs one file's tests. A file that needs the process to itself (its own
 //! allocator, a measurement) stays a binary of its own in Cargo.toml.
+mod aura_beam_styles;
 mod build_memory;
 mod build_memory_stale;
 mod build_throughput;

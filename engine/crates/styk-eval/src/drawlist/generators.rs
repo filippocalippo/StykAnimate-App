@@ -106,6 +106,7 @@ fn beam_look(s: &Spec) -> crate::vfx::generated::layers::BeamLook {
         core: [core[0], core[1], core[2], ec],
         body: [body[0], body[1], body[2], eb],
         glow: [body[0], body[1], body[2], eg],
+        rim: [body[0], body[1], body[2], eb],
         head: 1.0,
         strands: s.beam_style == 3.0,
         ink: s.outline.map(|o| (o.color, o.width)),
@@ -132,6 +133,7 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
         }
         let ink = look.ink.unwrap_or(([0.0; 3], 0.0));
         out.paints.push([f(look.head), f(ink.0[0]), f(ink.0[1]), f(ink.0[2])]);
+        out.paints.push([f(look.rim[0]), f(look.rim[1]), f(look.rim[2]), f(look.rim[3])]);
         let seed = (draw.seed % 997) as f64;
         let reach = (beam.width * 3.0 + 8.0 + ink.1) * scale;
         grow(&mut out, world(beam.a[0], beam.a[1]), reach);
@@ -146,15 +148,37 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
         return (out, 0);
     }
     if s.shape == ARC {
-        let r = rows(&mut out, m, scale, s, s.softness, false);
+        let pieces = particle::arcs(batch, draw);
         let (rgb, _) = particle::color_at(s, 0.0);
         let e = particle::emission(s, 0.0, rgb);
-        for piece in particle::arcs(batch, draw) {
-            let reach = piece.r0.max(piece.r1) * (1.0 + s.softness * 3.0) * scale + scale;
+        let ink = s.outline.map(|o| (o, rows(&mut out, m, scale, s, 0.0, false)));
+        let r = rows(&mut out, m, scale, s, s.softness, false);
+        let piece_prim = |piece: &particle::ArcPiece, rows: u32, wider: f64, caps: u32, c: [f64; 3]| {
+            prim(particle_kind(P_SEGMENT) | caps, 0, rows, [piece.p0[0], piece.p0[1], piece.p1[0], piece.p1[1]], [piece.r0 + wider, piece.r1 + wider, e, piece.a1], [c[0], c[1], c[2], piece.a0])
+        };
+        // An ink line round the bolts (lightning white-hot inside a line of its colour): their glow, then
+        // every piece's line, then every core, so no light falls on the line and no piece's line crosses
+        // its neighbour's core.
+        let (core_rows, line) = match ink {
+            Some((o, plain)) => {
+                if s.softness > 0.0 {
+                    for piece in &pieces {
+                        out.prims.push(piece_prim(piece, r, 0.0, F_CAP_START | F_CAP_END, rgb));
+                    }
+                }
+                for piece in &pieces {
+                    out.prims.push(piece_prim(piece, plain, o.width, F_CAP_START | F_CAP_END, o.color));
+                }
+                (plain, o.width)
+            }
+            None => (r, 0.0),
+        };
+        for piece in &pieces {
+            let reach = (piece.r0.max(piece.r1) * (1.0 + s.softness * 3.0) + line) * scale + scale;
             grow(&mut out, world(piece.p0[0], piece.p0[1]), reach);
             grow(&mut out, world(piece.p1[0], piece.p1[1]), reach);
             let caps = if piece.start { F_CAP_START } else { 0 } | if piece.end { F_CAP_END } else { 0 };
-            out.prims.push(prim(particle_kind(P_SEGMENT) | caps, 0, r, [piece.p0[0], piece.p0[1], piece.p1[0], piece.p1[1]], [piece.r0, piece.r1, e, piece.a1], [rgb[0], rgb[1], rgb[2], piece.a0]));
+            out.prims.push(piece_prim(piece, core_rows, 0.0, caps, rgb));
         }
         if out.prims.is_empty() {
             return (Out::new(), 0);

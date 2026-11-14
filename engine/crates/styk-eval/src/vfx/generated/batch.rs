@@ -176,7 +176,7 @@ impl Batch {
     /// The stage rectangle the batch's live particles and beams cover (x, y, width,
     /// height), each grown by its reach, or `None` when nothing is alive.
     pub fn bounds(&self) -> Option<[f64; 4]> {
-        use super::particle::{beam_tip, Evaluator};
+        use super::particle::{arcs, beam_tip, Evaluator};
         let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
         for draw in &self.draws {
             let s = self.spec(draw);
@@ -187,7 +187,12 @@ impl Batch {
                 lx1 = lx1.max(x + reach);
                 ly1 = ly1.max(y + reach);
             };
-            if s.is_beam() {
+            if s.shape == ARC {
+                for piece in arcs(self, draw) {
+                    grow(piece.p0[0], piece.p0[1], piece.r0 * 4.0 + 2.0);
+                    grow(piece.p1[0], piece.p1[1], piece.r1 * 4.0 + 2.0);
+                }
+            } else if s.is_beam() {
                 let ev = Evaluator::new(self, draw);
                 let tip = beam_tip(draw, s, ev.local());
                 let pad = s.beam_w * 4.0 + s.arc_amp + 16.0;
