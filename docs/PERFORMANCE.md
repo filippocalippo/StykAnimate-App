@@ -273,11 +273,13 @@ measure the same document. Every figure moves on every frame, the worst honest c
 
 Feature workloads (`perf/workload-features.mjs`) are the busy scene with one feature added, so the difference from
 `medium` is that feature's cost: `sprites` (pictures on the limbs), `effects` (glow, shadow, outline, tint and blur),
+`effects-heavy` (large radii, centred outlines, bloom, stacks of three, half strength and a scene stack with animated grain),
 `movieclips` (the figures inside clips two deep), `camera` (a camera that pans, zooms and turns on every frame), `text`
-(a label on every figure), `shapes` (half-transparent filled polygons), and `long` (the small scene over 4,001 frames:
-what a long timeline costs). `particles` (generated effects of every type: auras on six figures, two beams, two smoke
-columns, an explosion every second and a scene emitter of 2,000 particles) is run on its own (`--workload particles`)
-and is not part of the `features` suite. `npm run perf -- list` describes each.
+(a label on every figure), `shapes` (half-transparent filled polygons), `long` (the small scene over 4,001 frames:
+what a long timeline costs), and `particles` (generated effects of every type: auras on six figures, two beams, two
+smoke columns, an explosion every second and a scene emitter of 2,000 particles). `effects-heavy` and `particles` are
+run on their own (`--workload effects-heavy`, `--workload particles`) and are not part of the `features` suite.
+`npm run perf -- list` describes each.
 
 ## Scenarios
 

@@ -33,6 +33,9 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.turbulence.seed.label"
+      },
+      "speed": {
+        "labelKey": "vfxCatalog.parameter.turbulence.speed.label"
       }
     }
   },
@@ -48,6 +51,17 @@ export const effectMessages = Object.freeze({
       },
       "mix": {
         "labelKey": "vfxCatalog.parameter.tint.mix.label"
+      },
+      "blend": {
+        "labelKey": "vfxCatalog.parameter.tint.blend.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.tint.blend.option.normal",
+          "vfxCatalog.parameter.tint.blend.option.multiply",
+          "vfxCatalog.parameter.tint.blend.option.screen",
+          "vfxCatalog.parameter.tint.blend.option.overlay",
+          "vfxCatalog.parameter.tint.blend.option.color",
+          "vfxCatalog.parameter.tint.blend.option.add"
+        ]
       }
     }
   },
@@ -94,6 +108,13 @@ export const effectMessages = Object.freeze({
           "vfxCatalog.parameter.glow.blend.option.add",
           "vfxCatalog.parameter.glow.blend.option.screen"
         ]
+      },
+      "source": {
+        "labelKey": "vfxCatalog.parameter.glow.source.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.glow.source.option.color",
+          "vfxCatalog.parameter.glow.source.option.artwork"
+        ]
       }
     }
   },
@@ -134,6 +155,9 @@ export const effectMessages = Object.freeze({
           "vfxCatalog.parameter.outline.only.option.off",
           "vfxCatalog.parameter.outline.only.option.on"
         ]
+      },
+      "softness": {
+        "labelKey": "vfxCatalog.parameter.outline.softness.label"
       }
     }
   },
@@ -231,6 +255,9 @@ export const effectMessages = Object.freeze({
       },
       "gamma": {
         "labelKey": "vfxCatalog.parameter.grade.gamma.label"
+      },
+      "hue": {
+        "labelKey": "vfxCatalog.parameter.grade.hue.label"
       }
     }
   },
@@ -300,6 +327,9 @@ export const effectMessages = Object.freeze({
       },
       "phase": {
         "labelKey": "vfxCatalog.parameter.noise.phase.label"
+      },
+      "speed": {
+        "labelKey": "vfxCatalog.parameter.noise.speed.label"
       }
     }
   },
@@ -360,6 +390,12 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.dissolve.seed.label"
+      },
+      "directional": {
+        "labelKey": "vfxCatalog.parameter.dissolve.directional.label"
+      },
+      "angle": {
+        "labelKey": "vfxCatalog.parameter.dissolve.angle.label"
       }
     }
   },
@@ -405,6 +441,9 @@ export const effectMessages = Object.freeze({
       },
       "phase": {
         "labelKey": "vfxCatalog.parameter.wave.phase.label"
+      },
+      "speed": {
+        "labelKey": "vfxCatalog.parameter.wave.speed.label"
       }
     }
   },
@@ -483,6 +522,16 @@ export const effectMessages = Object.freeze({
       },
       "color": {
         "labelKey": "vfxCatalog.parameter.lightSweep.color.label"
+      },
+      "speed": {
+        "labelKey": "vfxCatalog.parameter.lightSweep.speed.label"
+      },
+      "loop": {
+        "labelKey": "vfxCatalog.parameter.lightSweep.loop.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.lightSweep.loop.option.off",
+          "vfxCatalog.parameter.lightSweep.loop.option.on"
+        ]
       }
     }
   },
@@ -510,6 +559,9 @@ export const effectMessages = Object.freeze({
       },
       "color": {
         "labelKey": "vfxCatalog.parameter.crt.color.label"
+      },
+      "roll": {
+        "labelKey": "vfxCatalog.parameter.crt.roll.label"
       }
     }
   },

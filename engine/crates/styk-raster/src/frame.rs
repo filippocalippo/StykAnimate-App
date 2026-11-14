@@ -175,6 +175,13 @@ impl<'a> Frame<'a> {
             full
         };
         let mut i = start + if g == 0 && matches!(self.paint_context, styk_render::paint::PaintContext::CanvasForeground { .. }) { background.min(end-start) } else { 0 };
+        // A scene effect stack (`plan::camera_group`): a camera view starts at the camera image's composite (the unfiltered scene before
+        // it is covered and was not planned); the workspace clears the camera rectangle just before it, as styk-render does.
+        let camera = if g == 0 { plan::camera_group(self.list).filter(|&c| self.layers[c].drawn) } else { None };
+        let camera_prim = camera.and_then(|c| plan::composite_of(self.list, c)).filter(|&at| at >= start + background && at < end);
+        if let (Some(at), true) = (camera_prim, self.view.camera_view) {
+            i = i.max(at);
+        }
         while i < end {
             if (self.cancelled)() { return; }
             let p = self.list.prims[i];
@@ -200,7 +207,14 @@ impl<'a> Frame<'a> {
                 K_TRI => self.triangle(target, &layer, clip, &p),
                 K_IMAGE => self.image(target, &layer, clip, &p),
                 K_GLYPH => self.glyph(target, &layer, clip, &p),
-                K_COMPOSITE => self.composite(target, clip, &p),
+                K_COMPOSITE => {
+                    if let (Some(at), Some(c), false) = (camera_prim, camera, self.view.camera_view)
+                        && at == i
+                    {
+                        self.knockout(target, clip, c);
+                    }
+                    self.composite(target, clip, &p)
+                }
                 K_FILL_VIEW | K_BG_IMAGE => self.fill(target, g, &layer, clip, &p),
                 K_PARTICLE | K_BEAM => crate::generators::draw(self.list, &p, target, &layer, clip, positions(self.samples)),
                 _ => {}
@@ -579,6 +593,20 @@ impl<'a> Frame<'a> {
         });
     }
 
+    /// Clears the camera rectangle (the camera image `camera`'s shown part on the root) to the view's clear colour, every sample it
+    /// covers, before the image is composited over it (styk-render's `knockout.wgsl`).
+    fn knockout(&self, target: &mut Target, clip: [i64; 4], camera: usize) {
+        let layer = self.layers[camera];
+        let show = layer.show;
+        let corners = [[show[0], show[1]], [show[2], show[1]], [show[0], show[3]], [show[2], show[3]]].map(|c| {
+            let q = apply(layer.p, c);
+            [q[0] as f32, q[1] as f32]
+        });
+        let clear = self.view.clear.map(|v| quantize(v as f32));
+        let width = target.width;
+        quad(corners, clip, positions(self.samples), |x, y, mask| target.replace(y as usize * width + x as usize, mask, clear));
+    }
+
     /// Draws child group `p.b.x` into a target of its own, filters it, then composites it
     /// into `target` with its opacity.
     fn composite(&mut self, target: &mut Target, clip: [i64; 4], p: &Prim) {
@@ -600,11 +628,12 @@ impl<'a> Frame<'a> {
             let mut records = Vec::new();
             let run = recipe::record(&mut records, stack, recipe::Frame { scale: filter.scale, origin: filter.origin, output_size: filter.output_size }, [cw as u32, ch as u32]);
             self.stats.effect_layers += 1;
-            self.stats.effect_passes += run.steps.iter().filter(|s| matches!(s, recipe::Step::Pass { .. })).count() as u32;
-            // Its working slots: at most eight of the layer's size besides it.
-            self.hold((cw * ch * 4 * 8) as isize);
+            self.stats.effect_passes += run.steps.len() as u32;
+            // Its working images: those alive at once at most, the layer among them.
+            let working = (run.peak_pixels() as usize).saturating_sub(cw * ch) * 4;
+            self.hold(working as isize);
             pixels = crate::effects::run(&run, &records, pixels, [cw, ch]);
-            self.hold(-((cw * ch * 4 * 8) as isize));
+            self.hold(-(working as isize));
         }
         let opacity = unpack(p.color)[3];
         let texture = Texture { width: cw, height: ch, data: &pixels, straight: false };

@@ -34,6 +34,8 @@ export const WORKLOADS = Object.freeze({
     figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'sprites', pictures: 48, pictureSize: 512},
   effects: {id: 'effects', title: 'Busy scene with effects', description: 'The busy scene with an effect on every figure for the whole animation: glow, shadow, outline, tint and blur, each on 16 figures.',
     figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'effects'},
+  'effects-heavy': {id: 'effects-heavy', title: 'Busy scene with heavy effects', description: 'The busy scene with large glows, blurs and shadows, centred outlines, bloom, stacks of three effects, effects at half strength and a scene stack with animated grain.',
+    figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'effects-heavy'},
   particles: {id: 'particles', title: 'Busy scene with generated effects', description: 'The busy scene with generated effects of every type: auras on six figures, two beams, two smoke columns, an explosion every second and a scene emitter of 2,000 particles.',
     figures: 80, segments: 40, chain: 8, keyframes: 17, hold: 8, canvas: [1920, 1080], feature: 'particles'},
   movieclips: {id: 'movieclips', title: 'Busy scene in movieclips', description: 'The busy scene\'s 80 figures inside movieclips two deep: 8 instances of a clip that holds 5 figures and a clip of 5 more.',

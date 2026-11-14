@@ -48,7 +48,7 @@ const resolved=new WeakMap();
 export function resolvedVfx(effect){let value=resolved.get(effect);if(!value){value=validateVfxStack([effect])[0];resolved.set(effect,value);resolved.set(value,value);}return value;}
 /** Filters only: generators are built by the engine (styk_eval::vfx::generated), never a filter executor. */
 export function activeVfx(stack){return stack?.length?stack.filter(e=>e.enabled&&!isGeneratorType(e.type)).map(resolvedVfx).filter(e=>!neutralVfx(e)):empty;}
-function neutralVfx({type,params:p}){return p.effectStrength===0?true:type==='turbulence'?p.amount===0:type==='tint'?p.mix===0:type==='glow'?p.intensity===0&&p.coreMix===0:type==='outline'?(p.width===0||p.opacity===0)&&!p.only:type==='blur'?p.radius===0:type==='shadow'?p.opacity===0:type==='grade'?p.exposure===0&&p.contrast===1&&p.saturation===1&&p.temperature===0&&!p.tint&&!p.shadows&&!p.highlights&&p.gamma===1:type==='pixelate'?p.size<=1&&(p.linked||p.sizeY<=1):type==='noise'||type==='vignette'?p.amount===0:type==='dissolve'?p.progress===0:type==='rgbSplit'?p.amount===0:type==='wave'||type==='shockwave'?p.strength===0:type==='bloom'||type==='lightSweep'?p.intensity===0:type==='crt'?!p.amount&&!p.curvature&&!p.chromatic:false;}
+function neutralVfx({type,params:p}){return p.effectStrength===0?true:type==='turbulence'?p.amount===0:type==='tint'?p.mix===0:type==='glow'?p.intensity===0&&p.coreMix===0:type==='outline'?(p.width===0||p.opacity===0)&&!p.only:type==='blur'?p.radius===0:type==='shadow'?p.opacity===0:type==='grade'?p.exposure===0&&p.contrast===1&&p.saturation===1&&p.temperature===0&&!p.tint&&!p.shadows&&!p.highlights&&p.gamma===1&&!p.hue:type==='pixelate'?p.size<=1&&(p.linked||p.sizeY<=1):type==='noise'||type==='vignette'?p.amount===0:type==='dissolve'?p.progress===0:type==='rgbSplit'?p.amount===0:type==='wave'||type==='shockwave'?p.strength===0:type==='bloom'||type==='lightSweep'?p.intensity===0:type==='crt'?!p.amount&&!p.curvature&&!p.chromatic:false;}
 function blurPadding(radius,sampling=false){
  if(radius<=0)return 0;
  // Match the executors' three box passes, minimum one-pixel kernel, and
@@ -65,7 +65,7 @@ function stackPadding(stack,scale,extent,sampling){
    pad=type==='blur'&&p.mode?p.radius*scale*(sampling?1:3)+(sampling?2:0):blurPadding(p.radius*scale,sampling);
    pad+=(p.spread??0)*scale;
    if(type==='shadow')pad+=Math.max(Math.abs(p.offsetX),Math.abs(p.offsetY))*scale;
-  }else if(type==='outline')pad=p.width*scale;
+  }else if(type==='outline')pad=p.width*scale*(1+(p.softness??0)/2);
   else if(type==='pixelate')pad=Math.max(1,p.size*scale,(p.linked?p.size:p.sizeY)*scale);
   else if(type==='rgbSplit')pad=p.amount*Math.max(Math.abs(p.red),Math.abs(p.green),Math.abs(p.blue))*scale;
   else if(type==='turbulence')pad=p.amount*scale;

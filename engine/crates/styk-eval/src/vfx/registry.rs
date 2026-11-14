@@ -170,6 +170,10 @@ choice! {
     GlowPlacement { Outer, Inner, Both }
     /// Glow blending.
     GlowBlend { Normal, Add, Screen }
+    /// What a glow is coloured by: its colour, or the artwork's own colours.
+    GlowSource { Color, Artwork }
+    /// How a tint's colour combines with the artwork (`Color` keeps the artwork's light and dark).
+    TintBlend { Normal, Multiply, Screen, Overlay, Color, Add }
     /// Outline placement.
     OutlinePlacement { Outside, Inside, Center }
     /// Shadow placement.
@@ -245,6 +249,10 @@ macro_rules! effects {
                 /// `effectStrength`: mixes the finished effect with its input (the opacity of a generated effect), 0–1.
                 pub effect_strength: f64,
                 $(pub $field: $ty,)*
+                /// The effect's clock, in frames: the clip's local time (the scene's tick for a per-pose stack) that its speeds
+                /// advance by (`Params::timed`). Not a saved parameter; set when a frame is evaluated, and only for an effect
+                /// with a speed, so every other effect stays shared from frame to frame (`vfx::at_time`).
+                pub time: f64,
             }
             impl $variant {
                 /// The parameters in the registry's order, `effectStrength` first.
@@ -260,6 +268,7 @@ macro_rules! effects {
                     $variant {
                         effect_strength: 1.0,
                         $($field: <$ty as Param>::from_value(&ParamValue::Num($default as f64)).expect("registry defaults are valid"),)*
+                        time: 0.0,
                     }
                 }
             }
@@ -293,11 +302,6 @@ macro_rules! effects {
             /// `definition.scene`: a camera effect, offered for the scene only.
             pub fn scene_only(self) -> bool {
                 match self { $(Kind::$variant => $scene_only,)* }
-            }
-            /// `VFX_SCENE_TYPES.has(type)` (src/vfx-registry.mjs): whether the effect may go in
-            /// the scene's stack.
-            pub fn on_scene(self) -> bool {
-                matches!(self.name(), "tint" | "blur" | "grade" | "pixelate" | "noise" | "vignette" | "dissolve" | "rgbSplit" | "wave" | "shockwave" | "bloom" | "lightSweep" | "crt" | "turbulence" | "particles" | "beam" | "explosion" | "smoke")
             }
             /// The parameters, `effectStrength` first.
             pub fn specs(self) -> &'static [Spec] {
@@ -335,6 +339,13 @@ macro_rules! effects {
             pub fn set_effect_strength(&mut self, value: f64) {
                 match self { $(Params::$variant(p) => p.effect_strength = value,)* }
             }
+            /// The effect's clock (frames), see the `time` field.
+            pub fn time(&self) -> f64 {
+                match self { $(Params::$variant(p) => p.time,)* }
+            }
+            pub fn set_time(&mut self, value: f64) {
+                match self { $(Params::$variant(p) => p.time = value,)* }
+            }
         }
     };
 }
@@ -346,10 +357,12 @@ effects! {
         evolution: f64 = ("evolution", 0, -10000, 10000),
         detail: u32 = ("detail", 3, 1, 4),
         seed: u32 = ("seed", 1, 0, 65535),
+        speed: f64 = ("speed", 0, -1, 1),
     }
     Tint = "tint", "Tint", "Color", generator: false, scene_only: false {
         color: Color = ("color", 0x66ccff, 0, 0xffffff),
         mix: f64 = ("mix", 0.5, 0, 1),
+        blend: TintBlend = ("blend", 0, 0, 5),
     }
     Glow = "glow", "Glow", "Light", generator: false, scene_only: false {
         color: Color = ("color", 0x66ccff, 0, 0xffffff),
@@ -361,6 +374,7 @@ effects! {
         core_color: Color = ("coreColor", 0xffffff, 0, 0xffffff),
         core_mix: f64 = ("coreMix", 0, 0, 1),
         blend: GlowBlend = ("blend", 0, 0, 2),
+        source: GlowSource = ("source", 0, 0, 1),
     }
     Outline = "outline", "Outline", "Light", generator: false, scene_only: false {
         color: Color = ("color", 0x111111, 0, 0xffffff),
@@ -369,6 +383,7 @@ effects! {
         mode: OutlinePlacement = ("mode", 0, 0, 2),
         rounded: bool = ("rounded", 1, 0, 1),
         only: bool = ("only", 0, 0, 1),
+        softness: f64 = ("softness", 0, 0, 1),
     }
     Shadow = "shadow", "Shadow", "Light", generator: false, scene_only: false {
         color: Color = ("color", 0, 0, 0xffffff),
@@ -395,6 +410,7 @@ effects! {
         shadows: f64 = ("shadows", 0, -1, 1),
         highlights: f64 = ("highlights", 0, -1, 1),
         gamma: f64 = ("gamma", 1, 0.1, 4),
+        hue: f64 = ("hue", 0, -180, 180),
     }
     Pixelate = "pixelate", "Pixelate", "Texture", generator: false, scene_only: false {
         size: f64 = ("size", 8, 1, 128),
@@ -412,6 +428,7 @@ effects! {
         softness: f64 = ("softness", 0, 0, 1),
         seed: u32 = ("seed", 1, 0, 65535),
         phase: f64 = ("phase", 0, 0, 1000000),
+        speed: f64 = ("speed", 0, 0, 1),
     }
     Vignette = "vignette", "Vignette", "Color", generator: false, scene_only: false {
         amount: f64 = ("amount", 0.4, 0, 1),
@@ -430,6 +447,8 @@ effects! {
         color: Color = ("color", 0xff8800, 0, 0xffffff),
         softness: f64 = ("softness", 0.03, 0.001, 0.2),
         seed: u32 = ("seed", 1, 0, 65535),
+        directional: f64 = ("directional", 0, 0, 1),
+        angle: f64 = ("angle", 0, -180, 180),
     }
     RgbSplit = "rgbSplit", "RGB split", "Distort", generator: false, scene_only: false {
         amount: f64 = ("amount", 6, 0, 128),
@@ -443,6 +462,7 @@ effects! {
         wavelength: f64 = ("wavelength", 64, 4, 512),
         angle: f64 = ("angle", 0, -180, 180),
         phase: f64 = ("phase", 0, -360, 360),
+        speed: f64 = ("speed", 0, -90, 90),
     }
     Shockwave = "shockwave", "Shockwave", "Distort", generator: false, scene_only: true {
         radius: f64 = ("radius", 80, 0, 2000),
@@ -466,6 +486,8 @@ effects! {
         softness: f64 = ("softness", 0.6, 0.01, 1),
         intensity: f64 = ("intensity", 0.8, 0, 3),
         color: Color = ("color", 0xffffff, 0, 0xffffff),
+        speed: f64 = ("speed", 0, -0.2, 0.2),
+        looped: bool = ("loop", 1, 0, 1),
     }
     Crt = "crt", "CRT / scanlines", "Texture", generator: false, scene_only: true {
         amount: f64 = ("amount", 0.25, 0, 1),
@@ -474,6 +496,7 @@ effects! {
         chromatic: f64 = ("chromatic", 0, 0, 16),
         phase: f64 = ("phase", 0, -32, 32),
         color: Color = ("color", 0, 0, 0xffffff),
+        roll: f64 = ("roll", 0, -16, 16),
     }
     Particles = "particles", "Particles", "Generate", generator: true, scene_only: false {
         emission: Emission = ("emission", 0, 0, 1),
@@ -628,14 +651,121 @@ effects! {
     }
 }
 
-impl Kind {
-    /// `effectAvailable`: whether the catalogue offers the type for the scene or for objects.
-    pub fn available(self, scene: bool) -> bool {
-        if scene {
-            !matches!(self, Kind::Glow | Kind::Outline | Kind::Shadow | Kind::Aura)
-        } else {
-            !self.scene_only() && self != Kind::Vignette
+/// Parameters added after the editor's recordings (`engine/tests/edit`, `tests/fixtures/owner-references`, the vfx fixtures)
+/// were made, by effect type and saved name: a recording holds none of them, and an effect written today holds each at its
+/// default unless it was set. A default gives the effect's behaviour from before the parameter. This is the one statement of
+/// which parameters a recording may lack (the parity comparison, the editor replay and the JavaScript tests read it): a new
+/// parameter is listed here when it is added, and a recording that lacks any parameter not listed differs.
+pub const ADDED: &[(&str, &str)] = &[
+    // Image filters (2026-11).
+    ("turbulence", "speed"),
+    ("tint", "blend"),
+    ("glow", "source"),
+    ("outline", "softness"),
+    ("grade", "hue"),
+    ("noise", "speed"),
+    ("dissolve", "directional"),
+    ("dissolve", "angle"),
+    ("wave", "speed"),
+    ("lightSweep", "speed"),
+    ("lightSweep", "loop"),
+    ("crt", "roll"),
+    // Generated effects (2026-11).
+    ("particles", "gravityAngle"),
+    ("particles", "fadeIn"),
+    ("particles", "bounce"),
+    ("particles", "prefill"),
+    ("particles", "timeScale"),
+    ("particles", "unique"),
+    ("aura", "width"),
+    ("aura", "layer"),
+    ("aura", "prefill"),
+    ("aura", "timeScale"),
+    ("aura", "unique"),
+    ("beam", "strands"),
+    ("beam", "prefill"),
+    ("beam", "timeScale"),
+    ("beam", "unique"),
+    ("smoke", "opacity"),
+    ("smoke", "direction"),
+    ("smoke", "prefill"),
+    ("smoke", "timeScale"),
+    ("smoke", "unique"),
+    ("explosion", "layer"),
+    ("explosion", "timeScale"),
+    ("explosion", "unique"),
+];
+
+/// Whether parameter `name` of `kind` is one of [`ADDED`].
+pub fn added(kind: Kind, name: &str) -> bool {
+    ADDED.iter().any(|&(effect, param)| effect == kind.name() && param == name)
+}
+
+/// `value` (a document, a stack, a record) as a recording made before the parameters of [`ADDED`] holds it: those of them at their
+/// defaults taken out of every effect (an object with an effect `type` and `params`). Tests compare frozen recordings with it, so a
+/// recording still states everything else exactly.
+pub fn without_added_defaults(value: &mut styk_doc::Value) {
+    use styk_doc::Value;
+    match value {
+        Value::Obj(_) => {
+            let object = value.make_obj().expect("an object");
+            if let Some(kind) = object.get("type").and_then(Value::as_str).and_then(Kind::from_name)
+                && let Some(params) = object.get_mut("params").and_then(Value::make_obj)
+            {
+                for &(name, param) in ADDED {
+                    let Some(index) = kind.param(param).filter(|_| kind.name() == name) else { continue };
+                    if params.get(param).and_then(Value::as_f64) == Some(kind.specs()[index].default) {
+                        params.remove(param);
+                    }
+                }
+            }
+            let keys: Vec<Arc<str>> = object.keys().cloned().collect();
+            for key in keys {
+                if let Some(child) = object.get_mut(&key) {
+                    without_added_defaults(child);
+                }
+            }
         }
+        Value::Arr(_) => {
+            for child in value.make_arr().expect("an array").iter_mut() {
+                without_added_defaults(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+impl Kind {
+    /// Whether the effect may go in the scene's stack (the camera image): the one statement of it. The interface's
+    /// `VFX_SCENE_TYPES` (src/vfx-registry.mjs) must agree; `tests/vfx.test.mjs` reads this list and checks that it does.
+    pub fn on_scene(self) -> bool {
+        matches!(
+            self,
+            Kind::Tint
+                | Kind::Blur
+                | Kind::Grade
+                | Kind::Pixelate
+                | Kind::Noise
+                | Kind::Vignette
+                | Kind::Dissolve
+                | Kind::RgbSplit
+                | Kind::Wave
+                | Kind::Shockwave
+                | Kind::Bloom
+                | Kind::LightSweep
+                | Kind::Crt
+                | Kind::Turbulence
+                | Kind::Particles
+                | Kind::Beam
+                | Kind::Explosion
+                | Kind::Smoke
+        )
+    }
+
+    /// `effectAvailable`: whether the catalogue offers the type for the scene ([`Kind::on_scene`]) or for objects (any that is
+    /// not a camera effect, nor a vignette).
+    pub fn available(self, scene: bool) -> bool {
+        if scene { self.on_scene() } else { !self.scene_only() && self != Kind::Vignette }
     }
 }
 
@@ -654,7 +784,7 @@ impl Params {
             Params::Blur(p) => p.radius == 0.0,
             Params::Shadow(p) => p.opacity == 0.0,
             Params::Grade(p) => {
-                p.exposure == 0.0 && p.contrast == 1.0 && p.saturation == 1.0 && p.temperature == 0.0 && p.tint == 0.0 && p.shadows == 0.0 && p.highlights == 0.0 && p.gamma == 1.0
+                p.exposure == 0.0 && p.contrast == 1.0 && p.saturation == 1.0 && p.temperature == 0.0 && p.tint == 0.0 && p.shadows == 0.0 && p.highlights == 0.0 && p.gamma == 1.0 && p.hue == 0.0
             }
             Params::Pixelate(p) => p.size <= 1.0 && (p.linked || p.size_y <= 1.0),
             Params::Noise(p) => p.amount == 0.0,
@@ -690,6 +820,19 @@ impl Params {
             Params::Beam(p) => p.unique,
             Params::Smoke(p) => p.unique,
             Params::Explosion(p) => p.unique,
+            _ => false,
+        }
+    }
+
+    /// Whether the effect changes by itself with time: a speed other than 0. Only such an effect is given its clock
+    /// (`vfx::at_time`).
+    pub fn timed(&self) -> bool {
+        match self {
+            Params::Noise(p) => p.speed != 0.0,
+            Params::Turbulence(p) => p.speed != 0.0,
+            Params::Wave(p) => p.speed != 0.0,
+            Params::Crt(p) => p.roll != 0.0,
+            Params::LightSweep(p) => p.speed != 0.0,
             _ => false,
         }
     }

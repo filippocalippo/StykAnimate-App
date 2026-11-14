@@ -182,6 +182,8 @@ pub struct Renderer {
     pub(crate) exact_sizes: bool,
     /// Effect passes, created with the first frame that filters.
     pub(crate) executor: Option<effects::executor::Executor>,
+    /// Effect images between passes are half floats (`effects::executor`, Precision).
+    pub(crate) float_effects: bool,
     /// Depth runs (docs/engine/spatial.md): the pipelines and multisampled depth
     /// buffers of passes with depth-tested faces, created with the first list that has any.
     pub(crate) depth_pipelines: Option<pipeline::DepthPipelines>,
@@ -216,6 +218,8 @@ pub struct Renderer {
     pub(crate) within: Option<[f64; 4]>,
     /// The pipeline that clears a part of the frame to transparency, by sample count.
     pub(crate) clear_part: Option<(u32, wgpu::RenderPipeline)>,
+    /// The pipeline that clears the camera rectangle before the camera image (`knockout.wgsl`), by sample count, its uniform and bind group.
+    pub(crate) knockout: Option<(u32, wgpu::RenderPipeline, wgpu::Buffer, wgpu::BindGroup)>,
     pub stats: Stats,
 }
 
@@ -226,9 +230,8 @@ impl Renderer {
     pub fn set_drawing_grid(&mut self, grid: DrawingGrid) { self.drawing_grid = grid; }
 
     /// Makes a frame depend on the frame alone, not on the frames drawn before it (an export asks for it; the stage keeps what it
-    /// has, because reallocating and refilling is the cost). It sizes layer-page and effect-slot dimensions by each frame (the effect
-    /// passes address a slot by normalized position, 1 / its size, so one kept from a larger frame moves the last bit of those
-    /// positions and a pixel here and there by one level), brings every particle material row in (the atlas is sampled
+    /// has, because reallocating and refilling is the cost). It sizes layer pages by each frame (effect textures always are:
+    /// `effects::executor`), brings every particle material row in (the atlas is sampled
     /// trilinearly, so a texel at a row's edge read a neighbour that was there only when a list before had named it), and places
     /// the lone glyph masks afresh (a mask is sampled at `(place + position in the mask) / atlas side`, which rounds with the place,
     /// so a glyph drawn after others, which took the first places, differed by a level at its edges). Textures it replaces are
@@ -236,9 +239,23 @@ impl Renderer {
     /// Capacity and unused owners stay until document/export teardown; page count and primitive capacity never shrink per frame.
     pub fn set_exact_sizes(&mut self, exact: bool) {
         self.exact_sizes = exact;
-        if let Some(executor) = &mut self.executor {
-            executor.set_exact(exact);
+    }
+
+    /// Whether effect images between passes are half floats: the default is what the device's backend always allows (WebGPU and
+    /// native, not WebGL2). A host whose WebGL2 context renders to and filters half floats (`EXT_color_buffer_float`, what
+    /// `Adapter::get_texture_format_features` reports for `Rgba16Float`) may turn it on; without it effects use eight bits,
+    /// dithered.
+    pub fn set_float_effects(&mut self, float: bool) {
+        if self.float_effects != float {
+            self.float_effects = float;
+            self.executor = None;
         }
+    }
+
+    /// Whether the last frame drew a filtered layer unfiltered because its effect pipelines were still to be created (on WebGL2 a
+    /// frame creates one: `effects::executor`). The host draws again until it is false.
+    pub fn effects_pending(&self) -> bool {
+        self.executor.as_ref().is_some_and(|e| e.pending())
     }
 
     /// Rotates and mirrors the workspace view: `orientation` maps the neutral view's screen pixels

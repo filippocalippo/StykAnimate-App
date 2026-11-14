@@ -51,15 +51,15 @@ pub fn effect_diff(ours: &Effect, expected: &Value) -> Option<String> {
         return Some(format!("{} {} vs {} {}", expected.get("type").unwrap_or(&Value::Null), expected.get("id").unwrap_or(&Value::Null), kind.name(), &*ours.id));
     }
     let Some(params) = expected.get("params").and_then(Value::as_obj) else { return Some("no parameters".into()) };
-    // A parameter added after the dump was made (generated effects gained some in 2026-11) is not in
-    // it: ours must then hold its default. Every parameter the dump has must be one we know.
-    let known = params.keys().filter(|name| kind.param(name).is_some()).count();
-    if known != params.len() {
-        return Some(format!("{} parameters, {} of them known", params.len(), known));
+    if let Some((unknown, _)) = params.iter().find(|(name, _)| kind.param(name).is_none()) {
+        return Some(format!("{unknown} is not a parameter"));
     }
+    // A recording predates the parameters added since it was made (`registry::ADDED`): it may lack one of those, and ours
+    // must then hold its default (what the effect did before it). Any other parameter it lacks is a difference.
+    let defaults = super::Params::defaults(kind);
     for (i, spec) in kind.specs().iter().enumerate() {
         let Some(theirs) = params.get(spec.name) else {
-            if ours.params.get(i) == ParamValue::Num(spec.default) {
+            if super::registry::added(kind, spec.name) && ours.params.get(i) == defaults.get(i) {
                 continue;
             }
             return Some(format!("{} missing", spec.name));

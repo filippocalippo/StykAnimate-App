@@ -5,6 +5,8 @@ import {emptyDocument,createObject,createFrame} from '../src/demo.mjs';
 import {createVfx,vfxStack,vfxProperty,validateVfxStack,validateVfxValue,resolvedVfx,VFX_REGISTRY} from '../src/vfx.mjs';
 import {VFX_PRESETS} from '../src/vfx-presets.mjs';
 import {validateAnimationDocument} from '../src/animation-channels.mjs';
+import {readFileSync} from 'node:fs';
+import {effectAvailable} from '../src/vfx-registry.mjs';
 function fixture(){const report=emptyDocument(),fig=report.figure_types[0];report.keyframes=[0,1,2].map(()=>createFrame([createObject(fig,1,120,180),createObject(fig,2,280,180)],10));return newOwnedEditor({demo:false,layerTimeline:true}).load(report);}
 const target={kind:'figure',uid:1};
 /** Keys the stack with `effect` added at the playhead: what `changeVfxStack(target,stack=>stack.push(effect))` does, with the stack as data. */
@@ -48,4 +50,36 @@ test('every VFX color supports bounded gradients, alpha, undo and native exposur
 test('presets validate, reordering is one history entry, and paste updates matching effect identities',()=>{
  const e=fixture(true);for(const [name,preset] of Object.entries(VFX_PRESETS)){const clean=fixture(true);clean.applyVfxPreset(target,name);assert.equal(clean.vfxEffects(target).length,preset.effects.length);validateVfxStack(clean.vfxEffects(target));}
  e.applyVfxPreset(target,'Power up');const old=e.vfxEffects(target).map(e=>e.id),history=e._undo.length;e.reorderVfx(target,old[0],1);assert.equal(e._undo.length,history+1);assert.deepEqual(e.vfxEffects(target).map(e=>e.id),old.toReversed());e.undo();assert.deepEqual(e.vfxEffects(target).map(e=>e.id),old);e.pasteVfx(target,e.vfxEffects(target));assert.equal(new Set(e.vfxEffects(target).map(e=>e.id)).size,2);
+});
+
+// The engine's registry (engine/crates/styk-eval/src/vfx/registry.rs) is the source of every effect's parameters and of which
+// effects the scene's stack takes (`Kind::on_scene`); the interface's registry must say the same.
+test('the interface registry agrees with the engine registry: parameters, defaults, ranges and the scene catalogue',()=>{
+ const rust=readFileSync(new URL('../engine/crates/styk-eval/src/vfx/registry.rs',import.meta.url),'utf8');
+ const number=text=>Number(text.trim().replace(/u32$/,''));
+ const kinds=new Map();
+ for(const block of rust.matchAll(/^ {4}(\w+) = "(\w+)", "[^"]*", "\w+", generator: (true|false), scene_only: (true|false) \{\n([\s\S]*?)^ {4}\}/gm)){
+  const params={effectStrength:{default:1,min:0,max:1}};
+  for(const field of block[5].matchAll(/^ {8}\w+: \w+ = \("(\w+)", ([^,]+), ([^,]+), ([^)]+)\),$/gm))params[field[1]]={default:number(field[2]),min:number(field[3]),max:number(field[4])};
+  kinds.set(block[1],{name:block[2],sceneOnly:block[4]==='true',params});
+ }
+ assert.equal(kinds.size,Object.keys(VFX_REGISTRY).length,'every effect type');
+ for(const {name,sceneOnly,params} of kinds.values()){
+  const definition=VFX_REGISTRY[name];
+  assert.ok(definition,name);
+  assert.deepEqual(Object.keys(definition.params).sort(),Object.keys(params).sort(),`${name}: parameter names`);
+  for(const [param,spec] of Object.entries(params)){
+   const js=definition.params[param],jsDefault=typeof js.default==='object'?null:js.default;
+   if(jsDefault!==null)assert.equal(jsDefault,spec.default,`${name}.${param}: default`);
+   assert.equal(js.min,spec.min,`${name}.${param}: minimum`);assert.equal(js.max,spec.max,`${name}.${param}: maximum`);
+  }
+  assert.equal(Boolean(definition.scene),sceneOnly,`${name}: a camera effect`);
+ }
+ const onScene=rust.match(/pub fn on_scene\(self\) -> bool \{\s*matches!\(\s*self,([^)]*)\)/);
+ assert.ok(onScene,'Kind::on_scene lists the scene effects');
+ const scene=new Set([...onScene[1].matchAll(/Kind::(\w+)/g)].map(m=>kinds.get(m[1]).name));
+ for(const type of Object.keys(VFX_REGISTRY)){
+  assert.equal(effectAvailable(type,true),scene.has(type),`${type} on the scene`);
+  assert.equal(effectAvailable(type,false),!VFX_REGISTRY[type].scene&&type!=='vignette',`${type} on a figure`);
+ }
 });

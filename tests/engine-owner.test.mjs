@@ -8,7 +8,6 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readdirSync, readFileSync} from 'node:fs';
 import {withDraws} from './support/with-draws.mjs';
-import {asRecorded} from './support/recorded-documents.mjs';
 import {holdsRevision, registeredEngine} from '../src/engine/engine-open.mjs';
 import {createDrawingFigure, drawingMetadata} from '../src/drawing-model.mjs';
 import {hasPinnedIK} from '../src/ik.mjs';
@@ -16,6 +15,7 @@ import {MotionTrails} from '../src/motion-path.mjs';
 import {snapshotPoseFrame} from './support/pose-snapshot.mjs';
 import {engineBuilt} from './support/engine-node.mjs';
 import {ownedEditor} from './support/owned-editor.mjs';
+import {asRecorded} from './support/recorded.mjs';
 import {CLOCKS, canonical, ownerReferences} from './support/owner-references.mjs';
 import {recordedBounds} from './support/edit-bounds-callbacks.mjs';
 
@@ -160,8 +160,10 @@ for (const {legacy} of variants) test(`the engine owning the document gives what
       // A pose with the legacy cache is edited by materializing what it holds (lengths, bends): another
       // document than the recording's, whose poses have none. The engine's own is checked against the read view.
       if (legacy) return;
-      const text = json(owned.report);
-      if (sha(text) !== wanted.documentSha) sameText(text === recorded ? text : json(asRecorded(owned.report, JSON.parse(recorded))), recorded, `${where}: document`);
+      let text = json(owned.report);
+      // The effect parameters added since the recordings, at their defaults, are not in them (support/recorded.mjs).
+      if (sha(text) !== wanted.documentSha) text = asRecorded(text);
+      if (sha(text) !== wanted.documentSha) sameText(text, recorded, `${where}: document`);
       same({...state(owned), layerRevision: owned.layerRevision, nextFrameIdentity: owned._nextFrameIdentity, nextUid: owned._nextUid,
         ...Object.fromEntries(Object.entries(owned._selectionState()).filter(([key]) => ['polygonSelection', 'segmentIds', 'branch'].includes(key)))}, wanted.state, `${where}: state`);
     };

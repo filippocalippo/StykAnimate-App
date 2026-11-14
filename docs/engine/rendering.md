@@ -45,7 +45,7 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | `resources.rs` | GPU record layouts, lookup tables in float textures, buffers, and `warm_texture` ([Uploads](#uploads)) |
 | `present.rs` | copy into the host's surface, read-back |
 | `view.rs` | world → output transform, artboard |
-| `effects/` | effect layers ([vfx.md](vfx.md#rendering)): `plan.rs` places each group for the view (density, crop, composite), `mod.rs` writes its group record, `executor.rs` and `passes.wgsl` run effect stacks on pooled slots |
+| `effects/` | effect layers ([vfx.md](vfx.md#rendering)): `plan.rs` places each group for the view (density, crop, composite), `mod.rs` writes its group record, `recipe.rs` records an effect stack as passes over images, `executor.rs` runs them on pooled textures with a pipeline per operation, made from its family's small shader (`shaders/`) the first time a frame needs it |
 | `materials.rs` | the noise materials of generated effects: a placeholder texel until a list names one, then one two-channel texture (density, light) of 1,024 texels square with its reduced levels (2.7 MB), filled as the engine's workers finish them, sampled trilinearly |
 | `glyphs.rs`, `glyph.wgsl` | the masks of lone glyphs ([Text](#text)): each glyph filled once per mask size into an atlas of one-channel pages kept across frames (at most 64 MiB), and the per-frame table that tells each `K_GLYPH` record where its mask is |
 
@@ -273,7 +273,7 @@ Measured 2026-11-13 in the desktop app without a graphics card (`--disable-gpu`,
 other work, so read the ratios), playing three seconds in one launch with `stage.shadingRuns` 0 and then the device's
 choice, frame time seen: the small scene (240 segments) 109 → 24 ms, the busy one (3,200) 165 → 48 ms, with a moving
 camera 139 → 39 ms, translucent filled shapes 241 → 71 ms, labels 294 → 124 ms, pictures on the limbs 173 → 107 ms; the
-effects scene stays over a second (its filter passes, `passes.wgsl`, are the cost). The stage's picture was the same
+effects scene stays over a second (its filter passes were the cost; the filters have been rebuilt since: [vfx.md](vfx.md#the-filter-core)). The stage's picture was the same
 with the runs on and off in all 28 views compared (seven scenes, four views, device pixels of the composited page). What
 was measured on the way: on the busy scene the segments' draw was 40 of 71 ms, of which a constant-colour fragment shader
 saved 10 and sending every vertex off screen showed the vertex shader at about a third of the frame; turning
@@ -496,7 +496,7 @@ faces before compositing it.
 | `target.rs` | a target with the GPU's samples: four RGBA8 samples a pixel (one for crisp edges), blended one by one, averaged when resolved |
 | `coverage.rs` | the GPU's rasterization rules: vertices snapped to 1/256 pixel, the standard four sample positions, the top-left rule |
 | `shade.rs` | `prim.wgsl`'s fragment arithmetic: coverage by distance, the strokes' distance functions, texture sampling |
-| `effects.rs` | effect recipes run pass by pass with the arithmetic of `passes.wgsl` |
+| `effects.rs` | effect recipes run pass by pass with the arithmetic of the effect shaders (`styk-render/src/effects/shaders/`) |
 | `glyphs.rs` | masks of lone glyphs, kept across frames |
 | `generators.rs` | generated effects: the GPU's quads, its fragment arithmetic |
 
@@ -505,8 +505,8 @@ faces before compositing it.
 drawn for a view (`effects::plan`: a translucent figure on its parent's grid, a raster entry
 or filtered artwork on the editor's raster grid at its density, the camera image through the
 scene camera) and its group record (`effects::record`, here with every layer at the origin
-of a target of its own), and effect recipes (`effects::recipe`: the passes `VfxWebGPU.run`
-records, with their parameters). The GPU's atlas, rounds and pooled slots are resource
+of a target of its own), and effect recipes (`effects::recipe`: the passes of each effect,
+with their parameters). The GPU's atlas, rounds and pooled slots are resource
 management and have no CPU counterpart: a layer is drawn at full resolution into a target of
 its size.
 
@@ -550,8 +550,8 @@ resolves round in the last level.
 
 **Memory.** A frame holds the view-sized target, then one target per isolation group on the
 path being drawn (a layer's size: its rectangle on its grid), each four bytes a pixel plus
-sixteen per pixel whose samples differ; a filtered layer adds its working slots (at most
-eight of its size). Glyph masks stay within 64 MiB. Images are the decoded images the
+sixteen per pixel whose samples differ; a filtered layer adds the working images of its
+effects that are alive at once (`Run::peak_pixels`). Glyph masks stay within 64 MiB. Images are the decoded images the
 engine holds, not copied (`Images::add_shared`). Nothing is pooled between frames; exports
 bound a frame by drawing it in tiles.
 

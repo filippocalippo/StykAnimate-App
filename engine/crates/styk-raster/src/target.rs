@@ -155,6 +155,47 @@ impl Target {
         }
     }
 
+    /// The samples `mask` names of pixel `i` set to `px` (as stored), whatever they held: a write with blending off, as the
+    /// camera image's knockout (`knockout.wgsl` in styk-render) writes.
+    pub fn replace(&mut self, i: usize, mask: u8, px: Px) {
+        if mask == 0 {
+            return;
+        }
+        if let Some(quad) = &self.quad_clip && !inside(quad, i, self.width) {
+            return;
+        }
+        let at = self.index[i];
+        let mut samples = if at == 0 { [self.pixels[i]; 4] } else { self.split[at as usize - 1] };
+        for (k, s) in samples.iter_mut().enumerate() {
+            if mask >> k & 1 != 0 {
+                *s = px;
+            }
+        }
+        if mask == self.full() || samples[1..].iter().all(|s| *s == samples[0]) {
+            self.pixels[i] = if mask == self.full() { px } else { samples[0] };
+            if at != 0 {
+                self.index[i] = 0;
+                self.free.push(at - 1);
+            }
+            return;
+        }
+        if at == 0 {
+            let slot = match self.free.pop() {
+                Some(slot) => {
+                    self.split[slot as usize] = samples;
+                    slot
+                }
+                None => {
+                    self.split.push(samples);
+                    self.split.len() as u32 - 1
+                }
+            };
+            self.index[i] = slot + 1;
+        } else {
+            self.split[at as usize - 1] = samples;
+        }
+    }
+
     /// Every sample of pixel `i` set to the opaque colour `px` (as stored): an opaque write
     /// over the whole pixel, which `blend` would give too.
     #[inline]

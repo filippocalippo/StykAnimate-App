@@ -599,7 +599,7 @@ fn worker_values_and_legacy_json_share_recorded_editor_outcomes() {
                 assert_eq!(answer.get("state"), step.get("state"), "{label}: editor state");
                 assert_eq!(answer.get("events"), step.get("events"), "{label}: editor events");
                 if let Some(document) = step.get("document").and_then(Value::as_str) { expected = document.to_string(); }
-                assert_eq!(worker.editor.report_json(), expected, "{label}: editor document");
+                assert_eq!(crate::replay::as_recorded(worker.editor.report()), expected, "{label}: editor document");
                 assert_eq!(legacy.editor.report_json(), worker.editor.report_json(), "{label}: owner");
                 calls += 1;
             }
