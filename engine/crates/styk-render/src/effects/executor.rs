@@ -103,8 +103,10 @@ pub struct Executor {
 pub struct Stats {
     pub layers: u32,
     pub passes: u32,
-    /// Bytes of the pool's textures (those released but not yet destroyed included).
+    /// Bytes of the textures the frame placed its images in.
     pub slot_bytes: u64,
+    /// Bytes of the textures the frame released, destroyed when the next frame is prepared.
+    pub released_bytes: u64,
     /// Effect pipelines created so far.
     pub pipelines: u32,
     /// Runs of the frame drawn unfiltered because a pipeline they need is still to be created.
@@ -124,7 +126,7 @@ pub fn work_bytes(float: bool) -> u64 {
 
 impl Executor {
     pub(crate) fn retained_bytes(&self) -> u64 {
-        self.stats.slot_bytes.saturating_add(self.uniforms.size()).saturating_add(8)
+        self.stats.slot_bytes.saturating_add(self.stats.released_bytes).saturating_add(self.uniforms.size()).saturating_add(8)
     }
 
     /// An executor whose working images are half floats (`float`) or eight bits.
@@ -319,7 +321,9 @@ impl Executor {
             self.passes.push(passes);
         }
         let work = work_bytes(self.float);
-        self.stats.slot_bytes = self.pool.iter().chain(&self.retired).map(|p| p.size[0] as u64 * p.size[1] as u64 * super::recipe::texel_bytes(p.texel, work)).sum();
+        let bytes = |p: &Pooled| p.size[0] as u64 * p.size[1] as u64 * super::recipe::texel_bytes(p.texel, work);
+        self.stats.slot_bytes = self.pool.iter().map(bytes).sum();
+        self.stats.released_bytes = self.retired.iter().map(bytes).sum();
         let need = records.len() as u64;
         if need > self.uniform_slots {
             self.uniform_slots = need.next_power_of_two();
