@@ -57,7 +57,7 @@ Particles, auras, energy beams, explosions and smoke create artwork instead of f
 | Module (`vfx/generated/`) | Holds |
 | --- | --- |
 | `layers.rs` | the layer vocabulary: shapes, emitters, blending, rotation and size modes, `Spec` (one layer, every field with a default), materials, colour ramps |
-| `styles.rs` | every effect type and style compiled into layers (`compile`), `Context`, the body scale |
+| `styles/` | every effect type and style compiled into layers: one module per type (`aura.rs`, `beam.rs`, `explosion.rs`, `smoke.rs`, `particles.rs`), each style a function that reads like a description of the effect (its layers with their shapes, colours, motion and timing); `mod.rs` holds `compile`, `Context`, the body scale and what the types share |
 | `anchors.rs` | `anchor`: a target's point, bounds, size (`measure`) and outline; `Sampler`: anchors on earlier ticks; `Evaluate`, a sampler without a cache; `evaluate_targets`, the geometry of the targets alone |
 | `batch.rs` | `build`, `build_within`: the frame's `Batch` (a draw per layer, the layers' parameters, the birth table and outlines); `clip_tail`; the limits; the caches of compiled layers and clip tails |
 | `particle.rs` | `Evaluator`: a particle's birth, its motion at an age, the particle itself; `ramp`, `beam`, `arc_segment`, `beam_tip`, `beam_width`, `trail_lag`, the hashes and value noise |
@@ -83,6 +83,19 @@ Particles, auras, energy beams, explosions and smoke create artwork instead of f
 **Limits** (`batch.rs`): a layer holds at most 65,536 particles alive (beyond, it emits fewer, evenly, rather than cutting the oldest), a frame evaluates at most 262,144 and draws at most `MAX_DRAWN` (200,000) records, every trail copy, halo and outline counted. An edit frame drawn on the interface thread is built with `build_within(…, EDIT_DRAWN)` (8,000). Beyond a limit, emission is thinned evenly: each particle keeps its own chance (`hash(n, 15) < emission × keep`), so the same particles stay as the share changes and old and young are thinned alike. The draw list further limits the area particles cover to `FILL_LIMIT` (48) canvases, thinning by another chance of each particle, faded near the threshold. Whenever a limit reduces what is drawn, `Batch::reduced` is set and the list's `materials` carries `styk_draw::MATERIALS_REDUCED` (`styk_draw::effects_reduced`); `EditScene::effects_reduced` says so for the stage's frame. Playback and export are reduced only beyond the frame limits.
 
 **Anchors on earlier ticks**: particles keep the place their target had when they were born, so a batch reads the target on earlier ticks through a `Sampler`. The evaluation crate's `Evaluate` evaluates the document's targets at each such tick (`evaluate_targets`: the frame, then the geometry of the targets, what they are joined to and what is attached to them, nothing else); the engine keeps them across frames (`styk_engine::anchors`, see [Generated effects on screen](#generated-effects-on-screen)). A sampler may answer `Pending` when an interactive frame's time budget is spent: the batch then uses the nearest tick the sampler knows (`Sampler::nearest`), samples the newest births first, and is marked `incomplete`, to be built again.
+
+**Reviewing generated effects** (`styk vfx-review`, `engine/crates/styk-cli/src/review.rs`). Builds a stage (`generated::stage`: a 640 × 400 canvas, a stick figure 180 pixels tall at its middle, one effect clip) and renders a contact sheet in a second or two: a row of frames across the effect's life, one row per background and zoom (1 = one canvas pixel per screen pixel), each labelled, on the graphics card or with `--cpu` on the processor renderer. With `--seq <folder>` it writes every tick as numbered PNG frames instead.
+
+```sh
+cargo build --release -p styk-cli --manifest-path engine/Cargo.toml
+engine/target/release/styk vfx-review explosion --style fireball --out sheet.png                 # white and dark, 1× and 4×
+engine/target/release/styk vfx-review aura --style fire --set color=0x66ccff --set width=1.6 --motion arms
+engine/target/release/styk vfx-review smoke --style soft --motion walk --backgrounds white,dark,sky --zooms 1
+engine/target/release/styk vfx-review particles --style spark --scene --set y=0.2 --cpu --out cpu.png
+engine/target/release/styk vfx-review beam --style energy --seq frames --until 48 --zooms 2
+```
+
+Options: `--style <name|index>` (the Particles look), `--set <name>=<value>` (any saved parameter; `0x…` colours, `on`/`off`), `--ticks a,b,…`, `--start`, `--duration <ticks|none>`, `--motion still|walk|run|arms|vanish`, `--scene`, `--backgrounds white,dark,grey,sky,0xRRGGBB`, `--zooms 1,4`, `--focus x,y`, `--cell WxH`, `--cpu`, `--out`, `--seq <folder>`, `--until <tick>`, `--save <file.json>` (the stage as a document the app opens).
 
 Invariants:
 
