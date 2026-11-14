@@ -479,6 +479,104 @@ fn batch_bounds_hold_every_live_particle() {
     assert!(checked > 1000, "only {checked} particles checked ({empty} empty batches)");
 }
 
+/// Every Particles look, the retired Leaf included, draws finite particles within the frame's limits at the
+/// defaults, at the smallest and at the largest of its main controls, on a figure and across the stage.
+/// Slow-ish (a few seconds): 23 looks, three settings, two places, the largest asking for 200 particles a frame.
+#[test]
+fn every_particles_look_draws_within_the_limits_at_its_extremes() {
+    use styk_eval::vfx::registry::ParticleLook;
+    let smallest: &[(&str, &str)] = &[("rate", "0.5"), ("size", "0.5"), ("speed", "0"), ("spread", "0"), ("life", "2"), ("endSize", "0"), ("variation", "0")];
+    let largest: &[(&str, &str)] = &[("rate", "200"), ("size", "400"), ("speed", "120"), ("spread", "360"), ("life", "300"), ("endSize", "5"), ("variation", "1"), ("glow", "2"), ("trail", "6")];
+    let mut drawn_anywhere = 0;
+    for look in 0..ParticleLook::ALL.len() {
+        for (setting, sets) in [("defaults", &[][..]), ("smallest", smallest), ("largest", largest)] {
+            for scene in [false, true] {
+                let mut clip = Clip::new(if scene { None } else { Some(1) }, "particles").set("look", &look.to_string());
+                if scene {
+                    // A Line of no size: across the whole stage.
+                    clip = clip.set("shape", "3");
+                }
+                for (name, value) in sets {
+                    clip = clip.set(name, value);
+                }
+                let prepared = Stage::new(60.0).clip(clip).prepare();
+                let tick = 40.0;
+                let what = format!("look {look}, {setting}, {}", if scene { "stage" } else { "figure" });
+                let batch = batch_at(&prepared, tick).unwrap_or_else(|| panic!("{what}: nothing to draw"));
+                let particles = live(&batch);
+                assert!(!particles.is_empty(), "{what}: no particle alive");
+                assert!(particles.iter().all(|(_, _, p)| p.x.is_finite() && p.y.is_finite() && p.size.is_finite() && p.size >= 0.0 && p.rgba.iter().all(|c| c.is_finite() && (0.0..=1.0).contains(c))), "{what}: a particle is not finite");
+                let frame = prepared.evaluate(tick);
+                let scene_geometry = styk_eval::geometry::build(&prepared.doc, &frame);
+                let assets = styk_eval::assets::Assets::build(&prepared.doc);
+                let list = styk_eval::drawlist::encode_with(&prepared.doc, &assets, &scene_geometry, &styk_eval::drawlist::Overrides { generators: Some(&batch), ..Default::default() });
+                let records = list.prims.iter().filter(|p| p.kind & 255 == styk_draw::K_PARTICLE).count();
+                assert!(records > 0, "{what}: nothing drawn");
+                assert!(records as f64 <= generated::MAX_DRAWN * 1.05, "{what}: {records} records");
+                drawn_anywhere += 1;
+            }
+        }
+    }
+    assert_eq!(drawn_anywhere, ParticleLook::ALL.len() * 6);
+}
+
+/// The Pixel look snaps to a grid of its own size and steps through its colours: every particle sits on the
+/// grid, its size in half steps of it.
+#[test]
+fn pixel_particles_sit_on_a_grid_of_their_size() {
+    let clip = Clip::new(Some(1), "particles").set("look", "17").set("size", "3").set("rate", "4").set("speed", "4").set("gravity", "0.25").set("endSize", "0.34");
+    let batch = batch_at(&Stage::new(40.0).clip(clip).prepare(), 30.0).expect("pixels draw");
+    let particles = live(&batch);
+    assert!(particles.len() > 20, "{} pixels", particles.len());
+    let on = |v: f64, step: f64| ((v / step) - (v / step).round()).abs() < 1e-6;
+    for (_, _, p) in &particles {
+        assert!(on(p.x, 3.0) && on(p.y, 3.0), "({}, {}) is off the grid of 3", p.x, p.y);
+        assert!(on(p.size, 1.5) && p.size >= 1.5, "size {} is not in half steps of the grid", p.size);
+    }
+    let sizes: std::collections::HashSet<i64> = particles.iter().map(|(_, _, p)| (p.size * 10.0).round() as i64).collect();
+    assert!(sizes.len() >= 2, "they shrink in steps: {sizes:?}");
+}
+
+/// The Lightning look strikes: each particle is drawn as a jagged bolt from where it was launched to where it is,
+/// whose shape holds for its rhythm (two frames) and is struck again after.
+#[test]
+fn lightning_strikes_from_where_each_particle_was_launched_to_where_it_is() {
+    let clip = Clip::new(Some(1), "particles").set("look", "18").set("rate", "3").set("life", "5").set("speed", "16").set("size", "12");
+    let prepared = Stage::new(40.0).clip(clip).prepare();
+    let batch = batch_at(&prepared, 20.0).expect("lightning draws");
+    let mut bolts = 0;
+    for draw in &batch.draws {
+        let s = batch.spec(draw);
+        if s.strike <= 0.0 {
+            continue;
+        }
+        let ev = Evaluator::new(&batch, draw);
+        for i in 0..draw.count {
+            let Some(b) = ev.birth(i) else { continue };
+            let Some(p) = ev.at_age(&b, ev.local() - b.born) else { continue };
+            let pieces = particle::strike(draw, s, ev.tick(), b.origin(), &p);
+            if pieces.is_empty() {
+                continue;
+            }
+            bolts += 1;
+            // The bolt: eight pieces from the launch to the particle, then its forks.
+            assert_eq!(pieces[0].p0, b.origin());
+            assert_eq!(pieces[7].p1, [p.x, p.y]);
+            assert!(pieces[..8].windows(2).all(|w| w[0].p1 == w[1].p0), "the bolt is one path");
+            let straight = pieces[..8].iter().all(|q| {
+                let (dx, dy) = (p.x - b.origin()[0], p.y - b.origin()[1]);
+                ((q.p1[0] - b.origin()[0]) * dy - (q.p1[1] - b.origin()[1]) * dx).abs() < 1e-6
+            });
+            assert!(!straight, "the bolt is jagged");
+            // Its shape holds within a rhythm and changes with the next.
+            let shape = |tick: f64| particle::strike(draw, s, tick, b.origin(), &p).iter().map(|q| (q.p1[0] * 1e6) as i64).collect::<Vec<_>>();
+            assert_eq!(shape(20.0), shape(21.0), "struck once every two frames");
+            assert_ne!(shape(20.0), shape(22.0), "and again after");
+        }
+    }
+    assert!(bolts > 3, "{bolts} bolts");
+}
+
 /// The area limit counts what particles cover on and around the canvas, and keeps the few it keeps whole: an effect
 /// at its largest (glows hundreds of pixels wide, flying far off the stage) still draws some of them.
 #[test]

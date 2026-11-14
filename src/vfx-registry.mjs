@@ -20,6 +20,39 @@ const prefill=choice('Start running',0,['Auto','Off','On']);
 const drawPlacement=choice('Draw',0,['Behind and in front','Behind target','In front of target']);
 // Scene clips have no figure to follow; they emit at a stage position instead.
 const scenePosition={x:{...n('Position X',.5,-1,2,.001,'%'),sceneOnly:true},y:{...n('Position Y',.5,-1,2,.001,'%'),sceneOnly:true}};
+// What a Particles look brings when it is picked: its colour and the motion that makes a cloud of it read as what it is
+// named (sparks arc and die, snow drifts down, flames lick upward, bubbles wobble and rise). Every look sets the same
+// values, so nothing of the previous look stays. Petal, Leaf, Snowflake and Drop emit from a Line, which on the scene
+// spans the whole stage: falling leaves, snow and rain (docs/engine/vfx.md, "Particles").
+const lookMotion=values=>({rate:3,life:40,size:6,radius:0,speed:2,direction:-90,spread:60,gravity:0,drag:0,wind:0,turbulence:0,flow:0,swirl:0,spin:0,stretch:2,endSize:.4,variation:.4,fadeIn:.08,fade:.5,twinkle:0,glow:0,trail:0,outline:0,ground:0,bounce:0,layer:0,step:0,...values});
+const fallingLeaves={shape:3,radius:0,rate:.6,life:260,size:6,speed:3,direction:-90,spread:140,gravity:.08,drag:.05,wind:.05,turbulence:40,flow:10,spin:6,endSize:1,variation:.5,fadeIn:.05,fade:.15};
+const PARTICLE_LOOKS=[
+ lookMotion({color:0x66ccff,rate:2.5,life:50,size:7,radius:16,speed:2,spread:80,gravity:-.03,drag:.02,flow:24,endSize:.3,variation:.5,fadeIn:.2,fade:.5,twinkle:.3,layer:1}),
+ lookMotion({color:0xff9a2e,rate:5,life:24,size:3.5,speed:9,spread:140,gravity:.6,drag:.03,endSize:.3,variation:.6,fadeIn:0,fade:.3,ground:1,bounce:.4}),
+ lookMotion({color:0x4fb3ff,rate:2.5,life:30,size:2.5,speed:4,spread:100,gravity:.25,drag:.02,endSize:.5,variation:.6,fadeIn:0,fade:.3}),
+ lookMotion({color:0x7fd0ff,rate:.8,life:70,size:5,radius:10,speed:2,spread:50,gravity:-.02,drag:.02,turbulence:30,endSize:1.5,variation:.5,fadeIn:.1,fade:.06,layer:1}),
+ lookMotion({color:0x9fdcff,rate:2,life:40,size:6,speed:7,spread:150,gravity:.35,drag:.02,spin:18,endSize:.8,variation:.6,fadeIn:0,fade:.25,twinkle:.4,ground:1,bounce:.25}),
+ lookMotion({color:0x8c8a93,rate:2.5,life:56,size:16,speed:1.6,spread:30,gravity:-.03,drag:.03,flow:24,spin:.4,endSize:3,fadeIn:.15,fade:.55,layer:1}),
+ lookMotion({color:0xffd75a,rate:2,life:30,size:8,radius:40,speed:2,spread:360,gravity:-.01,drag:.04,spin:3,endSize:.2,variation:.5,fadeIn:0,fade:.2,twinkle:.5}),
+ lookMotion({color:0xffc070,rate:.8,life:80,size:16,radius:50,speed:.5,spread:360,gravity:-.005,drag:.01,flow:20,endSize:1.15,variation:.6,fadeIn:.35,fade:.5,layer:1}),
+ lookMotion({color:0xff8a1a,rate:7,life:20,size:14,radius:6,speed:2,spread:30,gravity:-.08,drag:.03,flow:8,endSize:.35,fadeIn:.06,fade:.15}),
+ lookMotion({color:0xf3f0ea,rate:1,life:34,size:16,speed:3,spread:120,gravity:-.04,drag:.03,endSize:.3,fadeIn:0,fade:0,outline:1,outlineColor:0x2a2530,outlineWidth:2,step:1}),
+ lookMotion({color:0xff7a1a,rate:4,life:18,size:10,radius:6,speed:2.2,spread:30,gravity:-.06,drag:.03,endSize:.2,fadeIn:0,fade:.1,outline:1,outlineColor:0x3a160c,outlineWidth:2,step:1}),
+ lookMotion({...fallingLeaves,color:0xd9822b}),
+ lookMotion({...fallingLeaves,color:0xf49ac1}),
+ lookMotion({color:0xeef6ff,shape:3,radius:0,rate:1,life:300,size:3.5,speed:3,direction:-90,spread:140,gravity:.07,drag:.05,wind:.03,turbulence:30,flow:10,spin:2,endSize:1,variation:.6,fadeIn:.05,fade:.1,outline:1,outlineColor:0x7f9bbd,outlineWidth:.8}),
+ lookMotion({color:0x3d9be0,shape:3,radius:0,rate:6,life:90,size:2,speed:5,direction:-90,spread:60,gravity:.4,drag:.04,wind:.25,endSize:1,fadeIn:.02,fade:.1}),
+ lookMotion({color:0xff4f7a,rate:1.2,life:45,size:6,speed:1.4,spread:50,gravity:-.02,drag:.02,turbulence:20,endSize:.6,fadeIn:0,fade:.3}),
+ lookMotion({color:0xffd23c,rate:2,life:26,size:6,speed:4,spread:160,gravity:.15,drag:.04,spin:12,endSize:0,fadeIn:0,fade:0,outline:1,outlineColor:0x2a2010,outlineWidth:2,step:1}),
+ lookMotion({color:0xffcc33,rate:4,life:30,size:3,speed:4,spread:90,gravity:.25,drag:.02,endSize:.34,fadeIn:0,fade:0,step:1}),
+ lookMotion({color:0x8fd8ff,rate:3,life:5,size:12,radius:10,speed:16,spread:360,drag:.2,endSize:1,variation:.5,fadeIn:0,fade:.3,twinkle:.3,step:1}),
+ lookMotion({color:0x9fb8ff,rate:2,life:50,size:12,speed:1.4,spread:60,gravity:-.03,drag:.02,flow:30,endSize:1.6,fadeIn:.2,fade:.5,layer:1}),
+ lookMotion({color:0x6e625a,rate:1.5,life:60,size:4,speed:6,spread:100,gravity:.4,drag:.01,spin:10,endSize:1,variation:.6,fadeIn:0,fade:.15,ground:1,bounce:.3}),
+ lookMotion({color:0x7bd13a,rate:2,life:50,size:5,speed:5,spread:120,gravity:.35,drag:.01,endSize:1.3,variation:.5,fadeIn:0,fade:.2,ground:1}),
+ lookMotion({color:0xffd23c,rate:.6,life:8,size:14,radius:30,speed:.5,spread:360,endSize:.3,variation:.5,fadeIn:0,fade:.3,step:1}),
+];
+// Looks whose particles turn (round ones, lightning flashes and pixels never do), and those drawn from a noise material (shading).
+const turningLooks=[1,4,5,6,8,9,10,11,12,13,14,15,16,19,20,21,22],shadedLooks=[5,8,19];
 export const VFX_REGISTRY={
  turbulence:{name:'Turbulent displacement',category:'Distort',icon:'turbulence',params:{amount:n('Amount',12,0,128,1,'px'),size:n('Scale',48,4,512,1,'px'),evolution:n('Evolution',0,-10000,10000,.05),detail:{...n('Detail',3,1,4,1),discrete:true},seed:{...n('Seed',1,0,65535,1),discrete:true}}},
  tint:{name:'Tint',category:'Color',icon:'tint',params:{color:c(),mix:n('Mix',.5,0,1,.01,'%')}},
@@ -41,12 +74,12 @@ export const VFX_REGISTRY={
  // Generators create artwork instead of filtering it. They only live in effect
  // clips; the engine compiles and draws them.
  particles:{name:'Particles',category:'Generate',icon:'particles',generator:true,params:{emission:choice('Emission',0,['Continuous','Burst']),rate:{...n('Rate',6,0,200,.1,'/f'),when:{emission:[0]}},count:{...n('Count',40,1,5000,1),when:{emission:[1]}},life:n('Lifetime',30,1,300,1,'f'),
-  look:choice('Look',0,['Soft glow','Spark','Dot','Ring','Shard','Smoke','Star','Bokeh','Flame','Cartoon cloud','Cartoon flame','Leaf','Petal','Snowflake','Drop','Heart','Cartoon star','Pixel','Lightning','Wisp','Rock','Splat','Burst'],[11]),
+  look:{...choice('Look',0,['Soft glow','Spark','Dot','Ring','Shard','Smoke','Star','Bokeh','Flame','Cartoon cloud','Cartoon flame','Leaf','Petal','Snowflake','Drop','Heart','Cartoon star','Pixel','Lightning','Wisp','Rock','Splat','Burst'],[11]),applies:PARTICLE_LOOKS.map(values=>Object.freeze(values))},
   color:c('Color',0x66ccff),size:n('Size',6,.5,400,.5,'px'),speed:n('Speed',3,0,120,.1,'px/f'),direction:n('Direction',-90,-180,180,1,'°'),spread:n('Spread',60,0,360,1,'°'),gravity:n('Gravity',0,-3,3,.01),
   ...advanced({shape:choice('Emit from',0,['Target point','Circle','Body','Line']),radius:n('Emitter size',0,0,4000,1,'px'),endSize:n('End size',.4,0,5,.01,'×'),sizeMode:choice('Size over life',0,['Auto','Grow or shrink','Puff out','Pop','Flicker']),variation:n('Variation',.4,0,1,.01,'%'),
    drag:n('Drag',0,0,.5,.005),wind:n('Wind',0,-2,2,.01),gravityAngle:n('Gravity direction',90,-180,180,1,'°'),turbulence:n('Turbulence',0,0,300,1,'px'),flow:n('Flow',0,0,300,1,'px'),swirl:n('Swirl',0,-30,30,.1,'°/f'),
-   rotation:choice('Rotation',0,['Auto','Random','Follow motion','Upright','None']),spin:n('Spin',0,-45,45,.5,'°/f'),stretch:{...n('Streak length',2,0,20,.1),when:{look:[1]}},
-   fadeIn:n('Fade in',.08,0,1,.01,'%'),fade:n('Fade out',.5,0,1,.01,'%'),twinkle:n('Twinkle',0,0,1,.01,'%'),shading:n('Shading',1,0,1,.01,'%'),glow:n('Glow halo',0,0,2,.01),trail:{...n('Motion trail',0,0,6,1),discrete:true},
+   rotation:{...choice('Rotation',0,['Auto','Random','Follow motion','Upright','None']),when:{look:turningLooks}},spin:{...n('Spin',0,-45,45,.5,'°/f'),when:{look:turningLooks}},stretch:{...n('Streak length',2,0,20,.1),when:{look:[1,14]}},
+   fadeIn:n('Fade in',.08,0,1,.01,'%'),fade:n('Fade out',.5,0,1,.01,'%'),twinkle:n('Twinkle',0,0,1,.01,'%'),shading:{...n('Shading',1,0,1,.01,'%'),when:{look:shadedLooks}},glow:n('Glow halo',0,0,2,.01),trail:{...n('Motion trail',0,0,6,1),discrete:true},
    outline:toggle('Outline'),outlineColor:{...c('Outline color',0x16121c),when:{outline:[1]}},outlineWidth:{...n('Outline width',2,0,24,.1,'px'),when:{outline:[1]}},
    colorMode:choice('Color mode',0,['Over lifetime','Random per particle']),blend:choice('Blend',0,['Auto','Glow','Solid']),space:choice('Particles',0,['Leave a trail','Follow target']),ground:toggle('Land on ground'),bounce:{...n('Bounce',0,0,1,.01,'%'),when:{ground:[1]}},layer:choice('Draw',0,['In front of target','Behind target']),prefill:{...prefill,when:{emission:[0]}},...generatorTiming,...scenePosition})}},
  aura:{name:'Aura',category:'Generate',icon:'aura',generator:true,params:{style:style(['Fire','Electric','Shadow','Holy','Ice','Wind','Cartoon','Spirit'],[{color:0xffc93c},{color:0x6fd8ff},{color:0x8a4dff},{color:0xffe7a0},{color:0x9fe6ff},{color:0xb8f0d0},{color:0xffb000},{color:0x7fd7ff}]),
