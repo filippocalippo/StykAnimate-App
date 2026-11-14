@@ -159,21 +159,103 @@ fn blast_fireball(b: &Blast<'_>) -> Vec<Option<Spec>> {
     ]
 }
 
+/// Cartoon: drawn like hand-drawn effects animation. A spiky white flash and action lines on the
+/// first frames; a cluster of fire balls punched out fast that hang, painted in flat colour with a
+/// shadow side and a bold ink line, turning from yellow to orange to red and then to smoke, each
+/// shrinking away; grey smoke balls rolling up and popping out; shards and stars flung out;
+/// dust clouds rolling along the ground. Few elements, strong shapes; its style brings twos.
 fn blast_cartoon(b: &Blast<'_>) -> Vec<Option<Spec>> {
     let Blast { p, col, s, d, s0, ref base, .. } = *b;
-    let flat = Spec { blend: NORMAL, ..base.clone() };
+    // Paint only, crisp, no fades: drawn shapes pop on and off (each shrinks, then is gone); it reads the same on any page.
+    let flat = Spec { blend: AUTO, softness: 0.0, stretch: 0.0, fade_in: 0.0, fade_out: 0.0, alpha_over_life: Some(Curve::four(1.0, 0.9, 1.0, 0.97, 0.0, 0.0)), emissive: Some(Curve::three(0.0, 0.5, 0.0, 0.0)), ..base.clone() };
+    let k = 1.35 * s;
     let line = ink(col);
-    let light = tone(col, 0.55, WHITE);
-    let line_w = (3.0 * s).max(1.5);
+    let line_w = (2.6 * s.sqrt()).max(1.4);
+    let pale = tone(col, 0.75, [1.0, 0.98, 0.82]);
+    let light = tone(col, 0.45, [1.0, 0.93, 0.55]);
+    let deep = tone(col, 0.45, tone(col, 0.6, [0.55, 0.06, 0.04]));
+    let shadow = |c: [f64; 3], t: f64| Cel { color: tone(c, t, tone(line, 0.4, [0.25, 0.1, 0.35])), depth: 0.32, strength: 1.0 };
+    let smoke = rgb(0x8f8a96);
+    // Fire balls cool to smoke: pale, yellow, the colour, deep, then smoke grey.
+    let fire = paint_or(&p.color, stops(&[(pale, 1.0), (light, 1.0), (light, 1.0), (col, 1.0), (col, 1.0), (deep, 1.0), (tone(deep, 0.5, smoke), 1.0), (smoke, 1.0)]));
+    let pop = |hold: f64| Curve::four(0.35, 0.12, 1.0, hold, 1.08, 0.3);
     vec![
-        some_if(p.dust, || layer(Spec { placement: Placement::Behind, start: s0 + 2.0, count: 12.0 * d, burst_jitter: 3.0, life_min: 16.0, life_max: 26.0, emit_shape: GROUND, emit_radius: 60.0 * s, speed_min: 3.0 * s, speed_max: 7.0 * s, drag: 0.1, collide: 1.0, material: m("cloud"), rotate: ROTATE_FIXED, size_mode: GROW_POP, size0: 6.0 * s, size1: 20.0 * s, fade_in: 0.0, fade_out: 0.0, outline: Some(Outline { width: line_w * 0.8, color: line }), ..flat.clone() }, stops(&[([0.95, 0.93, 0.9], 1.0), ([0.84, 0.82, 0.8], 1.0)]))),
-        some_if(p.smoke > 0.0, || layer(Spec { start: s0 + 6.0, emit_dur: 6.0, rate: 3.0 * p.smoke * d, life_min: 26.0, life_max: 40.0, emit_radius: 30.0 * s, spread: TAU, speed_min: 0.6 * s, speed_max: 2.0 * s, gravity: -0.04 * s, drag: 0.05, material: m("cloud"), rotate: ROTATE_FIXED, size_mode: GROW_POP, size0: 10.0 * s, size1: 34.0 * s, size_jitter: 0.3, fade_in: 0.0, fade_out: 0.0, outline: Some(Outline { width: line_w * 0.8, color: [0.1, 0.09, 0.1] }), ..flat.clone() }, stops(&[([0.9, 0.89, 0.9], 1.0), ([0.72, 0.7, 0.74], 1.0)]))),
-        some_if(p.debris > 0.0, || layer(Spec { start: s0, count: 12.0 * p.debris, burst_jitter: 1.0, life_min: 26.0, life_max: 44.0, emit_radius: 12.0 * s, angle: UP, spread: 3.6, speed_min: 6.0 * s, speed_max: 13.0 * s, gravity: 0.45, drag: 0.012, collide: 1.0, spin: 0.3, spin_jitter: 1.0, material: m("shard"), size0: 5.0 * s, size1: 5.0 * s, size_jitter: 0.5, fade_in: 0.0, fade_out: 0.0, outline: Some(Outline { width: line_w * 0.5, color: line }), ..flat.clone() }, stops(&[([0.5, 0.44, 0.4], 1.0), ([0.36, 0.3, 0.28], 1.0)]))),
-        some_if(p.fireball, || layer(Spec { start: s0, count: 16.0 * d, burst_jitter: 2.0, life_min: 14.0, life_max: 24.0, emit_radius: 14.0 * s, spread: TAU, speed_min: 2.0 * s, speed_max: 6.0 * s, drag: 0.14, gravity: -0.05 * s, material: m("cloud"), rotate: ROTATE_FIXED, size_mode: GROW_POP, size0: 12.0 * s, size1: 40.0 * s, size_jitter: 0.35, fade_in: 0.0, fade_out: 0.0, outline: Some(Outline { width: line_w, color: line }), ..flat.clone() }, stops(&[([1.0, 0.97, 0.7], 1.0), (light, 1.0), (col, 1.0), (tone(col, 0.35, BLACK), 1.0)]))),
-        some_if(p.sparks, || layer(Spec { start: s0, count: 22.0 * d, burst_jitter: 1.0, life_min: 6.0, life_max: 10.0, emit_radius: 30.0 * s, spread: TAU, speed_min: 14.0 * s, speed_max: 22.0 * s, drag: 0.1, shape: STREAK, stretch: 1.6, size0: 3.0 * s, size1: 1.0 * s, softness: 0.05, fade_in: 0.0, fade_out: 0.3, ..flat.clone() }, stops(&[(WHITE, 1.0), (light, 1.0)]))),
-        some_if(p.sparks, || layer(Spec { start: s0 + 2.0, count: 6.0 * d, burst_jitter: 3.0, life_min: 14.0, life_max: 22.0, emit_radius: 40.0 * s, spread: TAU, speed_min: 2.0 * s, speed_max: 4.0 * s, drag: 0.06, material: m("toonStar"), spin: 0.15, spin_jitter: 1.0, size_mode: GROW_POP, size0: 3.0 * s, size1: 9.0 * s, fade_in: 0.0, fade_out: 0.0, outline: Some(Outline { width: line_w * 0.6, color: line }), ..flat.clone() }, stops(&[([1.0, 0.92, 0.4], 1.0)]))),
-        some_if(p.ring, || layer(Spec { start: s0 + 1.0, count: 1.0, life_min: 10.0, life_max: 10.0, shape: RING, size0: 30.0 * s, size1: 200.0 * s, size_curve: 0.5, softness: 0.05, size_jitter: 0.0, fade_in: 0.0, fade_out: 0.5, ..flat.clone() }, stops(&[(WHITE, 1.0), (light, 1.0)]))),
-        some_if(p.flash, || layer(Spec { start: s0, count: 1.0, life_min: 6.0, life_max: 6.0, material: m("burst"), size0: 60.0 * s, size1: 90.0 * s, size_jitter: 0.0, fade_in: 0.0, fade_out: 0.0, outline: Some(Outline { width: line_w, color: line }), ..flat.clone() }, stops(&[(WHITE, 1.0), (light, 1.0)]))),
+        // Dust rolling out along the ground, behind the target.
+        some_if(p.dust, || layer(Spec {
+            placement: Placement::Behind, start: s0 + 2.0, count: 8.0 * d, burst_jitter: 4.0, life_min: 18.0, life_max: 28.0,
+            emit_shape: GROUND, emit_radius: 30.0 * k, speed_min: 3.0 * k, speed_max: 6.5 * k, drag: 0.12, collide: 1.0,
+            shape: CLOUD, rotate: ROTATE_UPRIGHT, size0: 15.0 * k, size_over_life: Some(pop(0.6)), size_jitter: 0.35,
+            outline: Some(Outline { width: line_w * 0.85, color: ink(rgb(0xb7a68e)) }), cel: Some(shadow(rgb(0xd8ccb8), 0.45)),
+            ..flat.clone()
+        }, stops(&[(rgb(0xece4d6), 1.0), (rgb(0xd8ccb8), 1.0)]))),
+        // Smoke balls left behind, rolling up, each popping out.
+        some_if(p.smoke > 0.0, || layer(Spec {
+            start: s0 + 7.0, count: 7.0 * p.smoke.min(2.0) * d, burst_jitter: 8.0, life_min: 30.0, life_max: 48.0,
+            emit_radius: 34.0 * k, spread: 1.2, angle: UP, speed_min: 0.6 * k, speed_max: 1.6 * k, gravity: -0.05 * k, drag: 0.04,
+            size0: 16.0 * k * (0.8 + 0.2 * p.smoke.min(4.0)), size_over_life: Some(pop(0.55)), size_jitter: 0.35,
+            outline: Some(Outline { width: line_w * 0.85, color: tone(ink(smoke), 0.3, line) }), cel: Some(shadow(smoke, 0.5)),
+            ..flat.clone()
+        }, stops(&[(tone(smoke, 0.35, WHITE), 1.0), (tone(smoke, 0.2, WHITE), 1.0), (smoke, 1.0)]))),
+        // Shards flung out, spinning, landing.
+        some_if(p.debris > 0.0, || layer(Spec {
+            start: s0, count: 7.0 * p.debris, burst_jitter: 1.0, life_min: 24.0, life_max: 40.0,
+            emit_radius: 12.0 * k, angle: UP, spread: 3.4, speed_min: 7.0 * k, speed_max: 13.0 * k, gravity: 0.5, drag: 0.015,
+            collide: 1.0, bounce: 0.3, friction: 0.3, spin: 0.35, spin_jitter: 1.0, shape: SHARD, size0: 5.5 * k, size_jitter: 0.45,
+            alpha_over_life: Some(Curve::three(1.0, 0.85, 1.0, 0.0)), outline: Some(Outline { width: line_w * 0.6, color: line }),
+            ..flat.clone()
+        }, stops(&[(rgb(0x6a5a52), 1.0), (rgb(0x4d413c), 1.0)]))),
+        // The fire balls: punched out fast, hanging, cooling and shrinking away.
+        some_if(p.fireball, || layer(Spec {
+            start: s0, count: (9.0 * d).max(3.0), burst_jitter: 1.5, life_min: 18.0, life_max: 26.0,
+            emit_radius: 12.0 * k, spread: TAU, speed_min: 4.0 * k, speed_max: 8.0 * k, ease: 2.5, gravity: -0.03 * k,
+            size0: 24.0 * k, size_over_life: Some(pop(0.62)), size_jitter: 0.35,
+            outline: Some(Outline { width: line_w, color: line }), cel: Some(shadow(deep, 0.35)),
+            ..flat.clone()
+        }, fire)),
+        // Its hot middle on the first frames.
+        some_if(p.fireball, || layer(Spec {
+            start: s0, count: 4.0, burst_jitter: 1.0, life_min: 9.0, life_max: 12.0,
+            emit_radius: 10.0 * k, spread: TAU, speed_min: 1.0 * k, speed_max: 2.5 * k, ease: 2.0,
+            size0: 16.0 * k, size_over_life: Some(Curve::four(0.5, 0.2, 1.0, 0.5, 0.9, 0.0)), size_jitter: 0.25,
+            outline: Some(Outline { width: line_w * 0.8, color: line }), cel: Some(shadow(light, 0.25)),
+            ..flat.clone()
+        }, stops(&[([1.0, 1.0, 0.95], 1.0), (pale, 1.0), (light, 1.0)]))),
+        // Action lines: needles punched outward on the first frames.
+        some_if(p.sparks, || layer(Spec {
+            start: s0, count: 10.0 * d, burst_jitter: 1.0, life_min: 6.0, life_max: 9.0,
+            emit_radius: 26.0 * k, spread: TAU, radial: 1.0, speed_min: 12.0 * k, speed_max: 18.0 * k, ease: 1.5,
+            shape: SPARK, rotate: ROTATE_MOTION, size0: 13.0 * k, size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.0)), size_jitter: 0.3,
+            outline: Some(Outline { width: line_w * 0.55, color: line }),
+            ..flat.clone()
+        }, stops(&[([1.0, 1.0, 0.95], 1.0), (pale, 1.0)]))),
+        // Stars popping around it.
+        some_if(p.sparks, || layer(Spec {
+            start: s0 + 2.0, count: 5.0 * d, burst_jitter: 4.0, life_min: 12.0, life_max: 18.0,
+            emit_radius: 46.0 * k, spread: TAU, radial: 1.0, speed_min: 1.5 * k, speed_max: 3.0 * k, drag: 0.08,
+            shape: TOON_STAR, spin: 0.15, spin_jitter: 1.0, size0: 7.0 * k, size_over_life: Some(Curve::four(0.2, 0.2, 1.0, 0.7, 1.0, 0.0)),
+            outline: Some(Outline { width: line_w * 0.6, color: line }), cel: Some(shadow(light, 0.3)),
+            ..flat.clone()
+        }, stops(&[([1.0, 0.92, 0.35], 1.0)]))),
+        // A shock ring: a thin drawn circle racing out.
+        some_if(p.ring, || layer(Spec {
+            start: s0 + 1.0, count: 1.0, life_min: 8.0, life_max: 8.0, shape: RING, softness: 0.025, size_jitter: 0.0,
+            size0: 150.0 * k, size_over_life: Some(Curve::four(0.15, 0.4, 0.75, 0.8, 0.95, 1.0)),
+            alpha_over_life: Some(Curve::three(1.0, 0.6, 0.8, 0.0)),
+            ..flat.clone()
+        }, stops(&[(tone(col, 0.25, line), 1.0)]))),
+        // The flash: a spiky star, a yellow one behind a white-hot one, held two frames and gone.
+        some_if(p.flash, || layer(Spec {
+            start: s0, count: 1.0, life_min: 4.0, life_max: 4.0, shape: BURST, rotate: ROTATE_RANDOM, size_jitter: 0.0,
+            size0: 62.0 * k, size_over_life: Some(Curve::four(0.7, 0.3, 1.0, 0.7, 0.95, 0.6)),
+            emissive: Some(Curve::three(0.15, 0.5, 0.1, 0.0)),
+            ..flat.clone()
+        }, stops(&[(tone(light, 0.3, col), 1.0)]))),
+        some_if(p.flash, || layer(Spec {
+            start: s0, count: 1.0, life_min: 3.0, life_max: 3.0, shape: BURST, rotate: ROTATE_RANDOM, size_jitter: 0.0,
+            size0: 41.0 * k, size_over_life: Some(Curve::four(0.7, 0.3, 1.0, 0.7, 0.9, 0.5)),
+            emissive: Some(Curve::three(0.3, 0.5, 0.2, 0.0)),
+            ..flat.clone()
+        }, stops(&[([1.0, 0.97, 0.72], 1.0)]))),
     ]
 }
 
