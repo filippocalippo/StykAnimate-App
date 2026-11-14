@@ -96,6 +96,7 @@ fn beam_look(s: &Spec) -> crate::vfx::generated::layers::BeamLook {
         core: [core[0], core[1], core[2], ec],
         body: [body[0], body[1], body[2], eb],
         glow: [body[0], body[1], body[2], eg],
+        rim: [body[0], body[1], body[2], eb],
         head: 1.0,
         strands: s.beam_style == 3.0,
         ink: s.outline.map(|o| (o.color, o.width)),
@@ -122,6 +123,7 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
         }
         let ink = look.ink.unwrap_or(([0.0; 3], 0.0));
         out.paints.push([f(look.head), f(ink.0[0]), f(ink.0[1]), f(ink.0[2])]);
+        out.paints.push([f(look.rim[0]), f(look.rim[1]), f(look.rim[2]), f(look.rim[3])]);
         let seed = (draw.seed % 997) as f64;
         let reach = (beam.width * 3.0 + 8.0 + ink.1) * scale;
         grow(&mut out, world(beam.a[0], beam.a[1]), reach);

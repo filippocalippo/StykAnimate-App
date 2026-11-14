@@ -682,8 +682,9 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
     return lit(rgb, k, e);
 }
 
-// A beam's premultiplied colour; `aa` is the pixel in local units; rows 2 to 5 of its draw are its
-// core, body and glow colours (each with how much light it emits) and [head swell, ink colour].
+// A beam's premultiplied colour; `aa` is the pixel in local units; rows 2 to 6 of its draw are its
+// core, body and glow colours (each with how much light it emits), [head swell, ink colour] and the
+// rim colour its body turns to toward its edge.
 fn beam_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, aa: f32) -> vec4<f32> {
     let l = prm.x;
     let w = prm.y;
@@ -725,7 +726,11 @@ fn beam_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, aa: f32) -> vec4<f32> {
     let halo = w * 3.0 + 8.0;
     let glow = exp(-max(d - ww * body_w * 0.8, 0.0) / (ww * glow_w + 1.0)) * 0.55 * (1.0 - smooth01(halo * 0.6, halo, d));
     var out = lit(glow_c.rgb, glow * opacity, glow_c.a);
-    out = over(lit(body_c.rgb, body * opacity * min(bright, 1.0), body_c.a), out);
+    // The body turns to its rim colour over its outer half: a deeper tone of the hue gives a light
+    // beam an edge that reads on a light page.
+    let rim_c = paint_row(p.paint + 6u);
+    let edge = smooth01(ww * body_w * 0.4, ww * body_w, d);
+    out = over(lit(mix(body_c.rgb, rim_c.rgb, edge), body * opacity * min(bright, 1.0), mix(body_c.a, rim_c.a, edge)), out);
     if (p.c.z > 0.5) {
         let period = max(24.0, w * 3.2);
         let inside = step(0.0, x) * step(x, l);

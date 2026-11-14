@@ -216,13 +216,15 @@ impl Curve {
     }
 }
 
-/// A beam's look: its core, body and glow colours and how much light each gives off,
-/// how much its head swells, spiral strands, an ink line (cartoon).
+/// A beam's look: its core, body and glow colours and how much light each gives off, the
+/// rim colour its body turns to toward its edge (a deeper tone of a light hue reads on a light
+/// page), how much its head swells, spiral strands, an ink line (cartoon).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamLook {
     pub core: [f64; 4],
     pub body: [f64; 4],
     pub glow: [f64; 4],
+    pub rim: [f64; 4],
     pub head: f64,
     pub strands: bool,
     pub ink: Option<([f64; 3], f64)>,

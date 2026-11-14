@@ -71,6 +71,7 @@ fn energy(p: &Beam, ctx: &Context, strands: bool, firing_at_once: bool) -> Vec<S
             core: [core_c[0], core_c[1], core_c[2], if base.blend == NORMAL { 0.0 } else if base.blend == ADD { 1.0 } else { 0.45 }],
             body: [col[0], col[1], col[2], if base.blend == ADD { 1.0 } else { 0.12 }],
             glow: [col[0], col[1], col[2], if base.blend == NORMAL { 0.0 } else { 1.0 }],
+            rim: [col[0], col[1], col[2], if base.blend == ADD { 1.0 } else { 0.12 }],
             head: 1.0,
             strands,
             ink: None,
