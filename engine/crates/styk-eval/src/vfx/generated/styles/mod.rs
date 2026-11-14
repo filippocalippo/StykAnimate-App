@@ -90,13 +90,19 @@ pub fn compile(params: &Params, ctx: &Context) -> Vec<Spec> {
         Params::Smoke(p) => smoke(p, ctx),
         _ => Vec::new(),
     };
+    // A beam that charges plays its charge from nothing; one that starts firing starts running.
+    let prefill = match params {
+        Params::Beam(p) => ctx.prefill && beam::fires_at_once(p, ctx),
+        _ => ctx.prefill,
+    };
     layers
         .into_iter()
         .filter(|l| l.shape == BEAM || l.shape == ARC || l.count > 0.0 || l.rate > 0.0 || l.rate_param.is_some())
         .map(|mut l| {
             // Started already running: continuous layers emitted for a lifetime before the
-            // effect's start, so nothing fades in from empty.
-            if ctx.prefill && l.emit_dur > 0.0 && !l.is_beam() {
+            // effect's start, so nothing fades in from empty. Layers that begin later (a beam's
+            // sparks once it fires, an impact) are events of the effect and wait for their moment.
+            if prefill && l.emit_dur > 0.0 && !l.is_beam() && l.start <= ctx.start {
                 l.prewarm = 1.0;
                 l.clip_fade_in = 0.0;
             }

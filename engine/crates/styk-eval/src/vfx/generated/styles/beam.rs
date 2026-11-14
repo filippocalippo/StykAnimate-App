@@ -117,13 +117,17 @@ fn energy(p: &Beam, ctx: &Context, strands: bool, firing_at_once: bool) -> Vec<S
     [orb_glow, gathering, along, Some(beam), lightning, tip_light, splash, flare, orb_core].into_iter().flatten().collect()
 }
 
-pub(super) fn beam(p: &Beam, ctx: &Context) -> Vec<Spec> {
-    // Start firing: the beam is already firing at its start, without a charge.
-    let firing_at_once = match p.prefill {
+/// Start firing: the beam is already firing at its start, without a charge (Auto: when its clip has no end).
+pub(super) fn fires_at_once(p: &Beam, ctx: &Context) -> bool {
+    match p.prefill {
         Prefill::On => true,
         Prefill::Off => false,
         Prefill::Auto => !ctx.timed,
-    };
+    }
+}
+
+pub(super) fn beam(p: &Beam, ctx: &Context) -> Vec<Spec> {
+    let firing_at_once = fires_at_once(p, ctx);
     // Spiral is Energy with its strands (retired into it).
     if p.style == BeamStyle::Energy || p.style == BeamStyle::Spiral {
         return energy(p, ctx, p.strands || p.style == BeamStyle::Spiral, firing_at_once);

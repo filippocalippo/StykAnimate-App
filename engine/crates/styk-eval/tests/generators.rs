@@ -43,12 +43,12 @@ fn batch_with(prepared: &Prepared, tick: f64, sampler: &dyn Sampler) -> Option<B
     generated::build(prepared, &frame, &scene, Some(tick), Some(sampler), 1.0)
 }
 
-fn batch_at(prepared: &Prepared, tick: f64) -> Option<Batch> {
+pub(crate) fn batch_at(prepared: &Prepared, tick: f64) -> Option<Batch> {
     batch_with(prepared, tick, &Evaluate)
 }
 
 /// Every live particle: (draw, instance, particle).
-fn live(batch: &Batch) -> Vec<(usize, u32, Particle)> {
+pub(crate) fn live(batch: &Batch) -> Vec<(usize, u32, Particle)> {
     let mut out = Vec::new();
     for (d, draw) in batch.draws.iter().enumerate() {
         if batch.spec(draw).is_beam() {
