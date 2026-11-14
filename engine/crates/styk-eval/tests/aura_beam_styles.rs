@@ -142,3 +142,40 @@ fn lightning_is_one_main_channel_with_thinner_bolts_struck_again_every_other_fra
     assert_eq!(pieces(10.0), pieces(11.0));
     assert_ne!(pieces(10.0), pieces(12.0));
 }
+
+/// Every aura and beam style, retired ones included, draws something within the limits at its
+/// defaults and at the minimum and the maximum of its main controls: no limit thins it, and it
+/// stays a few thousand records at most (fewer, better particles).
+#[test]
+fn every_aura_and_beam_style_draws_within_the_limits_at_every_setting() {
+    let aura_min = [("height", "0.2"), ("width", "0.2"), ("density", "0.1"), ("intensity", "0"), ("turbulence", "0")];
+    let aura_max = [("height", "3"), ("width", "3"), ("density", "4"), ("intensity", "3"), ("turbulence", "3"), ("dust", "on")];
+    let beam_min = [("width", "1"), ("intensity", "0"), ("sparks", "0"), ("arcs", "0"), ("wobble", "0")];
+    let beam_max = [("width", "200"), ("intensity", "3"), ("sparks", "4"), ("arcs", "8"), ("wobble", "3"), ("strands", "on")];
+    let cases: [(&str, u32, &[(&str, &str)], &[(&str, &str)]); 2] = [("aura", 8, &aura_min, &aura_max), ("beam", 6, &beam_min, &beam_max)];
+    for (kind, styles, min, max) in cases {
+        for style in 0..styles {
+            for (setting, sets, limit) in [("default", &[][..], 2500), ("minimum", min, 2500), ("maximum", max, 9000)] {
+                let mut clip = Clip::new(Some(1), kind).set("style", &style.to_string());
+                for (name, value) in sets {
+                    clip = clip.set(name, value);
+                }
+                if kind == "beam" {
+                    clip = clip.timed(0.0, Some(40.0));
+                }
+                let prepared = Stage::new(60.0).clip(clip).prepare();
+                let mut most = 0;
+                // A beam fires once its charge (12 frames by default) is over.
+                let ticks = if kind == "beam" { [14.0, 24.0, 36.0] } else { [10.0, 24.0, 36.0] };
+                for tick in ticks {
+                    let batch = batch_at(&prepared, tick).unwrap_or_else(|| panic!("{kind} style {style} {setting}: nothing at tick {tick}"));
+                    assert!(!batch.reduced, "{kind} style {style} {setting}: a limit thinned it at tick {tick}");
+                    let pieces: usize = batch.draws.iter().filter(|d| batch.spec(d).shape == ARC).map(|d| particle::arcs(&batch, d).len()).sum();
+                    let beams = batch.draws.iter().filter(|d| batch.spec(d).shape == BEAM && particle::beam(&batch, d).is_some()).count();
+                    most = most.max(live(&batch).len() + pieces + beams);
+                }
+                assert!(most > 0 && most < limit, "{kind} style {style} {setting}: {most} records");
+            }
+        }
+    }
+}
