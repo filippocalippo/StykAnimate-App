@@ -49,11 +49,11 @@ fn energy(p: &Beam, ctx: &Context, strands: bool, firing_at_once: bool) -> Vec<S
     let gathering = (p.charge_particles && charge > 0.0).then(|| layer(Spec {
         start: ctx.start, emit_dur: charge + 2.0, rate: 12.0, life_min: 10.0, life_max: 14.0,
         emit_shape: EMIT_RING, emit_radius: 80.0 * r, radial: -1.0, speed_min: 4.0 * r, speed_max: 6.0 * r, attract: 0.7,
-        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.4, size0: 1.8 * r.sqrt(), size_over_life: Some(Curve::three(0.6, 0.5, 1.0, 0.7)),
+        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.4, size0: 2.2 * r.sqrt(), size_over_life: Some(Curve::three(0.6, 0.5, 1.0, 0.7)),
         trail: Some(Trail { length: 5.0, segments: 4, width: 0.6, alpha: 0.6, glow: 0.6, emissive: None }),
-        emissive: Some(Curve::three(0.5, 0.6, 0.7, 0.9)), alpha_over_life: Some(Curve::four(0.0, 0.25, 1.0, 0.8, 1.0, 0.0)),
+        emissive: Some(Curve::three(0.2, 0.6, 0.35, 0.7)), alpha_over_life: Some(Curve::four(0.0, 0.25, 1.0, 0.8, 1.0, 0.0)),
         ..base.clone()
-    }, stops(&[(col, 1.0), (pale, 1.0), (WHITE, 1.0)])));
+    }, stops(&[(deep, 1.0), (col, 1.0), (pale, 1.0)])));
     // The orb in the hand: a crisp bright heart that swells as it charges, and its light.
     let orb = |glow: bool| layer(Spec {
         start: ctx.start, emit_dur: (fire_end - ctx.start).max(1.0), rate: 1.5, life_min: 6.0, life_max: 8.0, emit_radius: 1.0,
@@ -62,9 +62,9 @@ fn energy(p: &Beam, ctx: &Context, strands: bool, firing_at_once: bool) -> Vec<S
         alpha_over_life: Some(Curve::three(0.0, 0.25, if glow { 0.5 * li } else { 1.0 }, 0.0)),
         clip_fade_in: charge.max(1.0), clip_fade_out: if ctx.timed { 8.0 } else { 0.0 },
         blend: if glow && base.blend != NORMAL { ADD } else { base.blend },
-        emissive: Some(Curve::three(0.7, 0.5, 0.7, 0.7)),
+        emissive: Some(if glow { Curve::three(0.7, 0.5, 0.7, 0.7) } else { Curve::three(0.45, 0.5, 0.5, 0.5) }),
         ..base.clone()
-    }, if glow { stops(&[(pale, 1.0), (col, 1.0)]) } else { stops(&[(WHITE, 1.0), (core_c, 1.0)]) });
+    }, if glow { stops(&[(pale, 1.0), (col, 1.0)]) } else { stops(&[(core_c, 1.0), (pale, 1.0)]) });
     let beam = layer(Spec {
         shape: BEAM, count: 1.0, start: fire_start,
         beam_look: Some(BeamLook {
