@@ -524,6 +524,12 @@ fn every_style_draws_within_limits(kind: &str, styles: usize, settings: &[(&str,
 }
 
 #[test]
+fn every_explosion_style_draws_within_limits() {
+    let settings = [("size", "0.2", "5"), ("intensity", "0", "3"), ("density", "0.1", "4"), ("debris", "0", "4"), ("smoke", "0", "4")];
+    every_style_draws_within_limits("explosion", 10, &settings, &[2.0, 12.0, 30.0]);
+}
+
+#[test]
 fn every_smoke_style_draws_within_limits() {
     // The amount and the opacity stay at their defaults at the least: none of either draws nothing, as it should.
     let settings = [("size", "2", "400"), ("life", "4", "400"), ("growth", "0.2", "8"), ("rise", "-6", "12"), ("turbulence", "0", "4"), ("spread", "0", "2000")];
@@ -546,4 +552,48 @@ fn ground_launched_layers_burst_up_from_the_ground() {
     let (later, _) = at(8.0);
     let risen = later.iter().filter(|&&y| y < ground - 50.0).count();
     assert!(risen * 2 > later.len(), "{risen} of {} thrown up above the ground", later.len());
+}
+
+/// An electric explosion's lightning strikes out from where it went off to around it, somewhere new on each strike.
+#[test]
+fn explosion_lightning_strikes_out_from_its_centre() {
+    let clip = Clip::new(Some(1), "explosion").set("style", "6").timed(0.0, Some(20.0));
+    let prepared = Stage::new(40.0).clip(clip).prepare();
+    let strikes = |tick: f64| {
+        let batch = batch_at(&prepared, tick).unwrap();
+        let draw = batch.draws.iter().find(|d| batch.spec(d).shape == styk_eval::vfx::generated::layers::ARC).expect("an arc layer").clone();
+        let s = batch.spec(&draw).clone();
+        (particle::arcs(&batch, &draw), s.fixed.unwrap(), s.emit_radius)
+    };
+    let (pieces, centre, reach) = strikes(2.0);
+    let starts: Vec<_> = pieces.iter().filter(|p| p.start && ((p.p0[0] - centre[0]).hypot(p.p0[1] - centre[1]) < 1e-6)).collect();
+    assert!(starts.len() >= 2, "arcs start at the explosion's centre: {} of {} pieces", starts.len(), pieces.len());
+    for p in &pieces {
+        let far = (p.p1[0] - centre[0]).hypot(p.p1[1] - centre[1]);
+        assert!(far < reach * 1.6, "within its reach: {far} of {reach}");
+    }
+    let (again, _, _) = strikes(5.0);
+    assert_ne!(pieces.iter().map(|p| (p.p1[0] as i64, p.p1[1] as i64)).collect::<Vec<_>>(), again.iter().map(|p| (p.p1[0] as i64, p.p1[1] as i64)).collect::<Vec<_>>(), "struck somewhere new");
+}
+
+/// Pixel art: every particle of the Pixel explosion is a whole number of grid cells wide, on the grid's lines.
+#[test]
+fn pixel_particles_sit_on_their_grid() {
+    for size in ["1", "1.7"] {
+        let clip = Clip::new(Some(1), "explosion").set("style", "9").set("size", size).timed(0.0, Some(20.0));
+        let prepared = Stage::new(40.0).clip(clip).prepare();
+        let mut checked = 0;
+        for tick in [1.0, 5.0, 11.0] {
+            let batch = batch_at(&prepared, tick).unwrap();
+            for (d, _, p) in live(&batch) {
+                let cell = batch.spec(&batch.draws[d]).grid;
+                assert!(cell >= 2.0, "a grid");
+                let (cells, corner) = (2.0 * p.size / cell, ((p.x - p.size) / cell, (p.y - p.size) / cell));
+                let whole = |v: f64| (v - v.round()).abs() < 1e-6;
+                assert!(whole(cells) && whole(corner.0) && whole(corner.1), "size {size} tick {tick}: {} at ({}, {}) on a grid of {cell}", p.size, p.x, p.y);
+                checked += 1;
+            }
+        }
+        assert!(checked > 30, "{checked} particles checked");
+    }
 }
