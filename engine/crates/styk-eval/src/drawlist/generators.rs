@@ -65,7 +65,8 @@ pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
 }
 
 /// A draw's six rows: transform, scale and shading, the shape's constants, the outline,
-/// erosion and rim (styk-draw `K_PARTICLE`).
+/// erosion and rim, or a crisp shape's cartoon shadow (styk-draw `K_PARTICLE`). `outline`:
+/// the main drawing of its particles (halos and trails have neither outline nor shadow).
 fn rows(out: &mut Out, m: [f64; 6], scale: f64, s: &Spec, softness: f64, outline: bool) -> u32 {
     let at = out.paints.len() as u32;
     let f = |v: f64| v as f32;
@@ -74,9 +75,18 @@ fn rows(out: &mut Out, m: [f64; 6], scale: f64, s: &Spec, softness: f64, outline
     let o = s.outline.filter(|_| outline);
     out.paints.push([f(softness), f(s.stretch), f(s.aspect), f(o.map_or(0.0, |o| o.width))]);
     out.paints.push(o.map_or([0.0; 4], |o| [f(o.color[0]), f(o.color[1]), f(o.color[2]), 1.0]));
-    let e = s.erosion.unwrap_or_default();
-    out.paints.push([f(e.edge), f(e.rim_width), f(e.rim), 0.0]);
-    out.paints.push([f(e.rim_color[0]), f(e.rim_color[1]), f(e.rim_color[2]), 0.0]);
+    // A material breaks up (erosion and its rim); a crisp shape may have a shadow side instead.
+    match s.cel.filter(|_| outline && s.shape != MATERIAL) {
+        Some(c) => {
+            out.paints.push([0.0, 0.0, 0.0, f(c.strength)]);
+            out.paints.push([f(c.color[0]), f(c.color[1]), f(c.color[2]), f(c.depth)]);
+        }
+        None => {
+            let e = s.erosion.unwrap_or_default();
+            out.paints.push([f(e.edge), f(e.rim_width), f(e.rim), 0.0]);
+            out.paints.push([f(e.rim_color[0]), f(e.rim_color[1]), f(e.rim_color[2]), 0.0]);
+        }
+    }
     at
 }
 

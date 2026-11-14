@@ -51,6 +51,9 @@ pub const BEAM_TIP: u8 = 4;
 pub const GROUND: u8 = 5;
 pub const LINE: u8 = 6;
 pub const STAGE: u8 = 7;
+/// From the ground under the target, as `GROUND`, but launched along the layer's angle and
+/// spread (an impact thrown up out of the earth) rather than rolling out along the ground.
+pub const GROUND_LAUNCH: u8 = 8;
 
 /// Blending (`Spec::blend`): `NORMAL` paints, `ADD` gives off light (emission 1), `AUTO` is
 /// the style's own mix (`Spec::emissive`), or for layers that set none, light growing with
@@ -161,6 +164,16 @@ pub struct Halo {
 pub struct Outline {
     pub width: f64,
     pub color: [f64; 3],
+}
+
+/// A cartoon shadow side on a crisp shape (hand-drawn effects): where the shape, moved `depth`
+/// of its size toward the light (above, a little to the left), no longer covers it, it is
+/// `color`, `strength` strong; a hard edge, as an animator paints a shadow shape.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cel {
+    pub color: [f64; 3],
+    pub depth: f64,
+    pub strength: f64,
 }
 
 /// How a material particle breaks up over its life: its density is cut at a threshold
@@ -338,6 +351,8 @@ pub struct Spec {
     pub echoes: Option<Echoes>,
     pub halo: Option<Halo>,
     pub outline: Option<Outline>,
+    /// A cartoon shadow side on a crisp shape.
+    pub cel: Option<Cel>,
     /// Streams leave toward the beam's aim (fire breath).
     pub aimed: bool,
     pub rate_param: Option<RateParam>,
@@ -366,6 +381,9 @@ pub struct Spec {
     pub trail: Option<Trail>,
     /// A beam's look (`None`: from its colour stops).
     pub beam_look: Option<BeamLook>,
+    /// Pixel art: particles are whole cells of a grid this many pixels wide, on its lines, in the
+    /// ramp's own colours (0: off).
+    pub grid: f64,
     /// Lightning: forks per arc, and how many ticks each shape holds.
     pub arc_branches: f64,
     pub arc_rhythm: f64,
@@ -443,6 +461,7 @@ impl Default for Spec {
             echoes: None,
             halo: None,
             outline: None,
+            cel: None,
             aimed: false,
             rate_param: None,
             keyed: false,
@@ -457,6 +476,7 @@ impl Default for Spec {
             ease: 0.0,
             trail: None,
             beam_look: None,
+            grid: 0.0,
             arc_branches: 0.0,
             arc_rhythm: 2.0,
         }

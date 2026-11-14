@@ -144,3 +144,30 @@ fn paint_covers_and_light_adds_on_any_background() {
     assert_eq!(draw(None, 1.0), [255, 128, 0, 0]);
     assert_eq!(draw(None, 0.0), [255, 128, 0, 255]);
 }
+
+/// A cartoon shadow side (`Cel`) on a crisp shape: the side away from the light (below, a little to the right in the
+/// world, however the shape is turned) takes the shadow colour with a hard edge; the side toward it keeps its own.
+#[test]
+fn a_cartoon_shadow_darkens_the_side_away_from_the_light() {
+    use styk_draw::*;
+    for rotation in [0.0f32, 2.0] {
+        let paints = vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 0.0], [0.0; 4], [0.0, 0.0, 0.0, 1.0], [0.2, 0.4, 0.6, 0.3]];
+        let prims = vec![
+            Prim { kind: K_FILL_VIEW, group: 0, color: argb8(0xffffffff), paint: NO_PAINT, a: [0.0; 4], b: [0.0; 4], c: [0.0; 4] },
+            Prim { kind: particle_kind(P_DISC), group: 0, color: 0, paint: 0, a: [32.0, 32.0, 24.0, rotation], b: [0.0; 4], c: [1.0, 0.8, 0.2, 1.0] },
+        ];
+        let list = DrawList { prims, paints, groups: vec![Group { parent: 0, depth: 0, opacity: 1.0, bounds: [0.0; 4], layer: NO_LAYER }], passes: vec![Pass { depth: 0, start: 0, end: 2 }], background_prims: 1, ..Default::default() };
+        let (cpu, gpu) = both(&list, [64, 64]);
+        let at = |pixels: &[u8], x: usize, y: usize| [pixels[(y * 64 + x) * 4], pixels[(y * 64 + x) * 4 + 1], pixels[(y * 64 + x) * 4 + 2]];
+        for (who, pixels) in std::iter::once(("CPU", &cpu)).chain(gpu.as_ref().map(|g| ("GPU", g))) {
+            // Toward the light (up and left of the centre): the shape's own colour.
+            assert_eq!(at(pixels, 26, 20), [255, 204, 51], "{who}, rotation {rotation}");
+            // Away from it, inside the edge: the shadow colour.
+            assert_eq!(at(pixels, 40, 50), [51, 102, 153], "{who}, rotation {rotation}");
+        }
+        if let Some(gpu) = gpu {
+            let (mean, strong) = difference(&gpu, &cpu, 32);
+            assert!(mean < 0.6 && strong < 0.01, "GPU and CPU differ by {mean:.3} levels, {:.2} % by more than 32", strong * 100.0);
+        }
+    }
+}

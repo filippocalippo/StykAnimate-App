@@ -84,8 +84,11 @@ pub fn window_depth(z: f32, z_min: f32, range: f32) -> f32 {
 /// world (`x' = m0·x + m2·y + tx`, `y' = m1·x + m3·y + ty`, a movieclip's placement for
 /// effects nested in one, `s` = √|det|) and how much a material's light shades it, then
 /// `[softness, stretch, aspect, outline width]` (the width in local units, 0 for none),
-/// the outline's straight RGBA, `[erosion edge, rim width, rim amount, 0]` and the rim's
-/// colour. The particle's shape is [`particle_shape`] (`P_*`); `a` = (x, y, size,
+/// the outline's straight RGBA, `[erosion edge, rim width, rim amount, shadow amount]` and
+/// `[rim or shadow colour, shadow depth]`: a material's rim where it erodes, or a crisp
+/// shape's cartoon shadow side (where the shape moved `depth` of its size toward the light,
+/// up and a little left in the world, does not cover it; a shadow amount of 0 is none).
+/// The particle's shape is [`particle_shape`] (`P_*`); `a` = (x, y, size,
 /// rotation), `b` = (vx, vy, emission, erosion), `c` = straight RGBA in floats (its colour
 /// and opacity), `color` = a material particle's cell (`material << 4 | variant`) or a
 /// shape's seed. Emission 0 paints; 1 adds light (the record's premultiplied colour keeps

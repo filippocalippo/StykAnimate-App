@@ -254,7 +254,7 @@ impl<'a> Evaluator<'a> {
                 px = ax + cs * er;
                 py = ay + sn * er * sq;
             }
-            GROUND => {
+            GROUND | GROUND_LAUNCH => {
                 px = ax + (h3 - 0.5) * 2.0 * er;
                 py = r[row::GROUND] as f64 - 3.0;
             }
@@ -560,7 +560,14 @@ impl<'a> Evaluator<'a> {
             _ => (hash(n, 20, seed) * 65536.0) as u32,
         };
         let size = size.max(0.0);
-        let x = if s.color_mode > 0.5 { hash(n, 16, seed) } else { an };
+        let mut x = if s.color_mode > 0.5 { hash(n, 16, seed) } else { an };
+        // Pixel art: whole cells of the grid, on its lines, in the ramp's own colours.
+        let (px, py, size) = if s.grid > 0.0 {
+            x = (x * (COLOR_STOPS - 1) as f64).round() / (COLOR_STOPS - 1) as f64;
+            snap(px, py, size, s.grid)
+        } else {
+            (px, py, size)
+        };
         let (rgb, stop_alpha) = color_at(s, x);
         let rgb = vary(rgb, s.hue_jitter, s.value_jitter, hash(n, 24, seed), hash(n, 25, seed));
         alpha = (alpha * stop_alpha).min(1.0);
@@ -633,6 +640,15 @@ pub fn vary(rgb: [f64; 3], hue: f64, value: f64, h1: f64, h2: f64) -> [f64; 3] {
         c = c.map(|x| clamp(x * v, 0.0, 1.0));
     }
     c
+}
+
+/// A square of half-size `size` at (`x`, `y`) on a grid of `cell`: a whole number of cells wide
+/// (none when it is much smaller than one), its corner on the grid's lines.
+fn snap(x: f64, y: f64, size: f64, cell: f64) -> (f64, f64, f64) {
+    let cells = (2.0 * size / cell).round();
+    let cells = if cells >= 1.0 { cells } else if 2.0 * size > 0.35 * cell { 1.0 } else { 0.0 };
+    let half = cells * cell * 0.5;
+    (((x - half) / cell).round() * cell + half, ((y - half) / cell).round() * cell + half, half)
 }
 
 /// A point in the unit disc for particle `n` (squashed vertically by `sq`).
@@ -744,10 +760,11 @@ pub fn arcs(batch: &Batch, draw: &Draw) -> Vec<ArcPiece> {
     }
     let segs = (s.arc_segs.max(1.0)) as u32;
     let count = (draw.count / segs.max(1)).max(1);
-    let a = draw.point;
-    let b = beam_tip(draw, s, te);
-    let len = fm::hypot(b[0] - a[0], b[1] - a[1]);
-    if len < 2.0 {
+    // Along the beam, or (an `EMIT_RING` layer) out from the point (an explosion's own) to around its ring.
+    let radial = s.emit_shape == EMIT_RING;
+    let a = if radial { s.fixed.unwrap_or(draw.point) } else { draw.point };
+    let tip = beam_tip(draw, s, te);
+    if !radial && fm::hypot(tip[0] - a[0], tip[1] - a[1]) < 2.0 {
         return out;
     }
     let rhythm = s.arc_rhythm.max(draw.step).max(1.0);
@@ -756,6 +773,18 @@ pub fn arcs(batch: &Batch, draw: &Draw) -> Vec<ArcPiece> {
     for arc in 0..count {
         let key = pcg(draw.seed.wrapping_add(arc.wrapping_mul(7919)).wrapping_add(int32(period).wrapping_mul(104729)));
         if hash(arc as f64, 99, key) < 0.2 {
+            continue;
+        }
+        // A radial arc strikes from the point to somewhere around it, a new place each strike.
+        let b = if radial {
+            let (sn, cs) = fm::sin_cos(hash(arc as f64, 95, key) * TAU);
+            let reach = s.emit_radius * (0.55 + 0.45 * hash(arc as f64, 94, key));
+            [a[0] + cs * reach, a[1] + sn * reach]
+        } else {
+            tip
+        };
+        let len = fm::hypot(b[0] - a[0], b[1] - a[1]);
+        if len < 2.0 {
             continue;
         }
         let amp = s.arc_amp * (0.6 + 0.8 * hash(arc as f64, 98, key));

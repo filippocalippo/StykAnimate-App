@@ -478,3 +478,122 @@ fn batch_bounds_hold_every_live_particle() {
     }
     assert!(checked > 1000, "only {checked} particles checked ({empty} empty batches)");
 }
+
+/// The records a batch draws (particles, their trails and halos, arc pieces) and whether the list says it was reduced.
+fn drawn_records(prepared: &Prepared, tick: f64, batch: &Batch) -> (usize, bool) {
+    let frame = prepared.evaluate(tick);
+    let scene = styk_eval::geometry::build(&prepared.doc, &frame);
+    let assets = styk_eval::assets::Assets::build(&prepared.doc);
+    let list = styk_eval::drawlist::encode_with(&prepared.doc, &assets, &scene, &styk_eval::drawlist::Overrides { generators: Some(batch), ..Default::default() });
+    (list.prims.iter().filter(|p| p.kind & 255 == styk_draw::K_PARTICLE).count(), styk_draw::effects_reduced(&list))
+}
+
+/// Every style of a type, retired ones included, compiles and draws, within the limits, at its defaults and at the
+/// least and the most of its main controls. `settings`: (name, least, most); something must be drawn at the first of
+/// `ticks`, and nothing beyond the limits at any.
+fn every_style_draws_within_limits(kind: &str, styles: usize, settings: &[(&str, &str, &str)], ticks: &[f64]) {
+    for style in 0..styles {
+        for (label, which) in [("defaults", None), ("least", Some(false)), ("most", Some(true))] {
+            let mut clip = Clip::new(Some(1), kind).set("style", &style.to_string()).timed(0.0, Some(40.0));
+            if let Some(most) = which {
+                for (name, least, max) in settings {
+                    clip = clip.set(name, if most { max } else { least });
+                }
+            }
+            let prepared = Stage::new(80.0).clip(clip).prepare();
+            for &tick in ticks {
+                let Some(batch) = batch_at(&prepared, tick) else {
+                    assert!(tick > ticks[0], "{kind} style {style} ({label}) draws at tick {tick}");
+                    continue;
+                };
+                let alive = live(&batch);
+                let arcs: usize = batch.draws.iter().filter(|d| batch.spec(d).shape == styk_eval::vfx::generated::layers::ARC).map(|d| particle::arcs(&batch, d).len()).sum();
+                assert!(tick > ticks[0] || !alive.is_empty() || arcs > 0, "{kind} style {style} ({label}): nothing alive at tick {tick}");
+                for (_, _, p) in &alive {
+                    assert!(p.x.is_finite() && p.y.is_finite() && p.size >= 0.0 && p.rgba[3] > 0.0, "{kind} style {style} ({label}) tick {tick}: {p:?}");
+                }
+                let (records, _) = drawn_records(&prepared, tick, &batch);
+                assert!(records as f64 <= generated::MAX_DRAWN * 1.05, "{kind} style {style} ({label}) tick {tick}: {records} records");
+                if which.is_none() {
+                    // At its defaults an effect is far inside the limits: a few thousand records at most.
+                    assert!(records < 4_000 && !batch.reduced, "{kind} style {style} at its defaults: {records} records at tick {tick}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn every_explosion_style_draws_within_limits() {
+    let settings = [("size", "0.2", "5"), ("intensity", "0", "3"), ("density", "0.1", "4"), ("debris", "0", "4"), ("smoke", "0", "4")];
+    every_style_draws_within_limits("explosion", 10, &settings, &[2.0, 12.0, 30.0]);
+}
+
+#[test]
+fn every_smoke_style_draws_within_limits() {
+    // The amount and the opacity stay at their defaults at the least: none of either draws nothing, as it should.
+    let settings = [("size", "2", "400"), ("life", "4", "400"), ("growth", "0.2", "8"), ("rise", "-6", "12"), ("turbulence", "0", "4"), ("spread", "0", "2000")];
+    every_style_draws_within_limits("smoke", 5, &settings, &[3.0, 30.0]);
+}
+
+/// An impact in the earth (Explosion Dust) is thrown up out of the ground under the target, not out of its middle.
+#[test]
+fn ground_launched_layers_burst_up_from_the_ground() {
+    let clip = Clip::new(Some(1), "explosion").set("style", "8").set("dust", "off").set("smoke", "0").set("debris", "0").set("sparks", "off").set("ring", "off").timed(0.0, Some(20.0));
+    let prepared = Stage::new(40.0).clip(clip).prepare();
+    let at = |tick: f64| {
+        let batch = batch_at(&prepared, tick).unwrap();
+        let ground = batch.draws[0].ground;
+        (live(&batch).iter().map(|(_, _, p)| p.y).collect::<Vec<f64>>(), ground)
+    };
+    let (born, ground) = at(0.5);
+    assert!(ground > HIP[1] + 60.0, "the ground is under the feet: {ground}");
+    assert!(!born.is_empty() && born.iter().all(|&y| (y - ground).abs() < 12.0), "born on the ground at {ground}: {born:?}");
+    let (later, _) = at(8.0);
+    let risen = later.iter().filter(|&&y| y < ground - 50.0).count();
+    assert!(risen * 2 > later.len(), "{risen} of {} thrown up above the ground", later.len());
+}
+
+/// An electric explosion's lightning strikes out from where it went off to around it, somewhere new on each strike.
+#[test]
+fn explosion_lightning_strikes_out_from_its_centre() {
+    let clip = Clip::new(Some(1), "explosion").set("style", "6").timed(0.0, Some(20.0));
+    let prepared = Stage::new(40.0).clip(clip).prepare();
+    let strikes = |tick: f64| {
+        let batch = batch_at(&prepared, tick).unwrap();
+        let draw = batch.draws.iter().find(|d| batch.spec(d).shape == styk_eval::vfx::generated::layers::ARC).expect("an arc layer").clone();
+        let s = batch.spec(&draw).clone();
+        (particle::arcs(&batch, &draw), s.fixed.unwrap(), s.emit_radius)
+    };
+    let (pieces, centre, reach) = strikes(2.0);
+    let starts: Vec<_> = pieces.iter().filter(|p| p.start && ((p.p0[0] - centre[0]).hypot(p.p0[1] - centre[1]) < 1e-6)).collect();
+    assert!(starts.len() >= 2, "arcs start at the explosion's centre: {} of {} pieces", starts.len(), pieces.len());
+    for p in &pieces {
+        let far = (p.p1[0] - centre[0]).hypot(p.p1[1] - centre[1]);
+        assert!(far < reach * 1.6, "within its reach: {far} of {reach}");
+    }
+    let (again, _, _) = strikes(5.0);
+    assert_ne!(pieces.iter().map(|p| (p.p1[0] as i64, p.p1[1] as i64)).collect::<Vec<_>>(), again.iter().map(|p| (p.p1[0] as i64, p.p1[1] as i64)).collect::<Vec<_>>(), "struck somewhere new");
+}
+
+/// Pixel art: every particle of the Pixel explosion is a whole number of grid cells wide, on the grid's lines.
+#[test]
+fn pixel_particles_sit_on_their_grid() {
+    for size in ["1", "1.7"] {
+        let clip = Clip::new(Some(1), "explosion").set("style", "9").set("size", size).timed(0.0, Some(20.0));
+        let prepared = Stage::new(40.0).clip(clip).prepare();
+        let mut checked = 0;
+        for tick in [1.0, 5.0, 11.0] {
+            let batch = batch_at(&prepared, tick).unwrap();
+            for (d, _, p) in live(&batch) {
+                let cell = batch.spec(&batch.draws[d]).grid;
+                assert!(cell >= 2.0, "a grid");
+                let (cells, corner) = (2.0 * p.size / cell, ((p.x - p.size) / cell, (p.y - p.size) / cell));
+                let whole = |v: f64| (v - v.round()).abs() < 1e-6;
+                assert!(whole(cells) && whole(corner.0) && whole(corner.1), "size {size} tick {tick}: {} at ({}, {}) on a grid of {cell}", p.size, p.x, p.y);
+                checked += 1;
+            }
+        }
+        assert!(checked > 30, "{checked} particles checked");
+    }
+}

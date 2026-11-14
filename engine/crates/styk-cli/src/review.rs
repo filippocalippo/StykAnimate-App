@@ -8,7 +8,7 @@
 //!     --start <tick>            the clip's start (default 0); --duration <ticks|none> its length
 //!     --motion <still|walk|arms|run|vanish|loop>   what the stick figure does (default still)
 //!     --scene                   the effect on the scene instead of the figure (at --set x/y)
-//!     --backgrounds <white,dark,…>  colours: white, dark, grey, sky or 0xRRGGBB (default white,dark)
+//!     --backgrounds <white,dark,…>  colours: white, dark, grey, sky or 0xRRGGBB, or picture: a mid-tone landscape (default white,dark)
 //!     --zooms <1,4>             the zooms shown, 1 = one canvas pixel per screen pixel (default 1,4)
 //!     --focus <x,y>             the canvas point zoomed views centre on (default: where the effect is)
 //!     --cell <WxH>              one picture's size (default 400x300)
@@ -57,6 +57,8 @@ fn background(name: &str) -> Option<(String, u32)> {
         "dark" => 0xff14161c,
         "grey" | "gray" => 0xff8a8d93,
         "sky" => 0xff9fc8ec,
+        // A mid-tone landscape (`picture`); the colour only decides the figure's ink.
+        "picture" => 0xff7f8082,
         hex => 0xff000000 | u32::from_str_radix(hex.trim_start_matches("0x").trim_start_matches('#'), 16).ok()?,
     };
     Some((name.to_string(), argb))
@@ -181,7 +183,7 @@ fn style_of(r: &Request) -> Result<(&'static str, usize, String), String> {
 }
 
 /// The review document: one stick figure doing `r.motion`, one clip of the effect.
-fn stage(r: &Request, background: u32) -> Result<Stage, String> {
+fn stage(r: &Request, background: &(String, u32)) -> Result<Stage, String> {
     let (param, index, _) = style_of(r)?;
     let motion = Motion::parse(&r.motion).ok_or_else(|| format!("unknown motion {:?}: still, walk, run, arms or vanish", r.motion))?;
     let last = r.ticks.iter().copied().fold(0.0f64, f64::max).max(r.until.unwrap_or(0.0)) + 2.0;
@@ -190,12 +192,15 @@ fn stage(r: &Request, background: u32) -> Result<Stage, String> {
         clip = clip.set(k, v);
     }
     let mut stage = Stage::new(last).clip(clip);
-    stage.background = background;
+    stage.background = background.1;
+    if background.0 == "picture" {
+        stage.picture = Some(picture());
+    }
     stage.figures[0].motion = motion;
     Ok(stage)
 }
 
-fn prepared(r: &Request, background: u32) -> Result<Prepared, String> {
+fn prepared(r: &Request, background: &(String, u32)) -> Result<Prepared, String> {
     let json = stage(r, background)?.json();
     let doc = styk_eval::open_bytes(json.as_bytes(), "json", "vfx review").map_err(|e| e.to_string())?;
     Ok(styk_eval::prepare(doc))
@@ -408,12 +413,12 @@ fn review(args: &[String]) -> Result<(), String> {
     let started = Instant::now();
     let (_, _, style) = style_of(&r)?;
     if let Some(path) = &r.save {
-        std::fs::write(path, stage(&r, r.backgrounds[0].1)?.json()).map_err(|e| format!("{path}: {e}"))?;
+        std::fs::write(path, stage(&r, &r.backgrounds[0])?.json()).map_err(|e| format!("{path}: {e}"))?;
     }
     let centre = focus(&r);
     if let Some(folder) = &r.seq {
         std::fs::create_dir_all(folder).map_err(|e| format!("{folder}: {e}"))?;
-        let p = prepared(&r, r.backgrounds[0].1)?;
+        let p = prepared(&r, &r.backgrounds[0])?;
         let assets = styk_eval::assets::Assets::build(&p.doc);
         let mut painter = Painter::new(&p, &assets, r.cpu)?;
         let zoom = r.zooms[0];
@@ -436,8 +441,9 @@ fn review(args: &[String]) -> Result<(), String> {
     let mut sheet = Sheet::new(width, height, [40, 41, 46]);
     let sets = r.sets.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ");
     let mut painter_name = String::new();
-    for (b, (bg_name, argb)) in r.backgrounds.iter().enumerate() {
-        let p = prepared(&r, *argb)?;
+    for (b, bg) in r.backgrounds.iter().enumerate() {
+        let (bg_name, _) = bg;
+        let p = prepared(&r, bg)?;
         let assets = styk_eval::assets::Assets::build(&p.doc);
         let mut painter = Painter::new(&p, &assets, r.cpu)?;
         painter_name = painter.name();
@@ -518,4 +524,52 @@ fn shapes(args: &[String]) -> Result<(), String> {
     sheet.save(&out)?;
     println!("{cells} shapes and materials at sizes {sizes:?} → {out} ({:.1} s)", started.elapsed().as_secs_f64());
     Ok(())
+}
+
+/// The `picture` background: a mid-tone landscape of the stage's size (a hazy sky with clouds, hills, a textured
+/// field and a path), as a PNG data URL. Effects must read over a picture as well as over flat colours.
+fn picture() -> String {
+    let (w, h) = (CANVAS[0] as u32, CANVAS[1] as u32);
+    let hash = |x: i32, y: i32| -> f64 {
+        let mut v = (x as u32).wrapping_mul(374761393) ^ (y as u32).wrapping_mul(668265263);
+        v = (v ^ (v >> 13)).wrapping_mul(1274126177);
+        ((v ^ (v >> 16)) & 0xffff) as f64 / 65535.0
+    };
+    let noise = |x: f64, y: f64| -> f64 {
+        let (xi, yi) = (x.floor(), y.floor());
+        let (fx, fy) = (x - xi, y - yi);
+        let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+        let at = |dx: i32, dy: i32| hash(xi as i32 + dx, yi as i32 + dy);
+        let top = at(0, 0) + (at(1, 0) - at(0, 0)) * sx;
+        let bottom = at(0, 1) + (at(1, 1) - at(0, 1)) * sx;
+        top + (bottom - top) * sy
+    };
+    let fbm = |x: f64, y: f64| (0..4).map(|o| noise(x * (1 << o) as f64, y * (1 << o) as f64) / (1 << o) as f64).sum::<f64>() / 1.875;
+    let mix = |a: [f64; 3], b: [f64; 3], t: f64| [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t.clamp(0.0, 1.0));
+    let mut pixels = Vec::with_capacity((w * h * 3) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f64, y as f64);
+            let hills = 205.0 + 22.0 * (fx * 0.011).sin() + 12.0 * (fx * 0.027 + 1.3).sin();
+            let c = if fy < hills {
+                let sky = mix([112.0, 140.0, 168.0], [178.0, 182.0, 172.0], fy / hills);
+                let cloud = ((fbm(fx * 0.012, fy * 0.03) - 0.52) * 3.0).clamp(0.0, 1.0) * (1.0 - fy / hills);
+                mix(sky, [214.0, 216.0, 214.0], cloud)
+            } else if fy < hills + 40.0 {
+                mix([92.0, 108.0, 100.0], [104.0, 116.0, 84.0], (fy - hills) / 40.0)
+            } else {
+                let field = mix([116.0, 122.0, 78.0], [84.0, 90.0, 58.0], (fy - hills - 40.0) / 160.0);
+                let grain = fbm(fx * 0.08, fy * 0.2) - 0.5;
+                let path = (1.0 - ((fx - 320.0 - (fy - 300.0) * 0.6).abs() / (30.0 + (fy - 245.0) * 0.5)).clamp(0.0, 1.0)) * 0.8;
+                mix(field.map(|v| v * (1.0 + grain * 0.35)), [150.0, 134.0, 108.0], path)
+            };
+            pixels.extend(c.map(|v| v.round().clamp(0.0, 255.0) as u8));
+        }
+    }
+    let mut png = Vec::new();
+    use image::ImageEncoder;
+    image::codecs::png::PngEncoder::new(&mut png).write_image(&pixels, w, h, image::ExtendedColorType::Rgb8).expect("a PNG in memory");
+    let mut out = b"data:image/png;base64,".to_vec();
+    styk_doc::json::base64_into(&png, &mut out);
+    String::from_utf8(out).expect("base64 is ASCII")
 }

@@ -1,4 +1,4 @@
-//! Smoke: puffs that rise, drift and billow.
+//! Smoke: a soft plume, cartoon puffs, dust kicked up from the ground.
 
 use super::*;
 use crate::vfx::registry::{DrawLayer, Emission, Smoke};
@@ -14,45 +14,30 @@ struct SmokeLook {
     rise: f64,
     life: f64,
     shade: Option<f64>,
-    toon: bool,
     ground: bool,
 }
 
 /// Soft, thick, steam, cartoon and ground dust (`SMOKES`).
 const SMOKES: [SmokeLook; 5] = [
-    SmokeLook { alpha: 0.45, rate: 1.0, size: 1.0, rise: 1.0, life: 1.0, shade: None, toon: false, ground: false },
-    SmokeLook { alpha: 0.85, rate: 1.4, size: 1.2, rise: 0.8, life: 1.1, shade: None, toon: false, ground: false },
-    SmokeLook { alpha: 0.16, rate: 0.6, size: 0.8, rise: 1.7, life: 0.6, shade: Some(0.35), toon: false, ground: false },
-    SmokeLook { alpha: 1.0, rate: 0.7, size: 1.0, rise: 1.0, life: 0.8, shade: None, toon: true, ground: false },
-    SmokeLook { alpha: 0.6, rate: 1.0, size: 1.1, rise: 0.25, life: 0.9, shade: None, toon: false, ground: true },
+    SmokeLook { alpha: 0.45, rate: 1.0, size: 1.0, rise: 1.0, life: 1.0, shade: None, ground: false },
+    SmokeLook { alpha: 0.85, rate: 1.4, size: 1.2, rise: 0.8, life: 1.1, shade: None, ground: false },
+    SmokeLook { alpha: 0.16, rate: 0.6, size: 0.8, rise: 1.7, life: 0.6, shade: Some(0.35), ground: false },
+    SmokeLook { alpha: 1.0, rate: 0.7, size: 1.0, rise: 1.0, life: 0.8, shade: None, ground: false },
+    SmokeLook { alpha: 0.6, rate: 1.0, size: 1.1, rise: 0.25, life: 0.9, shade: None, ground: true },
 ];
-
-fn smoke_stops(style: usize, c: [f64; 3]) -> Ramp {
-    match style {
-        1 => stops(&[(tone(c, 0.15, WHITE), 1.0), (c, 1.0), (tone(c, 0.35, BLACK), 1.0)]),
-        2 => stops_with(&[(tone(c, 0.6, WHITE), 1.0, 1.0), (tone(c, 0.4, WHITE), 1.0, 0.8)]),
-        3 => stops(&[(tone(c, 0.25, WHITE), 1.0), (c, 1.0)]),
-        4 => stops(&[(tone(c, 0.2, WHITE), 1.0), (c, 1.0)]),
-        _ => stops_with(&[(tone(c, 0.2, WHITE), 1.0, 0.9), (c, 1.0, 1.0), (c, 1.0, 0.7)]),
-    }
-}
 
 pub(super) fn smoke(p: &Smoke, ctx: &Context) -> Vec<Spec> {
     let col = paint_color(&p.color);
     // Thick and Steam are retired into Soft: drawn as Soft with their opacity, amount, size, rise, life and shading.
     let style = (p.style.index() as usize).min(SMOKES.len() - 1);
     let look = &SMOKES[style];
-    let soft = style <= 2;
     let ground = look.ground && !ctx.scene;
     let burst = p.emission == Emission::Burst;
     let size = p.size * look.size;
-    let t = p.turbulence;
-    let drag = 0.04;
     let rise = p.rise * look.rise;
     let life = p.life * look.life;
-    // Its direction: the way it rises (up by default), the wind across it.
+    // Its direction: the way it rises (up by default); the wind across it.
     let dir = p.direction.to_radians();
-    let (dy, dx) = super::super::fastmath::sin_cos(dir);
     let base = Spec {
         placement: behind(p.layer == DrawLayer::Behind),
         start: ctx.start,
@@ -67,61 +52,157 @@ pub(super) fn smoke(p: &Smoke, ctx: &Context) -> Vec<Spec> {
         emit_shape: if ground { GROUND } else { POINT },
         emit_radius: p.spread,
         angle: if rise >= 0.0 { dir } else { dir + std::f64::consts::PI },
-        spread: if ground { 0.0 } else { 0.6 },
-        speed_min: if ground { 1.0 + 0.5 * size / 24.0 } else { (rise.abs() * 0.6).max(0.0) },
-        speed_max: if ground { 2.5 + size / 24.0 } else { (rise.abs() * if soft { 1.8 } else { 1.3 }).max(0.0) },
-        // Drag settles puffs at the rise and wind speeds: constant forces over drag.
-        drag,
-        gravity: rise * drag * dy,
-        wind: p.wind * drag + rise * drag * dx,
         collide: if ground { 1.0 } else { 0.0 },
-        curl: 16.0 * t * (size / 24.0).sqrt(),
-        curl_scale: 0.3 / size.max(4.0),
         clip_fade_in: if ctx.timed && !burst { 6.0 } else { 0.0 },
         clip_fade_out: if ctx.timed && !burst { 10.0 } else { 0.0 },
         blend: NORMAL,
         ..Spec::default()
     };
-    if !soft {
-        // Cartoon and dust, not restyled yet.
-        return vec![layer(
-            Spec {
-                material: m(if look.toon { "cloud" } else { "smoke" }),
-                rotate: if look.toon { ROTATE_FIXED } else { ROTATE_UPRIGHT },
-                size_mode: if look.toon { GROW_POP } else { GROW_PUFF },
-                size0: size * 0.45,
-                size1: size * p.growth,
-                size_jitter: 0.35,
-                shade: look.shade.unwrap_or(1.0) * p.shading,
-                alpha: look.alpha * p.opacity,
-                fade_in: if look.toon { 0.0 } else { 0.12 },
-                fade_out: if look.toon { 0.0 } else { 0.6 },
-                outline: look.toon.then(|| Outline { width: (size / 12.0).max(1.2), color: ink(col) }),
-                ..base
-            },
-            smoke_stops(style, col),
-        )];
+    let flow = Flow::new(p, rise, size, dir);
+    match style {
+        3 => cartoon_puffs(p, &base, &flow, col, size),
+        4 => ground_dust(p, &base, &flow, col, size, ground),
+        _ => soft_plume(p, look, &base, &flow, col, size),
     }
-    // Soft: puffs that billow out fast and slow down, lit from above, thinning and breaking up
-    // softly as they rise; lighter where they are born, a little darker as they go.
+}
+
+/// More puffs alive at once than `cap` would only be thinned by the area a frame may cover: the emission (`rate`
+/// per unit of amount) is held to `cap` alive and each puff is that much denser instead, so more smoke still reads as
+/// thicker smoke. The factors for the rate and the opacity.
+fn crowd(p: &Smoke, base: &Spec, rate: f64, cap: f64) -> (f64, f64) {
+    let alive = rate * p.amount * base.life_max;
+    if base.emit_dur <= 0.0 || alive <= cap {
+        return (1.0, 1.0);
+    }
+    let k = alive / cap;
+    (1.0 / k, k.sqrt())
+}
+
+/// How smoke moves: it leaves its source fast (a buoyant jet) and settles, slowed by drag, to
+/// climbing along its direction with the wind across it; the jet and the climb scale with the rise,
+/// the swirl with the turbulence and the puff size.
+struct Flow {
+    /// Puffs larger than 64 pixels come fewer and swell less (1 below): huge puffs fill the frame with a few of them,
+    /// and stay within the area a frame may cover instead of being thinned away.
+    big: f64,
+    dir: f64,
+    rise: f64,
+    wind: f64,
+    curl: f64,
+    curl_scale: f64,
+}
+
+impl Flow {
+    fn new(p: &Smoke, rise: f64, size: f64, dir: f64) -> Flow {
+        Flow { big: (64.0 / size.max(1.0)).min(1.0), dir, rise, wind: p.wind, curl: p.turbulence * (size / 24.0).sqrt(), curl_scale: 1.0 / size.max(4.0) }
+    }
+
+    /// `s` moving so: leaving at `jet` times the rise, settling at `drag` to climbing at `climb`
+    /// times it, swirling by `curl` (times the turbulence) at `curl_scale` (over the puff size).
+    fn moving(&self, s: Spec, jet: f64, climb: f64, drag: f64, curl: f64, curl_scale: f64) -> Spec {
+        let (dy, dx) = super::super::fastmath::sin_cos(self.dir);
+        let c = climb * self.rise;
+        Spec {
+            speed_min: jet * self.rise.abs() * 0.75,
+            speed_max: jet * self.rise.abs() * 1.25,
+            drag,
+            gravity: c * drag * dy,
+            wind: self.wind * drag + c * drag * dx,
+            curl: curl * self.curl,
+            curl_scale: curl_scale * self.curl_scale,
+            ..s
+        }
+    }
+}
+
+/// Soft: a plume. Small dense puffs leave the source fast, slow to a steady climb as they take in
+/// air, widen, tumble in the flow and thin out, eroding into wisps at the top; the wind leans it.
+/// Lit from above, a little lighter where it is born. One frame shows the column (narrow and dense
+/// at its source, wide and ragged at its top); the frames show it climbing.
+fn soft_plume(p: &Smoke, look: &SmokeLook, base: &Spec, flow: &Flow, col: [f64; 3], size: f64) -> Vec<Spec> {
     let colors = paint_or(&p.color, stops_with(&[(tone(col, 0.22, WHITE), 1.0, 1.0), (col, 1.0, 1.0), (tone(tone(col, 0.12, BLACK), 0.15, [0.5, 0.5, 0.5]), 1.0, 1.0)]));
     let g = p.growth.max(0.2);
-    vec![layer(
-        Spec {
-            material: m("smoke"),
-            rotate: ROTATE_UPRIGHT,
-            spin: 0.006,
-            spin_jitter: 1.0,
-            size0: size,
-            size_over_life: Some(Curve::three(0.45, 0.5, 0.45 + (g - 0.45) * 0.5, g)),
-            size_jitter: 0.3,
-            erosion: Some(Erosion { from: 0.0, to: 0.5, power: 1.3, edge: 0.5, ..Default::default() }),
-            alpha: ((look.alpha / 0.45) * 0.62).min(1.0) * p.opacity,
-            alpha_over_life: Some(Curve::four(0.0, 0.15, 1.0, 0.5, 0.75, 0.0)),
-            shade: look.shade.map_or(0.55, |s| s * 1.1).min(1.0) * p.shading,
-            value_jitter: 0.06,
-            ..base
-        },
-        colors,
-    )]
+    // Thicker looks (the retired Thick) stay denser at the top; thinner ones (Steam) fade sooner.
+    let thick = (look.alpha / 0.45).min(2.0);
+    let (birth, end) = (0.5, 0.5 + 0.75 * g * flow.big.sqrt());
+    let (fewer, denser) = crowd(p, base, base.rate * 0.6 * flow.big, 220.0);
+    let puffs = Spec {
+        rate: base.rate * 0.6 * flow.big * fewer,
+        spread: 0.6,
+        material: m("smoke"),
+        rotate: ROTATE_UPRIGHT,
+        size0: size,
+        // Born small at the source, widening with the height it climbs.
+        size_over_life: Some(Curve::three(birth, 0.35, birth + (end - birth) * 0.45, end)),
+        size_jitter: 0.35,
+        erosion: Some(Erosion { from: 0.18, to: 0.62, power: 1.5, edge: 0.35, ..Default::default() }),
+        alpha: (0.6 * thick * denser).min(1.0) * p.opacity,
+        // Dense at the source; the wide puffs at the top overlap many times, so each is fainter.
+        alpha_over_life: Some(Curve::four(0.0, 0.05, 1.0, 0.45, 0.4 * thick.min(1.4), 0.0)),
+        shade: look.shade.map_or(0.45, |s| s * 1.1).min(1.0) * p.shading,
+        value_jitter: 0.06,
+        ..base.clone()
+    };
+    vec![layer(flow.moving(puffs, 3.6, 2.2, 0.05, 26.0, 0.35), colors)]
+}
+
+/// Cartoon: smoke as an effects animator draws it. Round puffs pop out of the source, roll up
+/// growing, each painted flat with a shadow side and an ink line, and shrink away at the top; few of
+/// them, strong shapes; its style brings twos.
+fn cartoon_puffs(p: &Smoke, base: &Spec, flow: &Flow, col: [f64; 3], size: f64) -> Vec<Spec> {
+    let g = p.growth.max(0.2);
+    let line = ink(col);
+    let light = tone(col, 0.35, WHITE);
+    let shade = tone(tone(col, 0.3, BLACK), 0.25, [0.35, 0.3, 0.5]);
+    let colors = paint_or(&p.color, stops(&[(light, 1.0), (tone(col, 0.15, WHITE), 1.0), (col, 1.0)]));
+    let big = 0.6 + 0.4 * g * flow.big.sqrt();
+    let (fewer, _) = crowd(p, base, base.rate * 0.15 * flow.big, 60.0);
+    let puffs = Spec {
+        rate: base.rate * 0.15 * flow.big * fewer,
+        spread: 0.5,
+        shape: DISC,
+        softness: 0.0,
+        stretch: 0.0,
+        size0: size * 0.55,
+        size_over_life: Some(Curve::four(0.3, 0.1, 1.0, 0.7, big, 0.0)),
+        size_jitter: 0.3,
+        alpha: p.opacity,
+        fade_in: 0.0,
+        fade_out: 0.0,
+        outline: Some(Outline { width: (size * 0.09).clamp(1.2, 6.0), color: line }),
+        cel: Some(Cel { color: shade, depth: 0.3, strength: p.shading }),
+        ..base.clone()
+    };
+    vec![layer(flow.moving(puffs, 4.0, 3.0, 0.06, 8.0, 0.3), colors)]
+}
+
+/// Dust: kicked up from the ground under the target (or, on the scene, from its point). Billows
+/// roll out along the ground both ways, slowing, swelling and rising a little as they settle into a
+/// haze. Earthy, lit from above.
+fn ground_dust(p: &Smoke, base: &Spec, flow: &Flow, col: [f64; 3], size: f64, ground: bool) -> Vec<Spec> {
+    let g = p.growth.max(0.2);
+    let colors = paint_or(&p.color, stops(&[(tone(col, 0.3, WHITE), 1.0), (col, 1.0), (tone(col, 0.15, BLACK), 1.0)]));
+    let (birth, end) = (0.45, 0.4 + 0.6 * g * flow.big.sqrt());
+    // Along the ground the jet is sideways (the ground emitter throws both ways); on the scene, out from its point.
+    let roll = (2.0 + size / 16.0) * 1.4;
+    let (fewer, denser) = crowd(p, base, base.rate * 0.6 * flow.big, 220.0);
+    let billows = Spec {
+        rate: base.rate * 0.6 * flow.big * fewer,
+        spread: if ground { 0.0 } else { 2.4 },
+        material: m("smoke"),
+        rotate: ROTATE_UPRIGHT,
+        size0: size,
+        size_over_life: Some(Curve::three(birth, 0.3, birth + (end - birth) * 0.55, end)),
+        size_jitter: 0.3,
+        erosion: Some(Erosion { from: 0.02, to: 0.55, power: 1.3, edge: 0.35, ..Default::default() }),
+        alpha: (0.7 * denser).min(1.0) * p.opacity,
+        alpha_over_life: Some(Curve::four(0.0, 0.06, 1.0, 0.5, 0.45, 0.0)),
+        shade: 0.45 * p.shading,
+        value_jitter: 0.06,
+        ..base.clone()
+    };
+    let mut billows = flow.moving(billows, 0.0, 1.2, 0.07, 18.0, 0.35);
+    billows.speed_min = roll * 0.6;
+    billows.speed_max = roll * 1.4;
+    vec![layer(billows, colors)]
 }
