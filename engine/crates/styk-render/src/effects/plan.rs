@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use styk_draw::{CameraPose, DrawList, LayerKind};
+use styk_draw::{CameraPose, DrawList, LayerKind, K_COMPOSITE};
 use styk_eval::doc::Camera;
 use styk_eval::drawlist::layer_effects;
 use styk_eval::vfx::Effect;
@@ -267,6 +267,19 @@ fn density(m: Affine) -> f64 {
     m[0].hypot(m[1])
 }
 
+/// The camera image's group (a scene effect stack: `LayerKind::Camera`), if the list has one. The groups before it and the
+/// root's primitives before its composite are the unfiltered scene, which the camera image draws again
+/// (`drawlist::assemble_composed`): a camera view, which the image covers, draws them no more, and the workspace clears the
+/// camera rectangle before compositing the image over it.
+pub fn camera_group(list: &DrawList) -> Option<usize> {
+    list.groups.iter().enumerate().skip(1).find(|(_, g)| g.parent == 0 && list.layers.get(g.layer as usize).is_some_and(|l| matches!(l.kind, LayerKind::Camera { .. }))).map(|(g, _)| g)
+}
+
+/// The root primitive compositing group `group`.
+pub fn composite_of(list: &DrawList, group: usize) -> Option<usize> {
+    list.prims.iter().position(|p| p.kind & 255 == K_COMPOSITE && p.group == 0 && p.b[0].to_bits() as usize == group)
+}
+
 /// Places every group of `list` for `view`. Index 0 is the frame itself.
 pub fn plan(list: &DrawList, view: &View) -> Vec<Placement> {
     plan_with_grid(list, view, DrawingGrid::World)
@@ -283,11 +296,13 @@ pub fn plan_with_grid(list: &DrawList, view: &View, drawing_grid: DrawingGrid) -
     let visible = [visible[0], visible[1], visible[2] - visible[0], visible[3] - visible[1]];
     let mut out: Vec<Placement> = Vec::with_capacity(list.groups.len());
     out.push(Placement { space: view.matrix, rect: screen, filter: None, camera: None, canvas: false });
+    // A camera view shows the scene through the camera image alone: the unfiltered scene before it is not drawn.
+    let scene = if view.camera_view { camera_group(list).unwrap_or(0) } else { 0 };
     for g in 1..list.groups.len() {
         let group = list.groups[g];
         let parent = out[group.parent as usize];
         let none = Placement { space: parent.space, rect: NOTHING, filter: None, camera: None, canvas: false };
-        if !parent.drawn() {
+        if !parent.drawn() || g < scene {
             out.push(none);
             continue;
         }

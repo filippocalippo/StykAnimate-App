@@ -4,6 +4,7 @@ use styk_draw::K_COMPOSITE;
 use styk_eval::drawlist::layer_effects;
 
 use crate::effects::executor::{Executor, Frame, Run};
+use crate::effects::recipe::Placement;
 use crate::effects::{self, plan, recipe, Slot};
 use std::sync::Arc;
 use crate::isolation::{page_size, plan_rounds};
@@ -34,7 +35,8 @@ pub struct FramePlan {
     pub(crate) rounds: Vec<crate::isolation::Round>,
     work: Vec<Work>,
     pub(crate) records: Vec<recipe::Uniform>,
-    pub(crate) biggest: [u32; 2],
+    /// Bytes of the textures the effect runs need at once (`Placement::bytes`).
+    pub(crate) effect_bytes: u64,
 }
 
 /// The runs of `range` of `list`'s primitives that can reach the part `rect` (output pixels `[x, y, width, height]`) through `matrix`: those whose
@@ -127,6 +129,49 @@ impl Renderer {
     /// The frame kept is not what the next frame would be drawn over any more: pictures it sampled changed.
     pub(crate) fn forget_kept(&mut self) {
         self.kept = None;
+    }
+
+    /// The pipeline that clears the camera rectangle to the view's clear colour (`knockout.wgsl`) and its bind group, written for
+    /// this frame: the rectangle is the camera image's shown part mapped onto the target (`record`: the image's group record).
+    fn knockout(&mut self, view: &ViewParams, size: [u32; 2], record: &[f32; effects::GROUP_FLOATS]) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
+        if self.knockout.as_ref().is_none_or(|k| k.0 != self.samples) {
+            let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("styk knockout"), source: wgpu::ShaderSource::Wgsl(include_str!("knockout.wgsl").into()) });
+            let layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("styk knockout"),
+                entries: &[wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::VERTEX_FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: wgpu::BufferSize::new(48) }, count: None }],
+            });
+            let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("styk knockout"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
+            let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("styk knockout"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_knockout"), compilation_options: Default::default(), buffers: &[] },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_knockout"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let buffer = buffer(&self.device, "styk knockout", 48, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
+            let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("styk knockout"), layout: &layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }] });
+            self.knockout = Some((self.samples, pipeline, buffer, bind));
+        }
+        let (_, pipeline, buffer, bind) = self.knockout.as_ref().expect("made above");
+        let p = [record[12], record[13], record[14], record[15], record[16], record[17]].map(f64::from);
+        let s = [record[20], record[21], record[22], record[23]].map(f64::from);
+        let clip = |[x, y]: [f64; 2]| {
+            let q = styk_eval::view::apply(p, [x, y]);
+            [(q[0] / size[0] as f64 * 2.0 - 1.0) as f32, (1.0 - q[1] / size[1] as f64 * 2.0) as f32]
+        };
+        let corners = [clip([s[0], s[1]]), clip([s[2], s[1]]), clip([s[2], s[3]]), clip([s[0], s[3]])];
+        let data: [f32; 12] = [corners[0][0], corners[0][1], corners[1][0], corners[1][1], corners[2][0], corners[2][1], corners[3][0], corners[3][1], view.clear[0] as f32, view.clear[1] as f32, view.clear[2] as f32, view.clear[3] as f32];
+        self.queue.write_buffer(buffer, 0, bytemuck::cast_slice(&data));
+        (pipeline.clone(), bind.clone())
     }
 
     /// The pipeline that clears a part of the frame: a triangle over the target, under the part's scissor ([`Renderer::redraw_within`]).
@@ -269,6 +314,26 @@ fn draw_prims(pass: &mut wgpu::RenderPass<'_>, base: &Shaders, additive: Option<
     }
 }
 
+/// The camera image's composite in the root, and the pipeline and bind group clearing the camera rectangle before it.
+type Knockout = (u32, wgpu::RenderPipeline, wgpu::BindGroup);
+
+/// [`draw_prims`] of the root's prims `range`, with the camera rectangle cleared just before the camera image's composite at
+/// `knockout.0` where the range holds it (the workspace view of a scene effect stack); `frame` is the root's bind group and offset.
+#[allow(clippy::too_many_arguments)]
+fn draw_root(pass: &mut wgpu::RenderPass<'_>, base: &Shaders, additive: Option<&Additive>, depth: Option<&DepthRuns>, range: std::ops::Range<u32>, knockout: Option<&Knockout>, frame: (&wgpu::BindGroup, u32)) {
+    match knockout.filter(|k| range.contains(&k.0)) {
+        Some((at, pipeline, bind)) => {
+            draw_prims(pass, base, additive, depth, range.start..*at);
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            pass.draw(0..6, 0..1);
+            pass.set_bind_group(0, frame.0, &[frame.1]);
+            draw_prims(pass, base, additive, depth, *at..range.end);
+        }
+        None => draw_prims(pass, base, additive, depth, range),
+    }
+}
+
 /// [`draw_prims`] for prims blended over the target.
 fn draw_painted(pass: &mut wgpu::RenderPass<'_>, base: &Shaders, depth: Option<&DepthRuns>, range: std::ops::Range<u32>) {
     let Some(DepthRuns { flat, faces, ranges, .. }) = depth else {
@@ -406,7 +471,6 @@ impl Renderer {
         let rounds = plan_rounds(list, &sizes, page);
         let mut records = Vec::new();
         let mut work = Vec::new();
-        let mut biggest = [0u32; 2];
             for (r, round) in rounds.iter().enumerate() {
                 for &(g, slot) in &round.placed {
                     let Some(filter) = planned[g].filter else { continue };
@@ -418,11 +482,11 @@ impl Renderer {
                     let at = [(s[0] as f64 * slot.scale).ceil().max(1.0) as u32, (s[1] as f64 * slot.scale).ceil().max(1.0) as u32];
                     let f = effects::scaled(filter, slot.scale);
                     let run = recipe::record(&mut records, stack, Frame { scale: f.scale, origin: f.origin, output_size: f.output_size }, at);
-                    biggest = [biggest[0].max(at[0]), biggest[1].max(at[1])];
                     work.push(Work { group: g, round: r, depth: list.groups[g].depth, page: slot.page, at: [slot.offset[0] as u32, slot.offset[1] as u32], size: at, run });
                 }
             }
-        FramePlan { list: list.clone(), view: *view, size, planned, page, rounds, work, records, biggest }
+        let effect_bytes = Placement::of(&work.iter().map(|w| &w.run).collect::<Vec<_>>()).bytes();
+        FramePlan { list: list.clone(), view: *view, size, planned, page, rounds, work, records, effect_bytes }
     }
 
     /// Renders the current draw list into the offscreen frame.
@@ -441,7 +505,7 @@ impl Renderer {
     /// Consumes precisely the plan admitted by the caller. The same Arc reaches
     /// set_list, preserving pointer-based geometry upload reuse during navigation.
     pub fn render_planned(&mut self, encoder: &mut wgpu::CommandEncoder, plan: FramePlan) {
-        let FramePlan { list, view, size, planned, page, rounds, work, records, biggest } = plan;
+        let FramePlan { list, view, size, planned, page, rounds, work, records, .. } = plan;
         let view = &view;
         self.set_list(&list);
         self.page = page;
@@ -478,14 +542,10 @@ impl Renderer {
         if self.groups.write(&self.device, &self.queue, bytemuck::cast_slice(&placed)) {
             self.rebind();
         }
-        if list.layers.iter().any(|layer| layer.effects.is_some()) {
-            let exact = self.exact_sizes;
-            let executor = self.executor.get_or_insert_with(|| { let mut e = Executor::new(&self.device); e.set_exact(exact); e });
-            executor.begin_recorded(records, work.len() as u32);
-            executor.prepare(&self.device, &self.queue, biggest);
-        } else if let Some(executor) = &mut self.executor {
-            executor.begin();
-            executor.prepare(&self.device, &self.queue, [0, 0]);
+        // The frame's effect runs placed in the executor's textures (a frame without any releases them).
+        if !work.is_empty() || self.executor.is_some() {
+            let executor = self.executor.get_or_insert_with(|| Executor::new(&self.device));
+            executor.prepare(&self.device, &self.queue, records, &work.iter().map(|w| &w.run).collect::<Vec<_>>());
         }
         // Each group's prims are one run inside its depth's pass (the encoder emits them by group).
         // (Worked out when the list was set: `Renderer::set_list`.)
@@ -574,6 +634,18 @@ impl Renderer {
             round_of[round.first..round.end].fill(r);
         }
         let bg = if foreground { 0 } else { list.background_prims.min(root.1 - root.0) };
+        // A scene effect stack (`effects::plan::camera_group`): a camera view starts the frame at the camera image's composite (the
+        // unfiltered scene before it is covered and was not planned); the workspace clears the camera rectangle just before it.
+        let camera = effects::plan::camera_group(&list).filter(|&g| planned[g].drawn() && slots[g].is_some());
+        let camera_prim = camera.and_then(|g| effects::plan::composite_of(&list, g)).map(|i| i as u32).filter(|&i| i >= root.0 + bg && i < root.1);
+        let scene_skip = camera_prim.filter(|_| view.camera_view);
+        let knockout = match (camera, camera_prim) {
+            (Some(g), Some(at)) if !view.camera_view => {
+                let (pipeline, bind) = self.knockout(view, size, &placed[g].0);
+                Some((at, pipeline, bind))
+            }
+            _ => None,
+        };
         let mut stops = vec![root.1; rounds.len()];
         let mut next = 1;
         let first = self.composites.partition_point(|&i| i < root.0 + bg);
@@ -614,7 +686,8 @@ impl Renderer {
         let part_runs = part.flatten().filter(|_| self.shading_on).map(|rect| part_runs(&list, root.0 + bg..root.1, view.matrix, rect));
         let keep = self.keep_frames;
         let (mut layer_depth, mut frame_depth) = (false, false);
-        let mut from = root.0 + bg;
+        let mut from = scene_skip.unwrap_or(root.0 + bg);
+        let frame_offset = (passes.len() as u64 * UNIFORM_STRIDE) as u32;
         for (r, _) in rounds.iter().enumerate() {
             for depth in (1..=max_depth).rev() {
                 for (i, &(round, pass_depth, page_index, start, end)) in passes.iter().enumerate() {
@@ -658,15 +731,13 @@ impl Renderer {
                 // The filtered groups of this depth, before the next depth composites them.
                 if let Some(executor) = &mut self.executor {
                     let atlas = &self.layers[depth as usize % 2].texture;
-                    for w in work.iter().filter(|w| w.round == r && w.depth == depth) {
-                        let extent = wgpu::Extent3d { width: w.size[0], height: w.size[1], depth_or_array_layers: 1 };
+                    for (index, w) in work.iter().enumerate().filter(|(_, w)| w.round == r && w.depth == depth) {
+                        debug_assert_eq!(w.size, w.run.size);
                         let place = wgpu::TexelCopyTextureInfo { texture: atlas, mip_level: 0, origin: wgpu::Origin3d { x: w.at[0], y: w.at[1], z: w.page }, aspect: wgpu::TextureAspect::All };
-                        encoder.copy_texture_to_texture(place, executor.slot_texture(&self.device, 0).as_image_copy(), extent);
-                        executor.encode(&self.device, encoder, &w.run);
+                        executor.encode(&self.device, encoder, index, &w.run, place);
                         if let Some(sources) = &mut gpu_sources {
-                            sources[w.group] |= w.run.steps.iter().any(|step| matches!(step, effects::recipe::Step::Pass { .. }));
+                            sources[w.group] |= !w.run.steps.is_empty();
                         }
-                        encoder.copy_texture_to_texture(executor.slot_texture(&self.device, w.run.result).as_image_copy(), place, extent);
                     }
                 }
             }
@@ -726,7 +797,7 @@ impl Renderer {
                         None => {}
                     }
                 }
-            } else if r == 0 && bg > 0 {
+            } else if r == 0 && bg > 0 && scene_skip.is_none() {
                 draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, root.0..root.0 + bg);
             }
             if part.is_none() && until > from {
@@ -738,7 +809,7 @@ impl Renderer {
                     let y1 = a[3].clamp(0.0, size[1] as f64).ceil() as u32;
                     if x1 > x0 && y1 > y0 {
                         pass.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
-                        draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until);
+                        draw_root(&mut pass, &shaders, additive.as_ref(), face_runs, from..until, knockout.as_ref(), (&bind0, frame_offset));
                         if let Some(sources) = &mut gpu_sources {
                             consume_gpu_sources(&list.prims[from as usize..until as usize], &placed, sources, None, Some([
                                 crate::paint::CanvasClip::new(view.artboard).rect()[0].max(x0 as f32),
@@ -748,7 +819,7 @@ impl Renderer {
                         }
                     }
                 } else {
-                    draw_prims(&mut pass, &shaders, additive.as_ref(), face_runs, from..until);
+                    draw_root(&mut pass, &shaders, additive.as_ref(), face_runs, from..until, knockout.as_ref(), (&bind0, frame_offset));
                     if let Some(sources) = &mut gpu_sources {
                         consume_gpu_sources(&list.prims[from as usize..until as usize], &placed, sources, None, Some([0.0,0.0,size[0] as f32,size[1] as f32]));
                     }
@@ -758,7 +829,7 @@ impl Renderer {
             // which respects the current scissor. Resolve the cleared card margins
             // too, after the artboard has clipped every drawn scene primitive.
             pass.set_scissor_rect(0, 0, size[0], size[1]);
-            from = until;
+            from = from.max(until);
             self.root_gpu_source = gpu_sources.as_ref().is_some_and(|sources| sources.first() == Some(&true));
         }
         // Depth buffers live while frames use them (a document with 3D faces).

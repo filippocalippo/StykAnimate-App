@@ -188,6 +188,7 @@ impl Renderer {
             kept: None,
             within: None,
             clear_part: None,
+            knockout: None,
             device,
             queue,
             pipeline,

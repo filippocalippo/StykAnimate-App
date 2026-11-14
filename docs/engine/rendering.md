@@ -45,7 +45,7 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | `resources.rs` | GPU record layouts, lookup tables in float textures, buffers, and `warm_texture` ([Uploads](#uploads)) |
 | `present.rs` | copy into the host's surface, read-back |
 | `view.rs` | world → output transform, artboard |
-| `effects/` | effect layers ([vfx.md](vfx.md#rendering)): `plan.rs` places each group for the view (density, crop, composite), `mod.rs` writes its group record, `executor.rs` and `passes.wgsl` run effect stacks on pooled slots |
+| `effects/` | effect layers ([vfx.md](vfx.md#rendering)): `plan.rs` places each group for the view (density, crop, composite), `mod.rs` writes its group record, `recipe.rs` records an effect stack as passes over images, `executor.rs` runs them on pooled textures with a small shader per family of operations (`shaders/`) |
 | `materials.rs` | the particle material atlas of generated effects: a placeholder texel until a list names a row, then the editor's procedural rows with their reduced levels (5.9 MB), sampled trilinearly |
 | `glyphs.rs`, `glyph.wgsl` | the masks of lone glyphs ([Text](#text)): each glyph filled once per mask size into an atlas of one-channel pages kept across frames (at most 64 MiB), and the per-frame table that tells each `K_GLYPH` record where its mask is |
 
@@ -492,7 +492,7 @@ faces before compositing it.
 | `target.rs` | a target with the GPU's samples: four RGBA8 samples a pixel (one for crisp edges), blended one by one, averaged when resolved |
 | `coverage.rs` | the GPU's rasterization rules: vertices snapped to 1/256 pixel, the standard four sample positions, the top-left rule |
 | `shade.rs` | `prim.wgsl`'s fragment arithmetic: coverage by distance, the strokes' distance functions, texture sampling |
-| `effects.rs` | effect recipes run pass by pass with the arithmetic of `passes.wgsl` |
+| `effects.rs` | effect recipes run pass by pass with the arithmetic of the effect shaders (`styk-render/src/effects/shaders/`) |
 | `glyphs.rs` | masks of lone glyphs, kept across frames |
 | `generators.rs` | generated effects: the GPU's quads, its fragment arithmetic |
 
@@ -546,8 +546,8 @@ resolves round in the last level.
 
 **Memory.** A frame holds the view-sized target, then one target per isolation group on the
 path being drawn (a layer's size: its rectangle on its grid), each four bytes a pixel plus
-sixteen per pixel whose samples differ; a filtered layer adds its working slots (at most
-eight of its size). Glyph masks stay within 64 MiB. Images are the decoded images the
+sixteen per pixel whose samples differ; a filtered layer adds the working images of its
+effects that are alive at once (`Run::peak_pixels`). Glyph masks stay within 64 MiB. Images are the decoded images the
 engine holds, not copied (`Images::add_shared`). Nothing is pooled between frames; exports
 bound a frame by drawing it in tiles.
 

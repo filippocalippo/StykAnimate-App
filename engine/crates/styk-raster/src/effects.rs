@@ -3,7 +3,7 @@
 //! operation the arithmetic of styk-render's `passes.wgsl` in single precision, each pass
 //! written to an RGBA8 slot as the GPU's are, sampled bilinearly with edges clamped.
 
-use styk_render::effects::recipe::{Run, Step, Uniform, BLANK, SLOTS};
+use styk_render::effects::recipe::{Run, Step, Uniform, BLANK, INPUT};
 
 use crate::target::{quantize, Px};
 
@@ -69,30 +69,27 @@ impl Read {
 }
 
 /// Runs `run` (its passes' parameters in `records`) on `input`, a `size` layer; returns the result.
+/// An image is let go after the last pass that reads it.
 pub(crate) fn run(run: &Run, records: &[Uniform], input: Vec<Px>, size: [usize; 2]) -> Vec<Px> {
-    let mut slots: Vec<Slot> = vec![Slot::default(); SLOTS];
-    slots[0] = Slot { size, data: input };
+    let last = run.last_reads();
+    let mut images: Vec<Option<Slot>> = vec![None; run.images.len()];
+    images[INPUT as usize] = Some(Slot { size, data: input });
     let blank = Slot { size: [1, 1], data: vec![[0; 4]] };
-    for step in &run.steps {
-        match *step {
-            Step::Copy { from, to, size } => {
-                let source = &slots[from as usize];
-                let (w, h) = (size[0] as usize, size[1] as usize);
-                let mut data = vec![[0u8; 4]; w * h];
-                for y in 0..h.min(source.size[1]) {
-                    let n = w.min(source.size[0]);
-                    data[y * w..y * w + n].copy_from_slice(&source.data[y * source.size[0]..y * source.size[0] + n]);
-                }
-                slots[to as usize] = Slot { size: [w, h], data };
-            }
-            Step::Pass { source, target, size, original, mask, uniform, .. } => {
-                let get = |i: u8| if i == BLANK { &blank } else { &slots[i as usize] };
-                let out = pass(&records[uniform as usize], get(source), get(original), get(mask), [size[0] as usize, size[1] as usize]);
-                slots[target as usize] = out;
+    for (i, step) in run.steps.iter().enumerate() {
+        let Step::Pass { source, target, original, mask, uniform, .. } = *step;
+        let target_size = run.images[target as usize].size;
+        let out = {
+            let get = |id: u16| if id == BLANK { &blank } else { images[id as usize].as_ref().expect("an image is written before it is read") };
+            pass(&records[uniform as usize], get(source), get(original), get(mask), [target_size[0] as usize, target_size[1] as usize])
+        };
+        images[target as usize] = Some(out);
+        for id in step.reads() {
+            if id != BLANK && last[id as usize] == Some(i) {
+                images[id as usize] = None;
             }
         }
     }
-    let mut result = std::mem::take(&mut slots[run.result as usize]);
+    let mut result = images[run.result as usize].take().unwrap_or_default();
     if result.size != size {
         // A run always ends at the layer's size; keep the pixels' place should it not.
         let mut data = vec![[0u8; 4]; size[0] * size[1]];
@@ -564,7 +561,7 @@ mod tests {
                     operation,
                     target: [size[0] as f32, size[1] as f32],
                     texel: [0.0; 2],
-                    unused: [0.0; 2],
+                    texel_other: [0.0; 2],
                     p: [radius, 0.0, 0.0, 0.0],
                     q: [0.0; 4],
                     stops: [[0.0; 4]; 32],
