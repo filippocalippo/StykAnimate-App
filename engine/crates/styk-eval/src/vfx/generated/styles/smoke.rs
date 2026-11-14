@@ -70,6 +70,9 @@ pub(super) fn smoke(p: &Smoke, ctx: &Context) -> Vec<Spec> {
 /// climbing along its direction with the wind across it; the jet and the climb scale with the rise,
 /// the swirl with the turbulence and the puff size.
 struct Flow {
+    /// Puffs larger than 64 pixels come fewer and swell less (1 below): huge puffs fill the frame with a few of them,
+    /// and stay within the area a frame may cover instead of being thinned away.
+    big: f64,
     dir: f64,
     rise: f64,
     wind: f64,
@@ -79,7 +82,7 @@ struct Flow {
 
 impl Flow {
     fn new(p: &Smoke, rise: f64, size: f64, dir: f64) -> Flow {
-        Flow { dir, rise, wind: p.wind, curl: p.turbulence * (size / 24.0).sqrt(), curl_scale: 1.0 / size.max(4.0) }
+        Flow { big: (64.0 / size.max(1.0)).min(1.0), dir, rise, wind: p.wind, curl: p.turbulence * (size / 24.0).sqrt(), curl_scale: 1.0 / size.max(4.0) }
     }
 
     /// `s` moving so: leaving at `jet` times the rise, settling at `drag` to climbing at `climb`
@@ -109,9 +112,9 @@ fn soft_plume(p: &Smoke, look: &SmokeLook, base: &Spec, flow: &Flow, col: [f64; 
     let g = p.growth.max(0.2);
     // Thicker looks (the retired Thick) stay denser at the top; thinner ones (Steam) fade sooner.
     let thick = (look.alpha / 0.45).min(2.0);
-    let (birth, end) = (0.5, 0.5 + 0.75 * g);
+    let (birth, end) = (0.5, 0.5 + 0.75 * g * flow.big.sqrt());
     let puffs = Spec {
-        rate: base.rate * 0.6,
+        rate: base.rate * 0.6 * flow.big,
         spread: 0.6,
         material: m("smoke"),
         rotate: ROTATE_UPRIGHT,
@@ -139,9 +142,9 @@ fn cartoon_puffs(p: &Smoke, base: &Spec, flow: &Flow, col: [f64; 3], size: f64) 
     let light = tone(col, 0.35, WHITE);
     let shade = tone(tone(col, 0.3, BLACK), 0.25, [0.35, 0.3, 0.5]);
     let colors = paint_or(&p.color, stops(&[(light, 1.0), (tone(col, 0.15, WHITE), 1.0), (col, 1.0)]));
-    let big = 0.6 + 0.4 * g;
+    let big = 0.6 + 0.4 * g * flow.big.sqrt();
     let puffs = Spec {
-        rate: base.rate * 0.15,
+        rate: base.rate * 0.15 * flow.big,
         spread: 0.5,
         shape: DISC,
         softness: 0.0,
@@ -165,11 +168,11 @@ fn cartoon_puffs(p: &Smoke, base: &Spec, flow: &Flow, col: [f64; 3], size: f64) 
 fn ground_dust(p: &Smoke, base: &Spec, flow: &Flow, col: [f64; 3], size: f64, ground: bool) -> Vec<Spec> {
     let g = p.growth.max(0.2);
     let colors = paint_or(&p.color, stops(&[(tone(col, 0.3, WHITE), 1.0), (col, 1.0), (tone(col, 0.15, BLACK), 1.0)]));
-    let (birth, end) = (0.45, 0.4 + 0.6 * g);
+    let (birth, end) = (0.45, 0.4 + 0.6 * g * flow.big.sqrt());
     // Along the ground the jet is sideways (the ground emitter throws both ways); on the scene, out from its point.
     let roll = (2.0 + size / 16.0) * 1.4;
     let billows = Spec {
-        rate: base.rate * 0.6,
+        rate: base.rate * 0.6 * flow.big,
         spread: if ground { 0.0 } else { 2.4 },
         material: m("smoke"),
         rotate: ROTATE_UPRIGHT,
