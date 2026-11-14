@@ -193,12 +193,12 @@
   .vfx-value { position: relative; min-inline-size: 0; border-radius: var(--radius-md); }
   /* The value whose keys the timeline shows: a quiet ring around its field. */
   .vfx-value.is-channel-selected :where(.ui-field) { box-shadow: inset 0 0 0 1px var(--accent-line); }
-  /* A choice of two to four keeps its words on a narrow card: its label goes above its segments. */
-  @container vfx-fields (width < 236px) {
-    .ui-field:where([data-segments]) { flex-wrap: wrap; block-size: auto; row-gap: var(--space-0-5); padding-block: var(--space-1-5) var(--space-1); }
-    .ui-field:where([data-segments]) > .ui-segmented { flex: 1 1 100%; block-size: calc(var(--control-sm) - 2px); }
-  }
-  .vfx-aim { gap: var(--space-1); padding-inline-end: var(--space-1); }
+  /* A choice of two to four keeps its words: its segments go under its label whenever both do not fit on one line
+     (a narrow card, a longer language), so the label is never squeezed into breaking a word. */
+  :where(#vfx-panel) .ui-field:where([data-segments]) { flex-wrap: wrap; row-gap: var(--space-0-5); }
+  :where(#vfx-panel) .ui-field:where([data-segments]) > .ui-segmented { block-size: calc(var(--control-sm) - 2px); }
+  /* What a beam aims at: its target and buttons go under Aim at when they do not fit beside it. */
+  .vfx-aim { flex-wrap: wrap; gap: var(--space-0-5) var(--space-1); block-size: auto; min-block-size: var(--_h); padding-block: var(--space-1); padding-inline-end: var(--space-1); }
   .vfx-aim-target { flex: 1 1 auto; min-inline-size: 0; white-space: normal; overflow-wrap: anywhere; text-align: end; font: var(--type-small); line-height: 1.2; color: var(--text-1); }
 
   /* A clip value's key, at its field's end: quiet until the field is hovered or focused, an outline once animated,
@@ -301,7 +301,9 @@
     border: 0; border-radius: var(--radius-xl); background: var(--surface-raised); color: var(--text-1);
     box-shadow: var(--elevation-3); font: var(--type-ui);
   }
+  .vfx-picker { container: vfx-picker / inline-size; }
   .vfx-picker-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1); }
+  @container vfx-picker (width < 270px) { .vfx-picker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .vfx-picker-tile {
     display: grid; gap: var(--space-1); min-inline-size: 0; padding: var(--space-1); border: 0; border-radius: var(--radius-md);
     background: transparent; color: var(--text-1); text-align: center; cursor: default;
@@ -350,6 +352,8 @@
   .vfx-catalog-card:disabled { opacity: 0.42; }
   /* Generated effects: rendered stills in three columns, the name under each. */
   .vfx-catalog-grid.is-previews { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1); }
+  /* Pictures in two columns on a narrow panel, so a long name (a longer language) keeps its words whole under them. */
+  @container vfx-catalog (width < 270px) { .vfx-catalog-grid.is-previews { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .vfx-catalog-grid.is-previews .vfx-catalog-card { flex-direction: column; align-items: stretch; gap: var(--space-1); padding: var(--space-1); }
   :where(.vfx-catalog-grid.is-previews) .vfx-catalog-card > span:not(.vfx-catalog-art) { text-align: center; font: var(--type-small); }
   .vfx-catalog-still {

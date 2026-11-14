@@ -68,7 +68,13 @@ export function attachCatalogPeek(popup, mode) {
   popup.addEventListener('pointerover', event => { const card = event.target.closest?.('.vfx-catalog-card[data-choice]'); if (card && !card.disabled) soon(card); }, {signal});
   popup.addEventListener('pointerleave', hide, {signal});
   popup.addEventListener('focusin', event => { const card = event.target.closest?.('.vfx-catalog-card[data-choice]'); if (card) soon(card); else hide(); }, {signal});
-  popup.addEventListener('scroll', hide, {signal, passive: true});
+  // A scroll moves the cards under a still pointer, so the card goes; but keyboard focus that scrolls its card into view
+  // keeps it (or its pending card), placed beside the card again.
+  popup.addEventListener('scroll', () => {
+    const card = doc.activeElement?.closest?.('.vfx-catalog-card[data-choice]'), box = popup.getBoundingClientRect(), at = card?.getBoundingClientRect();
+    if (card && popup.contains(card) && at.bottom > box.top && at.top < box.bottom) { if (shown === card) place(card); return; }
+    hide();
+  }, {signal, passive: true});
   popup.addEventListener('toggle', event => { if (event.newState === 'closed') { events.abort(); hide(); peek.remove(); } }, {signal});
   return () => { events.abort(); hide(); peek.remove(); };
 }

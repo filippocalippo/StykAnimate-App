@@ -173,6 +173,10 @@
   .ui-field-wrap { position: relative; display: grid; min-inline-size: 0; }
   .ui-field-wrap:where([data-trail="1"]) > .ui-field { padding-inline-end: calc(var(--space-1) + var(--control-xs)); }
   .ui-field-wrap:where([data-trail="2"]) > .ui-field { padding-inline-end: calc(var(--space-1) + 2 * var(--control-xs)); }
+  /* A choice's chevron sits before the trail, never under its key button (shown on hover, and always on touch). The
+     room above wins over every field kind's own end padding, which is written inside :where(). */
+  :where(.ui-field-wrap[data-trail="1"]) > .ui-field > .ui-field-chev { inset-inline-end: calc(2 * var(--space-1) + var(--control-xs)); }
+  :where(.ui-field-wrap[data-trail="2"]) > .ui-field > .ui-field-chev { inset-inline-end: calc(2 * var(--space-1) + 2 * var(--control-xs)); }
   .ui-field-wrap > .ui-field-trail { position: absolute; inset-block: 0; margin-block: auto; inset-inline-end: var(--space-1); color: var(--text-3); }
   .ui-field-wrap > .ui-field-trail:where(.ui-field-trail + *) { inset-inline-end: calc(var(--space-1) + var(--control-xs)); }
   .ui-field-wrap > .ui-field-trail:where(:hover) { color: var(--text-1); }
@@ -187,13 +191,15 @@
   .ui-field-art > svg { inline-size: var(--icon-sm); block-size: var(--icon-sm); }
   .ui-field-choice { display: flex; flex: 1 1 auto; align-items: center; justify-content: flex-end; gap: var(--space-1); min-inline-size: 0; }
   .ui-field-choice > .ui-field-hex { flex: 0 1 auto; min-inline-size: 0; white-space: normal; overflow-wrap: anywhere; text-align: end; line-height: 1.2; }
-  .ui-field-choice > .ui-field-chev { flex: none; inline-size: var(--icon-xs); block-size: var(--icon-xs); color: var(--text-3); }
-  /* A bare picker (no label: its value names its kind) reads from the start. */
-  .ui-field:where([data-picker][data-bare]) > .ui-field-choice { justify-content: space-between; }
-  .ui-field:where([data-picker][data-bare]) .ui-field-hex { text-align: start; }
+  /* In the flow of the value's line (not at the field's edge like a select's), so it keeps clear of a trail. */
+  .ui-field-choice > .ui-field-chev { position: static; flex: none; inline-size: var(--icon-xs); block-size: var(--icon-xs); translate: none; color: var(--text-3); }
+  /* A picker that opens a menu reads like a select: its value right after the label, the chevron at the end; so does a
+     bare one (no label: its value names its kind). */
+  .ui-field:where([data-picker][data-bare], [data-picker][aria-haspopup="menu"]) > .ui-field-choice { justify-content: space-between; }
+  .ui-field:where([data-picker][data-bare], [data-picker][aria-haspopup="menu"]) .ui-field-hex { text-align: start; }
 
   /* A choice of two to four in a field ([data-segments]): the label, then the segments in a quiet track. */
-  .ui-field[data-segments] { padding-inline-end: var(--space-0-5); }
+  .ui-field:where([data-segments]) { padding-inline-end: var(--space-0-5); }
   .ui-field:where([data-segments]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; }
   .ui-field:where([data-segments]) > .ui-segmented { flex: 0 1 auto; min-inline-size: 0; block-size: calc(100% - 6px); padding: 0; background: transparent; }
   .ui-field:where([data-segments]) .ui-segmented-item { min-inline-size: 0; padding-inline: var(--space-1-5); font: var(--type-small-strong); }

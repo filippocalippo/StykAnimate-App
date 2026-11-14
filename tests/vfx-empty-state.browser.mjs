@@ -47,6 +47,10 @@ try{
   await page.locator('.vfx-catalog [data-choice="glow"]').focus();
   await page.locator('.vfx-peek:popover-open').waitFor();
   check('a preview card says what an effect does before it is added',(await page.locator('.vfx-peek').innerText()).includes('A soft halo of light around the artwork.')&&await page.evaluate(()=>{const peek=document.querySelector('.vfx-peek').getBoundingClientRect(),list=document.querySelector('.vfx-catalog').getBoundingClientRect();return peek.right<=list.left||peek.left>=list.right;}));
+  // A card reached by keyboard further down scrolls the catalogue, and still shows what it does.
+  const lastCard=page.locator('.vfx-catalog [data-choice]').last(),lastName=(await lastCard.innerText()).split('\n')[0].trim();
+  await lastCard.focus();await page.waitForTimeout(600);
+  check('a card reached by keyboard further down the catalogue shows its preview card too',await page.locator('.vfx-peek:popover-open strong').count()===1&&(await page.locator('.vfx-peek:popover-open strong').innerText())===lastName);
   // A search finds a name anywhere, and what an effect does only from the start of a word: "sh" is Shadow, not Tint ("Washes").
   await page.locator('.vfx-catalog input[type=search]').fill('sh');
   check('a search finds what an effect does from the start of a word',(await page.locator('.vfx-catalog [data-choice]').evaluateAll(nodes=>nodes.map(node=>node.dataset.choice))).join()==='shadow');
@@ -76,6 +80,12 @@ try{
       const own=[...el.childNodes].filter(node=>node.nodeType===3&&node.data.trim());
       if(own.length&&style.display!=='inline'&&!el.matches('input, select, textarea')){
         const box=el.getBoundingClientRect(),range=document.createRange();range.setStartBefore(own[0]);range.setEndAfter(own.at(-1));
+        // A word split over two lines (a label squeezed beside its value) is cut too. The long-text mode pads with runs
+        // of dashes, which are not words: only runs with a letter count.
+        for(const node of own)for(const match of node.data.matchAll(/\S*\p{L}\S*/gu)){
+          const word=document.createRange();word.setStart(node,match.index);word.setEnd(node,match.index+match[0].length);
+          if(new Set([...word.getClientRects()].filter(rect=>rect.width).map(rect=>Math.round(rect.top))).size>1)cut.push(`${match[0]} (a word broken over two lines)`);
+        }
         const words=range.getBoundingClientRect();
         if(words.width&&(words.right>box.right+1||words.left<box.left-1)){cut.push(`${text} (runs out of its box)`);continue;}
       }
@@ -94,6 +104,15 @@ try{
     const e=styk.editor,doc=emptyDocument();doc.figure_types[0].name='Bubble';doc.keyframes=[createFrame([createObject(doc.figure_types[0],1,300,320)],80)];
     e.load(doc);initializeLayerSheet(e.report);e._invalidate({timing:true});e.select(1);
   });
+  // A value's key button sits at its field's end (shown on hover, always on touch); the field's chevron, segments,
+  // switch and value keep clear of it.
+  const crowdedKeys=()=>page.evaluate(()=>[...document.querySelectorAll('#vfx-panel .ui-field-wrap')].flatMap(wrap=>{
+    const trail=wrap.querySelector(':scope > .ui-field-trail');if(!trail)return [];
+    const t=trail.getBoundingClientRect();
+    return [...wrap.querySelectorAll(':scope > .ui-field :is(.ui-field-chev, .ui-segmented, .ui-switch, .ui-field-input, .ui-field-suffix, .ui-field-hex)')]
+      .filter(el=>{const r=el.getBoundingClientRect();return r.width&&r.right>t.left+0.5&&r.bottom>t.top&&r.top<t.bottom;})
+      .map(el=>`${wrap.textContent.trim().slice(0,30)} (${el.getAttribute('class')})`);
+  }));
   const openEffect=async type=>{
     await page.evaluate(type=>{const e=styk.editor,id=e.addVfxClip({kind:'figure',uid:1},type);e._selectedVfxClip=id;e._emit('vfx-selection');},type);
     await page.waitForTimeout(150);
@@ -113,6 +132,7 @@ try{
     for(const type of ['glow','shadow','particles','beam','grade']){
       await fresh();await openEffect(type);
       check(`no word is cut in an open ${type} with its sections open at 256 px ${language}`,(await cutWords()).length===0||console.error(await cutWords()));
+      check(`no control in an open ${type} runs under its key button at 256 px ${language}`,(await crowdedKeys()).length===0||console.error(await crowdedKeys()));
     }
   }
   await page.evaluate(()=>styk.localization.localization.setPseudo(null));
