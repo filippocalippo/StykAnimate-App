@@ -92,7 +92,7 @@ fn blast_fireball(b: &Blast<'_>) -> Vec<Option<Spec>> {
             start: s0, count: 9.0 * p.debris, burst_jitter: 1.0, life_min: 40.0, life_max: 60.0,
             emit_radius: 10.0 * s, angle: UP, spread: 2.2, speed_min: 6.0 * s, speed_max: 12.0 * s, gravity: 0.5, drag: 0.01,
             collide: 1.0, bounce: 0.35, friction: 0.25, spin: 0.3, spin_jitter: 1.0,
-            shape: ROCK, size0: 5.5 * s, size_jitter: 0.45, alpha_over_life: Some(Curve::three(1.0, 0.85, 1.0, 0.0)),
+            shape: ROCK, stretch: 0.0, size0: 5.5 * s, size_jitter: 0.45, alpha_over_life: Some(Curve::three(1.0, 0.85, 1.0, 0.0)),
             value_jitter: 0.2, blend: NORMAL,
             ..base.clone()
         }, stops(&[(rgb(0x4a3a30), 1.0), (rgb(0x3a2e29), 1.0)]))),
@@ -259,21 +259,100 @@ fn blast_cartoon(b: &Blast<'_>) -> Vec<Option<Spec>> {
     ]
 }
 
+/// Mushroom cloud: a blinding flash; a fireball punched straight up that slows high above and
+/// spreads into a cap, burning white-hot to orange to ember and cooling to dark smoke lit from
+/// above; a stem of smoke and dust climbing into it; a surge of dust rolling out along the ground
+/// with a ring racing ahead of it; stones, embers. Slow and huge after a fast start.
 fn blast_mushroom(b: &Blast<'_>) -> Vec<Option<Spec>> {
-    let Blast { p, col, hot, low, i, s, d, s0, window, ref base, .. } = *b;
-    let flat = Spec { blend: NORMAL, ..base.clone() };
-    let smoke = smoke_colors();
-    let fire = [(WHITE, 1.4), (hot, 1.3), (col, 1.2), (low, 1.0), (smoke[0], 1.0), (smoke[2], 1.0)];
-    let dust = rgb(0x8b7d73);
+    let Blast { p, col, i, s, d, s0, window, ref base, .. } = *b;
+    let li = i.min(1.0);
+    // Burning for the first third of its life, then dark smoke.
+    let ember = tone(col, 0.6, [0.5, 0.07, 0.03]);
+    let fire = paint_or(&p.color, stops(&[([1.0, 0.96, 0.8], 1.0), (col, 1.0), (ember, 1.0), (rgb(0x4a3631), 1.0), (rgb(0x3e3536), 1.0), (rgb(0x403a3a), 1.0), (rgb(0x46403f), 1.0), (rgb(0x57514f), 1.0)]));
+    let hot = tone(col, 0.55, [1.0, 0.93, 0.62]);
+    let dust = paint_or(&p.color, stops(&[(rgb(0xb3a596), 1.0), (rgb(0x95887c), 1.0), (rgb(0x7a7069), 1.0)]));
+    // The cap rises `h` above the ground: thrown up at `h · drag` it comes to rest there.
+    let h = 230.0 * s;
+    let kd = 0.075;
+    let burn = |from: f64, to: f64| Some(Erosion { from, to, power: 1.8, edge: 0.14, rim: 0.6, rim_width: 0.2, rim_color: ember });
     vec![
-        some_if(p.dust, || layer(Spec { placement: Placement::Behind, start: s0 + 3.0, count: 34.0 * d, burst_jitter: 6.0, life_min: 50.0, life_max: 80.0, emit_shape: GROUND, emit_radius: 140.0 * s, speed_min: 4.0 * s, speed_max: 10.0 * s, drag: 0.06, collide: 1.0, material: m("smoke"), rotate: ROTATE_UPRIGHT, size_mode: GROW_PUFF, size0: 16.0 * s, size1: 56.0 * s, alpha: 0.55, fade_in: 0.05, fade_out: 0.6, ..flat.clone() }, stops(&[(dust, 1.0)]))),
-        some_if(p.smoke > 0.0, || layer(Spec { start: s0 + 1.0, emit_dur: 24.0f64.min(window).max(6.0), rate: 6.0 * 2.0f64.min(p.smoke) * d, life_min: 45.0, life_max: 75.0, emit_radius: 14.0 * s, angle: UP, spread: 0.12, speed_min: 3.0 * s, speed_max: 8.0 * s, drag: 0.035, gravity: -0.01 * s, curl: 10.0 * s, curl_scale: 0.012 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT, size_mode: GROW_PUFF, size0: 12.0 * s, size1: 34.0 * s, alpha: 0.9, fade_in: 0.05, fade_out: 0.4, ..flat.clone() }, stops(&fire))),
-        some_if(p.fireball, || layer(Spec { start: s0 + 2.0, count: 40.0 * d, burst_jitter: 5.0, life_min: 70.0, life_max: 110.0, emit_radius: 18.0 * s, angle: UP, spread: 0.7, speed_min: 11.0 * s, speed_max: 15.0 * s, drag: 0.06, gravity: -0.02 * s, curl: 16.0 * s, curl_scale: 0.01 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT, size_mode: GROW_PUFF, size0: 20.0 * s, size1: 62.0 * s, size_jitter: 0.3, alpha: 0.95, fade_in: 0.02, fade_out: 0.35, ..flat.clone() }, stops(&fire))),
-        some_if(p.fireball, || layer(Spec { start: s0 + 2.0, count: 14.0 * d, burst_jitter: 4.0, life_min: 24.0, life_max: 40.0, emit_radius: 18.0 * s, angle: UP, spread: 0.6, speed_min: 11.0 * s, speed_max: 14.0 * s, drag: 0.06, material: m("smoke"), size_mode: GROW_PUFF, size0: 18.0 * s, size1: 50.0 * s, alpha: 0.7, shade: 0.6, fade_in: 0.05, fade_out: 0.6, ..base.clone() }, stops(&[(WHITE, 1.4 * i), (hot, 1.3 * i), (col, 1.0 * i), (low, 0.4 * i)]))),
-        some_if(p.debris > 0.0, || layer(Spec { start: s0, count: 20.0 * p.debris, burst_jitter: 2.0, life_min: 34.0, life_max: 56.0, emit_radius: 14.0 * s, angle: UP, spread: 2.8, speed_min: 6.0 * s, speed_max: 15.0 * s, gravity: 0.45, drag: 0.012, collide: 1.0, spin: 0.3, spin_jitter: 1.0, material: m("rock"), size0: 5.0 * s, size1: 5.0 * s, size_jitter: 0.6, fade_in: 0.0, fade_out: 0.15, ..flat.clone() }, stops(&[(ROCK_COLOR, 1.0), (tone(ROCK_COLOR, 0.3, BLACK), 1.0)]))),
-        some_if(p.sparks, || layer(Spec { start: s0 + 3.0, count: 40.0 * d, burst_jitter: 12.0, life_min: 40.0, life_max: 70.0, emit_radius: 40.0 * s, spread: TAU, speed_min: 0.5 * s, speed_max: 2.5 * s, gravity: -0.05 * s, drag: 0.03, curl: 24.0 * s, curl_scale: 0.012 / s, size0: 2.2 * s, size1: 0.8 * s, softness: 0.4, flicker: 0.5, ..base.clone() }, stops(&[(WHITE, 2.5 * i), (hot, 2.0 * i), (col, 1.5 * i), (col, 0.6 * i)]))),
-        some_if(p.ring, || layer(Spec { start: s0 + 1.0, count: 1.0, life_min: 20.0, life_max: 20.0, shape: RING, size0: 40.0 * s, size1: 420.0 * s, size_curve: 0.45, softness: 0.1, size_jitter: 0.0, alpha: 0.7, fade_in: 0.0, fade_out: 0.75, ..base.clone() }, stops(&[(hot, 0.9 * i), (col, 0.6 * i), (col, 0.3 * i)]))),
-        some_if(p.flash, || layer(Spec { start: s0, count: 1.0, life_min: 9.0, life_max: 9.0, size0: 140.0 * s, size1: 300.0 * s, size_curve: 0.5, softness: 2.4, size_jitter: 0.0, fade_in: 0.0, fade_out: 0.85, ..base.clone() }, stops(&[(WHITE, 1.2 * i), (hot, 1.0 * i), (col, 0.7 * i), (col, 0.25 * i)]))),
+        // The surge: dust rolling out along the ground, behind the target.
+        some_if(p.dust, || layer(Spec {
+            placement: Placement::Behind, start: s0 + 3.0, count: 24.0 * d, burst_jitter: 6.0, life_min: 60.0, life_max: 95.0,
+            emit_shape: GROUND, emit_radius: 40.0 * s, speed_min: 5.0 * s, speed_max: 12.0 * s, drag: 0.06, gravity: -0.01 * s, collide: 1.0,
+            curl: 12.0 * s, curl_scale: 0.01 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT,
+            size0: 22.0 * s, size_over_life: Some(Curve::three(0.5, 0.3, 1.3, 2.0)), size_jitter: 0.3,
+            erosion: Some(Erosion { from: 0.02, to: 0.55, power: 1.3, edge: 0.3, ..Default::default() }),
+            alpha_over_life: Some(Curve::four(0.0, 0.06, 0.85, 0.6, 0.55, 0.0)), shade: 0.7, blend: NORMAL, value_jitter: 0.06,
+            ..base.clone()
+        }, dust.clone())),
+        // A ring of dust racing out along the ground ahead of the surge.
+        some_if(p.ring, || layer(Spec {
+            placement: Placement::Behind, start: s0 + 1.0, count: 1.0, life_min: 22.0, life_max: 22.0, emit_shape: GROUND,
+            shape: RING, softness: 0.1, aspect: 0.2, rotate: ROTATE_FIXED, size_jitter: 0.0,
+            size0: 260.0 * s, size_over_life: Some(Curve::four(0.08, 0.3, 0.6, 0.8, 0.92, 1.0)),
+            alpha_over_life: Some(Curve::three(0.65, 0.5, 0.4, 0.0)), blend: NORMAL,
+            ..base.clone()
+        }, stops(&[(rgb(0xd4c8bb), 1.0)]))),
+        // The stem: smoke and dust climbing into the cap.
+        some_if(p.smoke > 0.0, || layer(Spec {
+            start: s0 + 2.0, emit_dur: 34.0f64.min(window.max(6.0)), rate: 2.2 * p.smoke.min(2.5) * d, life_min: 50.0, life_max: 80.0,
+            emit_shape: GROUND_LAUNCH, emit_radius: 10.0 * s, angle: UP, spread: 0.1, speed_min: h * kd * 0.35, speed_max: h * kd * 0.95, drag: kd, gravity: -0.012 * s,
+            curl: 8.0 * s, curl_scale: 0.012 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT,
+            size0: 15.0 * s, size_over_life: Some(Curve::three(0.6, 0.4, 1.0, 1.35)), size_jitter: 0.3,
+            erosion: Some(Erosion { from: 0.02, to: 0.5, power: 1.4, edge: 0.3, ..Default::default() }),
+            alpha_over_life: Some(Curve::four(0.0, 0.08, 0.9, 0.6, 0.65, 0.0)), shade: 0.75, blend: NORMAL,
+            ..base.clone()
+        }, stops(&[(rgb(0x8d7f74), 1.0), (rgb(0x6d6560), 1.0), (rgb(0x5d5856), 1.0)]))),
+        // The cap: thrown up hard, hanging high above, burning out to dark smoke.
+        some_if(p.fireball, || layer(Spec {
+            start: s0, count: 22.0 * d, burst_jitter: 3.0, life_min: 110.0, life_max: 150.0,
+            emit_shape: GROUND_LAUNCH, emit_radius: 16.0 * s, angle: UP, spread: 0.55, speed_min: h * kd * 0.85, speed_max: h * kd * 1.05, drag: kd, gravity: -0.008 * s,
+            curl: 14.0 * s, curl_scale: 0.008 / s, material: m("smoke"), spin: 0.004, spin_jitter: 1.0,
+            size0: 44.0 * s, size_over_life: Some(Curve::four(0.35, 0.12, 0.9, 0.5, 1.25, 1.45)), size_jitter: 0.3,
+            erosion: burn(0.0, 0.62), alpha_over_life: Some(Curve::four(1.0, 0.7, 1.0, 0.85, 0.7, 0.0)),
+            emissive: Some(Curve::four(0.4, 0.08, 0.25, 0.25, 0.0, 0.0)), shade: 0.6, hue_jitter: 0.015, value_jitter: 0.06,
+            ..base.clone()
+        }, fire.clone())),
+        // Its shoulders: thrown up and out, rolling over the sides of the cap.
+        some_if(p.fireball, || layer(Spec {
+            start: s0 + 1.0, count: 16.0 * d, burst_jitter: 4.0, life_min: 105.0, life_max: 142.0,
+            emit_shape: GROUND_LAUNCH, emit_radius: 16.0 * s, angle: UP, spread: 1.7, speed_min: h * kd * 0.65, speed_max: h * kd * 0.85, drag: kd, gravity: -0.004 * s,
+            curl: 14.0 * s, curl_scale: 0.008 / s, material: m("smoke"), spin: 0.004, spin_jitter: 1.0,
+            size0: 30.0 * s, size_over_life: Some(Curve::four(0.35, 0.12, 0.9, 0.5, 1.2, 1.4)), size_jitter: 0.3,
+            erosion: burn(0.0, 0.62), alpha_over_life: Some(Curve::four(1.0, 0.7, 1.0, 0.85, 0.7, 0.0)),
+            emissive: Some(Curve::four(0.35, 0.08, 0.2, 0.25, 0.0, 0.0)), shade: 0.6, hue_jitter: 0.015, value_jitter: 0.06,
+            ..base.clone()
+        }, fire)),
+        // Stones thrown out, landing.
+        some_if(p.debris > 0.0, || layer(Spec {
+            start: s0, count: 10.0 * p.debris, burst_jitter: 2.0, life_min: 40.0, life_max: 60.0,
+            emit_radius: 14.0 * s, angle: UP, spread: 2.6, speed_min: 7.0 * s, speed_max: 15.0 * s, gravity: 0.45, drag: 0.012,
+            collide: 1.0, bounce: 0.3, friction: 0.25, spin: 0.3, spin_jitter: 1.0, shape: ROCK, stretch: 0.0, size0: 5.0 * s, size_jitter: 0.5,
+            alpha_over_life: Some(Curve::three(1.0, 0.85, 1.0, 0.0)), value_jitter: 0.2, blend: NORMAL,
+            ..base.clone()
+        }, stops(&[(rgb(0x4a3a30), 1.0), (rgb(0x3a2e29), 1.0)]))),
+        // Embers carried up with it, flickering.
+        some_if(p.sparks, || layer(Spec {
+            start: s0 + 3.0, count: 26.0 * d, burst_jitter: 14.0, life_min: 40.0, life_max: 70.0,
+            emit_radius: 30.0 * s, angle: UP, spread: 1.4, speed_min: h * kd * 0.3, speed_max: h * kd * 0.9, drag: kd, gravity: -0.02 * s,
+            curl: 20.0 * s, curl_scale: 0.012 / s, flicker: 0.5, softness: 0.0, rotate: ROTATE_MOTION, size0: 2.2 * s.sqrt(), size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.25)),
+            emissive: Some(Curve::three(0.5, 0.5, 0.4, 0.3)), alpha_over_life: Some(Curve::four(0.0, 0.1, 1.0, 0.7, 0.8, 0.0)),
+            ..base.clone()
+        }, stops(&[([1.0, 0.82, 0.35], 1.0), (col, 1.0), (ember, 1.0)]))),
+        // The flash: light over everything, and a white-hot disc.
+        some_if(p.flash, || layer(Spec {
+            start: s0, count: 1.0, life_min: 10.0, life_max: 10.0, softness: 1.6, size_jitter: 0.0,
+            size0: 260.0 * s, size_over_life: Some(Curve::three(0.6, 0.25, 1.0, 1.1)),
+            alpha_over_life: Some(Curve::three(0.9 * li, 0.3, 0.45 * li, 0.0)), blend: ADD,
+            ..base.clone()
+        }, stops(&[([1.0, 0.97, 0.85], 1.0), (hot, 1.0)]))),
+        some_if(p.flash, || layer(Spec {
+            start: s0, count: 1.0, life_min: 6.0, life_max: 6.0, softness: 0.25, size_jitter: 0.0,
+            size0: 34.0 * s, size_over_life: Some(Curve::three(0.6, 0.3, 1.0, 0.7)),
+            alpha_over_life: Some(Curve::three(1.0, 0.6, 0.9, 0.0)), emissive: Some(Curve::three(0.6, 0.5, 0.4, 0.2)),
+            ..base.clone()
+        }, stops(&[([1.0, 1.0, 0.95], 1.0), (hot, 1.0)]))),
     ]
 }
 
