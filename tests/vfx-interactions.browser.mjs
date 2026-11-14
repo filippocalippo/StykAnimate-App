@@ -80,5 +80,14 @@ try{
  // The value whose keys show is ringed; its label keeps its contrast on the field in the dark theme.
  const contrast=await page.locator('.vfx-value.is-channel-selected .ui-field[data-property-row]').evaluate(row=>{const luminance=color=>{const c=color.match(/[\d.]+/g).slice(0,3).map(n=>{const v=Number(n)/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return .2126*c[0]+.7152*c[1]+.0722*c[2];},a=luminance(getComputedStyle(row).backgroundColor),b=luminance(getComputedStyle(row.querySelector('.ui-field-label')).color);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);});assert.ok(contrast>=4.5,`Dark selection contrast ${contrast}`);
  assert.equal(await panel.locator('.vfx-clip-effect[open]').count(),1);
+ // Properties is not rebuilt while VFX covers it in their dock (an effect's preview revises the document many times a
+ // second), and it is current the moment it shows again: here after a turn of the figure made while it was hidden.
+ await page.evaluate(()=>{window.propertiesWrites=0;new MutationObserver(records=>{window.propertiesWrites+=records.length;}).observe(document.getElementById('inspector'),{subtree:true,childList:true,attributes:true,characterData:true});});
+ const angle=()=>page.evaluate(()=>{const e=styk.editor;return Math.round(((e.object.angles[0]??0)-(e.figure.segments[0]?.angle_rad??0))*180/Math.PI);});
+ const turned=await page.evaluate(async()=>{const e=styk.editor;e.rotateFigure(Math.PI/6);for(const radius of [20,24,28])e.setVfxClipParameter(clipId,glow,'radius',radius);await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));return e.object.unique_id;});
+ assert.ok(turned,'the figure is still selected');
+ assert.equal(await page.evaluate(()=>propertiesWrites),0,'the hidden Properties panel was not rebuilt');
+ await page.evaluate(()=>styk.shell.showPanel('properties',{focus:false}));
+ assert.equal(Math.round(Number(await page.locator('#inspector input[data-field="rotation"]').inputValue())),await angle(),'Properties shows the turn at once');
  errors.push(...await page.evaluate(()=>appErrors));assert.deepEqual(errors,[]);console.log(JSON.stringify({errors,numericUndo:true,typedUndo:true,cancel:true,groupReorder:true,canvasControls:true,valueSelection:true,keyNavigation:true}));
 }catch(error){await fs.mkdir('artifacts/vfx',{recursive:true});await page.screenshot({path:'artifacts/vfx/interactions-failure.png'});throw error;}finally{await browser.close();}
