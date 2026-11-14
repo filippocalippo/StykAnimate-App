@@ -27,6 +27,7 @@ import {vfxIcon,vfxTile} from './vfx-icons.mjs';
 import {showTimelineMenu} from './timeline-menu.mjs';
 import {findFigureType} from './figure-types.mjs';
 import {openStylePicker} from './vfx-style-picker.mjs';
+import {attachCatalogPeek} from './vfx-catalog-peek.mjs';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const identity=(target,id)=>JSON.stringify(target)+'/'+id;
 /** Connected groups nest at most this deep (vfx-connected.mjs, the engine's depth rule). */
@@ -285,7 +286,7 @@ export class VfxInspector {
   const row=event.target.closest('.vfx-effect[data-vfx-id]');if(!this.dragged||row?.dataset.vfxTarget!==this.dragged.target)return;event.preventDefault();const target=JSON.parse(this.dragged.target),index=this.editor.vfxEffects(target).findIndex(e=>e.id===row.dataset.vfxId);this.commit();this.beforeEdit();this.editor.reorderVfx(target,this.dragged.id,index);this.dragend();this.sync();this.onChange();
  }
  dragend(){groupDragEnd(this);this.dragged=null;this.clipDragged=null;for(const row of this.root.querySelectorAll('.is-dragging,.is-drop-target'))row.classList.remove('is-dragging','is-drop-target');}
- closePopup(){this.popup?.remove();this.popup=null;this.closePeek?.();}
+ closePopup(){this.popup?.remove();this.popup=null;this.closePeek?.();this.closePeek=null;}
  /** Add one effect or preset to every current target (or the open group) as one undo step. A moment preset is placed
   at the playhead for its length (vfx-presentation.mjs, presetTiming) unless the engine already timed it. */
  addChoice(mode,key){
@@ -334,6 +335,8 @@ export class VfxInspector {
   popup.addEventListener('contextmenu',event=>{const card=event.target.closest('.vfx-my-preset');if(card)presetMenu(event,card);});
   popup.addEventListener('click',event=>{const more=event.target.closest('[data-preset-menu]');if(more){presetMenu(event,more);return;}const tab=event.target.closest('[data-catalog-mode]');if(tab){if(tab.dataset.catalogMode!==mode)this.openPopup(anchor,tab.dataset.catalogMode);return;}const button=event.target.closest('[data-choice]');if(!button||button.disabled)return;this.run(()=>this.addChoice(mode,button.dataset.choice));});
   popup.addEventListener('keydown',event=>{event.stopPropagation();if(event.key==='Escape'){this.closePopup();anchor.focus();}if(event.key==='ArrowDown'&&event.target.tagName==='INPUT'){event.preventDefault();popup.querySelector('.vfx-catalog-card:not(:disabled)')?.focus();}});draw();
+  // What an effect or a preset does, beside the catalogue, before it is added.
+  this.closePeek=attachCatalogPeek(popup,mode);
   // Measure the populated catalogue once so searching keeps the input stationary.
   const panel=this.root.getBoundingClientRect(),from=anchor.getBoundingClientRect();popup.style.width=Math.max(260,panel.width-16)+'px';const size=popup.getBoundingClientRect();
   popup.style.left=Math.max(8,Math.min(panel.left+8,innerWidth-size.width-8))+'px';

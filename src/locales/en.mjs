@@ -6338,7 +6338,7 @@ const messages = {
     "one": "Look · {count} effect",
     "other": "Look · {count} effects"
   },
-  "vfxPanel.catalog.preview": "{name}: {description}",
+  "vfxPanel.presetHolds": "Adds {effects}.",
   "vfxPanel.about.turbulence": "Warps the artwork with flowing noise.",
   "vfxPanel.about.tint": "Washes the artwork in a color.",
   "vfxPanel.about.glow": "A soft halo of light around the artwork.",

@@ -35,7 +35,7 @@ export default Object.freeze({
   "vfxPanel.catalog.moment": "Moment",
   "vfxPanel.catalog.momentFrames": {"one": "Moment · {count} frame", "other": "Moment · {count} frames"},
   "vfxPanel.catalog.lookEffects": {"one": "Look · {count} effect", "other": "Look · {count} effects"},
-  "vfxPanel.catalog.preview": "{name}: {description}",
+  "vfxPanel.presetHolds": "Adds {effects}.",
   // What each effect does, in the catalogue's preview.
   "vfxPanel.about.turbulence": "Warps the artwork with flowing noise.",
   "vfxPanel.about.tint": "Washes the artwork in a color.",

@@ -582,6 +582,7 @@ src/vfw-pixels.mjs	platform	styk-export	js	encoders and sinks (WebCodecs, FFmpeg
 src/vfw-video-export.mjs	platform	styk-export	js	encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine
 src/vfx-camera-gpu.mjs	engine	styk-render::vfx	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/vfx-camera.mjs	engine	styk-render::vfx	removed	deleted: nothing in the app used it; the engine draws the camera image and its effects (15835 bytes)
+src/vfx-catalog-peek.mjs	ui	-	stays	The effects catalogue's preview card: a still and one line on what an effect or a preset does
 src/vfx-canvas.mjs	engine	styk-render::vfx	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.
 src/vfx-clip-controls.mjs	ui	-	stays	
 src/vfx-clip-inspector.mjs	ui	-	stays	
