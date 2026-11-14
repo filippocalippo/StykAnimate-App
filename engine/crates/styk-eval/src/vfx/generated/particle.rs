@@ -800,9 +800,9 @@ fn bolt(a: [f64; 2], b: [f64; 2], amp: f64, r: f64, alpha: f64, branches: f64, a
     }
 }
 
-/// A particle of a layer with `strike` drawn as lightning: a bolt from where it was launched to
-/// where it is now, jagged by `arc_amp` of its length, forked `arc_branches` times, its shape
-/// held for `arc_rhythm` ticks (at least the drawing's step) and then struck again.
+/// A particle of a layer with `strike` drawn as lightning: a bolt (`bolt`, as every lightning) from where it was
+/// launched to where it is now, jagged by `arc_amp` of its length, forked `arc_branches` times, its shape held for
+/// `arc_rhythm` ticks (at least the drawing's step) and then struck again.
 pub fn strike(draw: &Draw, s: &Spec, tick: f64, from: [f64; 2], p: &Particle) -> Vec<ArcPiece> {
     let mut out = Vec::new();
     let to = [p.x, p.y];
@@ -813,34 +813,7 @@ pub fn strike(draw: &Draw, s: &Spec, tick: f64, from: [f64; 2], p: &Particle) ->
     let rhythm = s.arc_rhythm.max(draw.step).max(1.0);
     let period = (tick / rhythm).floor();
     let key = pcg(draw.seed ^ int32(p.n).wrapping_mul(0x9E37_79B1) ^ int32(period).wrapping_mul(104_729));
-    let r = p.size * s.strike;
-    let alpha = p.rgba[3];
-    let mut path = Vec::new();
-    jag(from, to, s.arc_amp * len, 3, key, &mut path);
-    let n = path.len() - 1;
-    // Thick where it leaves, thin where it reaches.
-    let taper = |f: f64| 1.0 - 0.55 * f;
-    for i in 0..n {
-        let (f0, f1) = (i as f64 / n as f64, (i + 1) as f64 / n as f64);
-        out.push(ArcPiece { p0: path[i], p1: path[i + 1], r0: r * taper(f0), r1: r * taper(f1), a0: alpha, a1: alpha, start: i == 0, end: i + 1 == n });
-    }
-    let (dx, dy) = ((to[0] - from[0]) / len, (to[1] - from[1]) / len);
-    let forks = s.arc_branches.floor() as u32 + u32::from(hash(p.n, 96, key) < s.arc_branches.fract());
-    for fork in 0..forks {
-        let h = |k: u32| hash(fork as f64, k, key);
-        let at = path[(1 + (h(1) * (n as f64 - 2.0)).floor() as usize).min(n - 1)];
-        let turn = (0.4 + 0.5 * h(2)) * if h(3) < 0.5 { -1.0 } else { 1.0 };
-        let (sn, cs) = fm::sin_cos(turn);
-        let reach = len * (0.25 + 0.25 * h(4));
-        let end = [at[0] + (dx * cs - dy * sn) * reach, at[1] + (dx * sn + dy * cs) * reach];
-        let mut branch = Vec::new();
-        jag(at, end, s.arc_amp * reach, 2, key ^ (fork + 1).wrapping_mul(0x9E37), &mut branch);
-        let m = branch.len() - 1;
-        for i in 0..m {
-            let (f0, f1) = (i as f64 / m as f64, (i + 1) as f64 / m as f64);
-            out.push(ArcPiece { p0: branch[i], p1: branch[i + 1], r0: r * 0.55 * (1.0 - f0), r1: r * 0.55 * (1.0 - f1), a0: alpha * (1.0 - 0.5 * f0), a1: alpha * (1.0 - 0.5 * f1), start: i == 0, end: i + 1 == m });
-        }
-    }
+    bolt(from, to, s.arc_amp * len, p.size * s.strike, p.rgba[3], s.arc_branches, int32(p.n), key, 3, &mut Vec::new(), &mut out);
     out
 }
 
