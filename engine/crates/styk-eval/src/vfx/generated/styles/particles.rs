@@ -201,7 +201,7 @@ fn soft_glow(i: &In<'_>) -> Vec<Spec> {
 
 /// Spark: few, bright, fast; thrown out on arcs, a needle along its motion that shortens as it
 /// slows, white-hot at its head and cooling through the colour to a deep ember as it dies; with
-/// the ground on, some land and bounce.
+/// the ground on, some land and bounce. Rising, they are embers.
 fn spark(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
     // The needle's white-hot middle is the shader's; its body paints the colour, so it reads on white.
@@ -214,6 +214,13 @@ fn spark(i: &In<'_>) -> Vec<Spec> {
         hue_jitter: 0.015, value_jitter: 0.12,
         ..i.base.clone()
     };
+    if i.base.gravity < 0.0 {
+        // Rising (gravity pulling up), sparks are embers: slow specks too small for a needle, hot in
+        // the middle, a little stretched along their drift, cooling to a deep red as they rise.
+        let ember = Spec { shape: DISC, softness: 0.3, core: 0.45, aspect: 1.0, stretch: i.p.stretch * 0.4, emissive: Some(Curve::three(0.3, 0.5, 0.2, 0.15)), ..s };
+        let ramp = i.ramp(stops(&[(deep(col, 0.1), 1.0), (deep(col, 0.3), 1.0), (deep(col, 0.5), 1.0), (deep(col, 0.75), 1.0)]));
+        return vec![layer(i.sized(ember, 0.35, Curve::three(1.0, 0.55, mix(1.0, i.end(), 0.35), i.end())), ramp)];
+    }
     vec![layer(i.sized(s, 0.6, Curve::three(1.0, 0.55, mix(1.0, i.end(), 0.35), i.end())), ramp)]
 }
 
@@ -401,19 +408,20 @@ fn petal(i: &In<'_>) -> Vec<Spec> {
     vec![layer(i.sized(s, 1.0, Curve::three(1.0, 0.5, 1.0, i.end())), ramp)]
 }
 
-/// Snowflake: flakes that drift down, sway and turn slowly; on the stage, smaller flakes further away.
+/// Snowflake: flakes that drift down, sway and turn slowly; on the stage, a few soft flakes close to the eye.
 fn snowflake(i: &In<'_>) -> Vec<Spec> {
     let col = i.col;
     let ramp = i.ramp(stops(&[(col, 1.0), (tone(col, 0.15, [0.75, 0.82, 0.92]), 1.0)]));
     let s = Spec { material: m("flake"), rotate: i.rotate(ROTATE_RANDOM), emissive: Some(Curve::three(0.35, 0.5, 0.3, 0.3)), blend: i.blend(AUTO), value_jitter: 0.06, ..i.base.clone() };
     let mut out = vec![layer(i.sized(s, 1.0, Curve::three(1.0, 0.5, 1.0, i.end())), ramp)];
     if i.stage {
-        let far = Spec {
-            shape: DISC, softness: 0.4, rotate: ROTATE_FIXED, outline: None, speed_min: i.base.speed_min * 0.55, speed_max: i.base.speed_max * 0.55, alpha: 0.7,
-            emissive: Some(Curve::three(0.35, 0.5, 0.3, 0.3)), blend: i.blend(AUTO), life_min: i.base.life_min * 1.6, life_max: i.base.life_max * 1.8,
+        // Flakes close to the eye: larger, soft (out of focus), faster across the stage, fewer.
+        let near = Spec {
+            shape: DISC, softness: 1.0, rotate: ROTATE_FIXED, outline: None, speed_min: i.base.speed_min * 1.3, speed_max: i.base.speed_max * 1.4, alpha: 0.55,
+            gravity: i.base.gravity * 1.4, emissive: Some(Curve::three(0.45, 0.5, 0.4, 0.4)), blend: i.blend(AUTO),
             ..i.base.clone()
         };
-        out.insert(0, layer(i.share(Spec { size0: 0.35, ..far }, 1.2), ramp));
+        out.push(layer(i.share(Spec { size0: 1.5, size_over_life: Some(Curve::three(1.0, 0.5, 1.0, 1.0)), ..near }, 0.35), ramp));
     }
     out
 }
