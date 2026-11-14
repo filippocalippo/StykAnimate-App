@@ -28,18 +28,23 @@ pub const FILL_LIMIT: f64 = 48.0;
 /// [`MATERIALS_PENDING`] when a material was not ready).
 pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
     let mut materials = if batch.reduced { MATERIALS_REDUCED } else { 0 };
-    // Every live particle once, so the frame's coverage is known before anything is drawn.
+    // Every live particle once, so the frame's coverage is known before anything is drawn: the
+    // area each covers on the canvas and half a canvas around it (what can be on screen to draw).
     let mut alive: Vec<Vec<(Birth, Particle)>> = Vec::with_capacity(batch.draws.len());
     let mut area = 0.0f64;
     for draw in &batch.draws {
         let mut list = Vec::new();
         if !batch.spec(draw).is_beam() {
             let ev = Evaluator::new(batch, draw);
-            let s2 = draw.scale * draw.scale;
+            let m = batch.matrix(draw);
+            let [w, h] = draw.canvas;
             for i in 0..draw.count {
                 let Some(b) = ev.birth(i) else { continue };
                 if let Some(p) = ev.at_age(&b, ev.local() - b.born) {
-                    area += 4.0 * p.reach * p.reach * s2;
+                    let (x, y, r) = (m[0] * p.x + m[2] * p.y + m[4], m[1] * p.x + m[3] * p.y + m[5], p.reach * draw.scale);
+                    let across = ((x + r).min(w * 1.5) - (x - r).max(-w * 0.5)).max(0.0);
+                    let down = ((y + r).min(h * 1.5) - (y - r).max(-h * 0.5)).max(0.0);
+                    area += across * down;
                     list.push((b, p));
                 }
             }
@@ -75,7 +80,7 @@ fn rows(out: &mut Out, m: [f64; 6], scale: f64, s: &Spec, softness: f64, outline
     out.paints.push([f(softness), f(s.stretch), f(s.aspect), f(o.map_or(0.0, |o| o.width))]);
     out.paints.push(o.map_or([0.0; 4], |o| [f(o.color[0]), f(o.color[1]), f(o.color[2]), 1.0]));
     let e = s.erosion.unwrap_or_default();
-    out.paints.push([f(e.edge), f(e.rim_width), f(e.rim), 0.0]);
+    out.paints.push([f(e.edge), f(e.rim_width), f(e.rim), f(s.core)]);
     out.paints.push([f(e.rim_color[0]), f(e.rim_color[1]), f(e.rim_color[2]), 0.0]);
     at
 }
@@ -155,6 +160,8 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
     let main = rows(&mut out, m, scale, s, s.softness, true);
     let halo_rows = s.halo.map(|_| rows(&mut out, m, scale, s, 2.2, false));
     let trail_rows = s.trail.map(|t| rows(&mut out, m, scale, s, t.glow, false));
+    // Lightning striking out to each particle: its bolt's pieces, with a glow.
+    let strike_rows = (s.strike > 0.0).then(|| rows(&mut out, m, scale, s, 0.9, false));
     // A material not generated yet: soft discs this frame, and the frame is drawn again.
     let fallback_rows = (s.shape == MATERIAL && s.material.and_then(|m| m.noise).is_some_and(|row| atlas::ready(row as usize).is_none())).then(|| rows(&mut out, m, scale, s, 1.5, false));
     let (mut trails, mut halos, mut mains) = (Vec::new(), Vec::new(), Vec::new());
@@ -164,7 +171,9 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
         if fill < 1.0 {
             // Thinned evenly by a chance of its own, fading near the threshold rather than popping.
             let h = particle::hash(p.n, 23, seed);
-            alpha_scale = 1.0 - particle::smoothstep(fill - 0.04, fill, h);
+            // The band is a share of what is kept, so even a tiny share keeps its few particles whole.
+            let band = (fill * 0.3).min(0.04);
+            alpha_scale = 1.0 - particle::smoothstep(fill - band, fill, h);
             if alpha_scale <= 0.0 {
                 continue;
             }
@@ -215,6 +224,19 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) 
                 let caps = if k == 1 { F_CAP_START } else { 0 } | if k == pieces || then - dt < 0.0 { F_CAP_END } else { 0 };
                 trails.push(prim(particle_kind(P_SEGMENT) | caps, 0, r, [previous[0], previous[1], at[0], at[1]], [r0, r1, e, a1], [p.rgba[0], p.rgba[1], p.rgba[2], a0]));
                 previous = at;
+            }
+        }
+        if let Some(r) = strike_rows.filter(|_| ps.strike > 0.0) {
+            // Each bolt is its colour, painted with a glow of light, and a white-hot core of light along it.
+            let pieces = particle::strike(draw, ps, ev.tick(), b.origin(), p);
+            let a = alpha_scale;
+            for (core, piece) in pieces.iter().map(|q| (false, q)).chain(pieces.iter().map(|q| (true, q))) {
+                let (k, rgb, e) = if core { (0.4, [1.0, 1.0, 1.0], 0.9) } else { (1.0, [p.rgba[0], p.rgba[1], p.rgba[2]], p.emissive) };
+                let reach = piece.r0.max(piece.r1) * 3.7 * scale + scale;
+                grow(&mut out, world(piece.p0[0], piece.p0[1]), reach);
+                grow(&mut out, world(piece.p1[0], piece.p1[1]), reach);
+                let caps = if piece.start { F_CAP_START } else { 0 } | if piece.end { F_CAP_END } else { 0 };
+                trails.push(prim(particle_kind(P_SEGMENT) | caps, 0, r, [piece.p0[0], piece.p0[1], piece.p1[0], piece.p1[1]], [piece.r0 * k, piece.r1 * k, e, piece.a1 * a], [rgb[0], rgb[1], rgb[2], piece.a0 * a]));
             }
         }
     }

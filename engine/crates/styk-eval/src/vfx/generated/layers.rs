@@ -369,6 +369,16 @@ pub struct Spec {
     /// Lightning: forks per arc, and how many ticks each shape holds.
     pub arc_branches: f64,
     pub arc_rhythm: f64,
+    /// Pixel art: positions on a grid of `snap` times the particle's size at birth, its size in
+    /// half steps of that grid, its colour and opacity in steps (0: smooth).
+    pub snap: f64,
+    /// Each particle is drawn as lightning striking from where it was born to where it is: a
+    /// jagged bolt `arc_amp` of its length rough, forked `arc_branches` times, struck again every
+    /// `arc_rhythm` ticks, its radius `strike` times the particle's size (0: none).
+    pub strike: f64,
+    /// A white-hot middle: discs and crisp shapes turn whiter toward their centre by this much
+    /// (0: none; a spark and a sparkle have 0.6 of their own).
+    pub core: f64,
 }
 
 impl Default for Spec {
@@ -459,6 +469,9 @@ impl Default for Spec {
             beam_look: None,
             arc_branches: 0.0,
             arc_rhythm: 2.0,
+            snap: 0.0,
+            strike: 0.0,
+            core: 0.0,
         }
     }
 }

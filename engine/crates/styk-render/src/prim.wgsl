@@ -594,6 +594,8 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
     let e = p.b.z;
     let softness = shape_row.x;
     var cov = 0.0;
+    // A white-hot middle (row 4's w): discs and crisp shapes whiter toward their centre.
+    var col = rgb;
     if (shape == P_SEGMENT) {
         let hl = prm.x;
         let px = prm.y;
@@ -643,6 +645,7 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
     } else if (shape == P_DISC || shape == P_RING || shape == P_BOKEH) {
         let r = length(uv);
         let px = prm.x;
+        col = mix(rgb, vec3<f32>(1.0), erosion.w * (1.0 - smooth01(0.0, 0.5, r)));
         if (shape == P_RING) {
             let hw = max(softness, 0.02);
             let band = clamp(0.5 - (abs(r - 1.0) - hw) / px, 0.0, 1.0);
@@ -656,7 +659,7 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
         }
         if (shape_row.w > 0.0) {
             let line = edge_cov(r - 1.0 - prm.y, 0.0, px);
-            let o = with_outline(rgb, cov, line, e, alpha, ink);
+            let o = with_outline(col, cov, line, e, alpha, ink);
             if (o.a <= 0.0 && max(o.r, max(o.g, o.b)) <= 0.0) { discard; }
             return o;
         }
@@ -664,14 +667,15 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
         let d = shape_distance(shape, uv, p.color & 0xffffu);
         let px = prm.x;
         cov = edge_cov(d, softness, px);
+        col = mix(rgb, vec3<f32>(1.0), erosion.w * (1.0 - smooth01(0.0, 0.5, length(uv))));
         if (shape_row.w > 0.0) {
             let line = edge_cov(d - prm.y, 0.0, px);
-            let o = with_outline(rgb, cov, line, e, alpha, ink);
+            let o = with_outline(col, cov, line, e, alpha, ink);
             if (o.a <= 0.0 && max(o.r, max(o.g, o.b)) <= 0.0) { discard; }
             return o;
         }
         if (shape == P_SPARK || shape == P_SPARKLE) {
-            let core = (1.0 - smooth01(0.0, 0.45, length(uv))) * 0.6;
+            let core = (1.0 - smooth01(0.0, 0.45, length(uv))) * select(0.6, erosion.w, erosion.w > 0.0);
             let k = cov * alpha;
             if (k <= 0.0) { discard; }
             return lit(mix(rgb, vec3<f32>(1.0), core), k, e);
@@ -679,7 +683,7 @@ fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, sha
     }
     let k = cov * alpha;
     if (k <= 0.0) { discard; }
-    return lit(rgb, k, e);
+    return lit(col, k, e);
 }
 
 // A beam's premultiplied colour; `aa` is the pixel in local units; rows 2 to 5 of its draw are its

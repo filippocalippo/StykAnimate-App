@@ -362,6 +362,12 @@ fn over(top: [f32; 4], under: [f32; 4]) -> [f32; 4] {
     [top[0] + under[0] * keep, top[1] + under[1] * keep, top[2] + under[2] * keep, top[3] + under[3] * keep]
 }
 
+/// `rgb` whiter toward a shape's centre by `core`, at distance `r` from it (1: its edge).
+fn hot(rgb: [f32; 3], core: f32, r: f32) -> [f32; 3] {
+    let k = core * (1.0 - smooth(0.0, 0.5, r));
+    [0, 1, 2].map(|i| mix(rgb[i], 1.0, k))
+}
+
 /// A particle's premultiplied colour at `uv` (`particle_color` in prim.wgsl); its alpha is
 /// what it covers of the target, less where it emits light.
 fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4] {
@@ -370,6 +376,8 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
     let rgb = [c[0], c[1], c[2]];
     let e = p.b[2];
     let softness = rows.shape[0];
+    // A white-hot middle (row 4's w): discs and crisp shapes whiter toward their centre.
+    let mut col = rgb;
     let cov = match shape {
         P_SEGMENT => {
             let (hl, px) = (prm[0], prm[1]);
@@ -422,6 +430,7 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
         P_DISC | P_RING | P_BOKEH => {
             let r = len(uv[0], uv[1]);
             let px = prm[0];
+            col = hot(rgb, rows.erosion[3], r);
             let k = match shape {
                 P_RING => {
                     let hw = softness.max(0.02);
@@ -434,7 +443,7 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
             };
             if rows.shape[3] > 0.0 {
                 let line = edge(r - 1.0 - prm[1], 0.0, px);
-                let fill = lit(rgb, k * c[3], e);
+                let fill = lit(col, k * c[3], e);
                 let band = (line - k.min(1.0)).max(0.0) * rows.outline[3] * c[3];
                 return [fill[0] + rows.outline[0] * band, fill[1] + rows.outline[1] * band, fill[2] + rows.outline[2] * band, fill[3] + band];
             }
@@ -444,22 +453,23 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
             let d = shape_distance(shape, uv[0], uv[1], p.color & 0xffff);
             let px = prm[0];
             let k = edge(d, softness, px);
+            col = hot(rgb, rows.erosion[3], len(uv[0], uv[1]));
             if rows.shape[3] > 0.0 {
                 let line = edge(d - prm[1], 0.0, px);
-                let fill = lit(rgb, k * c[3], e);
+                let fill = lit(col, k * c[3], e);
                 let band = (line - k).max(0.0) * rows.outline[3] * c[3];
                 return [fill[0] + rows.outline[0] * band, fill[1] + rows.outline[1] * band, fill[2] + rows.outline[2] * band, fill[3] + band];
             }
             // A spark's and a sparkle's middle is hotter than its points.
             if shape == P_SPARK || shape == P_SPARKLE {
                 let r = len(uv[0], uv[1]);
-                let core = (1.0 - smooth(0.0, 0.45, r)) * 0.6;
+                let core = (1.0 - smooth(0.0, 0.45, r)) * if rows.erosion[3] > 0.0 { rows.erosion[3] } else { 0.6 };
                 return lit([0, 1, 2].map(|i| mix(rgb[i], 1.0, core)), k * c[3], e);
             }
             k
         }
     };
-    lit(rgb, cov * c[3], e)
+    lit(col, cov * c[3], e)
 }
 
 /// A beam's premultiplied colour at `uv` (`beam_color` in prim.wgsl); `aa` is the pixel in local units.

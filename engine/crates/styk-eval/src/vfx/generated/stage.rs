@@ -326,6 +326,8 @@ pub struct Specimen {
     pub outline: f32,
     pub emissive: f32,
     pub erosion: f32,
+    /// A white-hot middle (`Spec::core`).
+    pub core: f32,
     /// A material's cell (`material << 4 | variant`), or a shape's seed.
     pub cell: u32,
 }
@@ -333,8 +335,8 @@ pub struct Specimen {
 /// Every particle shape and material, each in a few looks: what the renderers must draw alike.
 pub fn specimen_list() -> Vec<Specimen> {
     use styk_draw::*;
-    let s = |label, shape, softness: f32| Specimen { label, shape, softness, outline: 0.0, emissive: 0.0, erosion: 0.0, cell: 7 };
-    let m = |label, material: u32, erosion: f32, outline: f32| Specimen { label, shape: P_MATERIAL, softness: 0.0, outline, emissive: 0.0, erosion, cell: material << 4 | 1 };
+    let s = |label, shape, softness: f32| Specimen { label, shape, softness, outline: 0.0, emissive: 0.0, erosion: 0.0, core: 0.0, cell: 7 };
+    let m = |label, material: u32, erosion: f32, outline: f32| Specimen { label, shape: P_MATERIAL, softness: 0.0, outline, emissive: 0.0, erosion, core: 0.0, cell: material << 4 | 1 };
     vec![
         s("SOFT DISC", P_DISC, 1.4),
         s("DISC", P_DISC, 0.0),
@@ -361,6 +363,8 @@ pub fn specimen_list() -> Vec<Specimen> {
         Specimen { outline: 0.18, ..s("INKED", P_CLOUD, 0.0) },
         Specimen { emissive: 1.0, ..s("LIGHT", P_DISC, 1.4) },
         Specimen { softness: 1.0, ..s("TRAIL", P_SEGMENT, 1.0) },
+        Specimen { core: 0.85, emissive: 0.3, ..s("HOT DISC", P_DISC, 0.9) },
+        Specimen { core: 0.7, ..s("HOT SHARD", P_SHARD, 0.0) },
         m("SMOKE", super::atlas::SMOKE, 0.05, 0.0),
         m("FLAME", super::atlas::FLAME, 0.25, 0.0),
         m("WISP", super::atlas::WISP, 0.1, 0.0),
@@ -397,7 +401,7 @@ pub fn specimens(background: u32, sizes: &[f32], columns: usize) -> (styk_draw::
             let rows = if k == 0 { rows } else { at };
             paints.push([sp.softness, 1.0, 1.0, sp.outline * r]);
             paints.push([0.08, 0.05, 0.1, 1.0]);
-            paints.push([0.12, 0.2, 0.6, 0.0]);
+            paints.push([0.12, 0.2, 0.6, sp.core]);
             paints.push([0.55, 0.08, 0.02, 0.0]);
             let cx = x + r;
             let kind = particle_kind(sp.shape) | if sp.shape == P_SEGMENT { F_CAP_START | F_CAP_END } else { 0 };

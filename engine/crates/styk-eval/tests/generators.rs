@@ -478,3 +478,21 @@ fn batch_bounds_hold_every_live_particle() {
     }
     assert!(checked > 1000, "only {checked} particles checked ({empty} empty batches)");
 }
+
+/// The area limit counts what particles cover on and around the canvas, and keeps the few it keeps whole: an effect
+/// at its largest (glows hundreds of pixels wide, flying far off the stage) still draws some of them.
+#[test]
+fn the_area_limit_keeps_a_few_huge_particles_whole() {
+    let clip = Clip::new(Some(1), "particles").set("rate", "200").set("size", "400").set("endSize", "5").set("speed", "120").set("spread", "360").set("life", "300").set("variation", "1");
+    let prepared = Stage::new(60.0).clip(clip).prepare();
+    let tick = 40.0;
+    let frame = prepared.evaluate(tick);
+    let scene = styk_eval::geometry::build(&prepared.doc, &frame);
+    let batch = generated::build(&prepared, &frame, &scene, Some(tick), Some(&Evaluate), 1.0).unwrap();
+    let assets = styk_eval::assets::Assets::build(&prepared.doc);
+    let list = styk_eval::drawlist::encode_with(&prepared.doc, &assets, &scene, &styk_eval::drawlist::Overrides { generators: Some(&batch), ..Default::default() });
+    let drawn: Vec<&styk_draw::Prim> = list.prims.iter().filter(|p| p.kind & 255 == styk_draw::K_PARTICLE).collect();
+    assert!(styk_draw::effects_reduced(&list), "the picture is reduced");
+    assert!(!drawn.is_empty() && drawn.len() < live(&batch).len(), "{} of {} drawn", drawn.len(), live(&batch).len());
+    assert!(drawn.iter().any(|p| p.c[3] > 0.2), "the ones kept are drawn, not faded to nothing");
+}
