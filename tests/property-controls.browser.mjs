@@ -230,6 +230,104 @@ try {
       .locator("#property-test")
       .screenshot({ path: `artifacts/property-controls/${context}.png` });
   }
+  // The value field (inspector-kit `range`, `default`, `angle`; docs/design/components.md): one control for every
+  // bounded number of the effects panel, on the same PropertyControls as the fields above.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(async () => {
+    const { renderRow } = await import("/src/inspector-kit.mjs");
+    const { PropertyControls } = await import("/src/property-controls.mjs");
+    const host = document.createElement("div");
+    host.id = "value-test";
+    host.style.cssText = "position:fixed;z-index:2001;left:40px;top:60px;width:240px;display:grid;gap:6px;padding:12px;background:var(--surface)";
+    document.body.append(host);
+    const values = { count: 40, radius: 12, direction: -90 }, history = [], events = [];
+    host.innerHTML = [
+      renderRow({ kind: "number", key: "count", label: "Count", value: 40, min: 1, max: 5000, step: 1, precision: 0, range: true, scale: "log", knee: 1, default: 40 }),
+      renderRow({ kind: "number", key: "radius", label: "Radius", value: 12, min: 0, max: 128, step: 1, precision: 2, unit: "px", range: true, default: 12 }),
+      renderRow({ kind: "number", key: "direction", label: "Direction", value: -90, min: -180, max: 180, step: 1, precision: 0, unit: "°", angle: true, default: -90 }),
+    ].join("");
+    const controls = new PropertyControls(host, {
+      getValue: (key) => values[key],
+      canHandle: (key) => Object.hasOwn(values, key),
+      begin: ({ initialValue }) => initialValue,
+      preview: ({ key, value }) => { values[key] = value; events.push(["preview", key, value]); },
+      commit: ({ key, value, token }) => { history.push({ key, before: token, after: value }); },
+      cancel: ({ key, token }) => { values[key] = token; },
+    });
+    window.valueTest = { values, history, events, controls };
+  });
+  const vt = () => page.evaluate(() => ({ values: { ...valueTest.values }, history: valueTest.history.length, events: valueTest.events.length, active: valueTest.controls.active }));
+  const box = async (key, part = "") => (await page.locator(`#value-test [data-property-row="${key}"]${part}`).boundingBox());
+  const fill = (key) => page.locator(`#value-test [data-property-row="${key}"]`).evaluate((row) => parseFloat(row.style.getPropertyValue("--_p")));
+  const drag = async (key, dx, { at = 0.45, keys = [], cancel = false } = {}) => {
+    const r = await box(key);
+    const x = r.x + r.width * at, y = r.y + r.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (const k of keys) await page.keyboard.down(k);
+    await page.mouse.move(x + dx, y, { steps: 12 });
+    if (cancel) await page.keyboard.press("Escape");
+    for (const k of keys) await page.keyboard.up(k);
+    await page.mouse.up();
+  };
+  const { positionToValue, valueToPosition } = await import("../src/ui/value-scale.mjs");
+  const countRange = { scale: "log", min: 1, max: 5000, knee: 1 };
+  let v = await vt();
+  const fieldWidth = (await box("count")).width;
+  check("A value field draws where its value sits along a log travel", Math.abs((await fill("count")) - valueToPosition(40, countRange) * 100) < 0.1);
+  await drag("count", 3);
+  v = await vt();
+  // Three pixels from where the value is: the value moves by three pixels' worth of its travel, never to where the pointer is.
+  const small = positionToValue(valueToPosition(40, countRange) + 3 / fieldWidth, countRange);
+  check("A small drag from anywhere on the field moves the value a little, with no jump", v.history === 1 && v.values.count > 40 && Math.abs(v.values.count - small) <= 1.5);
+  await drag("count", 60);
+  v = await vt();
+  const expected = positionToValue(valueToPosition(v.values.count, countRange), countRange);
+  check("Dragging moves along the field's own scale and lands on whole steps", Number.isInteger(v.values.count) && Math.abs(expected - v.values.count) < 1 && v.values.count > 100);
+  check("The fill follows the value", Math.abs((await fill("count")) - valueToPosition(v.values.count, countRange) * 100) < 0.6);
+  let before = v.values.radius;
+  await drag("radius", 50, { keys: ["Shift"] });
+  v = await vt();
+  const fine = v.values.radius - before;
+  check("Shift scrubs ten times finer", fine > 0 && Math.abs(fine - (50 / fieldWidth) * 128 * 0.1) < 0.6);
+  before = v.values.radius;
+  await drag("radius", 20, { keys: ["Control"] });
+  v = await vt();
+  check("Ctrl scrubs coarsely", v.values.radius - before > (20 / fieldWidth) * 128 * 3);
+  const history = v.history;
+  await drag("radius", 40, { cancel: true });
+  v = await vt();
+  check("Escape during a drag puts the value back without an edit", v.history === history && !v.active);
+  const r = await box("radius");
+  await page.mouse.click(r.x + r.width * 0.3, r.y + r.height / 2);
+  check("A tap types the value", await page.evaluate(() => document.activeElement?.dataset.property === "radius" && document.activeElement.matches("input")));
+  await page.mouse.click(r.x + r.width * 0.3, r.y + r.height / 2);
+  v = await vt();
+  check("A second tap resets the value to its default, as one edit", v.values.radius === 12 && v.history === history + 1);
+  check("The default sits under its tick", Math.abs((await fill("radius")) - (12 / 128) * 100) < 0.1);
+  await page.keyboard.type("36");
+  await page.keyboard.press("Enter");
+  v = await vt();
+  check("A typed value commits once", v.values.radius === 36 && v.history === history + 2);
+  await page.locator('#value-test [data-property="radius"]').focus();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("PageUp");
+  v = await vt();
+  check("Arrow keys step and Page Up moves a tenth of the travel", v.values.radius > 37 && v.values.radius >= 37 + 128 * 0.1 - 1);
+  check("A screen reader hears the value with its unit", /^\d+(\.\d+)? px$/.test(await page.locator('#value-test [data-property="radius"]').getAttribute("aria-valuetext")));
+  check("The focused field shows the focus ring", await page.locator('#value-test [data-property-row="radius"]').evaluate((row) => getComputedStyle(row).boxShadow !== "none"));
+  check("Only the value is a tab stop: the label scrubs and holds focus while dragged", await page.locator('#value-test [data-property-row="radius"] [data-property-scrub]').getAttribute("tabindex") === "-1");
+  const dial = await box("direction", " [data-property-dial]");
+  await page.mouse.move(dial.x + dial.width / 2, dial.y + dial.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dial.x + dial.width / 2 + 40, dial.y + dial.height / 2, { steps: 4 });
+  await page.mouse.up();
+  v = await vt();
+  check("An angle's dial turns to the pointer", Math.abs(v.values.direction) < 2);
+  check("The dial shows the new angle", Math.abs(parseFloat(await page.locator('#value-test [data-property-dial]').evaluate((d) => d.style.getPropertyValue("--_a")))) < 2);
+  await page.locator("#value-test").screenshot({ path: "artifacts/property-controls/value-fields.png" });
+  await page.evaluate(() => { valueTest.controls.destroy(); document.getElementById("value-test").remove(); });
+
   await render("camera", 264);
   p = await beginDrag("camera_x");
   await page.mouse.move(p.x + 30, p.y);

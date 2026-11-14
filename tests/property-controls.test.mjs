@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { newOwnedEditor } from "./support/owned-editor.mjs";
 import {
   propertyStep,
+  propertyRate,
   formatPropertyValue,
 } from "../src/property-controls.mjs";
 import { inspectorView } from "../src/inspector-view.mjs";
@@ -16,6 +17,16 @@ test("scrub modifiers preserve useful fractional units", () => {
   assert.equal(formatPropertyValue(0.0004, 3), "0");
   assert.equal(formatPropertyValue(-0, 3), "0");
   assert.equal(formatPropertyValue(Infinity), "");
+});
+
+test("a coarse modifier makes a value move ten times as far, and fine ones still compose", () => {
+  assert.equal(propertyStep(1, { ctrlKey: true }), 10);
+  assert.equal(propertyStep(1, { metaKey: true }), 10);
+  assert.equal(propertyStep(2, { ctrlKey: true, shiftKey: true }), 2);
+  assert.equal(propertyRate({}), 1);
+  // A slider field crosses its travel in a quarter of its width with Ctrl (property-controls.mjs, RANGE_COARSE).
+  assert.equal(propertyRate({ ctrlKey: true }, 4), 4);
+  assert.equal(propertyRate({ shiftKey: true }, 4), 0.1);
 });
 
 test("explicit inspector contexts isolate camera, scene, frame and layer controls", () => {

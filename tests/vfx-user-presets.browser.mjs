@@ -20,8 +20,9 @@ try{
   check('the name starts as the effect’s name',await dialog.getByLabel('Name').inputValue()==='Glow');
   await page.screenshot({path:`${out}/save-dialog.png`});
   await dialog.getByLabel('Name').fill('Hero glow');await dialog.getByRole('button',{name:'Save',exact:true}).click();
-  await page.locator('.vfx-save-preset[data-saved]').waitFor();
-  check('saving says so in place',(await page.locator('.vfx-save-preset').textContent()).includes('Saved to My presets'));
+  // The foot's Save as preset is an icon button: it says so in its name and tooltip, with a check, for a moment.
+  const saved=page.locator('.vfx-detail [data-clip-action="save-preset"][data-saved]');await saved.waitFor();
+  check('saving says so in place',(await saved.getAttribute('aria-label')).includes('Saved to My presets')&&await saved.locator('svg').count()===1);
   check('the preset is written',await page.evaluate(()=>JSON.parse(localStorage.getItem('stykanimate.vfx-presets.v1')).presets[0].name==='Hero glow'));
   const undo=await page.evaluate(()=>styk.editor._undo.length);
   // Another figure: the preset is one of the suggestions and first in the Presets catalogue.

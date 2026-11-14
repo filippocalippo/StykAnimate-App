@@ -12,7 +12,7 @@
 export default Object.freeze({
   'inspector.scrubTip': 'Drag to adjust · Shift: fine · Alt: extra fine',
   'inspector.scrubLabel': 'Scrub {name}',
-  'inspector.scrubHint': 'Drag a label to scrub · Shift ×0.1 · Alt ×0.01',
+  'inspector.scrubHint': 'Drag a label to scrub · Shift ×0.1 · Alt ×0.01 · Ctrl ×10',
   'inspector.mixed': 'Mixed',
   'inspector.decrease': 'Decrease {name}',
   'inspector.increase': 'Increase {name}',

@@ -98,6 +98,45 @@ test('number fields carry the PropertyControls hooks, the unit after the value a
   assert.equal(renderRow({kind: 'number', key: 'x', label: 'X', value: 1}, {t: key => (key === 'inspector.scrubTip' ? 'Ziehen' : key)}).includes('data-tooltip="Ziehen"'), true);
 });
 
+test('value fields: a bounded value is its own slider, with its scale, default, dial, help and trailing buttons', () => {
+  const html = renderRow({kind: 'number', key: 'count', label: 'Count', value: 40, min: 1, max: 5000, step: 1, precision: 0, range: true, scale: 'log', knee: 1, default: 40,
+    help: 'How many particles a burst throws.', trail: [{label: 'Add key', icon: 'diamond', data: {'clip-key': 'k'}}]}, {icon});
+  const field = tag(html, {'data-property-row': 'count'}), input = tag(html, {'data-property': 'count'});
+  assert.ok('data-range' in field.attrs && 'data-default' in field.attrs);
+  assert.equal(field.attrs['data-tooltip'], 'How many particles a burst throws.');
+  // The fill and the default's tick sit where the log scale puts 40, not at 0.8% as a straight slider would.
+  assert.match(field.attrs.style, /^--_p:4\d\.\d+%;--_d:4\d\.\d+%$/);
+  assert.deepEqual([input.attrs['data-property-scale'], input.attrs['data-property-knee'], input.attrs['data-property-default'], input.attrs['aria-valuetext']], ['log', '1', '40', '40']);
+  assert.equal(input.attrs['aria-description'], 'How many particles a burst throws.');
+  assert.equal(tag(html, {'data-property-scrub': true}).attrs.tabindex, '-1', 'the value is the keyboard\'s stop');
+  assert.match(html, /<button[^>]*class="ui-icon-button ui-field-trail"[^>]*data-clip-key="k"/);
+  // A linear field writes no scale; an angle gets its dial and no fill; a Mixed value has no travel to show.
+  const linear = renderRow({kind: 'number', key: 'r', label: 'Radius', unit: 'px', value: 32, min: 0, max: 128, range: true}, {icon});
+  assert.equal(tag(linear, {'data-property': 'r'}).attrs['data-property-scale'], undefined);
+  assert.equal(tag(linear, {'data-property-row': 'r'}).attrs.style, '--_p:25%');
+  assert.equal(tag(linear, {'data-property': 'r'}).attrs['aria-valuetext'], '32 px');
+  const angle = renderRow({kind: 'number', key: 'a', label: 'Direction', unit: '°', value: -90, min: -180, max: 180, angle: true, default: -90}, {icon});
+  assert.match(angle, /<span class="ui-field-dial" data-property-dial style="--_a:-90deg" aria-hidden="true"><\/span>/);
+  assert.equal(tag(angle, {'data-property-row': 'a'}).attrs['data-range'], undefined);
+  assert.equal(tag(angle, {'data-property': 'a'}).attrs['data-property-default'], '-90');
+  assert.equal(tag(renderRow({kind: 'number', key: 'm', label: 'M', value: 1, min: 0, max: 2, range: true, mixed: true}), {'data-property-row': 'm'}).attrs.style, undefined);
+});
+
+test('the value field\'s companions: a choice in a field, a labelled colour with its gradient, and a linked pair', () => {
+  const choice = renderRow({kind: 'segmented', field: true, label: 'Placement', mode: 'pressed', value: 1, options: [{value: 0, label: 'Outer'}, {value: 1, label: 'Inner'}, {value: 2, label: 'Both'}]}, {icon});
+  assert.match(choice, /^<div class="ui-field" data-segments><span class="ui-field-label" aria-hidden="true">Placement<\/span><div class="ui-segmented" role="group" aria-label="Placement" data-size="sm">/);
+  assert.equal(tag(choice, {'aria-pressed': 'true'}).index > choice.indexOf('Outer'), true);
+  const colour = renderRow({kind: 'color', picker: 'paint', label: 'Color', showLabel: true, value: '#66ccff', paint: 'linear-gradient(90deg, #5096ff, #a03cff)', caption: 'Gradient'}, {icon});
+  assert.ok(colour.includes('<span class="ui-field-label">Color</span><span class="ui-swatch" data-size="sm" data-gradient style="--swatch:#66ccff;--swatch-paint:linear-gradient(90deg, #5096ff, #a03cff)"></span><span class="ui-field-hex">Gradient</span>'));
+  assert.ok('data-labelled' in tag(colour, {'data-color': true}).attrs);
+  const pair = renderRow({kind: 'pair', label: 'Cell size', link: {label: 'Link width and height', pressed: true, data: {'vfx-link': 'k'}},
+    rows: [{kind: 'number', key: 'w', label: 'Width', value: 8, min: 1, max: 128, range: true}, {kind: 'number', key: 'h', label: 'Height', value: 8, hidden: true}]}, {icon});
+  assert.match(pair, /^<div class="ui-field-pair" data-single role="group" aria-label="Cell size">/);
+  assert.match(pair, /data-icon="link"/);
+  assert.equal(tag(pair, {'data-vfx-link': 'k'}).attrs['aria-pressed'], 'true');
+  assert.equal(find(pair, {'data-property': 'h'}), undefined, 'while linked, one field edits both');
+});
+
 test('the stepper field keeps its step buttons outside the property row, out of the tab order and off at their limits', () => {
   const row = {kind: 'stepper-field', key: 'figure_z_order', label: 'Order', description: 'Z-index', precision: 0, value: 2, min: -3, max: 2,
     down: {action: 'layer-down', label: 'Send backward', icon: 'step-down'}, up: {action: 'layer-up', label: 'Bring forward', icon: 'step-up'}};
@@ -433,7 +472,7 @@ test('value helpers: slider fill, units, accessible names, the fade and the scru
   assert.equal(describeField('Angle', '°', {t: (key, params) => key === 'inspector.unit.degrees' ? 'gradi' : key === 'inspector.withUnit' ? `${params.label} (${params.unit})` : key}), 'Angle (gradi)');
   assert.equal(hasMoreBelow({scrollTop: 0, clientHeight: 100, scrollHeight: 300}), true);
   assert.equal(hasMoreBelow({scrollTop: 200, clientHeight: 100, scrollHeight: 300.5}), false);
-  assert.equal(SCRUB_HINT, 'Drag a label to scrub · Shift ×0.1 · Alt ×0.01');
+  assert.equal(SCRUB_HINT, 'Drag a label to scrub · Shift ×0.1 · Alt ×0.01 · Ctrl ×10');
 });
 
 test('the kit\'s own words live in their catalog fragment and translate', () => {

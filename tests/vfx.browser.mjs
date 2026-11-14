@@ -28,18 +28,26 @@ try{
  await page.getByRole('spinbutton',{name:'Noise Amount'}).press('Enter');
  assert.equal(await page.evaluate(()=>window.styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0]?.params.amount),.25);
  const beforeDrag=await page.evaluate(()=>({history:styk.editor._undo.length,keys:styk.editor.report._styk.layerSheet.tracks.scene.keys.length}));
- // The drag's value rounds with the slider's width (its 8px thumb): one splitter step widens the
- // inspector past the wide tier's 288px so the slider maps the middle half of its track steadily.
+ // A bounded value is its own slider (the value field): a drag anywhere on it moves the value along its travel from
+ // where it is, half the field's width for half the range, and commits one edit without keys.
  await page.getByRole('separator',{name:'Resize properties panel'}).focus();await page.keyboard.press('ArrowLeft');
- const slider=page.getByRole('slider',{name:'Noise Amount slider'}),box=await slider.boundingBox();
+ const field=page.locator('#vfx-panel [data-property-row]').filter({has:page.getByRole('spinbutton',{name:'Noise Amount'})}),box=await field.boundingBox();
  await page.mouse.move(box.x+box.width*.25,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width*.75,box.y+box.height/2,{steps:12});await page.mouse.up();
  const dragged=await page.evaluate(()=>({amount:styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.amount,history:styk.editor._undo.length,keys:styk.editor.report._styk.layerSheet.tracks.scene.keys.length}));
- assert.ok(dragged.amount>.7&&dragged.amount<.8);assert.equal(dragged.history,beforeDrag.history+1);assert.equal(dragged.keys,beforeDrag.keys);
+ assert.ok(dragged.amount>.7&&dragged.amount<.8,`dragged to ${dragged.amount}`);assert.equal(dragged.history,beforeDrag.history+1);assert.equal(dragged.keys,beforeDrag.keys);
  await page.evaluate(()=>styk.editor.undo());
+ // The label scrubs the same travel.
  const label=page.locator('#vfx-panel [data-property-scrub]').filter({hasText:/^Amount$/}),labelBox=await label.boundingBox();
  await page.mouse.move(labelBox.x+10,labelBox.y+labelBox.height/2);await page.mouse.down();await page.mouse.move(labelBox.x+35,labelBox.y+labelBox.height/2,{steps:8});await page.mouse.up();
- assert.equal(await page.evaluate(()=>styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.amount),.5);
+ const scrubbed=await page.evaluate(()=>styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.amount);
+ assert.ok(Math.abs(scrubbed-(.25+25/box.width))<.011,`scrubbed to ${scrubbed}`);
  assert.equal(await page.locator('#vfx-panel [data-property-key]').count(),0);
+ // Every seeded effect can be shuffled from its foot: a new seed, the same settings, one undo step.
+ const seedBefore=await page.evaluate(()=>({seed:styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.seed,history:styk.editor._undo.length}));
+ await page.locator('#vfx-panel .vfx-detail [data-clip-action="shuffle"]').click();
+ const seedAfter=await page.evaluate(()=>({seed:styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.seed,amount:styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.amount,history:styk.editor._undo.length}));
+ assert.notEqual(seedAfter.seed,seedBefore.seed);assert.equal(seedAfter.history,seedBefore.history+1);assert.ok(Math.abs(seedAfter.amount-scrubbed)<1e-9);
+ await page.evaluate(()=>styk.editor.undo());
  await page.getByRole('tab',{name:'Library',exact:true}).click();assert.equal(await page.locator('#vfx-panel').isVisible(),false);
  await page.getByRole('tab',{name:'VFX',exact:true}).click();assert.equal(await page.locator('#inspector').isVisible(),false);
  await fs.mkdir('artifacts/vfx',{recursive:true});await page.screenshot({path:'artifacts/vfx/inspector.png'});

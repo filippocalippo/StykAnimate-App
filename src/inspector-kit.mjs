@@ -82,6 +82,7 @@ import { messageText } from './localization.mjs';
  */
 import {icon as appIcon} from './icons.mjs';
 import {formatPropertyValue} from './property-controls.mjs';
+import {positionPercent, valueToPosition} from './ui/value-scale.mjs';
 import {createQuickActions} from './ui/quick-actions.mjs';
 import {nextRovingIndex} from './ui/roving-focus.mjs';
 import TEXT from './locales/en-inspector.mjs';
@@ -198,7 +199,7 @@ function fieldNameAttributes(row, withUnit = false) {
   return reference?.messageKey ? ' ' + messageAttributes(reference.messageKey, reference.messageParams, 'aria-label') : '';
 }
 
-const GLUED_UNITS = new Set(['%', '°', '×']);
+const GLUED_UNITS = new Set(['%', '°', '×', '/f']);
 /** A value with its unit as a person reads it: "100%", "172°", "8 px", "24 fps". */
 export function formatValueWithUnit(value, {unit = '', precision = 2} = {}) {
   const text = formatPropertyValue(value, precision);
@@ -280,24 +281,55 @@ function numberInput(row, env, className) {
   const descriptionReference = fieldNameReference(row, true);
   const legacy = row.field === false ? undefined : (row.field ?? key);
   const mixed = Boolean(row.mixed);
+  // A value field (row.range, row.default, row.angle) adds what its control needs: the scale its travel follows, its
+  // default for a double click's reset and the unit it speaks with. Plain fields keep today's markup.
+  const scale = row.range ? {
+    'data-property-scale': row.scale && row.scale !== 'linear' ? row.scale : undefined, 'data-property-knee': finite(row.knee), 'data-property-exponent': finite(row.exponent),
+  } : {};
+  const valueField = Boolean(row.range || row.angle || row.default !== undefined);
   const input = `<input${attributes({
     class: className, type: 'number', id: id(row.id), 'data-field': legacy, 'data-property': key,
     'data-property-value': value, 'data-property-precision': precision, 'data-property-display-precision': display,
-    'data-property-step': row.step ?? 1, value: mixed ? '' : formatPropertyValue(value, display), step: 'any',
-    'aria-label': description, min: finite(row.min), max: finite(row.max), disabled: Boolean(row.disabled),
+    'data-property-step': row.step ?? 1, ...scale, 'data-property-default': finite(row.default), 'data-property-unit': valueField ? unit : undefined,
+    value: mixed ? '' : formatPropertyValue(value, display), step: 'any',
+    'aria-label': description, 'aria-valuetext': valueField && !mixed ? formatValueWithUnit(value, {unit, precision}) : undefined,
+    'aria-description': row.help, min: finite(row.min), max: finite(row.max), disabled: Boolean(row.disabled),
     placeholder: mixed ? say(env, 'inspector.mixed') : undefined, 'data-mixed': mixed ? String(value) : undefined, ...extras(row),
-  })}${fieldNameAttributes(row, true)}>`;
+  })}${fieldNameAttributes(row, true)}${row.helpKey ? descriptorAttributes(row, 'help', 'aria-description') : ''}>`;
+  // In a value field the value is the keyboard's stop; its label scrubs and holds focus while dragged, out of the tab order.
   const scrub = `<span${attributes({
-    class: 'ui-field-label', 'data-property-scrub': true, tabindex: 0, role: 'button',
+    class: 'ui-field-label', 'data-property-scrub': true, tabindex: row.range || row.angle ? -1 : 0, role: 'button',
     'aria-label': row.scrubLabel ?? say(env, 'inspector.scrubLabel', {name: description}), 'data-tooltip': row.tip ?? say(env, 'inspector.scrubTip'),
   })}${descriptorAttributes(row, 'label')}${row.labelKey || row.descriptionKey ? ' ' + messageAttributes('inspector.scrubLabel', {name: descriptionReference}, 'aria-label') : ''}${row.tipKey ? descriptorAttributes(row, 'tip', 'data-tooltip') : row.tip == null ? ' ' + messageAttributes('inspector.scrubTip', {}, 'data-tooltip') : ''}>${escapeHTML(label)}</span>`;
   return {input, scrub, description, value, mixed};
 }
 
+/** A value field's fill and default tick (CSS custom properties on the field), or nothing for a plain field. */
+function valueFieldStyle(row, value) {
+  if (!row.range || row.mixed) return undefined;
+  const range = {scale: row.scale, min: finite(row.min), max: finite(row.max), knee: row.knee, exponent: row.exponent, step: row.step};
+  const parts = [`--_p:${positionPercent(valueToPosition(value, range))}`];
+  // A value that runs both ways fills from zero, not from its minimum.
+  if (range.min < 0 && range.max > 0) parts.push(`--_z:${positionPercent(valueToPosition(0, range))}`);
+  if (finite(row.default) !== undefined) parts.push(`--_d:${positionPercent(valueToPosition(row.default, range))}`);
+  return parts.join(';');
+}
+
+/** An angle's dial: a small circle whose line points the way the value does; dragging it turns the value (PropertyControls). */
+const dial = (row, value) => (row.angle ? `<span class="ui-field-dial" data-property-dial style="--_a:${Number(value.toFixed(2))}deg" aria-hidden="true"></span>` : '');
+
 /**
  * A number field: the inline label scrubs (PropertyControls) and the unit
  * follows the value. A <label>, as today's, so a click anywhere in the field
  * focuses the value. Without `key` it is a plain number input (IK's target rotation).
+ *
+ * The value field (components.md): `range: true` makes the whole field a slider
+ * for a bounded value: a quiet fill shows where the value sits on its travel
+ * (`scale`: linear, log or pow, src/ui/value-scale.mjs), `default` adds the
+ * default's tick and a double click's reset, `angle: true` adds a dial,
+ * `scrubAnywhere` lets an unbounded value scrub from any point of its field, `trail`
+ * puts small buttons inside the field's end (a key, a shuffle), and `help` is
+ * the one-line description a tooltip and a screen reader give.
  */
 function numberField(row, env) {
   const glue = GLUED_UNITS.has(row.unit) ? ' data-glue' : '';
@@ -310,8 +342,12 @@ function numberField(row, env) {
     })}${fieldNameAttributes(row, true)}>`;
     return `<label${attributes({class: `ui-field${span(row)}`, 'data-tooltip': row.tip})}${descriptorAttributes(row, 'tip', 'data-tooltip')}><span class="ui-field-label"${descriptorAttributes(row, "label")}>${escapeHTML(row.label)}</span>${input}${suffix}</label>`;
   }
-  const {input, scrub} = numberInput(row, env, 'ui-field-input');
-  return `<label${attributes({class: `ui-field${span(row)}`, 'data-property-row': row.key, 'data-mixed': Boolean(row.mixed)})}>${scrub}${input}${suffix}</label>`;
+  const {input, scrub, value} = numberInput(row, env, 'ui-field-input');
+  return `<label${attributes({
+    class: `ui-field${span(row)}`, 'data-property-row': row.key, 'data-mixed': Boolean(row.mixed), 'data-range': Boolean(row.range && !row.mixed),
+    'data-angle': Boolean(row.angle), 'data-scrub-anywhere': Boolean(row.scrubAnywhere && !row.range), 'data-default': row.range && finite(row.default) !== undefined ? true : undefined,
+    'data-tooltip': row.help, style: valueFieldStyle(row, value), ...(row.fieldData ? extras({data: row.fieldData}) : {}),
+  })}${row.helpKey ? descriptorAttributes(row, 'help', 'data-tooltip') : ''}>${dial(row, value)}${scrub}${input}${suffix}</label>`;
 }
 
 /**
@@ -444,11 +480,15 @@ const hexCaption = value => (HEX.test(String(value ?? '')) ? String(value).slice
 function color(row, env) {
   const caption = escapeHTML(row.caption ?? (row.mixed ? say(env, 'inspector.mixed') : hexCaption(row.value)));
   if (row.picker === 'paint') {
-    const swatch = `<span${attributes({class: 'ui-swatch', 'data-size': 'sm', 'data-mixed': Boolean(row.mixed), style: swatchStyle({color: row.value, paint: row.paint})})}></span>`;
+    const gradient = Boolean(row.paint) && !swatchColor(row.paint);
+    const swatch = `<span${attributes({class: 'ui-swatch', 'data-size': 'sm', 'data-mixed': Boolean(row.mixed), 'data-gradient': gradient, style: swatchStyle({color: row.value, paint: row.paint})})}></span>`;
+    // A value field's colour (showLabel) names itself like every field: its label, then the swatch and its hex.
+    const label = row.showLabel ? `<span class="ui-field-label"${descriptorAttributes(row, "label")}>${escapeHTML(row.label)}</span>` : '';
     return `<button${attributes({
-      type: 'button', class: `ui-field${span(row)}`, 'data-color': true, id: id(row.id), 'data-paint-picker': true,
+      // `owned`: the owner opens its own picker (an effect's paint, with gradients), so the shared one stays away.
+      type: 'button', class: `ui-field${span(row)}`, 'data-color': true, 'data-labelled': Boolean(row.showLabel), id: id(row.id), 'data-paint-picker': row.owned ? undefined : true,
       'aria-label': row.description ?? row.label, 'data-tooltip': row.tip, disabled: Boolean(row.disabled), ...extras(row),
-    })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}>${swatch}<span class="ui-field-hex">${caption}</span></button>`;
+    })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}>${label}${swatch}<span class="ui-field-hex"${row.captionKey ? descriptorAttributes(row, 'caption') : ''}>${caption}</span></button>`;
   }
   const value = HEX.test(String(row.value ?? '')) ? String(row.value).toLowerCase() : '#000000';
   return `<label${attributes({class: `ui-field${span(row)}`, 'data-color': true, 'data-tooltip': row.tip})}${descriptorAttributes(row, 'tip', 'data-tooltip')}><input${attributes({
@@ -516,6 +556,8 @@ function segmented(row, env) {
   const control = `<div${attributes({
     class: 'ui-segmented', role, 'aria-label': row.description ?? row.label, 'data-size': row.size ?? 'sm', 'data-fill': Boolean(row.fill), ...extras(row),
   })}${fieldNameAttributes(row)}>${items}</div>`;
+  // `field: true` (a value field's choice of two to four): its label and its segments share one field tile.
+  if (row.field) return `<div${attributes({class: `ui-field${span(row)}`, 'data-segments': true, 'data-tooltip': row.tip})}${descriptorAttributes(row, 'tip', 'data-tooltip')}><span class="ui-field-label" aria-hidden="true"${descriptorAttributes(row, "label")}>${escapeHTML(row.label)}</span>${control}</div>`;
   return row.label && !row.inline ? `<div class="ui-row"><span class="ui-row-label" aria-hidden="true"${descriptorAttributes(row, "label")}>${escapeHTML(row.label)}</span>${control}</div>` : control;
 }
 
@@ -625,9 +667,31 @@ function group(row, env) {
     hidden: Boolean(row.hidden), ...extras(row)})}${descriptorAttributes(row, row.labelKey || row.label != null ? 'label' : 'title', 'aria-label')}>${title}${renderRows(row.rows, env)}</div>`;
 }
 
+/**
+ * A visual picker's field (looks and styles): its label, the chosen option's picture and name, and a chevron; a
+ * click opens the owner's grid of options. `art` is trusted markup (an <img> or a glyph) from the owner.
+ */
+function picker(row, env) {
+  return `<button${attributes({
+    type: 'button', class: `ui-field${span(row)}`, 'data-picker': true, 'data-bare': Boolean(row.bare), id: id(row.id), 'aria-label': row.description ?? row.label,
+    'aria-haspopup': row.popup ?? 'dialog', 'data-tooltip': row.tip, disabled: Boolean(row.disabled), ...extras(row),
+  })}${fieldNameAttributes(row)}${descriptorAttributes(row, 'tip', 'data-tooltip')}>${row.bare ? '' : `<span class="ui-field-label"${descriptorAttributes(row, 'label')}>${escapeHTML(row.label)}</span>`}` +
+    `${row.art === '' ? '' : `<span class="ui-field-art" aria-hidden="true">${row.art ?? ''}</span>`}<span class="ui-field-choice"><span class="ui-field-hex"${descriptorAttributes(row, 'text')}>${escapeHTML(row.text)}</span>${glyph(env, 'chevron-down', 'ui-icon ui-field-chev')}</span></button>`;
+}
+
+/**
+ * A linked pair (width and height): two fields side by side with the link between them, a pressed toggle. While
+ * linked, a pair may show one field that edits both.
+ */
+function pair(row, env) {
+  const link = row.link ? renderButton({icon: row.link.pressed ? 'link' : 'detach', size: 'xs', ...row.link, pressed: Boolean(row.link.pressed)}, env, {className: 'ui-field-link'}) : '';
+  const [first, second] = row.rows ?? [];
+  return `<div${attributes({class: 'ui-field-pair', 'data-single': !second || second.hidden ? true : undefined, role: 'group', 'aria-label': row.label, ...extras(row)})}${descriptorAttributes(row, 'label', 'aria-label')}>${renderRow(first, env)}${link}${second && !second.hidden ? renderRow(second, env) : ''}</div>`;
+}
+
 const RENDERERS = {
   number: numberField, 'stepper-field': stepperField, stepper, slider, select, switch: switchRow, 'field-switch': fieldSwitch,
-  checkbox, color, swatch, swatches, segmented, text, actions, 'list-row': listRow, pager, preview, owned, markup, meta, value, grid, group,
+  checkbox, color, swatch, swatches, segmented, text, actions, 'list-row': listRow, pager, preview, owned, markup, meta, value, grid, group, pair, picker,
 };
 /** The row kinds a descriptor may use. */
 export const ROW_KINDS = Object.freeze(Object.keys(RENDERERS));
@@ -641,7 +705,12 @@ export function renderRow(row, env = {}) {
   if (!row || (row.hidden && !REGIONS.has(row.kind))) return ROW_PLACEHOLDER;
   const render = RENDERERS[row.kind];
   if (!render) throw messageError(new TypeError(''), "errors.inspectorKit.unknownInspectorRowKind", {value: row?.kind});
-  return render(row, env);
+  const trail = (row.trail ?? []).filter(Boolean);
+  if (!trail.length) return render(row, env);
+  // Small buttons at a field's end (a value's key, a seed's shuffle) sit beside the field, never inside its <label>
+  // or <button>, and are drawn over its end, which keeps room for them (data-trail).
+  const buttons = trail.map(item => renderButton({size: 'xs', ...item}, env, {className: `ui-field-trail${item.className ? ` ${item.className}` : ''}`})).join('');
+  return `<div class="ui-field-wrap${span(row)}" data-trail="${trail.length}">${render(row, env)}${buttons}</div>`;
 }
 const renderRows = (rows, env) => (rows ?? []).map(row => renderRow(row, env)).join('');
 
