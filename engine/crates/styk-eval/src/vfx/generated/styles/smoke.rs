@@ -66,6 +66,18 @@ pub(super) fn smoke(p: &Smoke, ctx: &Context) -> Vec<Spec> {
     }
 }
 
+/// More puffs alive at once than `cap` would only be thinned by the area a frame may cover: the emission (`rate`
+/// per unit of amount) is held to `cap` alive and each puff is that much denser instead, so more smoke still reads as
+/// thicker smoke. The factors for the rate and the opacity.
+fn crowd(p: &Smoke, base: &Spec, rate: f64, cap: f64) -> (f64, f64) {
+    let alive = rate * p.amount * base.life_max;
+    if base.emit_dur <= 0.0 || alive <= cap {
+        return (1.0, 1.0);
+    }
+    let k = alive / cap;
+    (1.0 / k, k.sqrt())
+}
+
 /// How smoke moves: it leaves its source fast (a buoyant jet) and settles, slowed by drag, to
 /// climbing along its direction with the wind across it; the jet and the climb scale with the rise,
 /// the swirl with the turbulence and the puff size.
@@ -113,8 +125,9 @@ fn soft_plume(p: &Smoke, look: &SmokeLook, base: &Spec, flow: &Flow, col: [f64; 
     // Thicker looks (the retired Thick) stay denser at the top; thinner ones (Steam) fade sooner.
     let thick = (look.alpha / 0.45).min(2.0);
     let (birth, end) = (0.5, 0.5 + 0.75 * g * flow.big.sqrt());
+    let (fewer, denser) = crowd(p, base, base.rate * 0.6 * flow.big, 220.0);
     let puffs = Spec {
-        rate: base.rate * 0.6 * flow.big,
+        rate: base.rate * 0.6 * flow.big * fewer,
         spread: 0.6,
         material: m("smoke"),
         rotate: ROTATE_UPRIGHT,
@@ -123,7 +136,7 @@ fn soft_plume(p: &Smoke, look: &SmokeLook, base: &Spec, flow: &Flow, col: [f64; 
         size_over_life: Some(Curve::three(birth, 0.35, birth + (end - birth) * 0.45, end)),
         size_jitter: 0.35,
         erosion: Some(Erosion { from: 0.18, to: 0.62, power: 1.5, edge: 0.35, ..Default::default() }),
-        alpha: (0.6 * thick).min(1.0) * p.opacity,
+        alpha: (0.6 * thick * denser).min(1.0) * p.opacity,
         // Dense at the source; the wide puffs at the top overlap many times, so each is fainter.
         alpha_over_life: Some(Curve::four(0.0, 0.05, 1.0, 0.45, 0.4 * thick.min(1.4), 0.0)),
         shade: look.shade.map_or(0.45, |s| s * 1.1).min(1.0) * p.shading,
@@ -143,8 +156,9 @@ fn cartoon_puffs(p: &Smoke, base: &Spec, flow: &Flow, col: [f64; 3], size: f64) 
     let shade = tone(tone(col, 0.3, BLACK), 0.25, [0.35, 0.3, 0.5]);
     let colors = paint_or(&p.color, stops(&[(light, 1.0), (tone(col, 0.15, WHITE), 1.0), (col, 1.0)]));
     let big = 0.6 + 0.4 * g * flow.big.sqrt();
+    let (fewer, _) = crowd(p, base, base.rate * 0.15 * flow.big, 60.0);
     let puffs = Spec {
-        rate: base.rate * 0.15 * flow.big,
+        rate: base.rate * 0.15 * flow.big * fewer,
         spread: 0.5,
         shape: DISC,
         softness: 0.0,
@@ -171,8 +185,9 @@ fn ground_dust(p: &Smoke, base: &Spec, flow: &Flow, col: [f64; 3], size: f64, gr
     let (birth, end) = (0.45, 0.4 + 0.6 * g * flow.big.sqrt());
     // Along the ground the jet is sideways (the ground emitter throws both ways); on the scene, out from its point.
     let roll = (2.0 + size / 16.0) * 1.4;
+    let (fewer, denser) = crowd(p, base, base.rate * 0.6 * flow.big, 220.0);
     let billows = Spec {
-        rate: base.rate * 0.6 * flow.big,
+        rate: base.rate * 0.6 * flow.big * fewer,
         spread: if ground { 0.0 } else { 2.4 },
         material: m("smoke"),
         rotate: ROTATE_UPRIGHT,
@@ -180,7 +195,7 @@ fn ground_dust(p: &Smoke, base: &Spec, flow: &Flow, col: [f64; 3], size: f64, gr
         size_over_life: Some(Curve::three(birth, 0.3, birth + (end - birth) * 0.55, end)),
         size_jitter: 0.3,
         erosion: Some(Erosion { from: 0.02, to: 0.55, power: 1.3, edge: 0.35, ..Default::default() }),
-        alpha: 0.7 * p.opacity,
+        alpha: (0.7 * denser).min(1.0) * p.opacity,
         alpha_over_life: Some(Curve::four(0.0, 0.06, 1.0, 0.5, 0.45, 0.0)),
         shade: 0.45 * p.shading,
         value_jitter: 0.06,
