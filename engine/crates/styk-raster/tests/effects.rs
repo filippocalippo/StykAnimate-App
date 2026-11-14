@@ -71,8 +71,15 @@ fn gpu() -> Option<&'static (styk_render::wgpu::Device, styk_render::wgpu::Queue
 
 /// `list` drawn on the GPU, straight RGBA, or `None` without an adapter.
 fn draw_gpu(list: &DrawList, images: &Images, view: &ViewParams, size: [u32; 2]) -> Option<Vec<u8>> {
+    draw_gpu_at(list, images, view, size, true)
+}
+
+/// `draw_gpu` with effect images between passes in half floats (`float`) or eight bits, as WebGL2 without half-float
+/// targets has them.
+fn draw_gpu_at(list: &DrawList, images: &Images, view: &ViewParams, size: [u32; 2], float: bool) -> Option<Vec<u8>> {
     let (device, queue) = gpu()?;
     let mut renderer = styk_render::Renderer::new(device, queue, styk_render::wgpu::TextureFormat::Rgba8Unorm);
+    renderer.set_float_effects(float);
     let _ = images;
     renderer.set_list(&Arc::new(list.clone()));
     let mut encoder = device.create_command_encoder(&Default::default());
@@ -478,4 +485,125 @@ fn a_frame_that_creates_one_pipeline_filters_its_layer_over_the_frames_after() {
     let (filtered, drawn) = draw(&mut limited);
     assert!(filtered && !limited.pending(), "with its last pipeline the layer is filtered");
     assert_eq!(drawn, expected, "as a frame without a limit filters it");
+}
+
+// ---- Time and the new controls ---------------------------------------------------------------------------------------------
+
+/// A red and a blue rectangle side by side (x 20–60 and 60–100, y 20–60) filtered by `effect` on its clock `clock`, drawn on
+/// both renderers on a 120×80 view.
+fn two_colours(effect: Effect, clock: f64) -> Vec<(&'static str, Vec<u8>)> {
+    let timed = styk_eval::vfx::at_time(&Arc::new(effect), clock);
+    let list = shapes(&[([20.0, 20.0, 60.0, 60.0], RED), ([60.0, 20.0, 100.0, 60.0], 0xffff_0000)], vec![(*timed).clone()]);
+    draw_both(&list, &zoomed([120, 80], 1.0), [120, 80])
+}
+
+/// The mean difference of two pictures, in levels per channel.
+fn mean_difference(a: &[u8], b: &[u8]) -> f64 {
+    a.iter().zip(b).map(|(&x, &y)| x.abs_diff(y) as f64).sum::<f64>() / a.len() as f64
+}
+
+/// A speed moves its effect with the clock (the clip's local time, frames) exactly as the value it advances: at clock t the
+/// picture is the one of the authored value plus speed × t, between frames too, while the authored values stay as saved.
+#[test]
+fn a_speed_draws_the_authored_value_it_advances_by_the_clock() {
+    use styk_eval::vfx::registry::{Crt, Noise, NoisePattern, Turbulence, Wave};
+    let cases: Vec<(&str, Params, Params, f64)> = vec![
+        ("wave", Params::Wave(Wave { speed: 30.0, ..Default::default() }), Params::Wave(Wave { phase: 75.0, ..Default::default() }), 2.5),
+        ("crt", Params::Crt(Crt { roll: 4.0, ..Default::default() }), Params::Crt(Crt { phase: 10.0, ..Default::default() }), 2.5),
+        ("turbulence", Params::Turbulence(Turbulence { speed: 0.5, ..Default::default() }), Params::Turbulence(Turbulence { evolution: 1.25, ..Default::default() }), 2.5),
+        // Clouds evolve a quarter of their speed a frame.
+        ("clouds", Params::Noise(Noise { pattern: NoisePattern::Clouds, speed: 1.0, ..Default::default() }), Params::Noise(Noise { pattern: NoisePattern::Clouds, phase: 0.625, ..Default::default() }), 2.5),
+        // Grain re-rolls once a frame at speed 1, as each 1/1024 of its phase does.
+        ("grain", Params::Noise(Noise { speed: 1.0, ..Default::default() }), Params::Noise(Noise { phase: 3.0 / 1024.0, ..Default::default() }), 3.5),
+    ];
+    for (name, moving, authored, clock) in cases {
+        let effect = |params: Params| Effect { id: Arc::from("e"), enabled: true, params };
+        let still = two_colours(effect(moving.clone()), 0.0);
+        let moved = two_colours(effect(moving.clone()), clock);
+        let expected = two_colours(effect(authored), 0.0);
+        for (((renderer, still), (_, moved)), (_, expected)) in still.iter().zip(&moved).zip(&expected) {
+            assert!(mean_difference(still, moved) > 0.05, "{renderer} {name}: the effect moves with the clock");
+            assert_eq!(moved, expected, "{renderer} {name}: at clock {clock} it is the authored value advanced by speed × clock");
+        }
+        let timed = styk_eval::vfx::at_time(&Arc::new(effect(moving.clone())), clock);
+        assert_eq!(timed.params.time(), clock);
+        let mut saved = timed.params.clone();
+        saved.set_time(0.0);
+        assert_eq!(saved, moving, "{name}: the clock changes no authored value");
+    }
+}
+
+/// Each control the filters gained changes the picture, and both renderers draw it alike.
+#[test]
+fn every_new_control_changes_the_picture_on_both_renderers() {
+    use styk_eval::vfx::registry::{Crt, Dissolve, Glow, GlowSource, Grade, LightSweep, Noise, TintBlend, Turbulence, Wave};
+    let tint = |blend| Params::Tint(Tint { mix: 1.0, blend, ..Default::default() });
+    let cases: Vec<(&str, Params, Params, f64)> = vec![
+        ("tint multiply", tint(TintBlend::Normal), tint(TintBlend::Multiply), 0.0),
+        ("tint screen", tint(TintBlend::Normal), tint(TintBlend::Screen), 0.0),
+        ("tint overlay", tint(TintBlend::Normal), tint(TintBlend::Overlay), 0.0),
+        ("tint colour", tint(TintBlend::Normal), tint(TintBlend::Color), 0.0),
+        ("tint add", tint(TintBlend::Normal), tint(TintBlend::Add), 0.0),
+        ("glow from the artwork", Params::Glow(Glow { radius: 10.0, ..Default::default() }), Params::Glow(Glow { radius: 10.0, source: GlowSource::Artwork, ..Default::default() }), 0.0),
+        ("outline softness", Params::Outline(Outline { width: 6.0, ..Default::default() }), Params::Outline(Outline { width: 6.0, softness: 1.0, ..Default::default() }), 0.0),
+        ("grade hue", Params::Grade(Grade::default()), Params::Grade(Grade { hue: 90.0, ..Default::default() }), 0.0),
+        ("directional dissolve", Params::Dissolve(Dissolve { progress: 0.5, ..Default::default() }), Params::Dissolve(Dissolve { progress: 0.5, directional: 1.0, angle: 45.0, ..Default::default() }), 0.0),
+        ("noise speed", Params::Noise(Noise::default()), Params::Noise(Noise { speed: 1.0, ..Default::default() }), 3.0),
+        ("turbulence speed", Params::Turbulence(Turbulence::default()), Params::Turbulence(Turbulence { speed: 0.5, ..Default::default() }), 3.0),
+        ("wave speed", Params::Wave(Wave::default()), Params::Wave(Wave { speed: 30.0, ..Default::default() }), 3.0),
+        // (A roll of a whole number of scanlines, 3 pixels apart, is the same picture: 1.5 pixels, not 12.)
+        ("crt roll", Params::Crt(Crt::default()), Params::Crt(Crt { roll: 0.5, ..Default::default() }), 3.0),
+        ("light sweep speed", Params::LightSweep(LightSweep::default()), Params::LightSweep(LightSweep { speed: 0.1, ..Default::default() }), 3.0),
+        ("light sweep without loop", Params::LightSweep(LightSweep { speed: 0.1, ..Default::default() }), Params::LightSweep(LightSweep { speed: 0.1, looped: false, ..Default::default() }), 12.0),
+    ];
+    for (name, before, after, clock) in cases {
+        let effect = |params: Params| Effect { id: Arc::from("e"), enabled: true, params };
+        let (a, b) = (two_colours(effect(before), clock), two_colours(effect(after), clock));
+        for ((renderer, a), (_, b)) in a.iter().zip(&b) {
+            let changed = mean_difference(a, b);
+            assert!(changed > 0.5, "{renderer} {name}: the control changes the picture ({changed:.2} levels)");
+        }
+        if let [(_, cpu), (_, gpu)] = &b[..] {
+            let apart = mean_difference(cpu, gpu);
+            let far = cpu.iter().zip(gpu).filter(|(x, y)| x.abs_diff(**y) > 8).count() as f64 / cpu.len() as f64;
+            assert!(apart <= 0.5 && far <= 0.01, "{name}: the renderers differ by {apart:.2} levels, {:.2}% of channels by more than 8", far * 100.0);
+        }
+    }
+}
+
+/// Where a device cannot render to half floats (WebGL2 without `EXT_color_buffer_float`), effect images between passes are
+/// eight bits, dithered: a wide blur, glow and bloom then draw what they draw in half floats, to a level or two, without bands.
+#[test]
+fn eight_bit_working_images_draw_what_half_floats_draw() {
+    use styk_eval::vfx::registry::{Bloom, Glow};
+    let images = Images::default();
+    let size = [200, 140];
+    let cases: Vec<(&str, Params)> = vec![
+        ("blur", Params::Blur(Blur { radius: 30.0, ..Default::default() })),
+        ("glow", Params::Glow(Glow { radius: 40.0, ..Default::default() })),
+        ("bloom", Params::Bloom(Bloom { radius: 30.0, threshold: 0.2, ..Default::default() })),
+    ];
+    for (name, params) in cases {
+        let list = shapes(&[([80.0, 50.0, 120.0, 90.0], RED)], vec![effect(params)]);
+        let (Some(half), Some(eight)) = (draw_gpu_at(&list, &images, &zoomed(size, 1.0), size, true), draw_gpu_at(&list, &images, &zoomed(size, 1.0), size, false)) else {
+            eprintln!("skipped: no graphics adapter");
+            return;
+        };
+        let mean = mean_difference(&half, &eight);
+        let worst = half.iter().zip(&eight).map(|(x, y)| x.abs_diff(*y)).max().unwrap();
+        eprintln!("{name}: eight bits differ by {mean:.3} levels on average, {worst} at most");
+        assert!(mean <= 0.25 && worst <= 4, "{name}: eight-bit working images differ from half floats by {mean:.2} levels on average, {worst} at most");
+        // Along the falloff right of the square, alpha changes smoothly: no flat run of one level longer than the half-float
+        // picture's longest by more than a few pixels.
+        let longest = |pixels: &[u8]| {
+            let row = alpha_row(pixels, size[0], 70);
+            let (mut best, mut run) = (0, 0);
+            for x in 121..size[0] as usize {
+                run = if row[x] == row[x - 1] && row[x] > 0.0 { run + 1 } else { 0 };
+                best = best.max(run);
+            }
+            best
+        };
+        assert!(longest(&eight) <= longest(&half) + 3, "{name}: eight bits band the falloff ({} pixels of one level against {})", longest(&eight), longest(&half));
+    }
 }

@@ -298,3 +298,39 @@ fn clips_fade_and_contain_like_the_editor() {
     assert_eq!(clip.fade(8.0), 0.0);
     assert_eq!(Clip { duration: None, start: 0.0, offset: 0.0, ..clip }.fade(1.0), 1.0);
 }
+
+/// An effect with a speed runs on its clip's local time (`Clip::time`, smooth between frames) and a per-pose effect on the
+/// scene's tick; its authored values stay as saved. An effect without a speed is shared as it is at every tick: time costs it
+/// nothing.
+#[test]
+fn effects_with_a_speed_run_on_the_clip_time_and_keep_their_authored_values() {
+    use vfx::registry::{Blur, Noise, Params};
+    let moving = Arc::new(Effect { id: "n".into(), enabled: true, params: Params::Noise(Noise { speed: 0.5, ..Default::default() }) });
+    let still = Arc::new(Effect { id: "b".into(), enabled: true, params: Params::Blur(Blur { radius: 4.0, ..Default::default() }) });
+    let clip = Clip {
+        id: "c".into(),
+        target: vfx::Target::Scene,
+        start: 10.0,
+        duration: Some(20.0),
+        offset: 3.0,
+        enabled: true,
+        strength: 1.0,
+        fade_in: 0.0,
+        fade_out: 0.0,
+        include_attached: false,
+        effects: vec![moving.clone(), still.clone()],
+        channels: vec![],
+    };
+    for tick in [10.0, 12.0, 12.5, 17.25] {
+        let sampled = clip.sample(tick, true);
+        assert_eq!(sampled[0].params.time(), clip.time(tick), "at tick {tick} the clock is the clip's local time");
+        let Params::Noise(noise) = &sampled[0].params else { panic!("a noise") };
+        assert_eq!(noise.speed, 0.5, "the authored speed stays");
+        assert!(Arc::ptr_eq(&sampled[1], &still), "an effect without a speed is shared");
+    }
+    assert_eq!(moving.params.time(), 0.0, "the saved effect is not changed");
+    assert_eq!(vfx::at_time(&moving, 7.5).params.time(), 7.5);
+    assert!(Arc::ptr_eq(&vfx::at_time(&still, 7.5), &still));
+    let on_time = vfx::at_time(&moving, 7.5);
+    assert!(Arc::ptr_eq(&vfx::at_time(&on_time, 7.5), &on_time), "an effect already on its clock is shared");
+}
