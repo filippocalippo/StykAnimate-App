@@ -166,6 +166,102 @@ fn energy(p: &Beam, ctx: &Context, strands: bool, firing_at_once: bool) -> Vec<S
     out
 }
 
+/// Lightning: the strike is forked bolts between the hand and the aim, white-hot inside a line of the
+/// colour and glowing, struck again every other frame; sparks crackling in the hand while it charges,
+/// a flash where it leaves and where it lands, a ring of impact and sparks thrown back.
+fn lightning(p: &Beam, ctx: &Context) -> Vec<Spec> {
+    let i = p.intensity;
+    let li = i.min(1.0);
+    let w = p.width;
+    let r = (w / 16.0).sqrt().max(0.6);
+    let (hot, col, deep) = beam_colors(p);
+    let pale = tone(col, 0.5, WHITE);
+    let charge = paint::js_round(p.charge);
+    let fire_start = ctx.start + charge;
+    let fire_end = ctx.end;
+    let grow = p.travel.max(1.0);
+    let firing = (fire_end - fire_start).max(1.0);
+    let fade = if ctx.fade_out != 0.0 && !ctx.fade_out.is_nan() { ctx.fade_out } else { 8.0 };
+    let blend = glow_blend(p.blend);
+    let light = |auto: f64| match blend {
+        ADD => 1.0,
+        NORMAL => 0.0,
+        _ => auto,
+    };
+    let light_layer = if blend == NORMAL { NORMAL } else { ADD };
+    let base = Spec {
+        blend,
+        beam_w: w,
+        grow,
+        fire_start,
+        fire_end,
+        fade_frames: if ctx.timed { 12.0f64.min(fade).max(4.0) } else { 1.0 },
+        arc_amp: (12.0 * p.wobble + 6.0) * r,
+        placement: behind(p.layer == DrawLayer::Behind),
+        ..Spec::default()
+    };
+    let arcs = p.arcs.max(1) as f64;
+    let main = 1.0;
+    let bolts = |n: f64, thick: f64, amp: f64, branches: f64, ink: f64| layer(Spec {
+        shape: ARC, count: n * 16.0, arc_segs: 16.0, start: fire_start, arc_branches: branches, arc_rhythm: 2.0,
+        arc_amp: base.arc_amp * amp, size0: thick * r, softness: 1.4 * li.max(0.25),
+        outline: Some(Outline { width: ink * r, color: deep }),
+        emissive: Some(Curve::three(light(0.2), 0.5, light(0.2), light(0.2))),
+        ..base.clone()
+    }, stops(&[(hot, 1.0)]));
+    // Charging: sparks crackle in the hand and its light grows.
+    let crackle = (p.charge_particles && charge > 0.0).then(|| layer(Spec {
+        start: ctx.start, emit_dur: charge, rate: 5.0, life_min: 3.0, life_max: 6.0, emit_radius: 6.0 * r,
+        spread: TAU, speed_min: 2.0 * r, speed_max: 5.0 * r, drag: 0.2,
+        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.2, size0: 1.6 * r, size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.2)),
+        trail: Some(Trail { length: 2.0, segments: 2, width: 0.6, alpha: 0.7, glow: 0.5, emissive: None }),
+        emissive: Some(Curve::three(light(0.5), 0.5, light(0.45), light(0.4))), flicker: 0.5,
+        ..base.clone()
+    }, stops(&[(hot, 1.0), (col, 1.0), (deep, 1.0)])));
+    let hand_light = layer(Spec {
+        start: ctx.start, emit_dur: (fire_end - ctx.start).max(1.0), rate: 1.0, life_min: 3.0, life_max: 4.0, emit_radius: 1.0,
+        softness: 1.8, size0: 40.0 * r, size_jitter: 0.25, flicker: 0.5, clip_fade_in: charge.max(1.0),
+        alpha_over_life: Some(Curve::three(0.0, 0.3, 0.5 * li, 0.0)), blend: light_layer,
+        ..base.clone()
+    }, stops(&[(pale, i.max(1.0)), (col, i.max(1.0))]));
+    // A flash at each end while it strikes.
+    let flash = |at: u8, size: f64| layer(Spec {
+        start: if at == POINT { fire_start } else { fire_start + grow }, emit_dur: firing, rate: 0.7, life_min: 2.0, life_max: 4.0,
+        emit_shape: at, emit_radius: 2.0, shape: SPARKLE, spin: 0.2, spin_jitter: 1.0, size0: size * r, size_jitter: 0.3,
+        size_over_life: Some(Curve::three(0.7, 0.3, 1.0, 0.6)), alpha_over_life: Some(Curve::three(1.0, 0.5, 0.9, 0.0)),
+        outline: Some(Outline { width: 0.8 * r, color: deep }),
+        emissive: Some(Curve::three(light(0.6), 0.5, light(0.6), light(0.6))),
+        ..base.clone()
+    }, stops(&[(hot, 1.0), (pale, 1.0)]));
+    let tip_light = p.splash.then(|| layer(Spec {
+        start: fire_start + grow, emit_dur: (firing - grow).max(1.0), rate: 1.0, life_min: 3.0, life_max: 4.0,
+        emit_shape: BEAM_TIP, emit_radius: 2.0, softness: 1.7, size0: 52.0 * r, size_jitter: 0.3, flicker: 0.5,
+        alpha_over_life: Some(Curve::three(0.0, 0.3, 0.6 * li, 0.0)), blend: light_layer,
+        ..base.clone()
+    }, stops(&[(pale, i.max(1.0)), (col, i.max(1.0))])));
+    let impact = p.splash.then(|| layer(Spec {
+        start: fire_start + grow, emit_dur: (firing - grow).max(1.0), rate: 0.3, life_min: 6.0, life_max: 6.0,
+        emit_shape: BEAM_TIP, shape: RING, softness: 0.06, size_jitter: 0.1, size0: 40.0 * r, size_over_life: Some(Curve::three(0.15, 0.4, 0.8, 1.0)),
+        alpha_over_life: Some(Curve::three(0.9, 0.5, 0.5, 0.0)), emissive: Some(Curve::three(light(0.3), 0.5, light(0.5), light(0.7))),
+        ..base.clone()
+    }, stops(&[(pale, 1.0), (col, 1.0), (deep, 1.0)])));
+    let splash = (p.splash && p.sparks > 0.0).then(|| layer(Spec {
+        start: fire_start + grow, emit_dur: (firing - grow).max(1.0), rate: 7.0 * p.sparks, life_min: 5.0, life_max: 11.0,
+        emit_shape: BEAM_TIP, emit_radius: 4.0, angle: std::f64::consts::PI, spread: 2.6, speed_min: 4.0, speed_max: 11.0, gravity: 0.3, drag: 0.06,
+        collide: 1.0, bounce: 0.35,
+        shape: SPARK, rotate: ROTATE_MOTION, aspect: 2.2, size0: 1.7, size_over_life: Some(Curve::three(1.0, 0.5, 0.8, 0.2)),
+        trail: Some(Trail { length: 3.0, segments: 3, width: 0.6, alpha: 0.7, glow: 0.5, emissive: None }),
+        emissive: Some(Curve::three(light(0.5), 0.5, light(0.45), light(0.4))), alpha_over_life: Some(Curve::three(1.0, 0.6, 0.9, 0.0)),
+        ..base.clone()
+    }, stops(&[(hot, 1.0), (pale, 1.0), (col, 1.0), (deep, 1.0)])));
+    // The rest strike round the main channel, every other one at a time, so the strike stays one bolt.
+    let thin = (arcs > main).then(|| bolts(((arcs - main) / 2.0).ceil(), 0.7, 1.6, 1.0, 0.9));
+    [Some(hand_light), crackle, tip_light, thin, Some(bolts(main, 2.2, 1.0, 2.4, 1.7)), impact, splash, Some(flash(POINT, 11.0)), p.splash.then(|| flash(BEAM_TIP, 15.0))]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 /// A beam's colours: its white-hot core, its body and a deeper, more saturated rim (so a light hue
 /// keeps an edge on a white page), or a gradient's start, middle and end.
 fn beam_colors(p: &Beam) -> ([f64; 3], [f64; 3], [f64; 3]) {
@@ -192,6 +288,9 @@ pub(super) fn beam(p: &Beam, ctx: &Context) -> Vec<Spec> {
     // Spiral is Energy with its strands (retired into it).
     if p.style == BeamStyle::Energy || p.style == BeamStyle::Spiral {
         return energy(p, ctx, p.strands || p.style == BeamStyle::Spiral, firing_at_once);
+    }
+    if p.style == BeamStyle::Lightning {
+        return lightning(p, ctx);
     }
     let col = paint_color(&p.color);
     let hot = tone(col, 0.5, WHITE);
@@ -300,16 +399,6 @@ pub(super) fn beam(p: &Beam, ctx: &Context) -> Vec<Spec> {
         )
     };
     let arcs_count = p.arcs as f64;
-    if style == 4 {
-        // Lightning: forked arcs carry the strike, flashing where it starts and lands.
-        let flash = |at: u8| {
-            layer(
-                Spec { start: fire_start, emit_dur: firing, rate: 1.0, life_min: 2.0, life_max: 3.0, emit_shape: at, emit_radius: 2.0, material: m("star"), size0: 30.0 * wr.sqrt(), size1: 26.0 * wr.sqrt(), flicker: 0.6, fade_in: 0.0, fade_out: 0.4, ..beam.clone() },
-                stops(&[(WHITE, 3.0 * i), (hot, 2.2 * i), (col, 1.4 * i)]),
-            )
-        };
-        return [charge_in, arcs(arcs_count.max(3.0), 1.0, 1.6, 1.7), Some(flash(POINT)), p.splash.then(|| flash(BEAM_TIP)), splash].into_iter().flatten().collect();
-    }
     if style == 5 {
         // Fire breath: flames stream toward the aim and reach it at the end of their life.
         let stream = Spec { placement, blend: beam.blend, start: fire_start, emit_dur: firing, aimed: true, clip_fade_out: if ctx.timed { 12.0f64.min(fade).max(4.0) } else { 0.0 }, ..Spec::default() };

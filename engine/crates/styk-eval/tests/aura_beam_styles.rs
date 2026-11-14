@@ -120,3 +120,25 @@ fn an_electric_aura_crackles_about_the_body() {
         }
     }
 }
+
+/// A lightning strike is one bright main channel with thinner bolts about it, each white-hot
+/// inside a line of the colour, struck again every other frame.
+#[test]
+fn lightning_is_one_main_channel_with_thinner_bolts_struck_again_every_other_frame() {
+    let prepared = Stage::new(60.0).clip(Clip::new(Some(1), "beam").set("style", "4").set("charge", "0").set("arcs", "6").timed(0.0, Some(40.0))).prepare();
+    let batch = batch_at(&prepared, 10.0).expect("the strike");
+    let mut layers: Vec<_> = batch.draws.iter().filter(|d| batch.spec(d).shape == ARC).map(|d| batch.spec(d)).collect();
+    layers.sort_by(|a, b| b.size0.total_cmp(&a.size0));
+    assert_eq!(layers.len(), 2, "a main channel and thinner bolts");
+    assert!(layers[0].size0 > 2.5 * layers[1].size0 && layers[0].count < layers[1].count, "the main channel is one thick bolt");
+    for s in &layers {
+        let ink = s.outline.expect("an ink line");
+        assert!(luma(ink.color) < luma(particle::color_at(s, 0.0).0) - 0.3);
+    }
+    let pieces = |tick: f64| {
+        let batch = batch_at(&prepared, tick).unwrap();
+        batch.draws.iter().filter(|d| batch.spec(d).shape == ARC).flat_map(|d| particle::arcs(&batch, d)).collect::<Vec<_>>()
+    };
+    assert_eq!(pieces(10.0), pieces(11.0));
+    assert_ne!(pieces(10.0), pieces(12.0));
+}
