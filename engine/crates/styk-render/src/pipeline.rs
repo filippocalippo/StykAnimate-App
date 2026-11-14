@@ -236,6 +236,38 @@ pub(crate) fn prim_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout
     shaded_pipeline(device, layout, shader, depth, additive, samples, Shading::Full, false)
 }
 
+/// Generated effects (styk-draw `K_PARTICLE`, `K_BEAM`): their own entry points (`vs_particle`, `fs_particle`), so a list
+/// without them never compiles their shading, and the premultiplied blend: a record that gives off light carries less alpha
+/// than colour (docs/engine/vfx.md).
+pub(crate) fn generated_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, depth: Option<wgpu::DepthStencilState>, samples: u32) -> wgpu::RenderPipeline {
+    let blend = wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING;
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(if depth.is_some() { "styk generated effects with depth" } else { "styk generated effects" }),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_particle"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<GpuPrim>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![0 => Uint32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4],
+            })],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: depth,
+        multisample: wgpu::MultisampleState { count: samples, mask: !0, alpha_to_coverage_enabled: false },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_particle"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: Some(blend), write_mask: wgpu::ColorWrites::ALL })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 /// [`prim_pipeline`] with the vertex and fragment entry points of `shading` ([`crate::shading`]), in their `plain` form.
 pub(crate) fn shaded_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, depth: Option<wgpu::DepthStencilState>, additive: bool, samples: u32, shading: Shading, plain: bool) -> wgpu::RenderPipeline {
     let entry = shading.entry(plain);
@@ -287,7 +319,7 @@ pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth2
 pub(crate) struct DepthPipelines {
     pub(crate) flat: wgpu::RenderPipeline,
     pub(crate) faces: wgpu::RenderPipeline,
-    /// `flat` with additive blending, for generated effects in a pass with faces.
+    /// The generated-effects pipeline ([`generated_pipeline`]) of a pass with faces.
     pub(crate) flat_add: wgpu::RenderPipeline,
 }
 
@@ -299,7 +331,7 @@ impl Renderer {
             DepthPipelines {
                 flat: prim_pipeline(device, layout, shader, Some(state(wgpu::CompareFunction::Always)), false, samples),
                 faces: prim_pipeline(device, layout, shader, Some(state(wgpu::CompareFunction::LessEqual)), false, samples),
-                flat_add: prim_pipeline(device, layout, shader, Some(state(wgpu::CompareFunction::Always)), true, samples),
+                flat_add: generated_pipeline(device, layout, shader, Some(state(wgpu::CompareFunction::Always)), samples),
             }
         })
     }
@@ -323,10 +355,10 @@ impl Renderer {
         })
     }
 
-    /// The additive pipeline, created with the first list that adds light.
+    /// The generated-effects pipeline ([`generated_pipeline`]), created with the first list that has them.
     pub(crate) fn additive_pipeline(&mut self) -> wgpu::RenderPipeline {
         let (device, layout, shader, samples) = (&self.device, &self.prim_layout, &self.prim_shader, self.samples);
-        self.pipeline_add.get_or_insert_with(|| prim_pipeline(device, layout, shader, None, true, samples)).clone()
+        self.pipeline_add.get_or_insert_with(|| generated_pipeline(device, layout, shader, None, samples)).clone()
     }
 
     pub(crate) fn rebind(&mut self) {

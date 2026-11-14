@@ -199,7 +199,7 @@ struct DepthRuns {
     ranges: Vec<(u32, u32)>,
 }
 
-/// Where the list's prims add light (styk-draw `F_ADD`) and the additive pipeline.
+/// Where the list's generated effects are and their pipeline ([`crate::pipeline::generated_pipeline`]).
 struct Additive {
     pipeline: wgpu::RenderPipeline,
     ranges: Vec<(u32, u32)>,

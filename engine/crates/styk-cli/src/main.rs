@@ -364,6 +364,8 @@ fn generators(path: &str, ticks: &[String]) -> i32 {
 /// included (earlier-tick anchors evaluated without a cache), effects optionally off.
 fn encode_frame(p: &Prepared, assets: &styk_eval::assets::Assets, tick: f64, frame: &styk_eval::eval::Frame, scene: &styk_eval::geometry::Scene, no_effects: bool, camera: bool) -> styk_eval::drawlist::DrawList {
     use styk_eval::vfx::generated;
+    // A tool: the materials are generated here (the app's workers generate them when a document opens).
+    generated::atlas::prepare();
     let mut batch = if no_effects { None } else { generated::build(p, frame, scene, Some(tick), Some(&generated::Evaluate), 1.0) };
     // Through the scene camera parallax layers move, and generated effects beside a figure with it.
     let parallax = frame.parallax.as_ref().filter(|_| camera);

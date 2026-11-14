@@ -5,28 +5,31 @@
 //! entry begins, scene draws after the background and after everything, draws of
 //! a target not drawn at the end.
 //!
-//! Each particle is evaluated once; its trail, glow halo and outline are drawn from
-//! that one evaluation (a trail's earlier places from its birth). A frame's soft
-//! sprites are limited in the area they cover ([`FILL_LIMIT`]): beyond it they are
-//! thinned evenly and the list says the picture was reduced.
+//! Each particle is evaluated once; its ribbon trail and glow halo are drawn from that
+//! one evaluation (the ribbon from its birth, at earlier ages). A frame's particles are
+//! limited in the area they cover ([`FILL_LIMIT`]): beyond it they are thinned evenly and
+//! the list says the picture was reduced. A material not generated yet is drawn as soft
+//! discs and the list says so ([`MATERIALS_PENDING`]).
 
 use std::collections::HashSet;
 
 use super::*;
-use crate::vfx::generated::layers::{Placement, Spec, ADD, ARC, AUTO, BEAM, CHUNK, COLOR_STOPS, DISC, NORMAL, SPRITE};
-use crate::vfx::generated::particle::{self, Evaluator, Particle};
+use crate::vfx::generated::atlas;
+use crate::vfx::generated::layers::{Placement, Spec, ADD, ARC, BEAM, DISC, MATERIAL, NORMAL};
+use crate::vfx::generated::particle::{self, Birth, Evaluator, Particle};
 use crate::vfx::generated::{Batch, Draw};
-use styk_draw::{particle_kind, F_ADD, K_BEAM, MATERIALS_REDUCED};
+use styk_draw::{particle_kind, F_CAP_END, F_CAP_START, K_BEAM, MATERIALS_PENDING, MATERIALS_REDUCED, P_SEGMENT};
 
 /// The area a frame's particles may cover, in canvases: beyond it they are thinned evenly.
 pub const FILL_LIMIT: f64 = 48.0;
 
 /// Every draw of a batch as records, each in its own `Out` (rows included), and the material
-/// rows they sample (with [`MATERIALS_REDUCED`] when a limit reduced the picture).
+/// rows they sample (with [`MATERIALS_REDUCED`] when a limit reduced the picture and
+/// [`MATERIALS_PENDING`] when a material was not ready).
 pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
     let mut materials = if batch.reduced { MATERIALS_REDUCED } else { 0 };
     // Every live particle once, so the frame's coverage is known before anything is drawn.
-    let mut alive: Vec<Vec<(u32, Particle)>> = Vec::with_capacity(batch.draws.len());
+    let mut alive: Vec<Vec<(Birth, Particle)>> = Vec::with_capacity(batch.draws.len());
     let mut area = 0.0f64;
     for draw in &batch.draws {
         let mut list = Vec::new();
@@ -34,9 +37,10 @@ pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
             let ev = Evaluator::new(batch, draw);
             let s2 = draw.scale * draw.scale;
             for i in 0..draw.count {
-                if let Some(p) = ev.particle(i) {
+                let Some(b) = ev.birth(i) else { continue };
+                if let Some(p) = ev.at_age(&b, ev.local() - b.born) {
                     area += 4.0 * p.reach * p.reach * s2;
-                    list.push((i, p));
+                    list.push((b, p));
                 }
             }
         }
@@ -52,119 +56,110 @@ pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
         .iter()
         .zip(&alive)
         .map(|(draw, list)| {
-            let out = draw_out(batch, draw, list, fill);
-            if draw.material >= 0 && !out.prims.is_empty() {
-                materials |= 1 << draw.material;
-            }
+            let (out, used) = draw_out(batch, draw, list, fill);
+            materials |= used;
             out
         })
         .collect();
     (outs, materials)
 }
 
-/// The colour stops a layer draws with: on a light stage, Auto layers painted solid borrow
-/// their nearest saturated colour for white-hot stops, which would otherwise vanish against it.
-fn ramp_of(s: &Spec, draw: &Draw, x: f64) -> [f64; 4] {
-    if draw.blend == NORMAL && s.blend == AUTO
-        && let Some(colors) = s.colors
-    {
-        let inked = Spec { colors: Some(ink_stops(colors)), ..Spec::default() };
-        let mut c = particle::ramp(&Spec { opacity: s.opacity, ..inked }, NORMAL, x);
-        if c[3] < 0.0 {
-            c[3] = 0.0;
-        }
-        return c;
-    }
-    particle::ramp(s, draw.blend, x)
-}
-
-fn near_white(c: &[f64; 4]) -> bool {
-    c[0].min(c[1]).min(c[2]) > 0.82
-}
-
-fn ink_stops(colors: [[f64; 4]; COLOR_STOPS]) -> [[f64; 4]; COLOR_STOPS] {
-    if colors.iter().all(near_white) {
-        return colors;
-    }
-    let mut out = colors;
-    for i in 0..COLOR_STOPS {
-        if !near_white(&colors[i]) {
-            continue;
-        }
-        let mut best: Option<[f64; 4]> = None;
-        let mut d = 1;
-        while d < COLOR_STOPS && best.is_none() {
-            for j in [i as i64 + d as i64, i as i64 - d as i64] {
-                if j >= 0 && (j as usize) < COLOR_STOPS && !near_white(&colors[j as usize]) {
-                    best = Some(colors[j as usize]);
-                    break;
-                }
-            }
-            d += 1;
-        }
-        let b = best.expect("some stop is not near white");
-        out[i] = [b[0], b[1], b[2], colors[i][3]];
-    }
-    out
-}
-
-/// The three rows of a draw: transform, scale and shading, then the shape's constants.
-fn rows(out: &mut Out, m: [f64; 6], scale: f64, shade: f64, softness: f64, stretch: f64, aspect: f64, row: f64) -> u32 {
+/// A draw's six rows: transform, scale and shading, the shape's constants, the outline,
+/// erosion and rim (styk-draw `K_PARTICLE`).
+fn rows(out: &mut Out, m: [f64; 6], scale: f64, s: &Spec, softness: f64, outline: bool) -> u32 {
     let at = out.paints.len() as u32;
-    out.paints.push([m[0] as f32, m[1] as f32, m[2] as f32, m[3] as f32]);
-    out.paints.push([m[4] as f32, m[5] as f32, scale as f32, shade as f32]);
-    out.paints.push([softness as f32, stretch as f32, aspect as f32, row as f32]);
+    let f = |v: f64| v as f32;
+    out.paints.push([f(m[0]), f(m[1]), f(m[2]), f(m[3])]);
+    out.paints.push([f(m[4]), f(m[5]), f(scale), f(s.shade)]);
+    let o = s.outline.filter(|_| outline);
+    out.paints.push([f(softness), f(s.stretch), f(s.aspect), f(o.map_or(0.0, |o| o.width))]);
+    out.paints.push(o.map_or([0.0; 4], |o| [f(o.color[0]), f(o.color[1]), f(o.color[2]), 1.0]));
+    let e = s.erosion.unwrap_or_default();
+    out.paints.push([f(e.edge), f(e.rim_width), f(e.rim), 0.0]);
+    out.paints.push([f(e.rim_color[0]), f(e.rim_color[1]), f(e.rim_color[2]), 0.0]);
     at
 }
 
-fn draw_out(batch: &Batch, draw: &Draw, alive: &[(u32, Particle)], fill: f64) -> Out {
+/// A beam's look: its stops' ends as core and body unless its style gives one.
+fn beam_look(s: &Spec) -> crate::vfx::generated::layers::BeamLook {
+    if let Some(look) = s.beam_look {
+        return look;
+    }
+    let (core, _) = particle::color_at(s, 0.0);
+    let (body, _) = particle::color_at(s, 1.0);
+    let (ec, eb, eg) = match s.blend {
+        NORMAL => (0.0, 0.0, 0.0),
+        ADD => (1.0, 1.0, 1.0),
+        _ => (0.85, 0.35, 1.0),
+    };
+    crate::vfx::generated::layers::BeamLook {
+        core: [core[0], core[1], core[2], ec],
+        body: [body[0], body[1], body[2], eb],
+        glow: [body[0], body[1], body[2], eg],
+        head: 1.0,
+        strands: s.beam_style == 3.0,
+        ink: s.outline.map(|o| (o.color, o.width)),
+    }
+}
+
+fn draw_out(batch: &Batch, draw: &Draw, alive: &[(Birth, Particle)], fill: f64) -> (Out, u32) {
     let mut out = Out::new();
+    let mut used = 0u32;
     let s = batch.spec(draw);
     let m = batch.matrix(draw);
     let scale = draw.scale;
     let world = |x: f64, y: f64| [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
-    let additive = draw.blend == ADD;
     let grow = |out: &mut Out, centre: [f64; 2], reach: f64| out.grow(centre[0] - reach, centre[1] - reach, centre[0] + reach, centre[1] + reach);
+    let f = |v: f64| v as f32;
     if s.shape == BEAM {
-        let Some(beam) = particle::beam(batch, draw) else { return Out::new() };
-        let main = rows(&mut out, m, scale, s.shade, s.softness, s.stretch, s.aspect, s.beam_style);
-        for x in [0.0, 1.0] {
-            let c = particle::ramp(s, draw.blend, x);
-            out.paints.push([c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32]);
+        let Some(beam) = particle::beam(batch, draw) else { return (Out::new(), 0) };
+        let look = beam_look(s);
+        let at = out.paints.len() as u32;
+        out.paints.push([f(m[0]), f(m[1]), f(m[2]), f(m[3])]);
+        out.paints.push([f(m[4]), f(m[5]), f(scale), 0.0]);
+        for c in [look.core, look.body, look.glow] {
+            out.paints.push([f(c[0]), f(c[1]), f(c[2]), f(c[3])]);
         }
+        let ink = look.ink.unwrap_or(([0.0; 3], 0.0));
+        out.paints.push([f(look.head), f(ink.0[0]), f(ink.0[1]), f(ink.0[2])]);
         let seed = (draw.seed % 997) as f64;
-        let reach = (beam.width * 3.5 + 8.0) * scale;
+        let reach = (beam.width * 3.0 + 8.0 + ink.1) * scale;
         grow(&mut out, world(beam.a[0], beam.a[1]), reach);
         grow(&mut out, world(beam.b[0], beam.b[1]), reach);
-        let mut push = |width: f64, opacity: f64, style: f64| {
-            out.prims.push(prim(K_BEAM | if additive { F_ADD } else { 0 }, 0, main, [beam.a[0], beam.a[1], beam.b[0], beam.b[1]], [width, s.wobble, seed, beam.te], [opacity, style, 0.0, 0.0]));
+        let style = match s.beam_style as u32 {
+            1 => 1.0,
+            2 => 2.0,
+            _ => 0.0,
         };
-        if let Some(o) = s.outline {
-            push(beam.width + o.width, draw.alpha * s.alpha, 2.0);
-        }
-        push(beam.width, draw.alpha * s.alpha, s.beam_style);
-        return out;
+        let opacity = draw.alpha * s.alpha * particle::color_at(s, 0.0).1;
+        out.prims.push(prim(K_BEAM, 0, at, [beam.a[0], beam.a[1], beam.b[0], beam.b[1]], [beam.width, s.wobble, seed, beam.te], [opacity, style, if look.strands { 1.0 } else { 0.0 }, ink.1]));
+        return (out, 0);
     }
-    let main = rows(&mut out, m, scale, s.shade, s.softness, s.stretch, s.aspect, s.material.map_or(0.0, |m| (m.row + 1) as f64));
     if s.shape == ARC {
-        for i in 0..draw.count {
-            let Some(seg) = particle::arc_segment(batch, draw, i) else { continue };
-            let reach = seg.radius * 5.0 * scale;
-            grow(&mut out, world(seg.p0[0], seg.p0[1]), reach);
-            grow(&mut out, world(seg.p1[0], seg.p1[1]), reach);
-            out.prims.push(prim(particle_kind(ARC as u32, additive), 0, main, [seg.p0[0], seg.p0[1], seg.p1[0], seg.p1[1]], [seg.radius, 0.0, 0.0, 0.0], [seg.rgb[0], seg.rgb[1], seg.rgb[2], seg.alpha]));
+        let r = rows(&mut out, m, scale, s, s.softness, false);
+        let (rgb, _) = particle::color_at(s, 0.0);
+        let e = particle::emission(s, 0.0, rgb);
+        for piece in particle::arcs(batch, draw) {
+            let reach = piece.r0.max(piece.r1) * (1.0 + s.softness * 3.0) * scale + scale;
+            grow(&mut out, world(piece.p0[0], piece.p0[1]), reach);
+            grow(&mut out, world(piece.p1[0], piece.p1[1]), reach);
+            let caps = if piece.start { F_CAP_START } else { 0 } | if piece.end { F_CAP_END } else { 0 };
+            out.prims.push(prim(particle_kind(P_SEGMENT) | caps, 0, r, [piece.p0[0], piece.p0[1], piece.p1[0], piece.p1[1]], [piece.r0, piece.r1, e, piece.a1], [rgb[0], rgb[1], rgb[2], piece.a0]));
         }
-        return out;
+        if out.prims.is_empty() {
+            return (Out::new(), 0);
+        }
+        return (out, 0);
     }
     let seed = draw.seed;
-    let halo_rows = s.halo.map(|_| rows(&mut out, m, scale, s.shade, 2.2, s.stretch, 1.0, 0.0));
-    let outline_rows = s.outline.map(|_| rows(&mut out, m, scale, 0.0, s.softness, s.stretch, s.aspect, s.material.map_or(0.0, |m| (m.row + 1) as f64)));
-    let (mut trails, mut halos, mut outlines, mut mains) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    // A trail's earlier places: on twos or threes they keep the drawing's step.
-    let trail = s.echoes.map(|e| (e, particle::trail_lag(e.lag, draw.step)));
-    let earlier: Vec<Evaluator<'_>> = trail.map_or_else(Vec::new, |(e, lag)| (1..=e.count).map(|k| Evaluator::at(batch, draw, draw.tick - k as f64 * lag)).collect());
+    let main = rows(&mut out, m, scale, s, s.softness, true);
+    let halo_rows = s.halo.map(|_| rows(&mut out, m, scale, s, 2.2, false));
+    let trail_rows = s.trail.map(|t| rows(&mut out, m, scale, s, t.glow, false));
+    // A material not generated yet: soft discs this frame, and the frame is drawn again.
+    let fallback_rows = (s.shape == MATERIAL && s.material.and_then(|m| m.noise).is_some_and(|row| atlas::ready(row as usize).is_none())).then(|| rows(&mut out, m, scale, s, 1.5, false));
+    let (mut trails, mut halos, mut mains) = (Vec::new(), Vec::new(), Vec::new());
     let ev = Evaluator::new(batch, draw);
-    for &(i, p) in alive {
+    for (b, p) in alive {
         let mut alpha_scale = 1.0;
         if fill < 1.0 {
             // Thinned evenly by a chance of its own, fading near the threshold rather than popping.
@@ -174,55 +169,63 @@ fn draw_out(batch: &Batch, draw: &Draw, alive: &[(u32, Particle)], fill: f64) ->
                 continue;
             }
         }
-        let ps = &*batch.specs[p.spec as usize];
-        let c = ramp_of(ps, draw, p.color);
-        let alpha = p.alpha * c[3] * alpha_scale;
+        let alpha = p.rgba[3] * alpha_scale;
         if alpha <= 0.0 {
             continue;
         }
-        let shape = ps.shape;
-        let cell = if shape == SPRITE { p.variant | (ps.material.map_or(0, |m| m.row)) << 8 } else { 0 };
-        let h = if shape == CHUNK { particle::hash(p.n, 14, seed) } else { 0.0 };
+        let ps = &*batch.specs[p.spec as usize];
         let reach = (p.reach + 1.0) * scale;
         grow(&mut out, world(p.x, p.y), reach);
-        mains.push(prim(particle_kind(shape as u32, additive), cell, main, [p.x, p.y, p.size, p.rotation], [p.vx, p.vy, h, 0.0], [c[0], c[1], c[2], alpha]));
-        if let (Some(hl), Some(r)) = (ps.halo, halo_rows) {
-            let size = p.size * hl.scale;
+        let (mut shape, mut rows_of) = (p.shape as u32, main);
+        if p.shape == MATERIAL {
+            match (fallback_rows, ps.material.and_then(|m| m.noise)) {
+                (Some(r), _) => {
+                    shape = DISC as u32;
+                    rows_of = r;
+                    used |= MATERIALS_PENDING;
+                }
+                (None, Some(row)) => used |= 1 << row,
+                _ => {}
+            }
+        }
+        mains.push(prim(particle_kind(shape), p.cell, rows_of, [p.x, p.y, p.size, p.rotation], [p.vx, p.vy, p.emissive, p.erosion], [p.rgba[0], p.rgba[1], p.rgba[2], alpha]));
+        if let (Some(h), Some(r)) = (ps.halo, halo_rows) {
+            let size = p.size * h.scale;
             grow(&mut out, world(p.x, p.y), (size + 1.0) * scale);
-            halos.push(prim(particle_kind(DISC as u32, additive), 0, r, [p.x, p.y, size, p.rotation], [p.vx, p.vy, 0.0, 0.0], [c[0], c[1], c[2], alpha * hl.alpha]));
+            halos.push(prim(particle_kind(DISC as u32), 0, r, [p.x, p.y, size, 0.0], [0.0, 0.0, 1.0, 0.0], [p.rgba[0], p.rgba[1], p.rgba[2], alpha * h.alpha]));
         }
-        if let (Some(o), Some(r)) = (ps.outline, outline_rows) {
-            let size = p.size + o.width;
-            grow(&mut out, world(p.x, p.y), (p.reach + o.width + 1.0) * scale);
-            outlines.push(prim(particle_kind(shape as u32, false), cell, r, [p.x, p.y, size, p.rotation], [p.vx, p.vy, h, 0.0], [o.color[0], o.color[1], o.color[2], alpha]));
-        }
-        if let Some((e, _)) = trail
-            && let Some(b) = ev.birth(i)
-        {
-            for (k, then) in earlier.iter().enumerate() {
-                let Some(q) = then.at_age(&b, then.local() - b.born) else { continue };
-                let k = k as f64 + 1.0;
-                let tc = ramp_of(ps, draw, q.color);
-                let size = q.size * fast_pow(e.size, k);
-                grow(&mut out, world(q.x, q.y), (q.reach + 1.0) * scale);
-                trails.push((k, prim(particle_kind(shape as u32, additive), cell, main, [q.x, q.y, size, q.rotation], [q.vx, q.vy, h, 0.0], [tc[0], tc[1], tc[2], q.alpha * tc[3] * fast_pow(e.alpha, k) * alpha_scale])));
+        if let (Some(t), Some(r)) = (ps.trail, trail_rows) {
+            // Where it was over the last `length` frames, a whole number of the drawing's steps apart.
+            let pieces = t.segments.max(1);
+            let dt = particle::trail_lag(t.length / pieces as f64, draw.step);
+            let age = ev.local() - b.born;
+            let e = t.emissive.unwrap_or(p.emissive);
+            let mut previous = [p.x, p.y];
+            for k in 1..=pieces {
+                let then = age - k as f64 * dt;
+                if then < 0.0 {
+                    break;
+                }
+                let (at, _) = ev.motion(b, then);
+                let (f0, f1) = ((k - 1) as f64 / pieces as f64, k as f64 / pieces as f64);
+                let w = p.size * t.width;
+                let (r0, r1) = (w * (1.0 - f0), w * (1.0 - f1));
+                let (a0, a1) = (alpha * t.alpha * (1.0 - f0) * (1.0 - f0), alpha * t.alpha * (1.0 - f1) * (1.0 - f1));
+                grow(&mut out, world(at[0], at[1]), (r0 * (1.0 + t.glow * 3.0) + 1.0) * scale);
+                let caps = if k == 1 { F_CAP_START } else { 0 } | if k == pieces || then - dt < 0.0 { F_CAP_END } else { 0 };
+                trails.push(prim(particle_kind(P_SEGMENT) | caps, 0, r, [previous[0], previous[1], at[0], at[1]], [r0, r1, e, a1], [p.rgba[0], p.rgba[1], p.rgba[2], a0]));
+                previous = at;
             }
         }
     }
-    // Painter order within the draw: the oldest trail copies, halos, outlines, then the particles.
-    trails.sort_by(|a, b| b.0.total_cmp(&a.0));
-    out.prims.extend(trails.into_iter().map(|(_, p)| p));
+    // Painter order within the draw: trails, halos, then the particles.
+    out.prims.extend(trails);
     out.prims.extend(halos);
-    out.prims.extend(outlines);
     out.prims.extend(mains);
     if out.prims.is_empty() {
-        return Out::new();
+        return (Out::new(), 0);
     }
-    out
-}
-
-fn fast_pow(base: f64, k: f64) -> f64 {
-    crate::vfx::generated::fastmath::powf(base, k)
+    (out, used)
 }
 
 /// Which draws go before or after each target's artwork, and where the walk through

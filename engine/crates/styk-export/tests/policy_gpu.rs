@@ -50,19 +50,21 @@ fn alternating_gpu_export_modes_keep_the_sprite_atlas() {
             else { first = Some(actual); }
         }
     }
-    // Actual Editor-built depth and additive records require the lazily built
-    // sample-dependent pipelines too, including after the crisp middle frame.
+    // Actual Editor-built depth records and generated effects require the lazily built
+    // sample-dependent pipelines too (generated effects draw with their own), including after the crisp middle frame.
     let plain_engine = Engine::new(|| 0.0, Budgets::for_device(None));
     plain_engine.open(&std::fs::read(root.join("plain-vector.json")).unwrap(), "json", "policy").unwrap();
     let plain_frames = plain_engine.export_frames(0).unwrap();
     let plain = plain_frames.take(0).unwrap();
-    for (name, tick, flag) in [("depth-surface", 0, styk_draw::F_DEPTH), ("generator-additive", 1, styk_draw::F_ADD)] {
+    let depth = |p: &styk_draw::Prim| p.kind & styk_draw::F_DEPTH != 0;
+    let generated = |p: &styk_draw::Prim| p.kind & 255 == styk_draw::K_PARTICLE;
+    for (name, tick, uses) in [("depth-surface", 0, &depth as &dyn Fn(&styk_draw::Prim) -> bool), ("generator-additive", 1, &generated)] {
         let engine = Engine::new(|| 0.0, Budgets::for_device(None));
         engine.open(&std::fs::read(root.join(format!("{name}.json"))).unwrap(), "json", "policy").unwrap();
         let frames = engine.export_frames(0).unwrap();
         let frame = frames.take(tick).unwrap();
         assert!(frame.list.composited_export);
-        assert!(frame.list.prims.iter().any(|p| p.kind & flag != 0), "{name} exercises the actual pipeline");
+        assert!(frame.list.prims.iter().any(uses), "{name} exercises the actual pipeline");
         let mut exporter = GpuExport::new(&device, &queue, settings(Smoothing::None), styk_export::TILE_SIDE);
         let mut first = None;
         for (current, generation, smoothing) in [(&frame, frames.generation(), Smoothing::Edges), (&plain, plain_frames.generation(), Smoothing::None), (&frame, frames.generation(), Smoothing::Edges)] {

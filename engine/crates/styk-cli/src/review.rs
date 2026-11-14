@@ -1,5 +1,6 @@
 //! `styk vfx-review`: review pictures of a generated effect (docs/engine/vfx.md, "Reviewing generated effects").
 //!
+//!   styk vfx-review shapes [--sizes 5,18,60] [--columns 8] [--out sheet.png]   every shape and material, both renderers
 //!   styk vfx-review <particles|aura|beam|smoke|explosion> [options]
 //!     --style <name|index>      the style (the Particles look); default the first
 //!     --set <name>=<value>      a saved parameter (repeatable): `--set color=0xff8a2a --set size=1.5`
@@ -392,7 +393,8 @@ fn glyph(c: char) -> [u8; 7] {
 }
 
 pub fn run(args: &[String]) -> i32 {
-    match review(args) {
+    let done = if args.first().is_some_and(|a| a == "shapes") { shapes(&args[1..]) } else { review(args) };
+    match done {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("vfx-review: {e}");
@@ -465,4 +467,55 @@ fn review(args: &[String]) -> Result<(), String> {
 /// At 1× the view keeps the focus in frame but leans toward the canvas centre, so the whole effect shows.
 fn centre_for_unit(focus: [f64; 2]) -> [f64; 2] {
     [(focus[0] + CANVAS[0] / 2.0) / 2.0, (focus[1] + CANVAS[1] / 2.0) / 2.0]
+}
+
+/// `styk vfx-review shapes [--sizes 5,18,60] [--columns 8] [--out sheet.png]`: every particle shape and material at
+/// three sizes, on white and on dark, drawn by the graphics card and by the processor, labelled.
+fn shapes(args: &[String]) -> Result<(), String> {
+    use styk_eval::vfx::generated::stage::{specimen_list, specimens};
+    let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let sizes: Vec<f32> = value("--sizes").map_or(Ok(vec![5.0, 18.0, 60.0]), |v| v.split(',').map(|s| s.trim().parse::<f32>().map_err(|e| format!("--sizes: {e}"))).collect())?;
+    let columns: usize = value("--columns").map_or(Ok(8), |v| v.parse().map_err(|e| format!("--columns: {e}")))?;
+    let out = value("--out").unwrap_or_else(|| "vfx-shapes.png".into());
+    let started = Instant::now();
+    styk_eval::vfx::generated::atlas::prepare();
+    let backgrounds = [("WHITE", 0xffffffffu32), ("DARK", 0xff14161cu32)];
+    let (probe, [w, h]) = specimens(backgrounds[0].1, &sizes, columns);
+    drop(probe);
+    let label_h = 26u32;
+    let mut sheet = Sheet::new(w + 140, (h + label_h) * 4 + 50, [40, 41, 46]);
+    sheet.text(10, 14, "PARTICLE SHAPES AND MATERIALS AT THREE SIZES: GRAPHICS CARD AND PROCESSOR", 2, [255, 214, 120], None);
+    use styk_render::wgpu;
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).map_err(|e| format!("no GPU adapter: {e}"))?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("styk vfx-review shapes"), required_limits: adapter.limits(), ..Default::default() })).map_err(|e| e.to_string())?;
+    let view = styk_render::ViewParams { matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], artboard: [0.0, 0.0, w as f64, h as f64], clip_to_artboard: true, clear: [0.0; 4], zoom: 1.0, pan: [0.0; 2], stretch: 1.0, camera_view: false, camera_limit: styk_render::CAMERA_PREVIEW_LIMIT };
+    let list_of = specimen_list();
+    let cells = list_of.len();
+    let mut row = 0u32;
+    for (name, argb) in backgrounds {
+        let (list, _) = specimens(argb, &sizes, columns);
+        let list = std::sync::Arc::new(list);
+        let mut renderer = styk_render::Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        renderer.set_list(&list);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        renderer.render(&mut encoder, &view, [w, h]);
+        queue.submit([encoder.finish()]);
+        let (_, _, gpu) = styk_render::read_frame(&device, &queue, renderer.frame_texture().unwrap());
+        let cpu = styk_raster::render(&list, &styk_raster::Images::default(), &view, [w, h], styk_raster::Edges::Smooth).straight();
+        for (who, pixels) in [("GPU", gpu), ("CPU", cpu)] {
+            let y = 50 + row * (h + label_h);
+            sheet.text(8, y + label_h + h / 2 - 8, &format!("{name} {who}"), 2, [235, 235, 240], None);
+            sheet.paste(140, y + label_h, w, h, &pixels);
+            let cell_w = w / columns as u32;
+            let cell_h = h / cells.div_ceil(columns) as u32;
+            for (i, sp) in list_of.iter().enumerate() {
+                sheet.text(140 + (i % columns) as u32 * cell_w + 6, y + label_h + (i / columns) as u32 * cell_h + 4, sp.label, 1, if argb == 0xffffffff { [70, 70, 80] } else { [200, 200, 210] }, None);
+            }
+            row += 1;
+        }
+    }
+    sheet.save(&out)?;
+    println!("{cells} shapes and materials at sizes {sizes:?} → {out} ({:.1} s)", started.elapsed().as_secs_f64());
+    Ok(())
 }

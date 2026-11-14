@@ -158,7 +158,7 @@ pub struct Renderer {
     pub(crate) glyphs: glyphs::GlyphMasks,
     /// Additive blending (generated effects), created with the first list that has any.
     pub(crate) pipeline_add: Option<wgpu::RenderPipeline>,
-    /// Ranges of the current list's prims drawn additively; empty when it has none.
+    /// Ranges of the current list's generated-effect prims (drawn with their own pipeline); empty when it has none.
     pub(crate) add_ranges: Vec<(u32, u32)>,
     pub(crate) nearest: wgpu::Sampler,
     pub(crate) linear: wgpu::Sampler,
@@ -283,7 +283,7 @@ impl Renderer {
             && since.groups.len() == list.groups.len()
             && ranges.iter().all(|&(start, end)| start <= end && end as usize <= list.prims.len())
         {
-            let structural = |p: &styk_draw::Prim| p.kind & (styk_draw::F_DEPTH | styk_draw::F_ADD) != 0 || p.kind & 255 == styk_draw::K_COMPOSITE;
+            let structural = |p: &styk_draw::Prim| p.kind & (styk_draw::F_DEPTH | styk_draw::F_ADD) != 0 || matches!(p.kind & 255, styk_draw::K_COMPOSITE | styk_draw::K_PARTICLE | styk_draw::K_BEAM);
             let mut same = since.background_prims == list.background_prims;
             for &(start, end) in &ranges {
                 let (start, end) = (start as usize, end as usize);
@@ -343,9 +343,8 @@ impl Renderer {
         }
         // Generated effects: the materials their sprites sample.
         self.ensure_materials(list.materials);
-        // Where the depth-tested faces are and where generated effects add light: passes
-        // switch pipelines there. (A reset without faces draws nothing, with or without a
-        // depth buffer.)
+        // Where the depth-tested faces and the generated effects are: passes switch pipelines
+        // there. (A reset without faces draws nothing, with or without a depth buffer.)
         self.depth_faces.clear();
         self.add_ranges.clear();
         let extend = |ranges: &mut Vec<(u32, u32)>, i: u32| match ranges.last_mut() {
@@ -353,12 +352,9 @@ impl Renderer {
             _ => ranges.push((i, i + 1)),
         };
         for (i, p) in list.prims.iter().enumerate() {
-            if p.kind & (styk_draw::F_DEPTH | styk_draw::F_ADD) == 0 {
-                continue;
-            }
             match p.kind & 255 {
                 styk_draw::K_TRI if p.kind & styk_draw::F_DEPTH != 0 => extend(&mut self.depth_faces, i as u32),
-                styk_draw::K_PARTICLE | styk_draw::K_BEAM if p.kind & styk_draw::F_ADD != 0 => extend(&mut self.add_ranges, i as u32),
+                styk_draw::K_PARTICLE | styk_draw::K_BEAM => extend(&mut self.add_ranges, i as u32),
                 _ => {}
             }
         }

@@ -4,7 +4,7 @@
 //! Until 2026-11 these tests compared every particle with recordings of the old
 //! JavaScript editor; its look is what was replaced, so they now state the behaviour
 //! directly. The recorded scene documents in `tests/fixtures/generators/` stay as
-//! inputs (every style of every type), and `atlas.json` still pins the material rows.
+//! inputs (every style of every type); the materials are pinned by their hashes below.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ fn json(path: &Path) -> Value {
 fn fixtures() -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(folder())
         .expect("fixture folder")
-        .filter_map(|entry| entry.ok()?.file_name().to_str()?.strip_suffix(".json").filter(|n| *n != "atlas" && !n.contains('.')).map(str::to_string))
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.strip_suffix(".json").map(str::to_string))
         .collect();
     names.sort();
     names
@@ -126,12 +126,22 @@ fn every_recorded_scene_draws_alike_twice_and_only_while_its_effects_last() {
                 drawn += live(batch).len();
                 // Every particle is a finite place with a size.
                 for (_, _, p) in live(batch) {
-                    assert!(p.x.is_finite() && p.y.is_finite() && p.size > 0.0 && p.alpha > 0.0, "{name} tick {tick}: {p:?}");
+                    assert!(p.x.is_finite() && p.y.is_finite() && p.size > 0.0 && p.rgba[3] > 0.0, "{name} tick {tick}: {p:?}");
                 }
             }
         }
     }
     assert!(drawn > 2000, "{drawn} particles drawn over the recorded scenes");
+}
+
+#[test]
+fn particles_live_on_after_their_layer_stops_emitting() {
+    // Smoke emitted for 10 frames lives 60: at tick 40 every puff is still there.
+    let clip = Clip::new(None, "smoke").set("life", "60").set("amount", "2").set("prefill", "1").timed(0.0, Some(10.0));
+    let prepared = Stage::new(80.0).clip(clip).prepare();
+    let at = |tick: f64| batch_at(&prepared, tick).map_or(0, |b| live(&b).len());
+    let (during, after) = (at(9.0), at(40.0));
+    assert!(during > 10 && after >= during, "{during} puffs while emitting, {after} after");
 }
 
 #[test]
@@ -260,6 +270,29 @@ fn continuous_effects_can_start_already_running() {
     assert!(live(&batch).len() < 4);
 }
 
+/// Retired options (no longer offered) still open and draw as the option each merged into:
+/// Explosion Plasma as Magic and Smoke bomb as Dust, Beam Spiral as Energy with its strands,
+/// Particles Leaf as Petal; Smoke Thick and Steam as Soft, keeping their own thickness.
+#[test]
+fn retired_styles_draw_as_the_style_they_merged_into() {
+    let drawn = |clip: Clip, tick: f64| {
+        let batch = batch_at(&Stage::new(60.0).clip(clip).prepare(), tick).expect("the effect draws");
+        live(&batch).iter().map(|(d, i, p)| (*d, *i, (p.x * 1000.0) as i64, (p.y * 1000.0) as i64, (p.size * 1000.0) as i64)).collect::<Vec<_>>()
+    };
+    let style = |kind: &str, name: &str, value: &str| Clip::new(Some(1), kind).set(name, value);
+    for (retired, into) in [("2", "7"), ("3", "8")] {
+        assert_eq!(drawn(style("explosion", "style", retired), 12.0), drawn(style("explosion", "style", into), 12.0), "explosion style {retired}");
+    }
+    assert_eq!(drawn(style("beam", "style", "3"), 30.0), drawn(style("beam", "style", "0").set("strands", "on"), 30.0));
+    assert_eq!(drawn(style("particles", "look", "11"), 30.0), drawn(style("particles", "look", "12"), 30.0));
+    let soft = drawn(style("smoke", "style", "0"), 40.0);
+    for retired in ["1", "2"] {
+        let smoke = drawn(style("smoke", "style", retired), 40.0);
+        assert!(!smoke.is_empty() && smoke.iter().all(|p| p.0 == 0), "smoke style {retired} draws one soft layer");
+        assert_ne!(smoke, soft, "smoke style {retired} keeps its own thickness");
+    }
+}
+
 #[test]
 fn copies_of_an_effect_play_their_own_patterns() {
     let pair = |unique: &str| {
@@ -382,24 +415,37 @@ fn fnv(bytes: &[u8]) -> u32 {
     h
 }
 
+/// The noise materials: within every device's texture limit, their cells clear at the sides (so filtering never
+/// reads a neighbour), the same bytes on every platform (the hashes are this machine's; CI checks them on Linux and
+/// Windows: a material whose look is changed on purpose gets its new hash here).
 #[test]
-fn materials_are_generated_byte_for_byte() {
-    let reference = json(&folder().join("atlas.json"));
-    let rows: Vec<Value> = reference.get("rows").and_then(Value::elements).unwrap().into_iter().collect();
-    assert_eq!(rows.len(), atlas::ROWS);
-    let mut wrong = Vec::new();
-    for (index, row) in rows.iter().enumerate() {
-        let ours = atlas::generate(index);
-        for (level, expected) in row.elements().unwrap().into_iter().enumerate() {
-            let e = expected.numbers().unwrap();
-            let l = &ours.levels[level];
-            if (l.width as f64, l.height as f64, fnv(&l.data) as f64) != (e[0], e[1], e[2]) {
-                wrong.push(format!("row {index} ({}) level {level}", generated::layers::ROWS[index]));
+fn materials_fit_every_device_and_are_the_same_everywhere() {
+    assert!(atlas::CELL * atlas::COLUMNS <= 2048 && atlas::CELL * atlas::ROWS <= 2048);
+    let mut hashes = Vec::new();
+    for row in 0..atlas::ROWS {
+        let material = atlas::generate(row);
+        assert_eq!(material.levels.len(), atlas::LEVELS);
+        let base = &material.levels[0];
+        assert_eq!((base.width, base.height), (atlas::CELL * atlas::COLUMNS, atlas::CELL));
+        for level in &material.levels {
+            let cell = level.height;
+            // The outer ring of every cell holds no density.
+            for c in 0..atlas::COLUMNS {
+                for k in 0..cell {
+                    for (x, y) in [(c * cell + k, 0), (c * cell + k, cell - 1), (c * cell, k), (c * cell + cell - 1, k)] {
+                        assert_eq!(level.data[(y * level.width + x) * 2], 0, "{} level {cell}: density at ({x}, {y})", atlas::NAMES[row]);
+                    }
+                }
             }
         }
+        // Something of the material is dense.
+        assert!(base.data.chunks_exact(2).any(|t| t[0] > 200), "{} has a dense middle", atlas::NAMES[row]);
+        hashes.push(fnv(&base.data));
     }
-    assert!(wrong.is_empty(), "differ: {wrong:?}");
+    assert_eq!(hashes, EXPECTED_MATERIALS, "material bytes");
 }
+
+const EXPECTED_MATERIALS: [u32; 4] = [1169140756, 2569879017, 2432394701, 1555941733];
 
 /// Every live particle's centre and every beam's ends, placed by their draw's transform,
 /// lie inside the batch's bounds; a batch with nothing alive has none.

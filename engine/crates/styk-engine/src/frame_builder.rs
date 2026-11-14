@@ -206,6 +206,10 @@ impl FrameBuilder {
                 )
             });
         }
+        // A worker: the materials its particles sample are generated here if they are not yet.
+        if batch.as_ref().is_some_and(|b| b.draws.iter().any(|d| d.material >= 0)) {
+            styk_eval::vfx::generated::atlas::prepare();
+        }
         if cancelled() {
             return None;
         }

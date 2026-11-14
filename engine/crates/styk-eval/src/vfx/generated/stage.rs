@@ -296,3 +296,106 @@ impl Stage {
         crate::prepare(doc)
     }
 }
+
+/// One specimen of [`specimens`]: what it shows.
+pub struct Specimen {
+    pub label: &'static str,
+    pub shape: u32,
+    pub softness: f32,
+    pub outline: f32,
+    pub emissive: f32,
+    pub erosion: f32,
+    /// A material's cell (`material << 4 | variant`), or a shape's seed.
+    pub cell: u32,
+}
+
+/// Every particle shape and material, each in a few looks: what the renderers must draw alike.
+pub fn specimen_list() -> Vec<Specimen> {
+    use styk_draw::*;
+    let s = |label, shape, softness: f32| Specimen { label, shape, softness, outline: 0.0, emissive: 0.0, erosion: 0.0, cell: 7 };
+    let m = |label, material: u32, erosion: f32, outline: f32| Specimen { label, shape: P_MATERIAL, softness: 0.0, outline, emissive: 0.0, erosion, cell: material << 4 | 1 };
+    vec![
+        s("SOFT DISC", P_DISC, 1.4),
+        s("DISC", P_DISC, 0.0),
+        s("RING", P_RING, 0.12),
+        s("STREAK", P_STREAK, 0.6),
+        s("ROCK", P_ROCK, 0.0),
+        s("SQUARE", P_SQUARE, 0.0),
+        s("RHOMBUS", P_RHOMBUS, 0.0),
+        s("STAR", P_STAR, 0.0),
+        s("SPARKLE", P_SPARKLE, 0.0),
+        s("SPARK", P_SPARK, 0.0),
+        s("SHARD", P_SHARD, 0.0),
+        s("DROP", P_DROP, 0.0),
+        s("HEART", P_HEART, 0.0),
+        s("BURST", P_BURST, 0.0),
+        s("CLOUD", P_CLOUD, 0.0),
+        s("FLAKE", P_FLAKE, 0.0),
+        s("PETAL", P_PETAL, 0.0),
+        s("BOLT", P_BOLT, 0.0),
+        s("FLAME", P_FLAME, 0.0),
+        s("SPLAT", P_SPLAT, 0.0),
+        s("BOKEH", P_BOKEH, 0.0),
+        s("TOON STAR", P_TOON_STAR, 0.0),
+        Specimen { outline: 0.18, ..s("INKED", P_CLOUD, 0.0) },
+        Specimen { emissive: 1.0, ..s("LIGHT", P_DISC, 1.4) },
+        Specimen { softness: 1.0, ..s("TRAIL", P_SEGMENT, 1.0) },
+        m("SMOKE", super::atlas::SMOKE, 0.05, 0.0),
+        m("FLAME", super::atlas::FLAME, 0.25, 0.0),
+        m("WISP", super::atlas::WISP, 0.1, 0.0),
+        m("PUFF", super::atlas::PUFF, 0.35, 0.12),
+    ]
+}
+
+/// A draw list of every specimen at the radii `sizes`, in a grid of `columns` cells on a
+/// background of `background` (ARGB), and its size in pixels (one pixel a world unit).
+pub fn specimens(background: u32, sizes: &[f32], columns: usize) -> (styk_draw::DrawList, [u32; 2]) {
+    use styk_draw::*;
+    let list = specimen_list();
+    let gap = 14.0f32;
+    let cell_w = sizes.iter().map(|r| 2.0 * r + gap).sum::<f32>() + gap;
+    let cell_h = 2.0 * sizes.iter().copied().fold(0.0, f32::max) + 2.0 * gap + 4.0;
+    let rows = list.len().div_ceil(columns);
+    let size = [(cell_w * columns as f32).ceil() as u32, (cell_h * rows as f32).ceil() as u32];
+    let mut paints: Vec<[f32; 4]> = Vec::new();
+    let mut prims = vec![Prim { kind: K_FILL_VIEW, group: 0, color: argb8(background), paint: NO_PAINT, a: [0.0; 4], b: [0.0; 4], c: [0.0; 4] }];
+    let colour = [1.0, 0.55, 0.15, 1.0];
+    for (i, sp) in list.iter().enumerate() {
+        // The specimen's rows: identity transform, full shading, its softness and outline, a rim.
+        let rows = paints.len() as u32;
+        paints.push([1.0, 0.0, 0.0, 1.0]);
+        paints.push([0.0, 0.0, 1.0, 1.0]);
+        let mut x = (i % columns) as f32 * cell_w + gap;
+        let y = (i / columns) as f32 * cell_h + cell_h / 2.0;
+        for (k, &r) in sizes.iter().enumerate() {
+            let at = paints.len() as u32;
+            if k > 0 {
+                paints.push([1.0, 0.0, 0.0, 1.0]);
+                paints.push([0.0, 0.0, 1.0, 1.0]);
+            }
+            let rows = if k == 0 { rows } else { at };
+            paints.push([sp.softness, 1.0, 1.0, sp.outline * r]);
+            paints.push([0.08, 0.05, 0.1, 1.0]);
+            paints.push([0.12, 0.2, 0.6, 0.0]);
+            paints.push([0.55, 0.08, 0.02, 0.0]);
+            let cx = x + r;
+            let kind = particle_kind(sp.shape) | if sp.shape == P_SEGMENT { F_CAP_START | F_CAP_END } else { 0 };
+            let (a, b) = match sp.shape {
+                P_SEGMENT => ([cx - r * 0.8, y + r * 0.5, cx + r * 0.8, y - r * 0.5], [r * 0.35, r * 0.08, sp.emissive, 0.3]),
+                P_STREAK => ([cx + r * 0.4, y, r * 0.35, 0.0], [r * 0.9, 0.0, sp.emissive, sp.erosion]),
+                _ => ([cx, y, r, 0.0], [0.0, 0.0, sp.emissive, sp.erosion]),
+            };
+            prims.push(Prim { kind, group: 0, color: sp.cell, paint: rows, a, b, c: colour });
+            x += 2.0 * r + gap;
+        }
+    }
+    let end = prims.len() as u32;
+    let mut materials = 0;
+    for sp in &list {
+        if sp.shape == P_MATERIAL {
+            materials |= 1 << (sp.cell >> 4);
+        }
+    }
+    let drawn = DrawList { prims, paints, groups: vec![Group { parent: 0, depth: 0, opacity: 1.0, bounds: [0.0; 4], layer: NO_LAYER }], passes: vec![Pass { depth: 0, start: 0, end }], background_prims: 1, materials, ..Default::default() };
+    (drawn, size)
+}

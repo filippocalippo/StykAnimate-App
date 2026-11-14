@@ -66,13 +66,19 @@ pub struct Particle {
     pub vx: f64,
     pub vy: f64,
     pub size: f64,
-    /// Before the colour stop's own opacity ([`ramp`]).
-    pub alpha: f64,
+    /// Its colour (straight, 0–1) and opacity, everything multiplied in.
+    pub rgba: [f64; 4],
+    /// The light it gives off: 0 paints, 1 adds light.
+    pub emissive: f64,
+    /// The density a material particle is cut at (0: whole).
+    pub erosion: f64,
+    pub rotation: f64,
+    /// Its shape ([`super::layers`]), and a material particle's atlas cell
+    /// (`material << 4 | variant`) or a shape's seed.
+    pub shape: u8,
+    pub cell: u32,
     /// Where on the colour ramp it is: its age, or a random place per particle.
     pub color: f64,
-    pub rotation: f64,
-    /// The atlas column of a sprite.
-    pub variant: u32,
     /// Its emission index.
     pub n: f64,
     /// The layer parameters it was born with ([`Batch::specs`]).
@@ -155,7 +161,9 @@ impl<'a> Evaluator<'a> {
                 return None;
             }
             let count = d.count as f64;
-            let n_max = (span * rr).floor();
+            // The newest emission so far: once the layer stops emitting, its last one (those in flight
+            // keep their slots after emission ends).
+            let n_max = (span.min(d.emit_dur) * rr).floor();
             let m = ((n_max - ii as f64) % count + count) % count;
             let ni = n_max - m;
             if ni < 0.0 {
@@ -319,16 +327,29 @@ impl<'a> Evaluator<'a> {
         let (ax, ay) = (b.anchor[0], b.anchor[1]);
         let sc = b.scale;
         let (g, gx, kd) = (s.gravity * sc, s.wind * sc, s.drag);
+        // Eased out, the launch covers its path by a warped time: full speed at birth, still at death.
+        let (ease, life) = (s.ease, b.life);
+        let warp = |t: f64| -> (f64, f64) {
+            if ease <= 0.0 {
+                return (t, 1.0);
+            }
+            let x = (t / life).clamp(0.0, 1.0);
+            let k = 1.0 + ease;
+            let rest = fm::powf(1.0 - x, k);
+            (life * (1.0 - rest) / k, rest / (1.0 - x).max(1e-9))
+        };
         let ballistic = |t: f64| -> [f64; 4] {
             let (vx, vy) = (b.v0[0], b.v0[1]);
+            let (tl, dl) = warp(t);
             if kd > 1e-4 {
+                let (el, ql) = (fm::exp(-kd * tl), (1.0 - fm::exp(-kd * tl)) / kd);
                 let e = fm::exp(-kd * t);
                 let q = (1.0 - e) / kd;
                 let w = (t - q) / kd;
-                [b.p0[0] + vx * q + gx * w, b.p0[1] + vy * q + g * w, vx * e + gx * q, vy * e + g * q]
+                [b.p0[0] + vx * ql + gx * w, b.p0[1] + vy * ql + g * w, vx * el * dl + gx * q, vy * el * dl + g * q]
             } else {
                 let h = 0.5 * t * t;
-                [b.p0[0] + vx * t + gx * h, b.p0[1] + vy * t + g * h, vx + gx * t, vy + g * t]
+                [b.p0[0] + vx * tl + gx * h, b.p0[1] + vy * tl + g * h, vx * dl + gx * t, vy * dl + g * t]
             }
         };
         let [mut px, mut py, mut vx, mut vy] = ballistic(age);
@@ -430,6 +451,12 @@ impl<'a> Evaluator<'a> {
         }
         let an = age / b.life;
         let n = b.n;
+        // Pulled back toward its emitter (energy gathering into a point).
+        if s.attract > 0.0 {
+            let k = s.attract * smoothstep(0.0, 1.0, an);
+            px += (ax - px) * k;
+            py += (ay - py) * k;
+        }
         if s.turb > 0.0 {
             let ts = s.turb_scale / sc;
             let qx = b.p0[0] * ts + hash(n, 7, seed) * 37.0;
@@ -488,16 +515,26 @@ impl<'a> Evaluator<'a> {
             }
             _ => fm::powf(an.max(1e-6), s.size_curve),
         };
-        let mut size = b.size_key * b.scale * mix(s.size0, s.size1, grow) * (1.0 + (hash(n, 8, seed) - 0.5) * 2.0 * s.size_jitter) * mix(0.3, 1.0, b.fade);
+        let curve = match s.size_over_life {
+            Some(c) => s.size0 * c.at(an),
+            None => mix(s.size0, s.size1, grow),
+        };
+        let mut size = b.size_key * b.scale * curve * (1.0 + (hash(n, 8, seed) - 0.5) * 2.0 * s.size_jitter) * mix(0.3, 1.0, b.fade);
         if s.size_mode == GROW_POP {
             size *= 1.0 - smoothstep(0.6, 1.0, an);
         } else if s.size_mode == GROW_FLICKER {
             let h = hash(n, 21, seed);
             size *= 0.55 + 0.9 * vnoise(self.now * 0.45 + h * 61.7, h * 17.3);
         }
-        let fi = if s.fade_in <= 0.0 { 1.0 } else { smoothstep(0.0, s.fade_in, an) };
-        let fo = if s.fade_out <= 0.0 { 1.0 } else { 1.0 - smoothstep(1.0 - s.fade_out, 1.0, an) };
-        let mut alpha = s.alpha * self.draw.alpha * fi * fo * b.fade;
+        let fades = match s.alpha_over_life {
+            Some(c) => c.at(an),
+            None => {
+                let fi = if s.fade_in <= 0.0 { 1.0 } else { smoothstep(0.0, s.fade_in, an) };
+                let fo = if s.fade_out <= 0.0 { 1.0 } else { 1.0 - smoothstep(1.0 - s.fade_out, 1.0, an) };
+                fi * fo
+            }
+        };
+        let mut alpha = s.alpha * self.draw.alpha * fades * b.fade;
         if s.flicker > 0.0 {
             let h = hash(n, 22, seed);
             alpha *= 1.0 - s.flicker * vnoise(self.now * 0.8 + h * 53.1, h * 29.7);
@@ -510,30 +547,37 @@ impl<'a> Evaluator<'a> {
             ROTATE_FIXED => 0.0,
             _ => hash(n, 13, seed) * TAU + s.spin * age * (1.0 + s.spin_jitter * ((hash(n, 19, seed) * 2.0 - 1.0) * 1.5 - 1.0)),
         };
-        let mut variant = 0;
-        if let Some(m) = s.material
-            && s.shape == SPRITE
-        {
-            let cells = m.count.max(1) as f64;
-            let mut vi = (cells - 1.0).min((hash(n, 20, seed) * cells).floor());
-            if s.frame_rate > 0.0 {
-                vi = (vi + (age / s.frame_rate).floor()) % cells;
+        // A material's cell (its variants flick by at `frame_rate`), or the shape's seed.
+        let cell = match s.material.and_then(|m| m.noise.map(|row| (row, m.variants))) {
+            Some((row, variants)) if s.shape == MATERIAL => {
+                let cells = variants.max(1) as f64;
+                let mut vi = (cells - 1.0).min((hash(n, 20, seed) * cells).floor());
+                if s.frame_rate > 0.0 {
+                    vi = (vi + (age / s.frame_rate).floor()) % cells;
+                }
+                row << 4 | vi as u32
             }
-            variant = m.col + vi as u32;
-        }
+            _ => (hash(n, 20, seed) * 65536.0) as u32,
+        };
         let size = size.max(0.0);
+        let x = if s.color_mode > 0.5 { hash(n, 16, seed) } else { an };
+        let (rgb, stop_alpha) = color_at(s, x);
+        let rgb = vary(rgb, s.hue_jitter, s.value_jitter, hash(n, 24, seed), hash(n, 25, seed));
+        alpha = (alpha * stop_alpha).min(1.0);
         if alpha <= 0.0 || size <= 0.0 {
             return None;
         }
+        let emissive = emission(s, an, rgb);
+        let erosion = s.erosion.map_or(0.0, |e| e.from + (e.to - e.from) * fm::powf(an, e.power));
         let speed = fm::hypot(vx, vy);
+        let outline = s.outline.map_or(0.0, |o| o.width);
         let reach = match s.shape {
             RING => size * (1.0 + s.softness * 2.0),
             STREAK => size + speed * s.stretch,
-            SPRITE => size.max(size * s.aspect + 0.5 * speed * s.stretch),
-            SQUARE | CHUNK => size * 1.42,
-            _ => size * s.aspect.max(1.0),
-        };
-        Some(Particle { x: px, y: py, vx, vy, size, alpha, color: if s.color_mode > 0.5 { hash(n, 16, seed) } else { an }, rotation, variant, n, spec: b.spec, reach })
+            SQUARE => size * 1.42,
+            _ => size.max(size * s.aspect + 0.5 * speed * s.stretch) * 1.42,
+        } + outline;
+        Some(Particle { x: px, y: py, vx, vy, size, rgba: [rgb[0], rgb[1], rgb[2], alpha], emissive, erosion, rotation, shape: s.shape, cell, color: x, n, spec: b.spec, reach })
     }
 }
 
@@ -541,6 +585,54 @@ impl<'a> Evaluator<'a> {
 /// or threes every copy lands on a held frame of its own, never on the particle's.
 pub fn trail_lag(lag: f64, step: f64) -> f64 {
     (lag / step.max(1.0)).ceil().max(1.0) * step.max(1.0)
+}
+
+/// A layer's colour at ramp position `x` (0–1 per channel) and its opacity there. A stop's
+/// intensity above 1 burns toward white channel by channel; below 1 it fades.
+pub fn color_at(s: &Spec, x: f64) -> ([f64; 3], f64) {
+    let colors = s.colors.unwrap_or([[1.0, 1.0, 1.0, 1.0]; COLOR_STOPS]);
+    let opacity = s.opacity.unwrap_or([1.0; COLOR_STOPS]);
+    let y = clamp(x, 0.0, 1.0) * (COLOR_STOPS - 1) as f64;
+    let i = ((COLOR_STOPS - 2) as f64).min(y.floor()) as usize;
+    let f = y - i as f64;
+    let (a, b) = (colors[i], colors[i + 1]);
+    let intensity = mix(a[3], b[3], f);
+    let k = intensity.max(1.0);
+    let rgb = [0, 1, 2].map(|c| (mix(a[c], b[c], f) * k).min(1.0));
+    (rgb, mix(opacity[i], opacity[i + 1], f) * intensity.clamp(0.0, 1.0))
+}
+
+/// The light a particle of `s` gives off at life fraction `an` with colour `rgb`: none when the
+/// layer paints, all when it glows, as its style designed (or, when it says nothing, more the
+/// whiter its colour) on Auto.
+pub fn emission(s: &Spec, an: f64, rgb: [f64; 3]) -> f64 {
+    match s.blend {
+        NORMAL => 0.0,
+        ADD => 1.0,
+        _ => match s.emissive {
+            Some(c) => c.at(an),
+            None => 0.2 + 0.7 * rgb[0].min(rgb[1]).min(rgb[2]),
+        },
+    }
+}
+
+/// `rgb` with its hue turned by up to `hue` of a turn and its value changed by up to `value`,
+/// by two random numbers.
+pub fn vary(rgb: [f64; 3], hue: f64, value: f64, h1: f64, h2: f64) -> [f64; 3] {
+    let mut c = rgb;
+    if hue > 0.0 {
+        // A turn about the grey axis.
+        let (sn, cs) = fm::sin_cos((h1 - 0.5) * 2.0 * hue * TAU);
+        let k = (1.0 - cs) / 3.0;
+        let r = 0.577_350_269_189_625_8 * sn;
+        let m = [[cs + k, k - r, k + r], [k + r, cs + k, k - r], [k - r, k + r, cs + k]];
+        c = [0, 1, 2].map(|i| clamp(m[i][0] * rgb[0] + m[i][1] * rgb[1] + m[i][2] * rgb[2], 0.0, 1.0));
+    }
+    if value > 0.0 {
+        let v = 1.0 + (h2 - 0.5) * 2.0 * value;
+        c = c.map(|x| clamp(x * v, 0.0, 1.0));
+    }
+    c
 }
 
 /// A point in the unit disc for particle `n` (squashed vertically by `sq`).
@@ -568,31 +660,6 @@ pub fn beam_width(s: &Spec, te: f64) -> f64 {
     smoothstep(s.fire_start - 1.0, s.fire_start + 2.0, te) * (1.0 - smoothstep(s.fire_end - s.fade_frames, s.fire_end, te))
 }
 
-/// The colour at ramp position `x` of `s` drawn with `blend`, 0–1 per channel, and the stop
-/// opacity. Additive layers clip bright values toward white; normal layers keep their hue at
-/// full saturation, lower intensity becoming transparency.
-pub fn ramp(s: &Spec, blend: u8, x: f64) -> [f64; 4] {
-    let colors = s.colors.unwrap_or([[1.0, 1.0, 1.0, 1.0]; COLOR_STOPS]);
-    let opacity = s.opacity.unwrap_or([1.0; COLOR_STOPS]);
-    let y = clamp(x, 0.0, 1.0) * (COLOR_STOPS - 1) as f64;
-    let i = ((COLOR_STOPS - 2) as f64).min(y.floor()) as usize;
-    let f = y - i as f64;
-    let (a, b) = (colors[i], colors[i + 1]);
-    let intensity = mix(a[3], b[3], f);
-    let add = blend == ADD;
-    let dim = !add && intensity < 1.0;
-    let mut out = [0.0; 4];
-    for c in 0..3 {
-        out[c] = mix(a[c], b[c], f) * if dim { 1.0 } else { intensity };
-    }
-    let peak = if add { 1.0 } else { 1.0f64.max(out[0]).max(out[1]).max(out[2]) };
-    for v in out.iter_mut().take(3) {
-        *v = (*v / peak).min(1.0);
-    }
-    out[3] = mix(opacity[i], opacity[i + 1], f) * if dim { intensity.max(0.0) } else { 1.0 };
-    out
-}
-
 /// A beam's quad: its origin and tip, width (0 when it is not drawn) and time.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamQuad {
@@ -616,49 +683,110 @@ pub fn beam(batch: &Batch, draw: &Draw) -> Option<BeamQuad> {
     Some(BeamQuad { a: draw.point, b: beam_tip(draw, s, te), width: w, te })
 }
 
-/// One segment of a lightning arc: its ends, radius, colour and opacity.
+/// One piece of a lightning bolt: its ends, its radius at each, its opacity at each.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ArcSegment {
+pub struct ArcPiece {
     pub p0: [f64; 2],
     pub p1: [f64; 2],
-    pub radius: f64,
-    pub rgb: [f64; 3],
-    pub alpha: f64,
+    pub r0: f64,
+    pub r1: f64,
+    pub a0: f64,
+    pub a1: f64,
+    /// The first and last piece of its bolt (round ends).
+    pub start: bool,
+    pub end: bool,
 }
 
-/// Instance `ii` of an arc draw (arcs of `arc_segs` segments each), or `None`.
-pub fn arc_segment(batch: &Batch, draw: &Draw, ii: u32) -> Option<ArcSegment> {
+/// A jagged path from `a` to `b`: midpoint displacement `depth` times, each level half as
+/// rough, the ends held.
+fn jag(a: [f64; 2], b: [f64; 2], amp: f64, depth: u32, key: u32, out: &mut Vec<[f64; 2]>) {
+    let n = 1usize << depth;
+    let start = out.len();
+    out.resize(start + n + 1, a);
+    out[start + n] = b;
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len = fm::hypot(dx, dy).max(1e-6);
+    let (nx, ny) = (-dy / len, dx / len);
+    let mut step = n;
+    let mut rough = amp;
+    let mut k = 0u32;
+    while step > 1 {
+        let half = step / 2;
+        let mut i = 0;
+        while i < n {
+            let (p, q) = (out[start + i], out[start + i + step]);
+            let off = (hash(k as f64, 31, key) - 0.5) * 2.0 * rough;
+            out[start + i + half] = [(p[0] + q[0]) * 0.5 + nx * off, (p[1] + q[1]) * 0.5 + ny * off];
+            k += 1;
+            i += step;
+        }
+        step = half;
+        rough *= 0.55;
+    }
+}
+
+/// The lightning of an arc draw at its tick: each arc a bolt along the beam (forked
+/// `arc_branches` times), its shape held for `arc_rhythm` ticks (at least the drawing's
+/// step), a fifth of them hidden at any moment so they flicker.
+pub fn arcs(batch: &Batch, draw: &Draw) -> Vec<ArcPiece> {
     let s = batch.spec(draw);
     let ev = Evaluator::new(batch, draw);
     let te = ev.local();
+    let mut out = Vec::new();
     if te < s.fire_start + s.grow || te > s.fire_end {
-        return None;
+        return out;
     }
-    let segs = (s.arc_segs as u32).max(1);
-    let (arc, k) = (ii / segs, ii % segs);
-    let seed = draw.seed;
-    // A new shape every other frame of the drawing (every frame held on twos or threes).
-    let period = (ev.tick() / draw.step.max(2.0)).floor();
-    let key = pcg(seed.wrapping_add(arc.wrapping_mul(7919)).wrapping_add(int32(period).wrapping_mul(104729)));
-    if hash(arc as f64, 99, key) < 0.3 {
-        return None;
+    let width = beam_width(s, te);
+    let (rgb_alpha, alpha) = (color_at(s, 0.0).1, draw.alpha * s.alpha * width);
+    let alpha = alpha * rgb_alpha;
+    if alpha <= 0.0 {
+        return out;
     }
+    let segs = (s.arc_segs.max(1.0)) as u32;
+    let count = (draw.count / segs.max(1)).max(1);
     let a = draw.point;
     let b = beam_tip(draw, s, te);
-    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-    let len = fm::hypot(dx, dy).max(1.0);
-    let (nx, ny) = (-dy / len, dx / len);
-    let (f0, f1) = (k as f64 / segs as f64, (k + 1) as f64 / segs as f64);
-    let amp = s.arc_amp * (0.6 + 0.8 * hash(arc as f64, 98, key));
-    let o0 = (hash(k as f64, 3, key) - 0.5) * 2.0 * amp * fm::sin(PI * f0);
-    let o1 = (hash((k + 1) as f64, 3, key) - 0.5) * 2.0 * amp * fm::sin(PI * f1);
-    let col = ramp(s, draw.blend, 0.0);
-    let alpha = draw.alpha * s.alpha * col[3] * beam_width(s, te);
-    (alpha > 0.0).then_some(ArcSegment {
-        p0: [mix(a[0], b[0], f0) + nx * o0, mix(a[1], b[1], f0) + ny * o0],
-        p1: [mix(a[0], b[0], f1) + nx * o1, mix(a[1], b[1], f1) + ny * o1],
-        radius: s.size0,
-        rgb: [col[0], col[1], col[2]],
-        alpha,
-    })
+    let len = fm::hypot(b[0] - a[0], b[1] - a[1]);
+    if len < 2.0 {
+        return out;
+    }
+    let rhythm = s.arc_rhythm.max(draw.step).max(1.0);
+    let period = (ev.tick() / rhythm).floor();
+    let mut path = Vec::new();
+    for arc in 0..count {
+        let key = pcg(draw.seed.wrapping_add(arc.wrapping_mul(7919)).wrapping_add(int32(period).wrapping_mul(104729)));
+        if hash(arc as f64, 99, key) < 0.2 {
+            continue;
+        }
+        let amp = s.arc_amp * (0.6 + 0.8 * hash(arc as f64, 98, key));
+        let r = s.size0 * (0.75 + 0.5 * hash(arc as f64, 97, key));
+        path.clear();
+        jag(a, b, amp, 4, key, &mut path);
+        let n = path.len() - 1;
+        for i in 0..n {
+            let (f0, f1) = (i as f64 / n as f64, (i + 1) as f64 / n as f64);
+            // Thinner toward the far end, where it strikes.
+            let taper = |f: f64| 1.0 - 0.45 * f;
+            out.push(ArcPiece { p0: path[i], p1: path[i + 1], r0: r * taper(f0), r1: r * taper(f1), a0: alpha, a1: alpha, start: i == 0, end: i + 1 == n });
+        }
+        // Forks: from a point along the bolt, off at an angle, a third of its length or so.
+        let forks = s.arc_branches.floor() as u32 + u32::from(hash(arc as f64, 96, key) < s.arc_branches.fract());
+        for fork in 0..forks {
+            let h = |k: u32| hash((arc * 16 + fork) as f64, k, key);
+            let at = path[(3 + (h(1) * (n as f64 - 6.0)).floor() as usize).min(n - 1)];
+            let (dx, dy) = ((b[0] - a[0]) / len, (b[1] - a[1]) / len);
+            let turn = (0.35 + 0.55 * h(2)) * if h(3) < 0.5 { -1.0 } else { 1.0 };
+            let (sn, cs) = fm::sin_cos(turn);
+            let reach = len * (0.18 + 0.22 * h(4));
+            let end = [at[0] + (dx * cs - dy * sn) * reach, at[1] + (dx * sn + dy * cs) * reach];
+            let mut branch = Vec::new();
+            jag(at, end, amp * 0.6, 3, key ^ (fork + 1).wrapping_mul(0x9E37), &mut branch);
+            let m = branch.len() - 1;
+            for i in 0..m {
+                let (f0, f1) = (i as f64 / m as f64, (i + 1) as f64 / m as f64);
+                out.push(ArcPiece { p0: branch[i], p1: branch[i + 1], r0: r * 0.6 * (1.0 - f0), r1: r * 0.6 * (1.0 - f1), a0: alpha * (1.0 - 0.6 * f0), a1: alpha * (1.0 - 0.6 * f1), start: i == 0, end: i + 1 == m });
+            }
+        }
+    }
+    out
 }

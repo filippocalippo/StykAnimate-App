@@ -487,7 +487,8 @@ impl EditScene {
                 // The interface thread draws this frame: its particles are thinned evenly within a budget.
                 current.generators = styk_eval::vfx::generated::build_within(&generation.prepared, &current.frame, &scene, current.vfx_tick, Some(&sampler), styk_eval::vfx::generated::EDIT_DRAWN).map(Arc::new);
             }
-            self.refining = current.generators.as_ref().is_some_and(|b| b.incomplete);
+            // Incomplete anchors, or a material the workers have not generated yet (drawn as soft discs meanwhile).
+            self.refining = current.generators.as_ref().is_some_and(|b| b.incomplete || b.draws.iter().any(|d| d.material >= 0 && styk_eval::vfx::generated::atlas::ready(d.material as usize).is_none()));
             batch = current.generators.clone();
             // Draws beside a figure move with its drag and its parallax (`offsetGeneratorBatch`:
             // `parallax(uid)` plus the drag of the figure with that identity).

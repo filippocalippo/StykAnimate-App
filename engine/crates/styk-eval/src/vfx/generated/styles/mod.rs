@@ -58,13 +58,19 @@ pub fn body_scale(measure: f64) -> f64 {
 }
 
 pub(super) const DUST: [f64; 3] = [0.54, 0.58, 0.65];
-pub(super) const ROCK: [f64; 3] = [0.42, 0.38, 0.36];
+pub(super) const ROCK_COLOR: [f64; 3] = [0.42, 0.38, 0.36];
 pub(super) fn smoke_colors() -> [[f64; 3]; 3] {
     [rgb(0x4a3b35), rgb(0x3a3436), rgb(0x2e2c31)]
 }
 
 pub(super) fn m(name: &str) -> Option<Material> {
     Some(material(name))
+}
+
+/// The effect colour's own ramp when it is a gradient (its stops and their opacities);
+/// otherwise the style's ramp derived from its colour.
+pub(super) fn paint_or(color: &crate::vfx::Color, derived: Ramp) -> Ramp {
+    if paint::is_gradient(color) { paint_ramp(color, 1.0) } else { derived }
 }
 
 pub(super) fn behind(on: bool) -> Placement {

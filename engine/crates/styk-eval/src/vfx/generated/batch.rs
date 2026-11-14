@@ -85,14 +85,14 @@ pub struct Draw {
     /// Instances: particles, a beam's one, or arc segments.
     pub count: u32,
     pub shape: u8,
-    /// [`NORMAL`] or [`ADD`].
+    /// [`NORMAL`], [`ADD`] or [`AUTO`] (`Spec::blend`).
     pub blend: u8,
     /// The figure (or the movieclip container) it is drawn beside; `None` for the scene.
     pub uid: Option<u32>,
     pub placement: Placement,
     /// A scene effect of the top-level document.
     pub scene: bool,
-    /// The material row a sprite samples, or -1.
+    /// The atlas row a material layer samples, or -1.
     pub material: i32,
     /// The tick of the layer's document (a movieclip's own tick for effects inside one).
     pub tick: f64,
@@ -799,45 +799,10 @@ fn build_limited(prepared: &Prepared, frame: &Frame, scene: &Scene, tick: Option
     if layers.is_empty() {
         return None;
     }
-    let light = background_is_light(&prepared.doc, frame);
-    let mut batch = pack(&layers, sampler, density, drawn, light, &mut state)?;
+    let mut batch = pack(&layers, sampler, density, drawn, &mut state)?;
     batch.incomplete = state.incomplete;
     batch.reduced |= state.reduced;
     Some(batch)
-}
-
-/// Whether Auto layers paint solid (a light, solid-colour scene) or add light.
-pub fn background_is_light(doc: &Document, frame: &Frame) -> bool {
-    use crate::doc::BackgroundKind;
-    if doc.layers.as_ref().is_some_and(|l| !l.scene_visible) {
-        return false;
-    }
-    let lum = |n: u32| -> Option<f64> {
-        if (n >> 24) < 13 {
-            return None;
-        }
-        Some(0.2126 * (n >> 16 & 255) as f64 / 255.0 + 0.7152 * (n >> 8 & 255) as f64 / 255.0 + 0.0722 * (n & 255) as f64 / 255.0)
-    };
-    let light = |l: Option<f64>| l.is_some_and(|l| l > 0.6);
-    if let Some(color) = frame.background_color {
-        return light(lum(color));
-    }
-    let Some(bg) = doc.backgrounds.iter().find(|b| b.id == frame.background) else { return true };
-    match &bg.kind {
-        BackgroundKind::Paint(p) if !p.stops.is_empty() => {
-            let mut sum = 0.0;
-            for s in &p.stops {
-                sum += (0.2126 * s.rgb[0] as f64 + 0.7152 * s.rgb[1] as f64 + 0.0722 * s.rgb[2] as f64) / 255.0;
-            }
-            sum / p.stops.len() as f64 > 0.6
-        }
-        BackgroundKind::Linear { a, b, .. } | BackgroundKind::Radial { a, b, .. } => match (lum(*a), lum(*b)) {
-            (Some(a), Some(b)) => (a + b) / 2.0 > 0.6,
-            _ => false,
-        },
-        BackgroundKind::Solid { argb } => light(lum(*argb)),
-        _ => false,
-    }
 }
 
 /// A layer's plan: capacity and birth rows.
@@ -874,7 +839,7 @@ fn stepped(tick: f64, clip_start: f64, step: f64) -> f64 {
 }
 
 /// Plans every layer, fills one table, writes one draw per layer.
-fn pack(layers: &[Layer<'_>], sampler: Option<&dyn Sampler>, density: f64, budget: f64, light: bool, state: &mut State) -> Option<Batch> {
+fn pack(layers: &[Layer<'_>], sampler: Option<&dyn Sampler>, density: f64, budget: f64, state: &mut State) -> Option<Batch> {
     let mut plans: Vec<Plan> = Vec::new();
     let mut blocks: Vec<((usize, bool), OutlineBlock)> = Vec::new();
     let (mut instances, mut row_count, mut drawn) = (0.0f64, 0.0f64, 0.0f64);
@@ -974,7 +939,8 @@ fn pack(layers: &[Layer<'_>], sampler: Option<&dyn Sampler>, density: f64, budge
             }
             block = Some(key);
         }
-        let copies = if beam { 0.0 } else { s.echoes.map_or(0.0, |e| e.count as f64) + f64::from(u8::from(s.halo.is_some())) + f64::from(u8::from(s.outline.is_some())) };
+        // Records each particle draws: itself, its halo, its trail's pieces.
+        let copies = if beam { 0.0 } else { s.trail.map_or(0.0, |t| t.segments as f64) + f64::from(u8::from(s.halo.is_some())) };
         let draws_now = if beam && s.shape == BEAM { 1.0 } else { count * (1.0 + copies) };
         plans.push(Plan { layer: li, beam, burst, start, emit_dur, count, rate, rate_max, tick0: first, ticks, block });
         instances += count;
@@ -1137,18 +1103,17 @@ fn pack(layers: &[Layer<'_>], sampler: Option<&dyn Sampler>, density: f64, budge
             table[o + row::SPEC] = variant as f32;
         }
         at += plan.ticks as usize * ROW;
-        let blend = if s.blend == AUTO { if light { NORMAL } else { ADD } } else { s.blend };
         let m = l.matrix;
         let det = (m[0] * m[3] - m[1] * m[2]).abs().sqrt();
         draws.push(Draw {
             spec: spec_index,
             count: plan.count as u32,
             shape: s.shape,
-            blend,
+            blend: s.blend,
             uid: l.uid,
             placement: s.placement,
             scene: l.scene,
-            material: s.material.map_or(-1, |m| m.row as i32),
+            material: s.material.map_or(-1, |m| m.row()),
             tick: l.tick,
             step: l.step,
             seed: l.seed,
