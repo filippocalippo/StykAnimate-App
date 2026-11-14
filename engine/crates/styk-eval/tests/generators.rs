@@ -478,3 +478,54 @@ fn batch_bounds_hold_every_live_particle() {
     }
     assert!(checked > 1000, "only {checked} particles checked ({empty} empty batches)");
 }
+
+/// The records a batch draws (particles, their trails and halos, arc pieces) and whether the list says it was reduced.
+fn drawn_records(prepared: &Prepared, tick: f64, batch: &Batch) -> (usize, bool) {
+    let frame = prepared.evaluate(tick);
+    let scene = styk_eval::geometry::build(&prepared.doc, &frame);
+    let assets = styk_eval::assets::Assets::build(&prepared.doc);
+    let list = styk_eval::drawlist::encode_with(&prepared.doc, &assets, &scene, &styk_eval::drawlist::Overrides { generators: Some(batch), ..Default::default() });
+    (list.prims.iter().filter(|p| p.kind & 255 == styk_draw::K_PARTICLE).count(), styk_draw::effects_reduced(&list))
+}
+
+/// Every style of a type, retired ones included, compiles and draws, within the limits, at its defaults and at the
+/// least and the most of its main controls. `settings`: (name, least, most); something must be drawn at the first of
+/// `ticks`, and nothing beyond the limits at any.
+fn every_style_draws_within_limits(kind: &str, styles: usize, settings: &[(&str, &str, &str)], ticks: &[f64]) {
+    for style in 0..styles {
+        for (label, which) in [("defaults", None), ("least", Some(false)), ("most", Some(true))] {
+            let mut clip = Clip::new(Some(1), kind).set("style", &style.to_string()).timed(0.0, Some(40.0));
+            if let Some(most) = which {
+                for (name, least, max) in settings {
+                    clip = clip.set(name, if most { max } else { least });
+                }
+            }
+            let prepared = Stage::new(80.0).clip(clip).prepare();
+            for &tick in ticks {
+                let Some(batch) = batch_at(&prepared, tick) else {
+                    assert!(tick > ticks[0], "{kind} style {style} ({label}) draws at tick {tick}");
+                    continue;
+                };
+                let alive = live(&batch);
+                let arcs: usize = batch.draws.iter().filter(|d| batch.spec(d).shape == styk_eval::vfx::generated::layers::ARC).map(|d| particle::arcs(&batch, d).len()).sum();
+                assert!(tick > ticks[0] || !alive.is_empty() || arcs > 0, "{kind} style {style} ({label}): nothing alive at tick {tick}");
+                for (_, _, p) in &alive {
+                    assert!(p.x.is_finite() && p.y.is_finite() && p.size >= 0.0 && p.rgba[3] > 0.0, "{kind} style {style} ({label}) tick {tick}: {p:?}");
+                }
+                let (records, _) = drawn_records(&prepared, tick, &batch);
+                assert!(records as f64 <= generated::MAX_DRAWN * 1.05, "{kind} style {style} ({label}) tick {tick}: {records} records");
+                if which.is_none() {
+                    // At its defaults an effect is far inside the limits: a few thousand records at most.
+                    assert!(records < 4_000 && !batch.reduced, "{kind} style {style} at its defaults: {records} records at tick {tick}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn every_smoke_style_draws_within_limits() {
+    // The amount and the opacity stay at their defaults at the least: none of either draws nothing, as it should.
+    let settings = [("size", "2", "400"), ("life", "4", "400"), ("growth", "0.2", "8"), ("rise", "-6", "12"), ("turbulence", "0", "4"), ("spread", "0", "2000")];
+    every_style_draws_within_limits("smoke", 5, &settings, &[3.0, 30.0]);
+}
