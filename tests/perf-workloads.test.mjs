@@ -12,7 +12,7 @@ import {validateMovieclipGraph, validatePlayback} from '../src/movieclips.mjs';
 import {VFX_REGISTRY} from '../src/vfx-registry.mjs';
 import {nodeEngine} from './support/engine-node.mjs';
 
-const FEATURES = ['sprites', 'effects', 'movieclips', 'camera', 'text', 'shapes', 'long'];
+const FEATURES = ['sprites', 'effects', 'effects-heavy', 'movieclips', 'camera', 'text', 'shapes', 'long'];
 const ticksOf = document => document.keyframes.reduce((ticks, frame) => ticks + frame.duration_raw, 0);
 const segments = (document, kind) => document.figure_types.flatMap(type => type.segments.filter(segment => segment.segment_kind === kind).map(segment => ({type, segment})));
 
@@ -85,6 +85,27 @@ test('effects: every figure has one effect clip for the whole animation, of a ki
     for (const name of Object.keys(effect.params)) if (name !== 'effectStrength') assert.ok(name in known.params, `${effect.type}.${name}`);
   }
   assert.deepEqual([...new Set(clips.map(clip => clip.effects[0].type))].sort(), ['blur', 'glow', 'outline', 'shadow', 'tint']);
+});
+
+test('effects-heavy: every figure has a stack of known effects, some at half strength, and the scene has a keyed stack', () => {
+  const document = built.get('effects-heavy'), clips = document._styk.vfxClips.clips, uids = document.keyframes[0].objects.map(object => object.unique_id);
+  const figures = clips.filter(clip => clip.target.kind === 'figure'), scene = clips.filter(clip => clip.target.kind === 'scene');
+  assert.deepEqual(figures.map(clip => clip.target.uid).sort((a, b) => a - b), [...uids].sort((a, b) => a - b));
+  assert.equal(new Set(clips.flatMap(clip => [clip.id, ...clip.effects.map(effect => effect.id)])).size, clips.length + clips.reduce((n, clip) => n + clip.effects.length, 0), 'ids are unique');
+  for (const clip of clips) for (const effect of clip.effects) {
+    const known = VFX_REGISTRY[effect.type];
+    assert.ok(known, effect.type);
+    for (const name of Object.keys(effect.params)) assert.ok(name in known.params, `${effect.type}.${name}`);
+  }
+  assert.ok(figures.some(clip => clip.effects.length === 3), 'stacks of three effects');
+  assert.ok(figures.some(clip => clip.effects.some(effect => effect.params.effectStrength === .5)), 'effects at half strength');
+  assert.ok(figures.some(clip => clip.effects.some(effect => effect.type === 'outline' && effect.params.mode === 2 && effect.params.width === 12)), 'a centred outline of 12');
+  assert.ok(figures.some(clip => clip.effects.some(effect => effect.type === 'glow' && effect.params.mode === 2)), 'glow on both sides');
+  assert.equal(scene.length, 1);
+  assert.deepEqual(scene[0].effects.map(effect => effect.type), ['grade', 'vignette', 'noise']);
+  const [phase] = Object.values(scene[0].keys);
+  assert.equal(phase.at(-1).tick, ticksOf(document), 'the grain is keyed to the last frame');
+  assert.equal(measure(workload('effects-heavy')).sceneEffects, 3);
 });
 
 test('movieclips: 80 figures inside clips two deep, a graph and playback the app accepts', () => {
