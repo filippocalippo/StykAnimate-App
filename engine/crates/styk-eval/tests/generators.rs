@@ -529,3 +529,21 @@ fn every_smoke_style_draws_within_limits() {
     let settings = [("size", "2", "400"), ("life", "4", "400"), ("growth", "0.2", "8"), ("rise", "-6", "12"), ("turbulence", "0", "4"), ("spread", "0", "2000")];
     every_style_draws_within_limits("smoke", 5, &settings, &[3.0, 30.0]);
 }
+
+/// An impact in the earth (Explosion Dust) is thrown up out of the ground under the target, not out of its middle.
+#[test]
+fn ground_launched_layers_burst_up_from_the_ground() {
+    let clip = Clip::new(Some(1), "explosion").set("style", "8").set("dust", "off").set("smoke", "0").set("debris", "0").set("sparks", "off").set("ring", "off").timed(0.0, Some(20.0));
+    let prepared = Stage::new(40.0).clip(clip).prepare();
+    let at = |tick: f64| {
+        let batch = batch_at(&prepared, tick).unwrap();
+        let ground = batch.draws[0].ground;
+        (live(&batch).iter().map(|(_, _, p)| p.y).collect::<Vec<f64>>(), ground)
+    };
+    let (born, ground) = at(0.5);
+    assert!(ground > HIP[1] + 60.0, "the ground is under the feet: {ground}");
+    assert!(!born.is_empty() && born.iter().all(|&y| (y - ground).abs() < 12.0), "born on the ground at {ground}: {born:?}");
+    let (later, _) = at(8.0);
+    let risen = later.iter().filter(|&&y| y < ground - 50.0).count();
+    assert!(risen * 2 > later.len(), "{risen} of {} thrown up above the ground", later.len());
+}

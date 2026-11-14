@@ -324,18 +324,71 @@ fn blast_magic(b: &Blast<'_>) -> Vec<Option<Spec>> {
     ]
 }
 
+/// Dust: an impact in the earth, no fire. A dome of dust punched up and out that hangs and slowly
+/// settles, a surge rolling out along the ground both ways, clods and stones thrown up on arcs
+/// trailing dust and landing, grit raining down, a pale ring racing along the ground; then a haze
+/// that rises and drifts. Earthy colours lit from above, so it reads on any page.
 fn blast_dust(b: &Blast<'_>) -> Vec<Option<Spec>> {
     let Blast { p, col, s, d, s0, window, ref base, .. } = *b;
-    let flat = Spec { blend: NORMAL, ..base.clone() };
+    let flat = Spec { blend: NORMAL, softness: 0.0, ..base.clone() };
     let light = tone(col, 0.3, WHITE);
     let deep = tone(col, 0.3, BLACK);
+    let earth = paint_or(&p.color, stops(&[(light, 1.0), (col, 1.0), (tone(col, 0.12, BLACK), 1.0)]));
+    let stone = tone(ROCK_COLOR, 0.35, deep);
+    let billow = |from: f64, to: f64| Some(Erosion { from, to, power: 1.3, edge: 0.32, ..Default::default() });
     vec![
-        some_if(p.dust, || layer(Spec { placement: Placement::Behind, start: s0, count: 20.0 * d, burst_jitter: 3.0, life_min: 36.0, life_max: 66.0, emit_shape: GROUND, emit_radius: 30.0 * s, speed_min: 3.0 * s, speed_max: 9.0 * s, drag: 0.07, gravity: -0.004, collide: 1.0, curl: 12.0 * s, curl_scale: 0.012 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT, size_mode: GROW_PUFF, size0: 14.0 * s, size1: 54.0 * s, size_jitter: 0.3, alpha: 0.75, fade_in: 0.03, fade_out: 0.6, ..flat.clone() }, stops(&[(light, 1.0), (col, 1.0)]))),
-        some_if(p.fireball, || layer(Spec { start: s0, count: 12.0 * d, burst_jitter: 2.0, life_min: 30.0, life_max: 56.0, emit_radius: 14.0 * s, angle: UP, spread: 1.6, speed_min: 2.0 * s, speed_max: 5.0 * s, drag: 0.07, gravity: 0.01, curl: 14.0 * s, curl_scale: 0.012 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT, size_mode: GROW_PUFF, size0: 16.0 * s, size1: 46.0 * s, size_jitter: 0.3, alpha: 0.8, fade_in: 0.03, fade_out: 0.55, ..flat.clone() }, stops(&[(light, 1.0), (col, 1.0), (deep, 1.0)]))),
-        some_if(p.smoke > 0.0, || layer(Spec { start: s0 + 6.0, emit_dur: 16.0f64.min(window).max(4.0), rate: 1.2 * p.smoke * d, life_min: 40.0, life_max: 70.0, emit_radius: 50.0 * s, angle: UP, spread: 1.0, speed_min: 0.2 * s, speed_max: 0.8 * s, gravity: -0.01 * s, drag: 0.03, curl: 16.0 * s, curl_scale: 0.01 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT, size_mode: GROW_PUFF, size0: 16.0 * s, size1: 50.0 * s, alpha: 0.4, fade_in: 0.2, fade_out: 0.6, ..flat.clone() }, stops(&[(col, 1.0), (light, 1.0)]))),
-        some_if(p.debris > 0.0, || layer(Spec { start: s0, count: 18.0 * p.debris, burst_jitter: 1.0, life_min: 24.0, life_max: 40.0, emit_radius: 14.0 * s, angle: UP, spread: 2.6, speed_min: 4.0 * s, speed_max: 10.0 * s, gravity: 0.45, drag: 0.012, collide: 1.0, spin: 0.3, spin_jitter: 1.0, material: m("rock"), size0: 3.5 * s, size1: 3.5 * s, size_jitter: 0.6, fade_in: 0.0, fade_out: 0.15, ..flat.clone() }, stops(&[(tone(ROCK_COLOR, 0.3, col), 1.0), (tone(ROCK_COLOR, 0.3, BLACK), 1.0)]))),
-        some_if(p.sparks, || layer(Spec { start: s0, count: 24.0 * d, burst_jitter: 1.0, life_min: 14.0, life_max: 26.0, emit_radius: 10.0 * s, angle: UP, spread: 2.8, speed_min: 6.0 * s, speed_max: 14.0 * s, gravity: 0.5, drag: 0.02, collide: 1.0, spin: 0.4, spin_jitter: 1.0, material: m("rock"), size0: 1.4 * s, size1: 1.4 * s, size_jitter: 0.5, fade_in: 0.0, fade_out: 0.2, ..flat.clone() }, stops(&[(deep, 1.0)]))),
-        some_if(p.ring, || layer(Spec { start: s0 + 1.0, count: 1.0, life_min: 14.0, life_max: 14.0, shape: RING, size0: 20.0 * s, size1: 180.0 * s, size_curve: 0.45, softness: 0.3, size_jitter: 0.0, alpha: 0.35, fade_in: 0.0, fade_out: 0.7, ..flat.clone() }, stops(&[(light, 1.0)]))),
+        // The surge: billows rolling out along the ground both ways, behind the target.
+        some_if(p.dust, || layer(Spec {
+            placement: Placement::Behind, start: s0 + 1.0, count: 16.0 * d, burst_jitter: 4.0, life_min: 40.0, life_max: 70.0,
+            emit_shape: GROUND, emit_radius: 24.0 * s, speed_min: 4.0 * s, speed_max: 10.0 * s, drag: 0.08, gravity: -0.008 * s, collide: 1.0,
+            curl: 10.0 * s, curl_scale: 0.012 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT,
+            size0: 22.0 * s, size_over_life: Some(Curve::three(0.45, 0.3, 1.2, 1.9)), size_jitter: 0.3,
+            erosion: billow(0.02, 0.55), alpha_over_life: Some(Curve::four(0.0, 0.06, 0.85, 0.55, 0.6, 0.0)), shade: 0.75, value_jitter: 0.06,
+            ..flat.clone()
+        }, earth)),
+        // The dome: dust punched up and out, hanging, swelling and settling.
+        some_if(p.fireball, || layer(Spec {
+            start: s0, count: 18.0 * d, burst_jitter: 2.0, life_min: 34.0, life_max: 60.0,
+            emit_shape: GROUND_LAUNCH, emit_radius: 14.0 * s, angle: UP, spread: 1.5, speed_min: 6.0 * s, speed_max: 12.0 * s, ease: 2.5,
+            gravity: 0.03 * s, curl: 12.0 * s, curl_scale: 0.01 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT,
+            size0: 40.0 * s, size_over_life: Some(Curve::three(0.4, 0.25, 1.0, 1.45)), size_jitter: 0.3,
+            erosion: billow(0.0, 0.6), alpha_over_life: Some(Curve::four(0.0, 0.04, 1.0, 0.5, 0.75, 0.0)), shade: 0.7, value_jitter: 0.07,
+            ..flat.clone()
+        }, earth)),
+        // The haze it leaves, rising and drifting.
+        some_if(p.smoke > 0.0, || layer(Spec {
+            start: s0 + 8.0, emit_dur: 14.0f64.min(window).max(4.0), rate: 1.0 * p.smoke * d, life_min: 50.0, life_max: 80.0,
+            emit_radius: 46.0 * s, angle: UP, spread: 1.2, speed_min: 0.3 * s, speed_max: 1.0 * s, gravity: -0.012 * s, drag: 0.03,
+            curl: 16.0 * s, curl_scale: 0.01 / s, material: m("smoke"), rotate: ROTATE_UPRIGHT,
+            size0: 34.0 * s, size_over_life: Some(Curve::three(0.6, 0.4, 1.1, 1.5)), size_jitter: 0.3,
+            erosion: billow(0.05, 0.6), alpha_over_life: Some(Curve::four(0.0, 0.2, 0.5 * p.smoke.min(1.5), 0.55, 0.35 * p.smoke.min(1.5), 0.0)), shade: 0.6,
+            ..flat.clone()
+        }, stops(&[(tone(light, 0.2, WHITE), 1.0), (light, 1.0)]))),
+        // Clods and stones thrown up on arcs, trailing dust, landing and rolling to a stop.
+        some_if(p.debris > 0.0, || layer(Spec {
+            start: s0, count: 10.0 * p.debris, burst_jitter: 1.0, life_min: 36.0, life_max: 56.0,
+            emit_shape: GROUND_LAUNCH, emit_radius: 12.0 * s, angle: UP, spread: 2.0, speed_min: 6.0 * s, speed_max: 12.0 * s, gravity: 0.5, drag: 0.012,
+            collide: 1.0, bounce: 0.3, friction: 0.3, spin: 0.25, spin_jitter: 1.0,
+            shape: ROCK, stretch: 0.0, size0: 4.5 * s, size_jitter: 0.5, value_jitter: 0.2, alpha_over_life: Some(Curve::three(1.0, 0.85, 1.0, 0.0)),
+            trail: Some(Trail { length: 8.0, segments: 6, width: 1.6, alpha: 0.45, glow: 0.0, emissive: None }),
+            ..flat.clone()
+        }, stops(&[(stone, 1.0), (tone(stone, 0.3, BLACK), 1.0)]))),
+        // Grit raining down.
+        some_if(p.sparks, || layer(Spec {
+            start: s0, count: 22.0 * d, burst_jitter: 2.0, life_min: 18.0, life_max: 32.0,
+            emit_shape: GROUND_LAUNCH, emit_radius: 10.0 * s, angle: UP, spread: 2.0, speed_min: 5.0 * s, speed_max: 13.0 * s, gravity: 0.5, drag: 0.03,
+            collide: 1.0, bounce: 0.2, spin: 0.4, spin_jitter: 1.0, shape: ROCK, stretch: 0.0, size0: 1.5 * s, size_jitter: 0.5,
+            alpha_over_life: Some(Curve::three(1.0, 0.8, 1.0, 0.0)),
+            ..flat.clone()
+        }, stops(&[(deep, 1.0)]))),
+        // A ring of dust racing out along the ground.
+        some_if(p.ring, || layer(Spec {
+            placement: Placement::Behind, start: s0 + 1.0, count: 1.0, life_min: 16.0, life_max: 16.0, emit_shape: GROUND,
+            shape: RING, softness: 0.12, aspect: 0.22, rotate: ROTATE_FIXED, size_jitter: 0.0,
+            size0: 170.0 * s, size_over_life: Some(Curve::four(0.12, 0.35, 0.7, 0.8, 0.95, 1.0)),
+            alpha_over_life: Some(Curve::three(0.55, 0.5, 0.35, 0.0)),
+            ..flat.clone()
+        }, stops(&[(light, 1.0)]))),
     ]
 }
 
