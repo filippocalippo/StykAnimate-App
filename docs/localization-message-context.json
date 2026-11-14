@@ -5565,13 +5565,13 @@
     "locations": [
       "src/color-picker.mjs:42"
     ],
-    "context": "<div class=\"paint-tabs\"${gradients ? '' : ' hidden'}><button type=\"button\" data-mode=\"solid\" data-i18n=\"colorPicker.nbspSolid\">◼ &nbsp; Solid</button>${gradient"
+    "context": "<div class=\"paint-tabs\"${gradients ? '' : ' hidden'}><button type=\"button\" data-mode=\"solid\"><span class=\"paint-tab-swatch\" data-kind=\"solid\" aria-hidden=\"true\""
   },
   "colorPicker.nbspSolid": {
     "locations": [
       "src/color-picker.mjs:42"
     ],
-    "context": "<div class=\"paint-tabs\"${gradients ? '' : ' hidden'}><button type=\"button\" data-mode=\"solid\" data-i18n=\"colorPicker.nbspSolid\">◼ &nbsp; Solid</button>${gradient"
+    "context": "<div class=\"paint-tabs\"${gradients ? '' : ' hidden'}><button type=\"button\" data-mode=\"solid\"><span class=\"paint-tab-swatch\" data-kind=\"solid\" aria-hidden=\"true\""
   },
   "colorPicker.newPalette": {
     "locations": [

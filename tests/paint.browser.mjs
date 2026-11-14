@@ -10,6 +10,8 @@ try{
  await page.waitForTimeout(800);
  if(await page.locator('[data-property-scope="joint"]').count())await page.locator('[data-property-scope="joint"]').click();
  await page.locator('#segment-color').click();
+ // The kind tabs read as words, with a drawn swatch; no markup shows as text ("&nbsp;" did).
+ assert.deepEqual(await page.locator('.paint-tabs button').evaluateAll(tabs=>tabs.map(tab=>tab.textContent.trim())),['Solid','Gradient']);
  await page.locator('[data-mode="gradient"]').click();
  await page.getByRole('combobox',{name:'Gradient type'}).selectOption('radial');
  await page.getByRole('button',{name:'Add gradient stop',exact:true}).click();
