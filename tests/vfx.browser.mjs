@@ -42,6 +42,12 @@ try{
  const scrubbed=await page.evaluate(()=>styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.amount);
  assert.ok(Math.abs(scrubbed-(.25+25/box.width))<.011,`scrubbed to ${scrubbed}`);
  assert.equal(await page.locator('#vfx-panel [data-property-key]').count(),0);
+ // Every seeded effect can be shuffled from its foot: a new seed, the same settings, one undo step.
+ const seedBefore=await page.evaluate(()=>({seed:styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.seed,history:styk.editor._undo.length}));
+ await page.locator('#vfx-panel .vfx-detail [data-clip-action="shuffle"]').click();
+ const seedAfter=await page.evaluate(()=>({seed:styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.seed,amount:styk.editor.sampleVfxClip(styk.vfx.selectedClip)[0].params.amount,history:styk.editor._undo.length}));
+ assert.notEqual(seedAfter.seed,seedBefore.seed);assert.equal(seedAfter.history,seedBefore.history+1);assert.ok(Math.abs(seedAfter.amount-scrubbed)<1e-9);
+ await page.evaluate(()=>styk.editor.undo());
  await page.getByRole('tab',{name:'Library',exact:true}).click();assert.equal(await page.locator('#vfx-panel').isVisible(),false);
  await page.getByRole('tab',{name:'VFX',exact:true}).click();assert.equal(await page.locator('#inspector').isVisible(),false);
  await fs.mkdir('artifacts/vfx',{recursive:true});await page.screenshot({path:'artifacts/vfx/inspector.png'});

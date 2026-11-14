@@ -44,6 +44,38 @@ try{
  const key=await page.evaluate(()=>{const t=styk.timeline,row=t.tracks.findIndex(r=>r.kind==='vfx'),r=t.scroll.getBoundingClientRect();return {x:r.left+20.5*t.pxPerTick-t._offsetX(),y:r.top+t.rowY(row)+t.rowSize(row)-9};});
  await page.mouse.click(key.x,key.y);assert.equal(await page.evaluate(()=>styk.editor.tick),20);assert.equal(await snapshot(),before);
  await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>styk.editor.tick),21);assert.equal(await page.evaluate(()=>Object.values(styk.editor.getVfxClips()[0].keys)[0][1].tick),21);await page.keyboard.press('Control+z');assert.equal(await snapshot(),before);
+ // A notice from the engine shows on the open card, and as a dot on the row; clearing it removes both.
+ await page.evaluate(()=>styk.vfx.setEffectNotice(clipId,{kind:'reduced'}));
+ assert.match(await panel.locator('.vfx-detail .vfx-notice').innerText(),/reduced quality/);assert.equal(await panel.locator('.vfx-clip .vfx-row-notice').count(),1);
+ await page.evaluate(()=>styk.vfx.setEffectNotice(clipId,null));assert.equal(await panel.locator('.vfx-notice').count(),0);
+ assert.equal(await page.evaluate(()=>{try{styk.vfx.setEffectNotice(clipId,{kind:'mystery'});return 'kept';}catch{return 'refused';}}),'refused');
+ // A second tap on a value resets it to its default, as one edit; its menu offers the same.
+ await glowRow.locator(':scope > summary').evaluate(n=>{if(!n.parentElement.open)n.click();});
+ const intensity=panel.locator('[data-property-row]').filter({has:page.getByRole('spinbutton',{name:'Glow Intensity',exact:true})}),ib=await intensity.boundingBox();
+ await drag(page.getByRole('spinbutton',{name:'Glow Intensity',exact:true}),40);assert.notEqual(await page.evaluate(()=>styk.editor.sampleVfxClip(clipId).find(e=>e.type==='glow').params.intensity),.8);
+ n=await history();await page.mouse.click(ib.x+ib.width*.3,ib.y+ib.height/2);await page.mouse.click(ib.x+ib.width*.3,ib.y+ib.height/2);
+ assert.equal(await page.evaluate(()=>styk.editor.sampleVfxClip(clipId).find(e=>e.type==='glow').params.intensity),.8);assert.equal(await history(),n+1);
+ await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');assert.equal(await snapshot(),before);
+ await intensity.click({button:'right'});assert.equal(await page.getByRole('menuitem',{name:'Reset value',exact:true}).count(),1);await page.keyboard.press('Escape');
+ // A titled section opens in place and stays open while the panel redraws.
+ await glowRow.locator('details[data-vfx-section="core"] > summary').click();await page.evaluate(()=>styk.vfx.sync());
+ assert.equal(await glowRow.locator('details[data-vfx-section="core"]').evaluate(d=>d.open),true);
+ // One effect copied out of the group pastes as its own clip, with its settings, as one undo step.
+ await shadowRow.locator(':scope > summary').evaluate(n=>{if(!n.parentElement.open)n.click();});await shadowRow.hover();
+ await shadowRow.getByRole('button',{name:'Effect actions',exact:true}).click();await page.getByRole('menuitem',{name:'Copy effect',exact:true}).click();
+ n=await history();await panel.getByRole('button',{name:'Paste effect',exact:true}).click();
+ const pasted=await page.evaluate(()=>styk.editor.getVfxClips().map(c=>c.effects.map(e=>e.type).join('+')));
+ assert.deepEqual(pasted,['glow+shadow','shadow']);assert.equal(await history(),n+1);
+ // Effect clips reorder from their grip with Alt+Up/Down, as one undo step.
+ await panel.locator('.vfx-clip').last().locator('[data-vfx-clip-drag]').focus();await page.keyboard.press('Alt+ArrowUp');
+ assert.deepEqual(await page.evaluate(()=>styk.editor.getVfxClips().map(c=>c.effects.map(e=>e.type).join('+'))),['shadow','glow+shadow']);
+ await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');assert.equal(await snapshot(),before);
+ // Reset effect (a group member's menu) puts every value back and drops that effect's keys, as one undo step.
+ await page.evaluate(id=>{styk.editor._selectedVfxClip=id;styk.editor._emit('vfx-selection');},await page.evaluate(()=>clipId));
+ await glowRow.locator(':scope > summary').evaluate(n=>{if(!n.parentElement.open)n.click();});await glowRow.hover();
+ n=await history();await glowRow.getByRole('button',{name:'Effect actions',exact:true}).click();await page.getByRole('menuitem',{name:'Reset effect',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>{const c=styk.editor.getVfxClips()[0],g=c.effects.find(e=>e.type==='glow');return [g.params.radius??12,Object.keys(c.keys).length];}),[12,0]);assert.equal(await history(),n+1);
+ await page.keyboard.press('Control+z');assert.equal(await snapshot(),before);
  await page.mouse.move(600,100);await fs.mkdir('artifacts/vfx',{recursive:true});await page.screenshot({path:'artifacts/vfx/interactions-light.png'});await page.evaluate(()=>{document.documentElement.dataset.theme='dark';window.dispatchEvent(new Event('styk-theme-change'));});await page.screenshot({path:'artifacts/vfx/interactions-dark.png'});
  // The value whose keys show is ringed; its label keeps its contrast on the field in the dark theme.
  const contrast=await page.locator('.vfx-value.is-channel-selected .ui-field[data-property-row]').evaluate(row=>{const luminance=color=>{const c=color.match(/[\d.]+/g).slice(0,3).map(n=>{const v=Number(n)/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return .2126*c[0]+.7152*c[1]+.0722*c[2];},a=luminance(getComputedStyle(row).backgroundColor),b=luminance(getComputedStyle(row.querySelector('.ui-field-label')).color);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);});assert.ok(contrast>=4.5,`Dark selection contrast ${contrast}`);
