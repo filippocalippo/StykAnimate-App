@@ -496,3 +496,25 @@ fn the_area_limit_keeps_a_few_huge_particles_whole() {
     assert!(!drawn.is_empty() && drawn.len() < live(&batch).len(), "{} of {} drawn", drawn.len(), live(&batch).len());
     assert!(drawn.iter().any(|p| p.c[3] > 0.2), "the ones kept are drawn, not faded to nothing");
 }
+
+/// A stage-wide emitter (a scene effect from a Line of no size) emits from the edge its particles travel away
+/// from: the way they are launched, or, when gravity pulls against the launch, the way gravity pulls them. Tossed
+/// up, rain falls from the top of the stage instead of being born under its bottom edge.
+#[test]
+fn a_stage_emitter_emits_from_the_edge_its_particles_come_from() {
+    let launches = |direction: &str, gravity: &str| {
+        let clip = Clip::new(None, "particles").set("shape", "3").set("radius", "0").set("direction", direction).set("gravity", gravity).set("speed", "2").set("rate", "4").set("life", "60");
+        let batch = batch_at(&Stage::new(80.0).clip(clip).prepare(), 70.0).expect("the stage emits");
+        let mut ys = Vec::new();
+        for draw in &batch.draws {
+            let ev = Evaluator::new(&batch, draw);
+            ys.extend((0..draw.count).filter_map(|i| ev.birth(i)).map(|b| b.origin()[1]));
+        }
+        assert!(ys.len() > 20, "{} births", ys.len());
+        ys
+    };
+    assert!(launches("90", "0.3").iter().all(|&y| y < 0.0), "launched down: from the top");
+    assert!(launches("-90", "0.3").iter().all(|&y| y < 0.0), "tossed up and falling: from the top");
+    assert!(launches("-90", "-0.05").iter().all(|&y| y > 400.0), "rising: from the bottom");
+    assert!(launches("-90", "0").iter().all(|&y| y > 400.0), "launched up without gravity: from the bottom");
+}

@@ -271,8 +271,13 @@ impl<'a> Evaluator<'a> {
                 py = ay + cs * (h3 - 0.5) * 2.0 * er;
             }
             STAGE => {
-                // The stage edge the particles travel away from, spanning the whole stage.
-                let (cy, cx) = fm::sin_cos(base);
+                // The stage edge the particles travel away from, spanning the whole stage: the way they
+                // are launched, or the way gravity and wind pull them when that is against the launch
+                // (tossed up, they fall from above).
+                let (ly, lx) = fm::sin_cos(base);
+                let (gx, gy) = (s.wind, s.gravity);
+                let travel = if gx * lx + gy * ly < 0.0 { fm::atan2(gy, gx) } else { base };
+                let (cy, cx) = fm::sin_cos(travel);
                 let (w, h) = (d.canvas[0], d.canvas[1]);
                 let half = cx.abs() * w / 2.0 + cy.abs() * h / 2.0 + 20.0;
                 let span = (cy.abs() * w + cx.abs() * h) * 1.2;
