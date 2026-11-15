@@ -124,6 +124,8 @@ pub struct Residency {
     /// and the ticks loaded ahead of it never take a page's place in them, and views never take a place of theirs
     /// ([`Residency::acquire_spare`]).
     pool: Vec<u32>,
+    /// The assets ([`Assets::id`]) whose drawing cels' pages were last handed out to be kept for good ([`Residency::drawing_pins`]).
+    drawing_of: u64,
     /// Pages given a layer, and pages that left for another, since the layout was laid out.
     pub loads: u64,
     pub evictions: u64,
@@ -132,7 +134,7 @@ pub struct Residency {
 impl Residency {
     /// A layout of `pages` pages (the live drawing pages included) and a texture of `budget` layers.
     pub fn new(pages: u32, budget: u32) -> Residency {
-        Residency { layers: budget, pages: vec![Page::default(); pages as usize], free: (0..budget).rev().collect(), clock: 0, hold: Vec::new(), pool: Vec::new(), loads: 0, evictions: 0 }
+        Residency { layers: budget, pages: vec![Page::default(); pages as usize], free: (0..budget).rev().collect(), clock: 0, hold: Vec::new(), pool: Vec::new(), drawing_of: 0, loads: 0, evictions: 0 }
     }
 
     /// Layers the sprite texture needs now (at least two are allocated: the texture is an array, [D11](../../../docs/engine/decisions/0011-array-textures-two-layers.md)).
@@ -163,14 +165,32 @@ impl Residency {
     }
 
     /// The layout gained document pages (`before` pages became `pages`) and live ones (`held` became `live`) between two syncs:
-    /// the `held` live pages keep their layers and pins at their new place, and the pages that now need a layer for good are
-    /// returned, in the order they are to be given one: the drawing cels' pages (`drawing`, in order) that have none, then the
-    /// live pages gained, which sit at `pages + held..pages + live`.
-    pub fn append_pages(&mut self, before: u32, pages: u32, held: u32, live: u32, drawing: &[u32]) -> Vec<u32> {
+    /// the `held` live pages keep their layers and pins at their new place, and the live pages gained, which sit at
+    /// `pages + held..pages + live`, are returned: they are to be given a layer for good. The drawing cels' pages are
+    /// [`Residency::drawing_pins`]'s, asked after this (the pages the live ones left are document pages now).
+    pub fn append_pages(&mut self, before: u32, pages: u32, held: u32, live: u32) -> Vec<u32> {
         self.extend(pages + live);
         self.move_pages(before, pages, held);
-        let mut pins: Vec<u32> = drawing.iter().copied().filter(|page| self.layer_of(*page).is_none()).collect();
-        pins.extend(pages + held..pages + live);
+        (pages + held..pages + live).collect()
+    }
+
+    /// The pages of `assets` that hold slots of drawing cels and are not kept for good yet, ascending: the stage gives each a layer
+    /// for good (`Stage::pin_page`: [`Residency::acquire`], then [`Residency::pin`]) after every change of the layout, whatever the
+    /// change. A cel's tiles are decoded once, when it is placed, and nothing asks for them again ([`pictures_of`] names pictures
+    /// alone), so a page holding some must never be without a layer nor leave: its slots would draw what the layer holds for another
+    /// page. And a cel can be placed on any page, with or without the layout gaining one: in the slots of a cel given back, on the
+    /// last page's shelf, or in the strip an earlier page left beside a large picture (`styk_eval::assets` packs pictures and slots
+    /// together). The pages are looked through once per assets: the stage syncs its atlas every frame, and assets it saw last cost
+    /// nothing. Every page of `assets` must be one of the residency's.
+    pub fn drawing_pins(&mut self, assets: &Assets) -> Vec<u32> {
+        if assets.id() != 0 && assets.id() == self.drawing_of {
+            return Vec::new();
+        }
+        self.drawing_of = assets.id();
+        let holding = drawing_pages(assets);
+        debug_assert!(holding.iter().all(|&page| (page as usize) < self.pages.len()), "a drawing page beyond the residency's");
+        let mut pins: Vec<u32> = holding.into_iter().filter(|&page| self.pages.get(page as usize).is_some_and(|held| !held.pinned)).collect();
+        pins.sort_unstable();
         pins
     }
 
@@ -389,7 +409,13 @@ mod tests {
             // The publication's new cel is on the first page it gained.
             let mut drawing = drawing;
             drawing.push(before);
-            let pins = residency.append_pages(before, pages, held, live, &drawing);
+            let gained = residency.append_pages(before, pages, held, live);
+            assert_eq!(gained, (pages + held..pages + live).collect::<Vec<_>>(), "{:?}", (before, pages, held, live, pool));
+            let mut cels = Assets::default();
+            cels.pages = pages;
+            cels.drawing = drawing.iter().map(|&layer| styk_eval::assets::AtlasEntry { layer, x: 2, y: 2, w: 64, h: 64, source_w: 64, source_h: 64, valid: true }).collect();
+            // Asked after the live pages moved: the page the first live one left is a document page holding the new cel.
+            let pins: Vec<u32> = residency.drawing_pins(&cels).into_iter().chain(gained).collect();
             let expected: Vec<u32> = std::iter::once(before).chain(pages + held..pages + live).collect();
             assert_eq!(pins, expected, "{:?}", (before, pages, held, live, pool));
             for k in 0..held {
@@ -412,6 +438,83 @@ mod tests {
                     assert_eq!(residency.layer_of(*page), layer);
                 }
             }
+        }
+    }
+
+    /// The drawing fixture with `pictures` (pixel sizes) as its images and `cel` as its drawing cel (none: no cel).
+    fn document(pictures: &[(u32, u32)], cel: Option<&std::sync::Arc<styk_eval::doc::DrawingTiles>>) -> styk_eval::doc::Document {
+        let png = |(w, h): (u32, u32)| -> std::sync::Arc<[u8]> {
+            let mut bytes = Vec::new();
+            image::GrayImage::new(w, h).write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+            bytes.into()
+        };
+        let mut doc = styk_eval::open(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/drawlist/drawing-cel.json")).unwrap();
+        doc.images = pictures.iter().map(|&size| styk_eval::doc::ImageData { bytes: png(size), color_key: None }).collect();
+        for figure in &mut doc.figures {
+            for image in std::sync::Arc::make_mut(figure).images.iter_mut().filter(|image| image.tiles.is_some()) {
+                image.tiles = cel.cloned();
+            }
+        }
+        doc
+    }
+
+    /// A page that a drawing cel's slots are placed on gets a layer for good, whether the layout keeps its page count or gains pages:
+    /// a cel's tiles are decoded once, when it is placed, and nothing asks for them again, so a page holding some must never be without a
+    /// layer or leave. Four 4K pictures take a page each, a fifth picture fills page 4: the slots of a cel placed after them go into the
+    /// strip page 0 left beside its picture, a page no cel was on when the stage laid the texture out.
+    #[test]
+    fn every_page_a_cel_is_placed_on_later_is_given_a_layer_for_good() {
+        let tile = |x: i32| -> (i32, i32, std::sync::Arc<[u8]>) {
+            let mut bytes = Vec::new();
+            image::RgbaImage::from_pixel(64, 64, image::Rgba([200, 30, 30, 255])).write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).unwrap();
+            (x, 0, bytes.into())
+        };
+        let tiles = vec![tile(0), tile(1)];
+        let levels = styk_eval::drawing::level_tiles(&tiles);
+        let cel = std::sync::Arc::new(styk_eval::doc::DrawingTiles::new([0.0; 2], 1.0, None, tiles, levels));
+        let (wide, full) = ((3840, 2160), (4094, 4094));
+        let first = Assets::build(&document(&[wide; 4], None));
+        let before = first.extended(&document(&[wide, wide, wide, wide, full], None));
+        assert_eq!(before.pages, 5);
+        assert!(on_demand(&before, ATLAS_PAGES), "the stage keeps this document's pages a few at a time");
+        for grew in [false, true] {
+            // The stage lays the texture out (`sync_atlas_resident`): no cel yet, so no page is kept for good.
+            let mut residency = Residency::new(before.pages, ATLAS_PAGES);
+            assert!(drawing_pages(&before).is_empty());
+            let pins = residency.drawing_pins(&before);
+            pin_all(&mut residency, &pins);
+            // Frames show every page in turn: page 0 is shown first and leaves for page 4.
+            for page in 0..before.pages {
+                residency.touch(&[page]);
+                residency.acquire(page, &[], false);
+            }
+            assert_eq!(residency.layer_of(0), None, "page 0 has left");
+            // A cel is placed (with another full page of pictures in the grew case): its slots go into the strip beside page 0's picture.
+            let pictures: &[(u32, u32)] = if grew { &[wide, wide, wide, wide, full, full] } else { &[wide, wide, wide, wide, full] };
+            let after = before.extended(&document(pictures, Some(&cel)));
+            assert_eq!(after.pages, if grew { 6 } else { 5 }, "grew: {grew}");
+            let holding = drawing_pages(&after);
+            assert!(holding.contains(&0), "grew {grew}: the cel's slots are on page 0: {holding:?}");
+            if grew {
+                residency.extend(after.pages);
+            }
+            let pins = residency.drawing_pins(&after);
+            pin_all(&mut residency, &pins);
+            for &page in &holding {
+                assert!(residency.layer_of(page).is_some(), "grew {grew}: page {page} holds a cel's slots and has no layer");
+                assert!(residency.pages[page as usize].pinned, "grew {grew}: page {page} holds a cel's slots and may leave");
+            }
+            // The pictures of every other page come and go; the cel's pages keep their layers.
+            let kept: Vec<Option<u32>> = holding.iter().map(|&page| residency.layer_of(page)).collect();
+            for round in 0..3 {
+                for page in (0..after.pages).filter(|page| !holding.contains(page)) {
+                    residency.touch(&[page]);
+                    residency.acquire(page, &[], round == 2);
+                }
+            }
+            assert_eq!(holding.iter().map(|&page| residency.layer_of(page)).collect::<Vec<_>>(), kept, "grew {grew}");
+            // The same assets again (every frame syncs the atlas): nothing more to give.
+            assert!(residency.drawing_pins(&after).is_empty());
         }
     }
 

@@ -274,8 +274,11 @@ pictures arrive. Not done.
   1,160 × 540 device pixels, the stage of a 1,248 × 800 window at 125%), as straight RGBA; a newer request replaces the one waiting, so a gesture never piles up
   frames. The pictures its frames sample are the decoded images the stage takes from the engine (shared with the GPU
   upload, not copied) in a `styk_raster::Images` under its budget (a sixteenth of the memory), the least recently used
-  dropped and decoded again from the document on a worker when a frame needs them; the live cels' slots are tiles in the
-  same set. All of it goes with the stage or when the processor is switched off, on a worker. The page holds one
+  dropped and decoded again from the document on a worker when a frame needs them. The live cels' slots are tiles in the
+  same set, but the document cannot give them again, so they are never dropped for the budget: they count against it (the
+  other pictures give way to them, and are held to the budget less what the slots take) and are let go of only when the live
+  pages move (`Images::drop_tiles_from`; the stage writes them again) or with the processor. They are bounded by the live
+  cels the editor keeps, a few cels' tiles. All of it goes with the stage or when the processor is switched off, on a worker. The page holds one
   `ImageData` of the canvas's size besides the canvas's own backing.
 - **The frame cache** stays under a sixteenth of the memory (120 MiB of 2 GiB), whatever
   `navigator.deviceMemory` says. It keeps the frames just ahead of the playhead, so a cap only changes how far ahead
@@ -419,7 +422,11 @@ document opens), and:
   has it soft until its pixels are in.
 - **A layout of more than 1,024 pages** (`MAX_PAGES`, 64 GiB of pictures) has no row for the pages beyond: their pictures are not
   loaded (counted as lost), the table has no entry for them and the shader draws nothing for them (never another page's picture).
-- Drawing cels' pages (decoded with the document) and the live drawing slots keep their layers for good.
+- Drawing cels' pages (decoded with the document) and the live drawing slots keep their layers for good. That holds for a page a cel is
+  placed on later too (`Residency::drawing_pins`, asked after every change of the layout, looked through once per assets): the packer puts
+  pictures and cel slots on the same pages, so a new cel's slots can go into the strip an earlier page left beside a large picture or onto
+  the last page's shelf without the layout gaining a page. A cel's tiles are decoded once and nothing asks for them again, so such a page
+  left without a layer, or given back, dropped them and drew what its layer held for another page.
 
 Measured on 2026-10-31 on tdd2 with release builds (one run each, an off-screen app run beside other agents' builds: directional;
 a jump is a seek to a far tick until the app paints it, a drag ends at the last tick, `soft` is the number of frames drawn with

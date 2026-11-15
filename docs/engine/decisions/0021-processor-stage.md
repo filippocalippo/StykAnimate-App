@@ -37,7 +37,8 @@ no longer waits.
 - **Measured as pictures.** A picture shown after its frame has its own span (`stage picture`); the capture's `shown` series, playback's
   delivered frames and the developer tools' `settle` count pictures shown, and a gesture is judged on the pictures too
   (`picture.felt`, `picture.input.p95`), so a stage whose frames run at the display's rate while its pictures lag cannot read as smooth.
-- **Fallback and switch.** A frame whose pictures cannot be held in memory switches the stage to the device for good. The live parameter
+- **Fallback and switch.** A frame whose pictures cannot be held in memory, or an engine thread lost (a trap, after which a frame on it
+  would never end), switches the stage to the device for good. The live parameter
   `stage.processor` (1, 0, -1 for the device's choice) switches between the two in the app.
 
 ## Evidence

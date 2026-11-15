@@ -79,12 +79,14 @@ pub(crate) struct Table {
 }
 
 impl Table {
-    pub(crate) fn new(device: &wgpu::Device, label: &'static str, format: wgpu::TextureFormat, texel_bytes: u32) -> Table {
-        let (texture, view) = Table::allocate(device, label, format, 1);
+    pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue, label: &'static str, format: wgpu::TextureFormat, texel_bytes: u32) -> Table {
+        let (texture, view) = Table::allocate(device, queue, label, format, 1);
         Table { texture, view, rows: 1, format, texel_bytes, label, scratch: Vec::new() }
     }
 
-    pub(crate) fn allocate(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat, rows: u32) -> (wgpu::Texture, wgpu::TextureView) {
+    /// A table texture of `rows` rows, warmed ([`warm_texture`]): every table is written with `write_texture`, so its first large write
+    /// must not be the first use of the texture.
+    pub(crate) fn allocate(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, format: wgpu::TextureFormat, rows: u32) -> (wgpu::Texture, wgpu::TextureView) {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d { width: TABLE_WIDTH, height: rows, depth_or_array_layers: 1 },
@@ -95,6 +97,7 @@ impl Table {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        warm_texture(queue, &texture);
         let view = texture.create_view(&Default::default());
         (texture, view)
     }
@@ -107,8 +110,7 @@ impl Table {
         let mut replaced = false;
         if rows > self.rows {
             self.rows = rows.next_power_of_two();
-            (self.texture, self.view) = Table::allocate(device, self.label, self.format, self.rows);
-            warm_texture(queue, &self.texture);
+            (self.texture, self.view) = Table::allocate(device, queue, self.label, self.format, self.rows);
             replaced = true;
         }
         if data.is_empty() {

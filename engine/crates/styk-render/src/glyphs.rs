@@ -82,7 +82,7 @@ fn atlas(device: &wgpu::Device, side: u32, layers: u32) -> (wgpu::Texture, wgpu:
 
 impl GlyphMasks {
     /// An empty atlas of one texel a side until a list draws a lone glyph.
-    pub(crate) fn new(device: &wgpu::Device) -> GlyphMasks {
+    pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> GlyphMasks {
         let (texture, view) = atlas(device, 1, 2);
         GlyphMasks {
             texture,
@@ -91,7 +91,7 @@ impl GlyphMasks {
             pages: Vec::new(),
             entries: HashMap::new(),
             pipeline: None,
-            table: Table::new(device, "styk glyph instances", wgpu::TextureFormat::Rgba32Float, 16),
+            table: Table::new(device, queue, "styk glyph instances", wgpu::TextureFormat::Rgba32Float, 16),
             rows: Vec::new(),
             frame: 0,
             filled: 0,

@@ -66,7 +66,11 @@ translations, it is bilinear; above 1× it is separable Mitchell-Netravali (B=C=
 When shrinking, the residual level of detail past 0.5 blends up to half of the
 parent reduction into the tile's bilinear sample. An `F_DRAWING` primitive's `paint`
 names the parent slot and quadrant in one lookup row; negative tile coordinates use
-Euclidean division. The decoder publishes all levels together and the upload queue
+Euclidean division. A tile on a page the sprite texture has no layer for draws
+nothing, and a parent on such a page is not blended in, on the GPU as on the CPU
+(`styk-raster` holds no tile of that page): WGSL leaves `textureLoad` with layer -1
+to the implementation, and one that clamps it to layer 0 would draw another page's
+tiles in its place (`tests/sprite_pages.rs`). The decoder publishes all levels together and the upload queue
 takes higher levels first, so a child never samples an unuploaded parent. Crisp
 edges keep nearest sampling, and onion tint uses the filtered coverage.
 
@@ -177,10 +181,12 @@ per texture, array textures of at least two layers, [D11](decisions/0011-array-t
 
 ### Uploads
 
-Every texture the renderer writes with `Queue::write_texture` (the sprite atlas and its soft copy, the lookup tables when they grow, the
-picture table, the particle material atlas) is **warmed** when it is made: `resources::warm_texture` writes one zero texel to every layer
-and mip level of it, not waited for. The texels were zero already; the write is what makes the browser initialize the texture before
-the first large write into it.
+Every texture the renderer writes with `Queue::write_texture` (the sprite atlas and its soft copy, the picture table, the particle
+material atlas, and every lookup table: the paint, group, polyline point and glyph tables and the sprite texture's page map, when they
+are made and when they grow, all in `resources::Table::allocate`) is **warmed** when it is made: `resources::warm_texture` writes one zero
+texel to every layer and mip level of it, not waited for. The texels were zero already; the write is what makes the browser initialize
+the texture before the first large write into it. The page map matters most: it is written only when the layout changes, so a first
+write the browser lost would have sent every drawing tile to the wrong layer until the next change.
 
 Why: in a browser, `writeTexture` into a texture nothing has used yet is unreliable. Measured 2026-11-01 (Electron 39.8.10, Chromium
 142.0.7444.265, Windows 11, RTX 4070 SUPER), by the engine and by a page with no engine
@@ -219,7 +225,7 @@ warming in 32 runs). `cargo test -p styk-render` checks what warming writes and 
 places; neither can show the browser's fault, which native adapters do not have.
 
 What remains: the engine's other writes (the draw list's primitives and tables, uniforms) are plain `Queue::write_buffer` / `write_texture`
-into resources that already hold data (a buffer written 280 frames in a row, read back, equalled the draw list every time), and a
+into resources that already hold data or were warmed (a buffer written 280 frames in a row, read back, equalled the draw list every time), and a
 tdd2 export still differs by one level in a few pixels of about one render in 25 of the particle frames, ticks 183–188 (the
 same output as before the warming; native wgpu gave the same bytes in 3,200 renders; `styk export <file> <ticks> <out> --verify N`).
 
@@ -290,8 +296,9 @@ threads, the stage's frames are drawn by the CPU rasterizer on the engine's work
   frame instead of drawing it on the device, and returns true (asked). A frame the stage cannot draw yet is a condition of
   the frame as before ([Every document](#every-document)), never an empty picture.
 - **The frame is drawn in bands on the workers** (`styk_engine::stage_raster`): a job readies what the frame needs (the
-  decoded pictures the stage took from the engine for its atlas, shared, not copied; any picture the frame samples that is
-  not held, decoded there from the document; the live cels' slots; the lone glyphs' masks, `Raster::bands`), then queues a
+  decoded pictures the stage took from the engine for its atlas, shared, not copied, but not their soft copies, which are
+  the device's placeholders and have no place on the CPU; any picture the frame samples that is not held, decoded there from
+  the document; the live cels' slots; the lone glyphs' masks, `Raster::bands`), then queues a
   task per band of 64 rows. Each band is the same view moved up by its first row (`styk_raster::Bands::render`, as an
   export's tiles are drawn), each layer cropped to the band, and writes its rows, straight RGBA, into the frame's buffer.
 - **The page shows the newest finished frame** (`src/engine/engine-stage-processor.mjs`): it copies the frame out of the
@@ -313,15 +320,19 @@ threads, the stage's frames are drawn by the CPU rasterizer on the engine's work
   processor always draws four samples a pixel.
 - **The fallback is the device.** Without engine threads (a page that is not cross-origin isolated) the processor is not
   used, because its tasks would run on the interface thread; when a frame's job cannot hold a picture it samples (the
-  memory is full) the stage switches to the device for good (`Stage::processor_failed`) and says so in the console. The
+  memory is full), or the page reports an engine thread lost (a trap: a job or band it was running never ends, and a lock it
+  held stays held), the stage switches to the device for good (`Stage::processor_failed`) and says so in the console. For
+  the same reason one job at a time uses the pictures and the CPU renderer, a frame's or one taking pictures in without a
+  frame, and none waits for their lock ([threading.md](threading.md#when-an-engine-thread-traps)). The
   live parameter `stage.processor` (developer tools: 1 on, 0 off, -1 the device's choice) switches between the two so they
   can be compared in the app; the stage's stats report the processor's frame (`engine.processor`: its time from request to
   last band, its work, its bands and buffers).
 
 Bounded: at most three frame buffers of the canvas's size (the one being drawn, one finished and not yet shown, one kept
 for the next frame), the page's one `ImageData` and the canvas's own backing; the pictures the job holds stay within
-`styk_raster::Images`' budget (a sixteenth of the memory), least recently used first out; all of it is let go of with the
-stage, on a worker ([memory.md](memory.md#what-is-bounded-now)).
+`styk_raster::Images`' budget (a sixteenth of the memory), least recently used first out, except the live cels' slots,
+which nothing could decode again: they count against the budget and go only when the live pages move; all of it is let
+go of with the stage, on a worker ([memory.md](memory.md#what-is-bounded-now)).
 
 The pictures are the CPU rasterizer's ([CPU](#cpu-styk-raster)), held to the GPU renderer's by D13 for exports already.
 The stage adds paint contexts of its own; each is covered: the canvas background drawn directly and the view's fill
@@ -681,8 +692,12 @@ quads are written in a block with room for more, so the list keeps its layout: [
 card every pixel of the frame was shaded again for each of them, and in software compositing the browser reads the stage's picture back
 on the interface thread, so that time was the frame's: a cel painted over the canvas cost about 58 ms a stroke frame.
 
-The stage's renderer keeps each frame (`Renderer::set_keep_frames`: the frame pass stores its multisampled picture instead of discarding it
-after the resolve), and the stage says where the next edit frame differs from it (`Renderer::redraw_within`): around the drawing tiles whose
+On a software rasterizer the stage's renderer keeps each frame (`Renderer::set_keep_frames`: the frame pass stores its multisampled picture
+instead of discarding it after the resolve; `keeps_frames` in `styk-wasm/src/stage.rs`). A graphics card draws every frame whole and keeps
+none: 1.3.0 kept them there too, so every redraw of an unchanged frame (a hover, a selection) loaded the samples a frame before had stored and
+resolved them again. No earlier editor carried samples from one frame to the next, and it is the suspect for the coloured edge pixels and
+noise users reported on Windows with 1.3.0 (not reproduced on the NVIDIA card it was tested on); it also stored four samples a pixel each
+frame, memory bandwidth an integrated GPU pays for. The stage says where the next edit frame differs from the frame on show (`Renderer::redraw_within`): around the drawing tiles whose
 slot or parent's slot was written since the frame on show and the primitives the list differs in, before and after (`styk_engine::LiveWrites`,
 filled by `Stage::flush_live`; `None`, the whole frame, when a changed primitive is anything but a drawing tile of the root). The renderer
 draws that part alone where it can: over a frame it kept, of the same view, size, sample count, orientation, painter, shading and background,
@@ -778,6 +793,14 @@ cannot draw is a condition of the frame, never another renderer:
   module); the stage reports it (`onStatus`) and draws nothing more. The app replaces the canvas and
   creates a stage on a new device: the engine keeps the document and decodes the pictures again
   (`Engine::redecode_images`). `Stage::lose_device` destroys the device for the tests of that path.
+  It tries again five times over about a minute (`GPU_RECOVERY_DELAYS` in `app.mjs`), then leaves a
+  button to reconnect by hand. After two crashes of its GPU process Chromium refuses WebGPU and WebGL to
+  a page for the rest of the run, so no new stage could start: the desktop app turns that off
+  (`app.disableDomainBlockingFor3DAPIs` in `desktop/main.cjs`), and from the third crash, when
+  Chromium draws on the processor, the stage comes back on WebGL2 and the processor stage. A browser
+  keeps its own rule: there a reload brings the stage back. `scripts/smoke-gpu-crash.mjs` crashes the
+  desktop app's GPU process four times and requires an edited frame on show after each. The problem the
+  statistics receive carries the browser's reason for the loss (`docs/STATISTICS.md`).
 - **A turned or mirrored Draw view.** `Stage::set_view_orientation` (rotation in radians about the
   artboard's centre, then a horizontal mirror, as `cameraMatrix` in `renderer-geometry.mjs` places
   it): `styk_eval::view::orientation` composes after the scene camera, and the artboard, its
