@@ -46,8 +46,11 @@ try{
  await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>styk.editor.tick),21);assert.equal(await page.evaluate(()=>Object.values(styk.editor.getVfxClips()[0].keys)[0][1].tick),21);await page.keyboard.press('Control+z');assert.equal(await snapshot(),before);
  // A notice from the engine shows on the open card, and as a dot on the row; clearing it removes both.
  await page.evaluate(()=>styk.vfx.setEffectNotice(clipId,{kind:'reduced'}));
- assert.match(await panel.locator('.vfx-detail .vfx-notice').innerText(),/reduced quality/);assert.equal(await panel.locator('.vfx-clip .vfx-row-notice').count(),1);
+ assert.match(await panel.locator('.vfx-detail .vfx-notice').innerText(),/fewer particles/);assert.equal(await panel.locator('.vfx-clip .vfx-row-notice').count(),1);
  await page.evaluate(()=>styk.vfx.setEffectNotice(clipId,null));assert.equal(await panel.locator('.vfx-notice').count(),0);
+ // The engine's report of the frame on show sets it on the clips it names and takes it from the others.
+ await page.evaluate(()=>styk.vfx.setReducedEffects([clipId]));assert.equal(await panel.locator('.vfx-clip .vfx-row-notice').count(),1);
+ await page.evaluate(()=>styk.vfx.setReducedEffects([]));assert.equal(await panel.locator('.vfx-notice, .vfx-row-notice').count(),0);
  assert.equal(await page.evaluate(()=>{try{styk.vfx.setEffectNotice(clipId,{kind:'mystery'});return 'kept';}catch{return 'refused';}}),'refused');
  // A second tap on a value resets it to its default, as one edit; its menu offers the same.
  await glowRow.locator(':scope > summary').evaluate(n=>{if(!n.parentElement.open)n.click();});
