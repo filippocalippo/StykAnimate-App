@@ -327,9 +327,10 @@ const state = {
   hoverPathPoint: null,
 };
 // A lost device usually returns once the browser's GPU process settles, so
-// reconnects back off per consecutive loss; a stage surviving the stable
-// window restores the retry budget for the next transient loss.
-const GPU_RECOVERY_DELAYS = [1000, 5000], GPU_STABLE_MS = 30000;
+// reconnects back off per consecutive loss, for about a minute (a driver reset
+// can take several seconds); a stage surviving the stable window restores the
+// retry budget for the next transient loss.
+const GPU_RECOVERY_DELAYS = [1000, 3000, 8000, 15000, 30000], GPU_STABLE_MS = 30000;
 let canvas = $("scene"), rendererRecovery, gpuRecoveryTimer, gpuRecoveryAttempts = 0, gpuStableTimer;
 const viewport = $("viewport"),
   overlay = $("overlay"),
@@ -6197,7 +6198,7 @@ function queueStartupPrompts() {
 }
 function scheduleGpuRecovery() {
   if (gpuRecoveryTimer !== undefined) return;
-  // Two attempts, each later than the last: a lost device usually returns once the browser's GPU process settles.
+  // Each attempt later than the last (GPU_RECOVERY_DELAYS); the person can always reconnect by hand.
   const delay = GPU_RECOVERY_DELAYS[gpuRecoveryAttempts++] ?? 0;
   gpuRecoveryTimer = setTimeout(() => {
     gpuRecoveryTimer = undefined;
@@ -6243,7 +6244,8 @@ function rendererOptions() {
       localizedText($("renderer-label"), "rendererStatus.deviceLost");
       status({messageKey: message.messageKey, messageParams: message.messageParams});
       stats.count('graphicsLost');
-      stats.problem(Object.assign(messageError(new Error(''), "errors.app.theGraphicsDeviceWasLost", {}), {name: 'GPUError'}), {type: 'graphics-lost', recovered: false});
+      // The browser's reason (a driver reset, out of memory, the GPU process ended) tells lost devices apart: it is the reported message.
+      stats.problem(Object.assign(new Error(`The graphics device was lost: ${message.reason || 'no reason given'}`), {name: 'GPUError'}), {type: 'graphics-lost', recovered: false});
       pause();
       propertyControls?.cancel();
       cancelDrag();

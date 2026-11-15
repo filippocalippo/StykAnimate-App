@@ -778,6 +778,14 @@ cannot draw is a condition of the frame, never another renderer:
   module); the stage reports it (`onStatus`) and draws nothing more. The app replaces the canvas and
   creates a stage on a new device: the engine keeps the document and decodes the pictures again
   (`Engine::redecode_images`). `Stage::lose_device` destroys the device for the tests of that path.
+  It tries again five times over about a minute (`GPU_RECOVERY_DELAYS` in `app.mjs`), then leaves a
+  button to reconnect by hand. After two crashes of its GPU process Chromium refuses WebGPU and WebGL to
+  a page for the rest of the run, so no new stage could start: the desktop app turns that off
+  (`app.disableDomainBlockingFor3DAPIs` in `desktop/main.cjs`), and from the third crash, when
+  Chromium draws on the processor, the stage comes back on WebGL2 and the processor stage. A browser
+  keeps its own rule: there a reload brings the stage back. `scripts/smoke-gpu-crash.mjs` crashes the
+  desktop app's GPU process four times and requires an edited frame on show after each. The problem the
+  statistics receive carries the browser's reason for the loss (`docs/STATISTICS.md`).
 - **A turned or mirrored Draw view.** `Stage::set_view_orientation` (rotation in radians about the
   artboard's centre, then a horizontal mirror, as `cameraMatrix` in `renderer-geometry.mjs` places
   it): `styk_eval::view::orientation` composes after the scene camera, and the artboard, its

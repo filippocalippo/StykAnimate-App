@@ -6,6 +6,10 @@ What's new in each version of StykAnimate.
 
 ## [Unreleased]
 
+### Fixed
+
+- The canvas comes back by itself after the graphics driver resets, instead of staying blank until you restart StykAnimate.
+
 ## [1.3.0]
 
 Project tabs, a new Home and a much faster StykAnimate

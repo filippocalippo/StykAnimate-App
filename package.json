@@ -41,6 +41,7 @@
     "test:hotkeys:ui": "node tests/hotkeys-timeline.browser.mjs",
     "test:hotkeys:desktop": "node scripts/smoke-hotkeys.mjs",
     "test:drawing:desktop": "node scripts/smoke-drawing.mjs",
+    "test:gpu-crash:desktop": "node scripts/smoke-gpu-crash.mjs",
     "test:browser": "node scripts/run-browser-tests.mjs",
     "test:ui": "node tests/app.browser.mjs",
     "test:timeline": "node tests/timeline.browser.mjs",
