@@ -43,6 +43,6 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       grain = select(grain, vec3f(n), vec3<bool>(k == 0u, k == 1u, k == 2u));
     }
   }
-  let out = vec4f(clamp(rgb + grain * p.x * p.z, vec3f(0.), vec3f(1.)) * c.a, c.a);
+  let out = vec4f(clamp(rgb + grain * p.x * p.z, vec3f(0.), vec3f(1.)) * cover(c), c.a);
   return finish(strengthen(out, base), at);
 }

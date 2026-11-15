@@ -131,8 +131,15 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
+/// How much of a pixel shows: its alpha, or its brightest channel where light makes it brighter than its coverage (`cover` in
+/// `common.wgsl`).
+fn cover(c: C) -> f32 {
+    c[3].max(c[0]).max(c[1]).max(c[2])
+}
+/// Unpremultiplied colour, over what of the pixel shows (`straight` in `common.wgsl`): light keeps its colour.
 fn straight(c: C) -> [f32; 3] {
-    if c[3] > 0.000001 { [c[0] / c[3], c[1] / c[3], c[2] / c[3]] } else { [0.0; 3] }
+    let w = cover(c);
+    if w > 0.000001 { [c[0] / w, c[1] / w, c[2] / w] } else { [0.0; 3] }
 }
 fn fract(v: f32) -> f32 {
     v - v.floor()
@@ -776,6 +783,8 @@ impl Grading {
 fn colour_op(u: &Uniform, c: C, at: [f32; 2], brush: &impl Fn([f32; 2]) -> C, grading: &Grading) -> C {
     let (p, q) = (u.p, u.q);
     let mut rgb = straight(c);
+    // What of the pixel shows: the colour operations scale back by it (`color.wgsl`).
+    let w = cover(c);
     let g = [u.origin[0] + at[0], u.origin[1] + at[1]];
     match u.operation {
         op::TINT => {
@@ -790,7 +799,7 @@ fn colour_op(u: &Uniform, c: C, at: [f32; 2], brush: &impl Fn([f32; 2]) -> C, gr
                 5 => [0, 1, 2].map(|i| (rgb[i] + bc[i]).min(1.0)),
                 _ => bc,
             };
-            [mix(rgb[0], blended[0], k) * c[3], mix(rgb[1], blended[1], k) * c[3], mix(rgb[2], blended[2], k) * c[3], c[3]]
+            [mix(rgb[0], blended[0], k) * w, mix(rgb[1], blended[1], k) * w, mix(rgb[2], blended[2], k) * w, c[3]]
         }
         op::GRADE => {
             let e = grading.exposure;
@@ -805,7 +814,7 @@ fn colour_op(u: &Uniform, c: C, at: [f32; 2], brush: &impl Fn([f32; 2]) -> C, gr
             // The gamma's power; a grade usually keeps 1.
             let gamma = grading.gamma;
             rgb = rgb.map(|x| if gamma == 1.0 { (x + lift).max(0.0) } else { (x + lift).max(0.0).powf(gamma) });
-            [rgb[0].clamp(0.0, 1.0) * c[3], rgb[1].clamp(0.0, 1.0) * c[3], rgb[2].clamp(0.0, 1.0) * c[3], c[3]]
+            [rgb[0].clamp(0.0, 1.0) * w, rgb[1].clamp(0.0, 1.0) * w, rgb[2].clamp(0.0, 1.0) * w, c[3]]
         }
         op::VIGNETTE => {
             let mut xy = [(g[0] / u.output_size[0] - q[0]) * 2.0, (g[1] / u.output_size[1] - q[1]) * 2.0];
@@ -822,8 +831,8 @@ fn colour_op(u: &Uniform, c: C, at: [f32; 2], brush: &impl Fn([f32; 2]) -> C, gr
             let distance = (position - p[0]).abs() * 2.0 / p[2];
             let light = 1.0 - smoothstep(1.0 - p[3], 1.0, distance);
             let b = brush(at);
-            let k = b[3] * light * q[0] * c[3];
-            [(c[0] + b[0] * k).clamp(0.0, c[3]), (c[1] + b[1] * k).clamp(0.0, c[3]), (c[2] + b[2] * k).clamp(0.0, c[3]), c[3]]
+            let k = b[3] * light * q[0] * w;
+            [(c[0] + b[0] * k).clamp(0.0, w), (c[1] + b[1] * k).clamp(0.0, w), (c[2] + b[2] * k).clamp(0.0, w), c[3]]
         }
     }
 }
@@ -935,8 +944,8 @@ fn noise_op(u: &Uniform, src: &Img, at: [f32; 2]) -> C {
                 let n = noise_at(xy, seed, p[3]) - 0.5;
                 if q[0] > 0.0 { [n, noise_at(xy, seed.wrapping_add(131), p[3]) - 0.5, noise_at(xy, seed.wrapping_add(719), p[3]) - 0.5] } else { [n; 3] }
             };
-            let k = p[0] * p[2];
-            [(rgb[0] + grain[0] * k).clamp(0.0, 1.0) * c[3], (rgb[1] + grain[1] * k).clamp(0.0, 1.0) * c[3], (rgb[2] + grain[2] * k).clamp(0.0, 1.0) * c[3], c[3]]
+            let (k, w) = (p[0] * p[2], cover(c));
+            [(rgb[0] + grain[0] * k).clamp(0.0, 1.0) * w, (rgb[1] + grain[1] * k).clamp(0.0, 1.0) * w, (rgb[2] + grain[2] * k).clamp(0.0, 1.0) * w, c[3]]
         }
     }
 }

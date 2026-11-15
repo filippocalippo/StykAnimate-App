@@ -218,8 +218,8 @@ pub struct Renderer {
     pub(crate) within: Option<[f64; 4]>,
     /// The pipeline that clears a part of the frame to transparency, by sample count.
     pub(crate) clear_part: Option<(u32, wgpu::RenderPipeline)>,
-    /// The pipeline that clears the camera rectangle before the camera image (`knockout.wgsl`), by sample count, its uniform and bind group.
-    pub(crate) knockout: Option<(u32, wgpu::RenderPipeline, wgpu::Buffer, wgpu::BindGroup)>,
+    /// The pipelines that clear the camera rectangle before the camera image (`knockout.wgsl`), by sample count, their uniform and bind group.
+    pub(crate) knockout: Option<frame::Knockouts>,
     pub stats: Stats,
 }
 

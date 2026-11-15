@@ -146,5 +146,10 @@ fn brush(at: vec2f) -> vec4f {
   return colour;
 }
 
-// Unpremultiplied colour.
-fn straight(c: vec4f) -> vec3f { if (c.a > .000001) { return c.rgb / c.a; } return vec3f(0.); }
+// How much of a pixel shows: its alpha, or its brightest channel where light makes it brighter than its coverage (a generated
+// effect's glow over transparency: colour beyond its coverage, docs/engine/vfx.md "Light and paint"; exports read it alike).
+fn cover(c: vec4f) -> f32 { return max(c.a, max(c.r, max(c.g, c.b))); }
+
+// Unpremultiplied colour: the pixel's colour over what of it shows (`cover`), so light keeps its colour through a colour filter,
+// which then multiplies the result by `cover` again. Paint (colour within its coverage) is divided by its alpha as ever.
+fn straight(c: vec4f) -> vec3f { let w = cover(c); if (w > .000001) { return c.rgb / w; } return vec3f(0.); }

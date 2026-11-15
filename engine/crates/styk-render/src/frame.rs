@@ -70,6 +70,17 @@ fn part_runs(list: &styk_draw::DrawList, range: std::ops::Range<u32>, matrix: [f
     runs
 }
 
+/// The pipelines that clear the camera rectangle (`knockout.wgsl`) for one sample count: for a frame pass without a depth buffer and
+/// for one with it (index 1), each made with the first frame that needs it; the shader, the uniform and the bind group they share.
+pub(crate) struct Knockouts {
+    samples: u32,
+    module: wgpu::ShaderModule,
+    layout: wgpu::PipelineLayout,
+    pipelines: [Option<wgpu::RenderPipeline>; 2],
+    buffer: wgpu::Buffer,
+    bind: wgpu::BindGroup,
+}
+
 /// What the frame in the output was drawn of, for a frame drawn again in a part of it ([`Renderer::redraw_within`]): the next frame is
 /// drawn in a part only when all of this is the same (the view, the target and how it is painted, the list's background).
 #[derive(Clone, PartialEq)]
@@ -136,35 +147,46 @@ impl Renderer {
 
     /// The pipeline that clears the camera rectangle to the view's clear colour (`knockout.wgsl`) and its bind group, written for
     /// this frame: the rectangle is the camera image's shown part mapped onto the target (`record`: the image's group record).
-    fn knockout(&mut self, view: &ViewParams, size: [u32; 2], record: &[f32; effects::GROUP_FLOATS]) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
-        if self.knockout.as_ref().is_none_or(|k| k.0 != self.samples) {
+    /// `depth`: the frame pass it draws in has a depth buffer (it holds faces of a depth run), whose pipelines must say so; the
+    /// clear neither tests nor writes depth there.
+    fn knockout(&mut self, view: &ViewParams, size: [u32; 2], record: &[f32; effects::GROUP_FLOATS], depth: bool) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
+        if self.knockout.as_ref().is_none_or(|k| k.samples != self.samples) {
             let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("styk knockout"), source: wgpu::ShaderSource::Wgsl(include_str!("knockout.wgsl").into()) });
-            let layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            let bind_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("styk knockout"),
                 entries: &[wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::VERTEX_FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: wgpu::BufferSize::new(48) }, count: None }],
             });
-            let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("styk knockout"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
-            let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("styk knockout"), bind_group_layouts: &[Some(&bind_layout)], immediate_size: 0 });
+            let buffer = buffer(&self.device, "styk knockout", 48, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
+            let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("styk knockout"), layout: &bind_layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }] });
+            self.knockout = Some(Knockouts { samples: self.samples, module, layout, pipelines: [None, None], buffer, bind });
+        }
+        let (device, samples) = (&self.device, self.samples);
+        let Knockouts { module, layout, pipelines, buffer, bind, .. } = self.knockout.as_mut().expect("made above");
+        let pipeline = pipelines[usize::from(depth)].get_or_insert_with(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("styk knockout"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_knockout"), compilation_options: Default::default(), buffers: &[] },
+                layout: Some(layout),
+                vertex: wgpu::VertexState { module, entry_point: Some("vs_knockout"), compilation_options: Default::default(), buffers: &[] },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
+                depth_stencil: depth.then(|| wgpu::DepthStencilState {
+                    format: crate::pipeline::DEPTH_FORMAT,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
                 fragment: Some(wgpu::FragmentState {
-                    module: &module,
+                    module,
                     entry_point: Some("fs_knockout"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })],
                 }),
                 multiview_mask: None,
                 cache: None,
-            });
-            let buffer = buffer(&self.device, "styk knockout", 48, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
-            let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("styk knockout"), layout: &layout, entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }] });
-            self.knockout = Some((self.samples, pipeline, buffer, bind));
-        }
-        let (_, pipeline, buffer, bind) = self.knockout.as_ref().expect("made above");
+            })
+        });
         let p = [record[12], record[13], record[14], record[15], record[16], record[17]].map(f64::from);
         let s = [record[20], record[21], record[22], record[23]].map(f64::from);
         let clip = |[x, y]: [f64; 2]| {
@@ -647,13 +669,6 @@ impl Renderer {
         let camera = effects::plan::camera_group(&list).filter(|&g| planned[g].drawn() && slots[g].is_some());
         let camera_prim = camera.and_then(|g| effects::plan::composite_of(&list, g)).map(|i| i as u32).filter(|&i| i >= root.0 + bg && i < root.1);
         let scene_skip = camera_prim.filter(|_| view.camera_view);
-        let knockout = match (camera, camera_prim) {
-            (Some(g), Some(at)) if !view.camera_view => {
-                let (pipeline, bind) = self.knockout(view, size, &placed[g].0);
-                Some((at, pipeline, bind))
-            }
-            _ => None,
-        };
         let mut stops = vec![root.1; rounds.len()];
         let mut next = 1;
         let first = self.composites.partition_point(|&i| i < root.0 + bg);
@@ -672,6 +687,15 @@ impl Renderer {
             let pipelines = self.depth_pipelines();
             DepthRuns { flat: pipelines.flat.clone(), faces: pipelines.faces.clone(), flat_generated: pipelines.flat_generated.clone(), ranges }
         });
+        // The camera rectangle is cleared in the frame pass, which has a depth buffer when the root holds faces of a depth run.
+        let frame_faces = depth_runs.as_ref().is_some_and(|r| r.within(root.0..root.1));
+        let knockout = match (camera, camera_prim) {
+            (Some(g), Some(at)) if !view.camera_view => {
+                let (pipeline, bind) = self.knockout(view, size, &placed[g].0, frame_faces);
+                Some((at, pipeline, bind))
+            }
+            _ => None,
+        };
         let generated = (!self.generated_ranges.is_empty()).then(|| Generated { pipeline: self.effects_pipeline(), ranges: self.generated_ranges.clone() });
         // An upright view with the native painter draws with the simpler shaders' plain forms (`prim.wgsl`).
         let plain = self.orientation.is_none() && self.paint_context == crate::paint::PaintContext::Native;

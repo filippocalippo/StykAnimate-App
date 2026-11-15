@@ -107,6 +107,48 @@ fn near(a: [u8; 4], b: [u8; 4], levels: u8) -> bool {
     (0..4).all(|k| a[k].abs_diff(b[k]) <= levels)
 }
 
+/// Light over transparency (a generated effect's glow on a transparent background: colour beyond its coverage, docs/engine/vfx.md
+/// "Light and paint") goes through a colour filter as the colour it shows, with its coverage: a tint recolours it, a grade
+/// grades it, grain and a light sweep keep it, instead of dividing it by an alpha of nothing and losing it. Paint is filtered as
+/// before.
+#[test]
+fn colour_filters_keep_light_over_transparency() {
+    use styk_draw::{particle_kind, P_DISC};
+    use styk_eval::vfx::registry::{Grade, LightSweep, Noise};
+    // An orange disc (radius 12) at (32, 32), all light (`emissive` 1) or all paint, in a layer filtered by `effects`.
+    let disc = |emissive: f32, effects: Vec<Effect>| {
+        let mut list = filtered(effects);
+        list.prims[0] = Prim { kind: particle_kind(P_DISC), group: 1, color: 0, paint: 0, a: [32.0, 32.0, 12.0, 0.0], b: [0.0, 0.0, emissive, 0.0], c: [1.0, 0.5, 0.0, 1.0] };
+        list.prims.remove(1);
+        list.passes = vec![Pass { depth: 1, start: 0, end: 1 }, Pass { depth: 0, start: 1, end: 2 }];
+        list.paints = vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 1.0, 0.0], [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]];
+        list
+    };
+    let view = ViewParams { matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], artboard: [0.0, 0.0, 64.0, 64.0], clip_to_artboard: false, clear: [0.0; 4], zoom: 1.0, pan: [0.0; 2], stretch: 1.0, camera_view: false, camera_limit: 2048.0 };
+    let middle = |list: &DrawList| draw_both(list, &view, [64, 64]).into_iter().map(|(renderer, pixels)| (renderer, pixel(&pixels, 64, 32, 32))).collect::<Vec<_>>();
+    let effect = |params: Params| Effect { id: Arc::from("e"), enabled: true, params };
+    let blue = || effect(Params::Tint(Tint { color: Color::Rgb(0x0000ff), mix: 1.0, ..Default::default() }));
+    for (renderer, got) in middle(&disc(1.0, vec![])) {
+        assert!(near(got, [255, 128, 0, 0], 2), "{renderer}: unfiltered light is orange beyond its coverage: {got:?}");
+    }
+    for (renderer, got) in middle(&disc(1.0, vec![blue()])) {
+        assert!(near(got, [0, 0, 255, 0], 2), "{renderer}: a blue tint turns the light blue: {got:?}");
+    }
+    for (renderer, got) in middle(&disc(0.0, vec![blue()])) {
+        assert!(near(got, [0, 0, 255, 255], 2), "{renderer}: and the paint blue, as before: {got:?}");
+    }
+    // A saturating grade keeps the light, more saturated; faint grain and a sweep whose band is elsewhere keep it as it is.
+    let grade = effect(Params::Grade(Grade { saturation: 2.0, ..Default::default() }));
+    for (renderer, got) in middle(&disc(1.0, vec![grade])) {
+        // Saturation 2 about the luminance l = 0.2126 + 0.7152 × 0.5 = 0.570: green 2 × 0.5 − l = 0.43 (110), red and blue clamp.
+        assert!(near(got, [255, 110, 0, 0], 2), "{renderer}: a saturating grade keeps the light, more saturated: {got:?}");
+    }
+    let quiet = vec![effect(Params::Noise(Noise { amount: 0.01, ..Default::default() })), effect(Params::LightSweep(LightSweep { position: -0.5, ..Default::default() }))];
+    for (renderer, got) in middle(&disc(1.0, quiet)) {
+        assert!(near(got, [255, 128, 0, 0], 3), "{renderer}: faint grain and a sweep elsewhere keep the light: {got:?}");
+    }
+}
+
 // ---- Documents -----------------------------------------------------------------------------------------------------------
 
 /// A document of one figure on an 80×60 canvas: a black stroke 8 units thick from (12, 30) to (68, 30), the scene's stack
@@ -180,6 +222,29 @@ fn the_workspace_shows_the_camera_image_alone_inside_the_camera_rectangle() {
         assert!(near(stroke, [0, 0, 0, 255], 2), "{renderer}: the stroke outside the camera rectangle is drawn unfiltered: {stroke:?}");
         let canvas = pixel(&pixels, size[0], 10 + 5, 10 + 5);
         assert!(near(canvas, [255, 255, 255, 255], 2), "{renderer}: the canvas outside the camera rectangle: {canvas:?}");
+    }
+}
+
+/// A frame pass that holds depth-tested faces (a spatial figure drawn outside any layer) has a depth buffer, and the camera
+/// rectangle's clear is drawn in that same pass: it draws there too, and the faces draw as they do without a scene stack.
+#[test]
+fn the_camera_rectangle_clears_in_a_pass_with_faces() {
+    use styk_draw::{F_DEPTH, K_DEPTH_RESET};
+    let prepared = stroke_document(DISSOLVED, r#"{"is_default":false,"x":0,"y":0,"scale":0.5,"angle_rad":0}"#);
+    let (mut list, view, size) = scene_frame(&prepared, 1.0, false, BACKDROP);
+    // A green square of two faces at canvas x 2–10, y 2–10 (outside the camera rectangle), drawn last in the root.
+    let (x0, y0, x1, y1) = (2.0, 2.0, 10.0, 10.0);
+    let face = |a: [f32; 4], b: [f32; 2]| Prim { kind: K_TRI | F_DEPTH, group: 0, color: 0xff00_ff00, paint: NO_PAINT, a, b: [b[0], b[1], 5.0, 5.0], c: [5.0, 0.0, 10.0, 0.0] };
+    let reset = Prim { kind: K_DEPTH_RESET, group: 0, color: 0, paint: NO_PAINT, a: [x0, y0, x1, y1], b: [0.0; 4], c: [0.0; 4] };
+    let root = list.passes.iter_mut().filter(|p| p.depth == 0).max_by_key(|p| p.end).expect("a root pass");
+    assert_eq!(root.end as usize, list.prims.len(), "the root pass ends the list");
+    list.prims.extend([reset, face([x0, y0, x1, y0], [x1, y1]), face([x0, y0, x1, y1], [x0, y1])]);
+    root.end = list.prims.len() as u32;
+    for (renderer, pixels) in draw_both(&list, &view, size) {
+        let square = pixel(&pixels, size[0], 10 + 6, 10 + 6);
+        assert!(near(square, [0, 255, 0, 255], 1), "{renderer}: the faces are drawn: {square:?}");
+        let inside = pixel(&pixels, size[0], 10 + 40, 10 + 30);
+        assert!(near(inside, BACKDROP8, 1), "{renderer}: the camera rectangle is still cleared and dissolved: {inside:?}");
     }
 }
 

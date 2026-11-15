@@ -38,9 +38,11 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   // One brush for every operation (the grade ignores it): its code is written once.
   let b = brush(at);
   var rgb = straight(c);
+  // What of the pixel shows (`cover`): its alpha, or more where it holds light. The colour operations scale back by it.
+  let w = cover(c);
   var out = c;
   if (OP == 70) {
-    out = vec4f(mix(rgb, blended(rgb, b.rgb, MODE), vec3f(p.x * b.a)) * c.a, c.a);
+    out = vec4f(mix(rgb, blended(rgb, b.rgb, MODE), vec3f(p.x * b.a)) * w, c.a);
   } else if (OP == 71) {
     rgb *= exp2(p.x);
     rgb = (rgb - vec3f(.5)) * p.y + vec3f(.5);
@@ -56,7 +58,7 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     rgb += vec3f(p.w * .12, q.x * .12, -p.w * .12);
     rgb += vec3f(q.y * pow(1. - clamp(l, 0., 1.), 2.) * .4 + q.z * pow(clamp(l, 0., 1.), 2.) * .4);
     rgb = pow(max(rgb, vec3f(0.)), vec3f(1. / q.w));
-    out = vec4f(clamp(rgb, vec3f(0.), vec3f(1.)) * c.a, c.a);
+    out = vec4f(clamp(rgb, vec3f(0.), vec3f(1.)) * w, c.a);
   } else if (OP == 72) {
     var xy = (globalAt(at) / params.outputSize - q.xy) * 2.;
     xy.x /= q.z;
@@ -68,7 +70,7 @@ fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     let position = dot(xy, vec2f(cos(p.y), sin(p.y))) + .5;
     let distance = abs(position - p.x) * 2. / p.z;
     let light = 1. - smoothstep(1. - p.w, 1., distance);
-    out = vec4f(clamp(c.rgb + b.rgb * b.a * light * q.x * c.a, vec3f(0.), vec3f(c.a)), c.a);
+    out = vec4f(clamp(c.rgb + b.rgb * b.a * light * q.x * w, vec3f(0.), vec3f(w)), c.a);
   }
   return finish(strengthen(out, base), at);
 }
