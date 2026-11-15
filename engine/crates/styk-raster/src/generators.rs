@@ -427,9 +427,15 @@ fn particle_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], rows: &Rows) -> [f32; 4
             (1.0 - d).max(1e-5).powf(prm[2].max(0.05)) * edge_cov * tail
         }
         P_MATERIAL => {
-            let tex = material(p.color & 0xffff, uv[0] * 0.5 + 0.5, uv[1] * 0.5 + 0.5, prm[2]);
+            let (cell, u, v, th) = (p.color & 0xffff, uv[0] * 0.5 + 0.5, uv[1] * 0.5 + 0.5, p.b[3]);
+            // Nothing shows where no sample can be denser than the threshold (less half the outline, below): the
+            // material is not sampled there (`atlas::Row::densest`), which is most of a smoke puff's quad.
+            let needed = if rows.shape[3] > 0.0 { th - prm[1] * 0.5 } else { th };
+            if atlas::ready((cell >> 4) as usize).is_some_and(|row| row.densest((cell & 15) as usize, u, v) <= needed) {
+                return [0.0; 4];
+            }
+            let tex = material(cell, u, v, prm[2]);
             let (f, light) = (tex[0], tex[1]);
-            let th = p.b[3];
             let w = rows.erosion[0].max(prm[0] * 1.2);
             let k = smooth(th, th + w, f);
             let ow = prm[1];
@@ -550,6 +556,24 @@ fn beam_color(p: &Prim, uv: [f32; 2], prm: [f32; 4], aa: f32, colors: &[[f32; 4]
     over(lit(hot, core * opacity, core_c[3]), out)
 }
 
+/// The part of material particle `p`'s quad, `[qx0, qy0, qx1, qy1]` in its corner coordinates (-1..1), outside which it
+/// draws nothing: where its cell is no denser than its threshold (less half its outline), every sample is no denser
+/// (`atlas::Row::reach`), and `particle_color` gives nothing there. Grown by three pixels, so that a pixel the narrower
+/// quad covers only in part gives nothing either. `None` when the particle draws nothing at all; the whole quad while the
+/// material is not there yet. `extent` is the quad's corner in shading coordinates (uv at q = 1).
+fn material_reach(p: &Prim, rows: &Rows, prm: [f32; 4], extent: [f32; 2]) -> Option<[f32; 4]> {
+    let whole = [-1.0, -1.0, 1.0, 1.0];
+    let cell = p.color & 0xffff;
+    let Some(row) = atlas::ready((cell >> 4) as usize) else { return Some(whole) };
+    let threshold = if rows.shape[3] > 0.0 { p.b[3] - prm[1] * 0.5 } else { p.b[3] };
+    let [u0, v0, u1, v1] = row.reach((cell & 15) as usize, threshold)?;
+    // uv = q × extent, and the cell is sampled at uv / 2 + 1/2; a pixel is prm[0] in uv.
+    let margin = 3.0 * prm[0];
+    let q = |u: f32, grow: f32, e: f32| (((2.0 * u - 1.0) + grow) / e).clamp(-1.0, 1.0);
+    let r = [q(u0, -margin, extent[0]), q(v0, -margin, extent[1]), q(u1, margin, extent[0]), q(v1, margin, extent[1])];
+    (r[2] > r[0] && r[3] > r[1]).then_some(r)
+}
+
 /// Draws generated-effect record `p` of `list` into `target`, the pixels of `layer`, within
 /// `clip` (x0, y0, x1, y1).
 pub(crate) fn draw(list: &DrawList, p: &Prim, target: &mut Target, layer: &Layer, clip: [i64; 4], positions: &[[i64; 2]]) {
@@ -578,7 +602,17 @@ pub(crate) fn draw(list: &DrawList, p: &Prim, target: &mut Target, layer: &Layer
     let (uv0, uv1, uv2) = (shaped[0].1, shaped[1].1, shaped[2].1);
     let colors = [row(2), row(3), row(4), row(5), row(6)];
     let width = target.width;
-    quad(corners, clip, positions, |x, y, mask| {
+    // A material particle shows only where its cell is denser than its threshold: the pixels it is visited at are those
+    // (`material_reach`); the others would give nothing. Every pixel visited is drawn by the whole quad's mapping, as before.
+    let visited = if !beam && particle_shape(p.kind) == P_MATERIAL {
+        match material_reach(p, &rows, prm, [uv1[0], uv2[1]]) {
+            Some([qx0, qy0, qx1, qy1]) => [[qx0, qy0], [qx1, qy0], [qx0, qy1], [qx1, qy1]].map(|q| to_target(corner(p, q, px, &rows).0)),
+            None => return,
+        }
+    } else {
+        corners
+    };
+    quad(visited, clip, positions, |x, y, mask| {
         let (cx, cy) = (x as f64 + 0.5, y as f64 + 0.5);
         let qx = (to_q[0] * cx + to_q[2] * cy + to_q[4]) as f32;
         let qy = (to_q[1] * cx + to_q[3] * cy + to_q[5]) as f32;

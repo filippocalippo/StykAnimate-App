@@ -455,6 +455,54 @@ fn materials_fit_every_device_and_are_the_same_everywhere() {
 
 const EXPECTED_MATERIALS: [u32; 4] = [1169140756, 2569879017, 2432394701, 1555941733];
 
+/// A renderer skips the parts of a material particle that cannot show (styk-raster's `material_reach` and the density
+/// test before sampling), so the bounds it asks the atlas for must never be below a sample: at every level and position
+/// (beyond the cell's edges too, where samples clamp), a bilinear sample taken as the renderers take it is no denser
+/// than `Row::densest` there, and outside `Row::reach` of a threshold no denser than that threshold.
+#[test]
+fn material_bounds_are_never_below_a_sample() {
+    // A bilinear sample of `level` in `variant`'s cell at (u, v), as styk-raster's `material` takes it.
+    let sample = |row: &atlas::Row, level: usize, variant: usize, u: f32, v: f32| -> f32 {
+        let lv = &row.levels[level];
+        let cell = atlas::CELL >> level;
+        let lo = (variant * cell) as f32;
+        let x = ((variant as f32 + u.clamp(0.0, 1.0)) * cell as f32 - 0.5).clamp(lo, lo + cell as f32 - 1.0);
+        let y = (v.clamp(0.0, 1.0) * cell as f32 - 0.5).clamp(0.0, cell as f32 - 1.0);
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        let (x0, y0) = (x0 as usize, y0 as usize);
+        let (x1, y1) = ((x0 + 1).min(lv.width - 1), (y0 + 1).min(lv.height - 1));
+        let t = |tx: usize, ty: usize| lv.data[(ty * lv.width + tx) * 2] as f32 / 255.0;
+        let mix = |a: f32, b: f32, f: f32| a + (b - a) * f;
+        mix(mix(t(x0, y0), t(x1, y0), fx), mix(t(x0, y1), t(x1, y1), fx), fy)
+    };
+    let steps = 181;
+    let at = |i: usize| -0.05 + 1.1 * i as f32 / (steps - 1) as f32;
+    let mut skipped = 0usize;
+    for r in 0..atlas::ROWS {
+        let row = atlas::row(r);
+        for variant in 0..atlas::COLUMNS {
+            let reaches: Vec<_> = (0..=atlas::REACH_STEPS).map(|k| (k as f32 / atlas::REACH_STEPS as f32 + 1e-4, row.reach(variant, k as f32 / atlas::REACH_STEPS as f32 + 1e-4))).collect();
+            for i in 0..steps {
+                for j in 0..steps {
+                    let (u, v) = (at(i), at(j));
+                    let densest = row.densest(variant, u, v);
+                    let most = (0..atlas::LEVELS).map(|level| sample(row, level, variant, u, v)).fold(0.0f32, f32::max);
+                    assert!(most <= densest + 1e-6, "{} variant {variant} at ({u}, {v}): a sample of {most} above the bound {densest}", atlas::NAMES[r]);
+                    for (threshold, reach) in &reaches {
+                        let outside = reach.is_none_or(|[u0, v0, u1, v1]| u < u0 || u > u1 || v < v0 || v > v1);
+                        if outside {
+                            skipped += 1;
+                            assert!(most <= *threshold, "{} variant {variant} at ({u}, {v}): {most} outside the reach of {threshold}", atlas::NAMES[r]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(skipped > 0, "the reach leaves something out");
+}
+
 /// Every live particle's centre and every beam's ends, placed by their draw's transform,
 /// lie inside the batch's bounds; a batch with nothing alive has none.
 #[test]

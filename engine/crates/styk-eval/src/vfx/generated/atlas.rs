@@ -44,6 +44,91 @@ pub struct Level {
 pub struct Row {
     pub index: usize,
     pub levels: Vec<Level>,
+    /// Where each cell can be denser than a threshold, for a renderer that visits only that part of a particle
+    /// ([`Row::reach`]): by variant, then by step `k` of [`REACH_STEPS`].
+    reach: Vec<[Option<[f32; 4]>; REACH_STEPS]>,
+    /// The densest a sample can be within each tile of each cell ([`Row::densest`]): by variant, `TILES × TILES` bytes.
+    densest: Vec<Vec<u8>>,
+}
+
+/// Tiles a side of a cell has in [`Row::densest`].
+const TILES: usize = 32;
+
+/// The density thresholds [`Row::reach`] is kept for: `k / REACH_STEPS`.
+pub const REACH_STEPS: usize = 32;
+
+/// How far (in full-size texels) a sample's texels lie from where it is taken: a bilinear read of level `l` takes two
+/// texels each way, which cover 1.5 × 2^l full-size texels on either side of the point; the coarsest level is the widest.
+const REACH_MARGIN: usize = 2 << (LEVELS - 1);
+
+impl Row {
+    /// The part of `variant`'s cell, `[u0, v0, u1, v1]` in 0..1 as the renderers sample it, outside which every sample
+    /// of every level is at most `threshold` (density 0..1); `None` when it is nowhere denser. It is kept for steps of
+    /// `1 / REACH_STEPS` and rounds down to one, so it is a bound: a renderer may skip what lies outside it, never more.
+    /// `Some([0, 0, 1, 1])` below the first step.
+    pub fn reach(&self, variant: usize, threshold: f32) -> Option<[f32; 4]> {
+        let step = (threshold * REACH_STEPS as f32).floor();
+        if !(step >= 0.0) {
+            return Some([0.0, 0.0, 1.0, 1.0]);
+        }
+        self.reach.get(variant).map_or(Some([0.0, 0.0, 1.0, 1.0]), |steps| steps[(step as usize).min(REACH_STEPS - 1)])
+    }
+
+    /// The densest (0..1) a sample of `variant`'s cell at `(u, v)` (0..1, as the renderers sample it) can be, at any
+    /// level: the densest full-size texel within [`REACH_MARGIN`] of the tile it falls in. A renderer that needs a
+    /// sample denser than a threshold can skip sampling where this is not.
+    #[inline]
+    pub fn densest(&self, variant: usize, u: f32, v: f32) -> f32 {
+        let Some(tiles) = self.densest.get(variant) else { return 1.0 };
+        let at = |t: f32| ((t * TILES as f32) as usize).min(TILES - 1);
+        tiles[at(v.clamp(0.0, 1.0)) * TILES + at(u.clamp(0.0, 1.0))] as f32 / 255.0
+    }
+}
+
+/// [`Row::densest`] of a full-size level, by variant.
+fn densest(base: &Level) -> Vec<Vec<u8>> {
+    let side = CELL / TILES;
+    (0..COLUMNS)
+        .map(|variant| {
+            let texel = |x: usize, y: usize| base.data[(y * base.width + variant * CELL + x) * 2];
+            let mut tiles = vec![0u8; TILES * TILES];
+            for ty in 0..TILES {
+                for tx in 0..TILES {
+                    // The tile's texels from `start`, and every texel a sample taken within them reads.
+                    let span = |start: usize| start.saturating_sub(REACH_MARGIN)..(start + side + REACH_MARGIN).min(CELL);
+                    tiles[ty * TILES + tx] = span(ty * side).flat_map(|y| span(tx * side).map(move |x| (x, y))).map(|(x, y)| texel(x, y)).max().unwrap_or(0);
+                }
+            }
+            tiles
+        })
+        .collect()
+}
+
+/// [`Row::reach`] of a full-size level: for each variant, each step's rectangle of the texels denser than it, grown by
+/// [`REACH_MARGIN`].
+fn reaches(base: &Level) -> Vec<[Option<[f32; 4]>; REACH_STEPS]> {
+    (0..COLUMNS)
+        .map(|variant| {
+            // Per step: the texel rectangle (x0, y0, x1, y1, inclusive) of what is denser than it.
+            let mut boxes = [None::<[usize; 4]>; REACH_STEPS];
+            for y in 0..CELL {
+                for x in 0..CELL {
+                    let density = base.data[(y * base.width + variant * CELL + x) * 2] as usize;
+                    // Denser than step k's threshold k / REACH_STEPS: density × REACH_STEPS > k × 255.
+                    for b in boxes.iter_mut().take((density * REACH_STEPS).div_ceil(255).min(REACH_STEPS)) {
+                        *b = Some(b.map_or([x, y, x, y], |r| [r[0].min(x), r[1].min(y), r[2].max(x), r[3].max(y)]));
+                    }
+                }
+            }
+            boxes.map(|b| {
+                b.map(|[x0, y0, x1, y1]| {
+                    let lo = |t: usize| (t.saturating_sub(REACH_MARGIN) as f32 / CELL as f32).max(0.0);
+                    let hi = |t: usize| ((t + 1 + REACH_MARGIN) as f32 / CELL as f32).min(1.0);
+                    [lo(x0), lo(y0), hi(x1), hi(y1)]
+                })
+            })
+        })
+        .collect()
 }
 
 #[inline]
@@ -258,7 +343,8 @@ pub fn generate(row: usize) -> Row {
         }
         levels.push(Level { width: w, height: h, data });
     }
-    Row { index: row, levels }
+    let (reach, densest) = (reaches(&levels[0]), densest(&levels[0]));
+    Row { index: row, levels, reach, densest }
 }
 
 /// `cos` and `sin` for the variants' layout (a short series; exact operations only).
