@@ -66,7 +66,11 @@ translations, it is bilinear; above 1× it is separable Mitchell-Netravali (B=C=
 When shrinking, the residual level of detail past 0.5 blends up to half of the
 parent reduction into the tile's bilinear sample. An `F_DRAWING` primitive's `paint`
 names the parent slot and quadrant in one lookup row; negative tile coordinates use
-Euclidean division. The decoder publishes all levels together and the upload queue
+Euclidean division. A tile on a page the sprite texture has no layer for draws
+nothing, and a parent on such a page is not blended in, on the GPU as on the CPU
+(`styk-raster` holds no tile of that page): WGSL leaves `textureLoad` with layer -1
+to the implementation, and one that clamps it to layer 0 would draw another page's
+tiles in its place (`tests/sprite_pages.rs`). The decoder publishes all levels together and the upload queue
 takes higher levels first, so a child never samples an unuploaded parent. Crisp
 edges keep nearest sampling, and onion tint uses the filtered coverage.
 
