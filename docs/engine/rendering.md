@@ -66,7 +66,11 @@ translations, it is bilinear; above 1× it is separable Mitchell-Netravali (B=C=
 When shrinking, the residual level of detail past 0.5 blends up to half of the
 parent reduction into the tile's bilinear sample. An `F_DRAWING` primitive's `paint`
 names the parent slot and quadrant in one lookup row; negative tile coordinates use
-Euclidean division. The decoder publishes all levels together and the upload queue
+Euclidean division. A tile on a page the sprite texture has no layer for draws
+nothing, and a parent on such a page is not blended in, on the GPU as on the CPU
+(`styk-raster` holds no tile of that page): WGSL leaves `textureLoad` with layer -1
+to the implementation, and one that clamps it to layer 0 would draw another page's
+tiles in its place (`tests/sprite_pages.rs`). The decoder publishes all levels together and the upload queue
 takes higher levels first, so a child never samples an unuploaded parent. Crisp
 edges keep nearest sampling, and onion tint uses the filtered coverage.
 
@@ -177,10 +181,12 @@ per texture, array textures of at least two layers, [D11](decisions/0011-array-t
 
 ### Uploads
 
-Every texture the renderer writes with `Queue::write_texture` (the sprite atlas and its soft copy, the lookup tables when they grow, the
-picture table, the particle material atlas) is **warmed** when it is made: `resources::warm_texture` writes one zero texel to every layer
-and mip level of it, not waited for. The texels were zero already; the write is what makes the browser initialize the texture before
-the first large write into it.
+Every texture the renderer writes with `Queue::write_texture` (the sprite atlas and its soft copy, the picture table, the particle
+material atlas, and every lookup table: the paint, group, polyline point and glyph tables and the sprite texture's page map, when they
+are made and when they grow, all in `resources::Table::allocate`) is **warmed** when it is made: `resources::warm_texture` writes one zero
+texel to every layer and mip level of it, not waited for. The texels were zero already; the write is what makes the browser initialize
+the texture before the first large write into it. The page map matters most: it is written only when the layout changes, so a first
+write the browser lost would have sent every drawing tile to the wrong layer until the next change.
 
 Why: in a browser, `writeTexture` into a texture nothing has used yet is unreliable. Measured 2026-11-01 (Electron 39.8.10, Chromium
 142.0.7444.265, Windows 11, RTX 4070 SUPER), by the engine and by a page with no engine
@@ -219,7 +225,7 @@ warming in 32 runs). `cargo test -p styk-render` checks what warming writes and 
 places; neither can show the browser's fault, which native adapters do not have.
 
 What remains: the engine's other writes (the draw list's primitives and tables, uniforms) are plain `Queue::write_buffer` / `write_texture`
-into resources that already hold data (a buffer written 280 frames in a row, read back, equalled the draw list every time), and a
+into resources that already hold data or were warmed (a buffer written 280 frames in a row, read back, equalled the draw list every time), and a
 tdd2 export still differs by one level in a few pixels of about one render in 25 of the particle frames, ticks 183–188 (the
 same output as before the warming; native wgpu gave the same bytes in 3,200 renders; `styk export <file> <ticks> <out> --verify N`).
 
