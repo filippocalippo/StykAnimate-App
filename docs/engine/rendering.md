@@ -681,8 +681,12 @@ quads are written in a block with room for more, so the list keeps its layout: [
 card every pixel of the frame was shaded again for each of them, and in software compositing the browser reads the stage's picture back
 on the interface thread, so that time was the frame's: a cel painted over the canvas cost about 58 ms a stroke frame.
 
-The stage's renderer keeps each frame (`Renderer::set_keep_frames`: the frame pass stores its multisampled picture instead of discarding it
-after the resolve), and the stage says where the next edit frame differs from it (`Renderer::redraw_within`): around the drawing tiles whose
+On a software rasterizer the stage's renderer keeps each frame (`Renderer::set_keep_frames`: the frame pass stores its multisampled picture
+instead of discarding it after the resolve; `keeps_frames` in `styk-wasm/src/stage.rs`). A graphics card draws every frame whole and keeps
+none: 1.3.0 kept them there too, so every redraw of an unchanged frame (a hover, a selection) loaded the samples a frame before had stored and
+resolved them again. No earlier editor carried samples from one frame to the next, and it is the suspect for the coloured edge pixels and
+noise users reported on Windows with 1.3.0 (not reproduced on the NVIDIA card it was tested on); it also stored four samples a pixel each
+frame, memory bandwidth an integrated GPU pays for. The stage says where the next edit frame differs from the frame on show (`Renderer::redraw_within`): around the drawing tiles whose
 slot or parent's slot was written since the frame on show and the primitives the list differs in, before and after (`styk_engine::LiveWrites`,
 filled by `Stage::flush_live`; `None`, the whole frame, when a changed primitive is anything but a drawing tile of the root). The renderer
 draws that part alone where it can: over a frame it kept, of the same view, size, sample count, orientation, painter, shading and background,
