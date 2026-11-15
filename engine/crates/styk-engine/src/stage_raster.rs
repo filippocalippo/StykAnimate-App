@@ -308,12 +308,12 @@ impl Drop for StageRaster {
 }
 
 /// Applies `changes` to the pictures the frames sample, for the document `lineage` when one is given (the pictures of
-/// another are let go of).
+/// another are let go of; the live cels' slots are the stage's, and stay until their pages move).
 fn apply(painter: &mut Painter, changes: Vec<Change>, lineage: Option<u64>) {
     if let Some(lineage) = lineage
         && lineage != painter.lineage
     {
-        painter.images = Arc::new(Images::default());
+        Arc::make_mut(&mut painter.images).forget_pictures();
         painter.raster.release();
         painter.lineage = lineage;
     }

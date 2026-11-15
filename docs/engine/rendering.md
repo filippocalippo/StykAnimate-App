@@ -320,8 +320,9 @@ threads, the stage's frames are drawn by the CPU rasterizer on the engine's work
 
 Bounded: at most three frame buffers of the canvas's size (the one being drawn, one finished and not yet shown, one kept
 for the next frame), the page's one `ImageData` and the canvas's own backing; the pictures the job holds stay within
-`styk_raster::Images`' budget (a sixteenth of the memory), least recently used first out; all of it is let go of with the
-stage, on a worker ([memory.md](memory.md#what-is-bounded-now)).
+`styk_raster::Images`' budget (a sixteenth of the memory), least recently used first out, except the live cels' slots,
+which nothing could decode again: they count against the budget and go only when the live pages move; all of it is let
+go of with the stage, on a worker ([memory.md](memory.md#what-is-bounded-now)).
 
 The pictures are the CPU rasterizer's ([CPU](#cpu-styk-raster)), held to the GPU renderer's by D13 for exports already.
 The stage adds paint contexts of its own; each is covered: the canvas background drawn directly and the view's fill

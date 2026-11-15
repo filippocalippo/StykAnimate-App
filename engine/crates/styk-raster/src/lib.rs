@@ -66,6 +66,8 @@ pub struct Place(bool, Key);
 struct Held {
     image: Arc<DecodedImage>,
     used: u64,
+    /// A slot of a drawing cel held live ([`Images::put_tile`]): never dropped for the budget.
+    live: bool,
 }
 
 /// Decoded pixels of a document's images, keyed by their atlas place (the draw list
@@ -76,6 +78,9 @@ struct Held {
 /// [`Images::MEMORY_SHARE`]) the least recently used are dropped, and [`Images::ensure`] decodes
 /// again, from the document's encoded pictures, what a frame needs and is not held. A frame is never
 /// drawn short of a picture because of the budget: what it samples is kept while it is drawn.
+/// The live cels' slots ([`Images::put_tile`]) are not in the document, so nothing could decode them
+/// again: they count against the budget (the other pictures give way to them) and are never dropped
+/// for it, only when their pages move ([`Images::drop_tiles_from`]) or with the set.
 ///
 /// A clone shares the decoded pixels (it copies the tables of which picture is where), so a set the threads drawing
 /// a frame read can be taken further for the next frame without waiting for them.
@@ -128,7 +133,7 @@ impl Images {
         }
         let key = (e.layer, e.x, e.y);
         self.clock += 1;
-        let held = Held { used: self.clock, image };
+        let held = Held { used: self.clock, image, live: false };
         let len = held.image.rgba.len();
         let replaced = if held.image.drawing { self.tiles.insert(key, held) } else { self.sprites.insert(key, held) };
         self.bytes += len;
@@ -139,15 +144,26 @@ impl Images {
 
     /// Puts the drawing tile `image` (straight alpha with its two-texel border, `styk_eval::live::CELL` texels a side) at
     /// atlas place `(layer, x, y)` (its first texel inside the border): the slots of the drawing cels the editor holds live,
-    /// which the document's atlas does not lay out. Over the budget, the least recently used pictures are dropped.
+    /// which the document's atlas does not lay out. Nothing decodes such a slot again, so it is kept until its pages move
+    /// ([`Images::drop_tiles_from`]); over the budget, the least recently used of the other pictures are dropped.
     pub fn put_tile(&mut self, place: (u32, u32, u32), image: Arc<DecodedImage>) {
         self.clock += 1;
         let len = image.rgba.len();
-        if let Some(old) = self.tiles.insert(place, Held { used: self.clock, image }) {
+        if let Some(old) = self.tiles.insert(place, Held { used: self.clock, image, live: true }) {
             self.bytes -= old.image.rgba.len();
         }
         self.bytes += len;
         self.trim(&HashSet::new());
+    }
+
+    /// Lets go of the pictures of the document they were laid out for (another document is drawn from now on), and keeps the
+    /// live cels' slots, which only [`Images::drop_tiles_from`] lets go of.
+    pub fn forget_pictures(&mut self) {
+        self.sprites.clear();
+        self.tiles.retain(|_, held| held.live);
+        self.bytes = self.tiles.values().map(|held| held.image.rgba.len()).sum();
+        self.failed.clear();
+        self.failed_in = (0, 0);
     }
 
     /// Lets go of the drawing tiles on atlas layers `layer` and above (the live cels' pages, when they move).
@@ -272,7 +288,7 @@ impl Images {
     }
 
     /// Drops the least recently used pictures outside `keep` until the pixels held are under three quarters of the
-    /// budget, when they are over it.
+    /// budget, when they are over it. The live cels' slots are never dropped: nothing could decode them again.
     fn trim(&mut self, keep: &HashSet<Place>) {
         if self.bytes <= self.budget {
             return;
@@ -282,7 +298,7 @@ impl Images {
         for (drawing, map) in [(false, &self.sprites), (true, &self.tiles)] {
             for (key, held) in map {
                 let place = Place(drawing, *key);
-                if !keep.contains(&place) {
+                if !held.live && !keep.contains(&place) {
                     order.push((held.used, place, held.image.rgba.len()));
                 }
             }
