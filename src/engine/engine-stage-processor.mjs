@@ -81,7 +81,8 @@ export function createProcessorStage({stage, engine, scene, onPicture = () => {}
         }
       }
       if (stage.processor_failed()) {
-        // A picture of the frame could not be held: the device draws from now on (the picture on show stays until it does).
+        // A picture of the frame could not be held, or an engine thread stopped (a frame on it would never end): the device
+        // draws from now on (the picture on show stays until it does).
         self.set(false);
         onFailed();
         return;

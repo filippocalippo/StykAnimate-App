@@ -2,7 +2,7 @@
 //! "The stage on the processor"), with real worker threads: a frame drawn in bands on the workers is the frame the
 //! processor renderer draws whole; a newer request replaces the one waiting and the buffers stay bounded; a frame let
 //! go of is never shown; pictures the stage hands over and the live drawing cels' slots are what the frames sample, a soft copy
-//! never in a picture's place.
+//! never in a picture's place; a frame whose worker was lost is not waited for.
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -151,15 +151,17 @@ fn the_live_cels_slots_are_drawn_from_what_the_stage_hands_over() {
         let bytes = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../engine/crates/styk-eval/tests/fixtures/generators/explosions.json")).unwrap();
         engine.open(&bytes, "json", "fixture").unwrap();
         let generation = engine.generation().unwrap();
-        // Two live slots side by side on the live page at atlas layer 5: the first red, the second blue.
-        let mut rgba = vec![0u8; (2 * CELL * CELL * 4) as usize];
+        // Live slots side by side on the live page at atlas layer 5, the second blue, the others red: more of them than wait for
+        // a frame (16 MiB), so a job takes them in at once and the frame asked for next waits for it, one job on the pictures at a time.
+        let cells = ((16 << 20) / (CELL * CELL * 4) + 1) as u32;
+        let mut rgba = vec![0u8; (cells * CELL * CELL * 4) as usize];
         for (i, pixel) in rgba.chunks_mut(4).enumerate() {
-            let blue = (i as u32 % (2 * CELL)) >= CELL;
+            let blue = (i as u32 % (cells * CELL)) / CELL == 1;
             pixel.copy_from_slice(if blue { &[0, 0, 255, 255] } else { &[255, 0, 0, 255] });
         }
         let base = 5;
         let border = styk_eval::drawing::BORDER;
-        let run = Run { page: 0, x: 0, y: 0, cells: 2, rgba };
+        let run = Run { page: 0, x: 0, y: 0, cells, rgba };
         let tile = |x: f32, cell: u32| {
             let place = [(cell * CELL + border) as f32, border as f32];
             let page = styk_eval::assets::PAGE as f32;
@@ -179,6 +181,7 @@ fn the_live_cels_slots_are_drawn_from_what_the_stage_hands_over() {
         let at = |x: usize, y: usize| shot.pixels()[(y * 128 + x) * 4..][..4].to_vec();
         assert_eq!(at(30, 30), [255, 0, 0, 255], "the first slot");
         assert_eq!(at(100, 30), [0, 0, 255, 255], "the second slot");
+        assert!(!stage.failed());
         // The live pages moved: their tiles are let go of, and the slots draw nothing until they are written again.
         stage.shown(shot.serial);
         stage.drop_live_from(base);
@@ -214,4 +217,31 @@ fn a_soft_copy_never_takes_the_place_of_its_picture() {
         let worst = whole.iter().zip(shot.pixels()).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
         assert!(worst <= 2, "a pixel differs by {worst} levels: a soft copy was drawn as the picture");
     });
+}
+
+#[test]
+fn a_frame_whose_worker_was_lost_is_not_waited_for() {
+    // No thread takes the frame's tasks, as when the one drawing it trapped: the frame would never end.
+    let engine = Engine::new(clock, Budgets::for_device(None));
+    let bytes = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../engine/crates/styk-eval/tests/fixtures/generators/explosions.json")).unwrap();
+    engine.open(&bytes, "json", "fixture").unwrap();
+    let snapshot = engine.prepared_frame_now_at(0.0).expect("a frame");
+    let size = [160, 90];
+    let view = view(&snapshot.generation.prepared.doc, snapshot.frame.camera.as_ref(), size);
+    let request = || Request { generation: snapshot.generation.clone(), list: snapshot.frame.list.clone(), view, orientation: None, size, grid: DrawingGrid::World };
+    let mut stage = StageRaster::new(&engine);
+    stage.request(request());
+    stage.request(request());
+    assert!(stage.poll(), "the frame waits for its tasks");
+    assert!(!stage.failed());
+    // The page learns a worker stopped (`Engine::note_worker_lost`): the frame is given up, and the stage draws with its device.
+    engine.note_worker_lost();
+    assert!(!stage.poll(), "a frame that may never end is still waited for");
+    assert!(stage.failed(), "the page is told to draw with the device");
+    assert!(stage.ready().is_none(), "nothing half drawn is shown");
+    stage.request(request());
+    assert!(!stage.poll(), "nothing more is asked of the workers");
+    // What was queued before runs to its end on a thread that comes back, and nothing is shown of it.
+    while engine.step() {}
+    assert!(!stage.poll() && stage.ready().is_none());
 }

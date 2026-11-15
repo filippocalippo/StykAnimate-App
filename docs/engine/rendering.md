@@ -314,7 +314,10 @@ threads, the stage's frames are drawn by the CPU rasterizer on the engine's work
   processor always draws four samples a pixel.
 - **The fallback is the device.** Without engine threads (a page that is not cross-origin isolated) the processor is not
   used, because its tasks would run on the interface thread; when a frame's job cannot hold a picture it samples (the
-  memory is full) the stage switches to the device for good (`Stage::processor_failed`) and says so in the console. The
+  memory is full), or the page reports an engine thread lost (a trap: a job or band it was running never ends, and a lock it
+  held stays held), the stage switches to the device for good (`Stage::processor_failed`) and says so in the console. For
+  the same reason one job at a time uses the pictures and the CPU renderer, a frame's or one taking pictures in without a
+  frame, and none waits for their lock ([threading.md](threading.md#when-an-engine-thread-traps)). The
   live parameter `stage.processor` (developer tools: 1 on, 0 off, -1 the device's choice) switches between the two so they
   can be compared in the app; the stage's stats report the processor's frame (`engine.processor`: its time from request to
   last band, its work, its bands and buffers).
