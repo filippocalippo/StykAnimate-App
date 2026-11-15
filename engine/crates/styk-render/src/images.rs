@@ -41,8 +41,8 @@ pub(crate) struct SpriteMap {
 }
 
 impl SpriteMap {
-    pub(crate) fn new(device: &wgpu::Device) -> SpriteMap {
-        let (texture, view) = crate::resources::Table::allocate(device, "styk sprite pages", wgpu::TextureFormat::R32Float, 1);
+    pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> SpriteMap {
+        let (texture, view) = crate::resources::Table::allocate(device, queue, "styk sprite pages", wgpu::TextureFormat::R32Float, 1);
         SpriteMap { texture, view, layers: Vec::new() }
     }
 
