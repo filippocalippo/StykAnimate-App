@@ -571,6 +571,7 @@ src/ui/ui-popover.mjs	ui	-	stays
 src/ui/ui-strings.mjs	ui	-	stays	
 src/ui/ui-toast.mjs	ui	-	stays	
 src/ui/ui-tooltip.mjs	ui	-	stays	
+src/ui/value-scale.mjs	ui	-	stays	Where a value field's value sits along its travel (linear, log, pow): the fill, the scrub and the coarse keys
 src/update-ui.mjs	app	-	stays	support, updates
 src/user-action-error.mjs	ui	-	stays	
 src/user-library.mjs	ui	-	stays	
@@ -581,6 +582,7 @@ src/vfw-pixels.mjs	platform	styk-export	js	encoders and sinks (WebCodecs, FFmpeg
 src/vfw-video-export.mjs	platform	styk-export	js	encoders and sinks (WebCodecs, FFmpeg, VFW); frames come from the engine
 src/vfx-camera-gpu.mjs	engine	styk-render::vfx	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/vfx-camera.mjs	engine	styk-render::vfx	removed	deleted: nothing in the app used it; the engine draws the camera image and its effects (15835 bytes)
+src/vfx-catalog-peek.mjs	ui	-	stays	The effects catalogue's preview card: a still and one line on what an effect or a preset does
 src/vfx-canvas.mjs	engine	styk-render::vfx	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.
 src/vfx-clip-controls.mjs	ui	-	stays	
 src/vfx-clip-inspector.mjs	ui	-	stays	
@@ -588,6 +590,7 @@ src/vfx-clip-timeline.mjs	ui	-	stays
 src/vfx-clip-views.mjs	ui	-	stays	The effects timeline's clip tails and playing state, read from the session (vfxClips)
 src/vfx-clips.mjs	engine	styk-eval::vfx	partial	Rust: clip sampling, keys, fades, composition and strict edit validation including paints/attached scopes; remaining JS model callers preserved
 src/vfx-connected.mjs	engine	styk-eval::vfx	partial	effect model, clips, sampling. Rust: connected groups (planning); conflict checks for editing still JS
+src/vfx-effect-view.mjs	ui	-	stays	One open effect in the VFX panel: its values and titled sections through the shared value control
 src/vfx-cpu.mjs	engine	styk-render::vfx	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.
 src/vfx-drawable.mjs	engine	styk-eval::vfx	js	what effects a drawn item carries and how far they spread (drawableVfxPadding); the interface's bounds read it
 src/vfx-generator-anchors.mjs	engine	styk-eval::vfx::generated	removed	Deleted: the engine builds generated effects (styk_eval::vfx::generated); the interface reads a clip's tail and whether it plays from the session (vfxClips, src/vfx-clip-views.mjs)
@@ -610,8 +613,10 @@ src/vfx-paint.mjs	engine	styk-eval::vfx	ported	effect model, clips, sampling. Ru
 src/vfx-preset-preview.mjs	ui	-	stays	
 src/vfx-preset-ui.mjs	ui	-	stays	
 src/vfx-presets.mjs	engine	styk-eval::vfx	partial	Rust: byte-verifiable 13-preset catalogue and recorded stack/group commands; existing JS UI/oracle catalogue callers remain
+src/vfx-presentation.mjs	ui	-	stays	How the VFX panel presents each effect: the values that define it, its sections, controls, scales, words, the catalogue groups
 src/vfx-preview.mjs	engine	styk-eval::vfx	removed	deleted with the JavaScript renderer: the engine stage and playback draw and prepare every frame
 src/vfx-registry.mjs	engine	styk-eval::vfx	ported	effect model, clips, sampling. Rust: vfx::registry (every type, parameters, scene and generator flags)
+src/vfx-style-picker.mjs	ui	-	stays	The VFX panel's visual picker of a look or a style: rendered stills of each option
 src/vfx-scene.mjs	engine	styk-render::vfx	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.
 src/vfx-shaders.mjs	engine	styk-render::vfx	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.
 src/vfx-surface.mjs	engine	styk-render::vfx	removed	Deleted: nothing in the app draws with the JavaScript painter any more; a click on artwork asks the engine (styk_export::pick), the stage and exports draw with the engine.

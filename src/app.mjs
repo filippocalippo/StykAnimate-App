@@ -427,6 +427,7 @@ function editingGestureActive(){return Boolean(state.drag||keyboardHandleGesture
 // marks them all; one pass a frame updates what is marked. While playing, only the transport updates
 // (at most every 200 ms); the quiet surfaces wait and update in the first pass after playback stops
 // (pause() queues one). Surfaces write through dom-write.mjs, so an unchanged value writes nothing.
+// Properties is not rebuilt while it is hidden (behind VFX in their dock, a closed sheet): it catches up when it shows.
 const ui = createInvalidator({
   isPlaying: () => state.playing,
   // Playback draws its own frames; only the transport updates then, and nothing on the stage changes with it.
@@ -436,11 +437,11 @@ ui.surface("title", { on: ["document", "save", "revision"], update: () => update
 ui.surface("transport", { on: ["tick", "document", "settings"], playbackInterval: 200, update: () => timelineHost?.updateTransport() });
 ui.surface("layers", { on: ["selection", "document", "revision"], quiet: true, update: () => renderLayers() });
 ui.surface("vfx", { on: ["selection", "revision", "context", "tick"], quiet: true, update: () => vfxInspector?.sync() });
-ui.surface("inspector", { on: ["selection", "revision", "context", "tick"], quiet: true, update: () => renderProperties() });
+ui.surface("inspector", { on: ["selection", "revision", "context", "tick"], quiet: true, panel: "properties", update: () => renderProperties() });
 ui.surface("selection", { on: ["selection", "range", "drag"], quiet: true, update: () => { if (!state.drag) syncSelectionControls(); } });
 ui.surface("status", { on: ["objects", "document", "selection"], quiet: true, update: () => updateStatus() });
 ui.surface("assets", { on: ["document", "revision"], quiet: true, update: () => { if (state.activeTab === "assets") renderAssets(); } });
-ui.surface("shell", { on: ["mode", "settings", "selection", "context"], quiet: true, update: () => syncShell() });
+ui.surface("shell", { on: ["mode", "settings", "selection", "context", "revision", "tick"], quiet: true, update: () => syncShell() });
 ui.surface("stagehead", { on: ["mode", "settings", "selection", "context", "document", "revision", "tick"], quiet: true, update: () => syncStageHead() });
 function queueUI() {
   ui.invalidate("all");
@@ -1997,14 +1998,6 @@ function renderProperties() {
     $("inspector")
       .querySelector(`details[data-polygon-index="${index}"]`)
       ?.setAttribute("open", "");
-  document
-    .querySelectorAll("[data-inspector]")
-    .forEach((button) =>
-      button.classList.toggle(
-        "active",
-        button.dataset.inspector === state.inspectorTab,
-      ),
-    );
 }
 
 let construction;
@@ -2059,11 +2052,6 @@ function setTool(tool) {
     state.inspectorTab = "design";
     state.inspectorContext = editor.object ? "figure" : "scene";
   }
-  document
-    .querySelectorAll("[data-inspector]")
-    .forEach((b) =>
-      b.classList.toggle("active", b.dataset.inspector === state.inspectorTab),
-    );
   renderInspector();
   tweenerControls?.sync();
   syncModeMessage();
@@ -5921,6 +5909,7 @@ async function init() {
   workspaceLayout = shell.workspace;
   window.styk.workspace = workspaceLayout;
   window.styk.shell = shell;
+  ui.followPanels(shell.registry);
   window.styk.touchShell = installTouchShell({ touch: touchMode, stageHead, shell });
   // Press and hold: the right-click menus and the controls' names, for fingers (docs/TOUCH.md).
   installLongPress({ touch: touchMode, tooltips });
@@ -6236,7 +6225,7 @@ function rendererOptions() {
   return {
     // A frame drawn on the engine's workers is presented when its picture is shown, not when it was asked for.
     onInvalidate: requestRender, onPicture: (prepared, at, frame) => { if (!prepared) presentedEditing(frame.tick, frame.revision, at); else if (state.playing) playbackMetrics.present(at); },
-    onMonitorPicture: requestMonitorRender,
+    onMonitorPicture: requestMonitorRender, onReducedEffects: clipIds => vfxInspector?.setReducedEffects(clipIds),
     // A frame the engine refused: the previous picture stays and the document's next revision is tried again.
     onError: error => { stats.problem(error); status(error, true); },
     onStatus: (message) => {

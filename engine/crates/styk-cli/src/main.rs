@@ -18,6 +18,8 @@
 //!   styk prims <file> [tick…]            what a frame's draw list is made of, and how much lies outside the artboard
 //!   styk raster-parity <file>…            styk-raster against styk-render on the same draw lists,
 //!                                         by the app-parity rule D13 (see raster_parity.rs)
+//!   styk vfx-review <type> [options]      contact sheets and frame sequences of a generated effect on a
+//!                                         stick figure (see review.rs)
 
 use std::path::Path;
 use std::time::Instant;
@@ -36,6 +38,7 @@ mod load;
 mod prims;
 mod stepbench;
 mod raster_parity;
+mod review;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -70,6 +73,7 @@ fn main() {
         Some("raster-parity") if args.len() >= 2 => raster_parity::run(&args[1..]),
         Some("prims") if args.len() >= 2 => prims::run(&args[1..]),
         Some("stepbench") if args.len() >= 3 => stepbench::run(&args[1..]),
+        Some("vfx-review") if args.len() >= 2 => review::run(&args[1..]),
         _ => {
             eprintln!("usage: styk info <file> | compare <file> <reference.json> [--verbose] | bench <file> [--frames N] | render <file> <tick> <out.png> [--size WxH] [--zoom Z] [--center X,Y] [--no-clip] [--neutral] [--after T] | gpubench <file> <tick> [--no-effects] | layers <file> <tick> [--all] | edit-replay [--worker [--max-source-bytes N]] <reference.json>... | edit-replay --live-worker <session.json> <returns.json>... | export <file> <ticks> <out> [..]");
             2
@@ -323,7 +327,7 @@ fn layers(path: &str, tick: &str, all: bool) -> i32 {
 /// blend, target and live particles, and what building the batch and evaluating
 /// its particles cost (earlier-tick anchors evaluated without a cache).
 fn generators(path: &str, ticks: &[String]) -> i32 {
-    use styk_eval::vfx::generated::{self, particle};
+    use styk_eval::vfx::generated::{self, particle::Evaluator};
     let (p, _) = match load(path) {
         Ok(v) => v,
         Err(e) => {
@@ -345,12 +349,13 @@ fn generators(path: &str, ticks: &[String]) -> i32 {
         let started = Instant::now();
         let mut live = 0;
         for draw in &batch.draws {
-            let alive = (0..draw.count).filter(|&i| particle::evaluate(&batch, draw, i).is_some()).count();
+            let ev = Evaluator::new(&batch, draw);
+            let alive = (0..draw.count).filter(|&i| ev.particle(i).is_some()).count();
             live += alive;
-            println!("  draw {}: shape {} blend {} uid {:?} {:?}{} material {}: {alive} of {} alive", draw.record, draw.shape, draw.blend, draw.uid, draw.placement, if draw.scene { " scene" } else { "" }, draw.material, draw.count);
+            println!("  draw {}: shape {} blend {} uid {:?} {:?}{} material {} keep {:.2}: {alive} of {} alive", draw.spec, draw.shape, draw.blend, draw.uid, draw.placement, if draw.scene { " scene" } else { "" }, draw.material, draw.keep, draw.count);
         }
         let evaluated = started.elapsed().as_secs_f64() * 1000.0;
-        println!("tick {tick}: {} draws, {live} of {} particles alive; batch {built:.2} ms, particles {evaluated:.2} ms", batch.draws.len(), batch.particles);
+        println!("tick {tick}: {} draws, {live} of {} particles alive{}; batch {built:.2} ms, particles {evaluated:.2} ms", batch.draws.len(), batch.particles, if batch.reduced { ", reduced by a limit" } else { "" });
     }
     0
 }
@@ -359,6 +364,8 @@ fn generators(path: &str, ticks: &[String]) -> i32 {
 /// included (earlier-tick anchors evaluated without a cache), effects optionally off.
 fn encode_frame(p: &Prepared, assets: &styk_eval::assets::Assets, tick: f64, frame: &styk_eval::eval::Frame, scene: &styk_eval::geometry::Scene, no_effects: bool, camera: bool) -> styk_eval::drawlist::DrawList {
     use styk_eval::vfx::generated;
+    // A tool: the materials are generated here (the app's workers generate them when a document opens).
+    generated::atlas::prepare();
     let mut batch = if no_effects { None } else { generated::build(p, frame, scene, Some(tick), Some(&generated::Evaluate), 1.0) };
     // Through the scene camera parallax layers move, and generated effects beside a figure with it.
     let parallax = frame.parallax.as_ref().filter(|_| camera);

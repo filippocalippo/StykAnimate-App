@@ -111,6 +111,10 @@ pub struct Stage {
     pictures: u32,
     /// Bytes of pictures the last frame uploaded to the atlas.
     upload_bytes: usize,
+    /// The effect clips whose generated effects a limit reduced in the frame on show (`DrawList::reduced_effects`), and how
+    /// many times that set changed: the interface reads the set when the count moves (`Stage::reduced_effects`).
+    reduced_effects: Vec<Arc<str>>,
+    reduced_revision: u32,
     pub(crate) edit: EditScene,
     /// What a click on artwork draws with ([`Stage::pick_artwork`]).
     picker: styk_export::pick::Picker,
@@ -212,9 +216,14 @@ impl Stage {
             }
         }));
         let mut renderer = Renderer::new(&device, &queue, format);
+        // Effect images between passes in half floats wherever the device renders to and filters them (on WebGL2: with
+        // `EXT_color_buffer_float`), as on WebGPU; else eight bits, dithered.
+        renderer.set_float_effects(styk_render::effects::executor::float_supported(&adapter));
         // A stroke changes a part of the frame: on a software rasterizer the stage keeps each frame, so the next is drawn again in
         // that part alone (`keeps_frames`).
         renderer.set_keep_frames(keeps_frames(&device));
+        // Generated effects' shading compiles now, with the app's start, not on the first frame that draws one.
+        renderer.prepare_effects();
         // A stage over a document that is already open (the canvas was replaced after a lost device):
         // the pictures decoded so far went to the stage before it.
         engine.engine.redecode_images();
@@ -247,6 +256,8 @@ impl Stage {
             ready_ms: 0.0,
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
+            reduced_effects: Vec::new(),
+            reduced_revision: 0,
             edit: EditScene::default(),
             picker: Default::default(),
             pick_prep: None,
@@ -501,10 +512,24 @@ impl Stage {
         }
     }
 
+    /// How many times the set of effect clips reduced in the frame on show has changed: the interface reads
+    /// [`Stage::reduced_effects`] when this moves.
+    pub fn reduced_effects_revision(&self) -> u32 {
+        self.reduced_revision
+    }
+
+    /// The identities of the effect clips whose generated effects a limit thinned or left out of the frame on show (a JSON
+    /// array; docs/engine/vfx.md, "Limits"): read when [`Stage::reduced_effects_revision`] moves, not every frame.
+    pub fn reduced_effects(&self) -> String {
+        let ids: Vec<styk_doc::Value> = self.reduced_effects.iter().map(|id| styk_doc::Value::str(id)).collect();
+        styk_doc::json::to_string(&styk_doc::Value::array(ids))
+    }
+
     /// Whether the last edit frame's generated effects still lack some of their targets'
-    /// earlier positions (they used the current pose): the interface draws again.
+    /// earlier positions (they used the current pose), or it drew a filtered layer unfiltered
+    /// while its effect's shaders compile (WebGL2 compiles one a frame): the interface draws again.
     pub fn refining(&self) -> bool {
-        self.edit.refining()
+        self.edit.refining() || self.renderer.effects_pending()
     }
 
     /// Whether the last frame drawn lacked pictures that are still to come: 0 when it had
@@ -924,6 +949,7 @@ impl Stage {
             self.processor_list = (list.prims.len(), list.groups.len());
             processor.request(styk_engine::stage_raster::Request { generation: generation.clone(), list: list.clone(), view, orientation, size: [self.config.width, self.config.height], grid });
             self.pictures = self.pictures_after(list);
+            self.note_reduced(list);
             self.soft_frames += u64::from(self.loading.placeholders() > 0);
             self.pictures_shown(pages);
             // The live slots written since the device's kept frame say where its next frame differs; it keeps none meanwhile.
@@ -974,9 +1000,18 @@ impl Stage {
         self.live_writes.clear();
         self.part_frames += u64::from(self.renderer.drew_part());
         self.pictures = self.pictures_after(list);
+        self.note_reduced(list);
         self.soft_frames += u64::from(self.loading.placeholders() > 0);
         self.pictures_shown(pages);
         Ok(true)
+    }
+
+    /// The frame on show is `list`: its reduced effect clips become the stage's, counted when they change.
+    fn note_reduced(&mut self, list: &styk_eval::drawlist::DrawList) {
+        if self.reduced_effects != list.reduced_effects {
+            self.reduced_effects.clone_from(&list.reduced_effects);
+            self.reduced_revision = self.reduced_revision.wrapping_add(1);
+        }
     }
 
     /// Replaces tiles of the drawing cel `id` the interface holds live, so edit frames draw its
@@ -1058,7 +1093,7 @@ impl Stage {
     /// Primitive, isolation group and pass counts of the last frame, its effect layers and
     /// passes, the GPU memory of the effect slots, isolation atlases and depth buffers, and the
     /// glyph masks kept, filled by the last frame and their memory, the picture bytes the last frame
-    /// uploaded, the pictures held and whether edges are multisampled, as JSON.
+    /// uploaded, the pictures held, whether edges are multisampled and whether effect images are half floats, as JSON.
     pub fn stats(&self) -> String {
         let s = &self.renderer.stats;
         let (mut prims, mut groups, mut passes) = (s.prims, s.groups, s.passes);
@@ -1074,10 +1109,10 @@ impl Stage {
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
         let (resident, loads, evictions) = self.residency_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"shadingRuns\":{},\"partFrames\":{},\"processor\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"shadingRuns\":{},\"partFrames\":{},\"floatEffects\":{},\"processor\":{}}}",
             prims, groups, passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
             sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
-            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms, self.renderer.shading_runs(), self.part_frames, processor
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms, self.renderer.shading_runs(), self.part_frames, self.renderer.float_effects(), processor
         )
     }
 }

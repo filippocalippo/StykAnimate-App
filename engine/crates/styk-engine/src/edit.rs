@@ -428,6 +428,13 @@ impl EditScene {
         self.refining
     }
 
+    /// Whether the current frame's generated effects are drawn reduced: thinned to the
+    /// interface thread's budget or by a frame limit (docs/engine/vfx.md, "Limits").
+    /// Playback and export draw them in full within the frame limits.
+    pub fn effects_reduced(&self) -> bool {
+        self.current.as_ref().and_then(|c| c.generators.as_ref()).is_some_and(|b| b.reduced)
+    }
+
     /// The camera the edit frame is seen through in the camera preview (`cameraAtTime`),
     /// as the last [`EditScene::draw_list`] with `camera` worked it out; the authored one otherwise.
     pub fn camera(&self) -> Option<styk_eval::doc::Camera> {
@@ -477,9 +484,11 @@ impl EditScene {
                 let clock = options.clock.unwrap_or(no_clock);
                 let deadline = if options.clock.is_some() { clock() + options.anchor_budget_ms } else { f64::INFINITY };
                 let sampler = anchors.sampler(clock, deadline);
-                current.generators = styk_eval::vfx::generated::build(&generation.prepared, &current.frame, &scene, current.vfx_tick, Some(&sampler), 1.0).map(Arc::new);
+                // The interface thread draws this frame: its particles are thinned evenly within a budget.
+                current.generators = styk_eval::vfx::generated::build_within(&generation.prepared, &current.frame, &scene, current.vfx_tick, Some(&sampler), styk_eval::vfx::generated::EDIT_DRAWN).map(Arc::new);
             }
-            self.refining = current.generators.as_ref().is_some_and(|b| b.incomplete);
+            // Incomplete anchors, or a material the workers have not generated yet (drawn as soft discs meanwhile).
+            self.refining = current.generators.as_ref().is_some_and(|b| b.incomplete || b.draws.iter().any(|d| d.material >= 0 && styk_eval::vfx::generated::atlas::ready(d.material as usize).is_none()));
             batch = current.generators.clone();
             // Draws beside a figure move with its drag and its parallax (`offsetGeneratorBatch`:
             // `parallax(uid)` plus the drag of the figure with that identity).

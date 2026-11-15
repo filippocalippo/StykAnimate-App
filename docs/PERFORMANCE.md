@@ -257,6 +257,10 @@ sizes its threads and caches by, and live parameters such as `engine.workers` an
 `low-end` run the software rasterizer at this machine's processor speed: a real computer without a graphics card is
 slower still. Read their numbers as a floor for that computer. With no WebGL at all the app cannot start
 ([ARCHITECTURE.md](ARCHITECTURE.md#the-stage-and-playback)); a run in such an environment ends with that message.
+There the stage's frames are drawn on the engine's workers by the processor renderer, so a playback can deliver every
+frame while each costs a lot of processor time: `playback.play` also reports `playback.processorWork`, the work of a
+frame in all its bands (sampled while it plays). It is how a playback quality level is seen to lower what a frame costs:
+`--experiment` a script that sets `window.styk.state.settings.playbackQuality` (`normal`, `medium`, `low`, `draft`).
 
 ## Workloads
 
@@ -273,9 +277,13 @@ measure the same document. Every figure moves on every frame, the worst honest c
 
 Feature workloads (`perf/workload-features.mjs`) are the busy scene with one feature added, so the difference from
 `medium` is that feature's cost: `sprites` (pictures on the limbs), `effects` (glow, shadow, outline, tint and blur),
+`effects-heavy` (large radii, centred outlines, bloom, stacks of three, half strength and a scene stack with animated grain),
 `movieclips` (the figures inside clips two deep), `camera` (a camera that pans, zooms and turns on every frame), `text`
-(a label on every figure), `shapes` (half-transparent filled polygons), and `long` (the small scene over 4,001 frames:
-what a long timeline costs). `npm run perf -- list` describes each.
+(a label on every figure), `shapes` (half-transparent filled polygons), `long` (the small scene over 4,001 frames:
+what a long timeline costs), and `particles` (generated effects of every type: auras on six figures, two beams, two
+smoke columns, an explosion every second and a scene emitter of 2,000 particles). `effects-heavy` and `particles` are
+run on their own (`--workload effects-heavy`, `--workload particles`) and are not part of the `features` suite.
+`npm run perf -- list` describes each.
 
 ## Scenarios
 

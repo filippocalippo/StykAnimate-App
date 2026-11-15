@@ -51,11 +51,19 @@ pub fn effect_diff(ours: &Effect, expected: &Value) -> Option<String> {
         return Some(format!("{} {} vs {} {}", expected.get("type").unwrap_or(&Value::Null), expected.get("id").unwrap_or(&Value::Null), kind.name(), &*ours.id));
     }
     let Some(params) = expected.get("params").and_then(Value::as_obj) else { return Some("no parameters".into()) };
-    if params.len() != kind.specs().len() {
-        return Some(format!("{} parameters vs {}", params.len(), kind.specs().len()));
+    if let Some((unknown, _)) = params.iter().find(|(name, _)| kind.param(name).is_none()) {
+        return Some(format!("{unknown} is not a parameter"));
     }
+    // A recording predates the parameters added since it was made (`registry::ADDED`): it may lack one of those, and ours
+    // must then hold its default (what the effect did before it). Any other parameter it lacks is a difference.
+    let defaults = super::Params::defaults(kind);
     for (i, spec) in kind.specs().iter().enumerate() {
-        let Some(theirs) = params.get(spec.name) else { return Some(format!("{} missing", spec.name)) };
+        let Some(theirs) = params.get(spec.name) else {
+            if super::registry::added(kind, spec.name) && ours.params.get(i) == defaults.get(i) {
+                continue;
+            }
+            return Some(format!("{} missing", spec.name));
+        };
         let same = match (ours.params.get(i), theirs) {
             (ParamValue::Num(a), Value::Num(b)) if spec.kind == ParamKind::Number => near(a, *b),
             (ParamValue::Num(a), Value::Num(b)) => a == *b,

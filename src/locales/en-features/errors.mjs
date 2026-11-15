@@ -1301,6 +1301,7 @@ export default Object.freeze({
   "errors.vfxClips.tooManyEffectKeys": "Too many effect keys.",
   "errors.vfxClips.aTargetSupportsUpTo64SimultaneousEffects": "A target supports up to 64 simultaneous effects.",
   "errors.vfxInspector.thatPresetWasDeleted": "That preset was deleted.",
+  "errors.vfxInspector.unknownEffectNotice": "There is no effect notice called {value}.",
   "errors.vfxUserPresets.nameThePreset": "Name the preset.",
   "errors.vfxUserPresets.thisEffectHasMoreThanKeysTooMany": "This effect has more than {USER_PRESET_KEY_LIMIT} keys, too many to save as a preset.",
   "errors.vfxUserPresets.invalidEffectPreset": "Invalid effect preset.",

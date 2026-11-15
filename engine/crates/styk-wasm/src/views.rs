@@ -134,7 +134,8 @@ impl Aux {
         let config = wgpu::SurfaceConfiguration { width, height, ..stage.config.clone() };
         surface.configure(&stage.device, &config);
         probe(&surface, &config, &stage.device, &stage.queue);
-        let renderer = Renderer::new(&stage.device, &stage.queue, config.format);
+        let mut renderer = Renderer::new(&stage.device, &stage.queue, config.format);
+        renderer.set_float_effects(stage.renderer.float_effects());
         Ok(Aux { surface, config, renderer, shared: None })
     }
 

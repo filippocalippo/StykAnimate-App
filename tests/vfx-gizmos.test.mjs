@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {VfxGizmos} from '../src/vfx-gizmos.mjs';
+import {VfxGizmos,vfxHandles,vfxHandleValues} from '../src/vfx-gizmos.mjs';
+import {createVfx,VFX_REGISTRY} from '../src/vfx.mjs';
 
 test('inactive VFX controls do not request scene evaluation or geometry',()=>{
   const gizmos=Object.create(VfxGizmos.prototype);
@@ -55,4 +56,47 @@ test('a movieclip instance is measured by what the engine says it paints, with t
   // A clip that paints nothing gives no controls; a figure that is no clip never asks.
   assert.equal(measured(null,{clips:[1],extent:null}).control,null);
   assert.deepEqual(measured(null).extents,[]);
+});
+
+/** A control as VfxGizmos.control() gives it: the effect, its bounds and, for a figure's generated effect, its emitter. */
+const controlOf=(type,params,{target={kind:'figure',uid:1},bounds={x:100,y:50,width:200,height:300},origin=null}={})=>({
+  target,effect:{type,enabled:true,params:{...createVfx(type,'e').params,...params}},bounds,unit:1,origin,options:{report:{canvas_width:960,canvas_height:540}}});
+
+test('a figure\'s generated effect is handled from where the engine emits it: the root, or the selected joint',()=>{
+  // The figure's bounds centre is (200, 200); the engine emits particles from its root point.
+  const root={x:150,y:320},control=controlOf('particles',{direction:0,speed:10},{origin:root});
+  const {center,handles}=vfxHandles(control),spray=handles.find(h=>h.kind==='spray');
+  assert.deepEqual(center,root);
+  assert.deepEqual(spray.point,{x:root.x+60,y:root.y},'the spray line starts at the emitter');
+  // Dragging the spray handle straight up from the emitter aims the particles straight up.
+  assert.equal(vfxHandleValues(control,spray,{x:root.x,y:root.y-60}).direction,-90);
+  // An explosion on a figure starts at the middle of what the figure draws, as the engine places it.
+  assert.deepEqual(vfxHandles(controlOf('explosion',{},{origin:null})).center,{x:200,y:200});
+});
+
+test('a scene\'s generated effect is handled from its own stage position, not the middle of the stage',()=>{
+  const stage={x:0,y:0,width:960,height:540},control=controlOf('particles',{x:.25,y:.75,direction:0,speed:10},{target:{kind:'scene'},bounds:stage});
+  const {center,handles}=vfxHandles(control),spray=handles.find(h=>h.kind==='spray');
+  assert.deepEqual(center,{x:240,y:405});
+  // Dragging the spray handle to the emitter's right keeps the direction at 0: measured from the emitter, not (480, 270).
+  const values=vfxHandleValues(control,spray,{x:center.x+90,y:center.y});
+  assert.equal(values.direction,0);assert.equal(values.speed,15);
+  // The position handle moves the emitter on the stage.
+  const moved=vfxHandleValues(control,handles.find(h=>h.kind==='center'),{x:480,y:270});
+  assert.deepEqual([moved.x,moved.y],[.5,.5]);
+});
+
+test('a dissolve\'s progress runs round a ring (it has no direction); a wipe moves along its angle',()=>{
+  const control=controlOf('dissolve',{progress:.25}),{center,handles,ring}=vfxHandles(control),handle=handles.find(h=>h.kind==='progress');
+  assert.ok(ring&&Math.abs(ring.progress-.25)<1e-9);
+  assert.ok(Math.abs(handle.point.x-(center.x+ring.radius))<1e-9&&Math.abs(handle.point.y-center.y)<1e-9,'a quarter of the way round, from the top');
+  assert.ok(Math.abs(vfxHandleValues(control,handle,{x:center.x,y:center.y+40}).progress-.5)<1e-9,'half way round is half dissolved');
+  // Past the top the progress holds at its end rather than jumping to the other.
+  const drag={progress:.95};assert.equal(vfxHandleValues(controlOf('dissolve',{progress:.95}),handle,{x:center.x+10,y:center.y-60},drag).progress,1);
+  assert.equal(vfxHandleValues(controlOf('dissolve',{progress:.05}),handle,{x:center.x-10,y:center.y-60},{progress:.05}).progress,0);
+  // A directional dissolve (when the registry has it) is a wipe along its angle across the artwork.
+  if(VFX_REGISTRY.dissolve.params.directional){
+    const wipe=controlOf('dissolve',{directional:1,angle:0,progress:.5}),{handles:[w]}=vfxHandles(wipe);
+    assert.equal(w.kind,'wipe');assert.ok(Math.abs(vfxHandleValues(wipe,w,{x:300,y:200}).progress-1)<1e-9);
+  }
 });

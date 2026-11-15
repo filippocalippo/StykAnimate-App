@@ -1,414 +1,839 @@
 {
- "Power up": [
-  [
-   "glow",
-   {
-    "color": {
-     "type": "linear",
-     "angle": 90,
-     "stops": [
-      {
-       "offset": 0,
-       "color": [
-        80,
-        150,
-        255
-       ],
-       "opacity": 1
-      },
-      {
-       "offset": 1,
-       "color": [
-        160,
-        60,
-        255
-       ],
-       "opacity": 1
-      }
-     ]
-    },
-    "radius": 20,
-    "intensity": 1.5,
-    "spread": 2,
-    "coreColor": 16777215,
-    "coreMix": 0.25
-   }
-  ],
-  [
-   "wave",
-   {
-    "strength": 2,
-    "wavelength": 80
-   }
-  ]
- ],
- "Teleport": [
-  [
-   "dissolve",
-   {
-    "progress": 0.4,
-    "color": {
-     "type": "linear",
-     "angle": 90,
-     "stops": [
-      {
-       "offset": 0,
-       "color": [
-        30,
-        240,
-        255
-       ],
-       "opacity": 1
-      },
-      {
-       "offset": 1,
-       "color": [
-        100,
-        80,
-        255
-       ],
-       "opacity": 1
-      }
-     ]
-    },
-    "edge": 0.12
-   }
-  ],
-  [
-   "glow",
-   {
-    "color": 4840703,
-    "intensity": 1.4,
-    "radius": 10
-   }
-  ]
- ],
- "Impact": [
-  [
-   "tint",
-   {
-    "color": 16777215,
-    "mix": 0.6
-   }
-  ],
-  [
-   "rgbSplit",
-   {
-    "amount": 8,
-    "angle": 15
-   }
-  ],
-  [
-   "blur",
-   {
-    "mode": 1,
-    "radius": 3,
-    "angle": 15
-   }
-  ]
- ],
- "Hologram": [
-  [
-   "tint",
-   {
-    "color": 3268607,
-    "mix": 0.8
-   }
-  ],
-  [
-   "rgbSplit",
-   {
-    "amount": 2
-   }
-  ],
-  [
-   "noise",
-   {
-    "amount": 0.08,
-    "colored": 1
-   }
-  ],
-  [
-   "glow",
-   {
-    "color": 3002367,
-    "radius": 8,
-    "intensity": 0.8
-   }
-  ]
- ],
- "Ice": [
-  [
-   "tint",
-   {
-    "color": {
-     "type": "linear",
-     "angle": 90,
-     "stops": [
-      {
-       "offset": 0,
-       "color": [
-        60,
-        135,
-        255
-       ],
-       "opacity": 1
-      },
-      {
-       "offset": 1,
-       "color": [
-        210,
-        255,
-        255
-       ],
-       "opacity": 1
-      }
-     ]
-    },
-    "mix": 0.8
-   }
-  ],
-  [
-   "outline",
-   {
-    "color": 12252671,
-    "width": 2
-   }
-  ],
-  [
-   "lightSweep",
-   {
-    "intensity": 0.7
-   }
-  ]
- ],
- "Poison": [
-  [
-   "tint",
-   {
-    "color": {
-     "type": "linear",
-     "angle": 90,
-     "stops": [
-      {
-       "offset": 0,
-       "color": [
-        170,
-        255,
-        50
-       ],
-       "opacity": 1
-      },
-      {
-       "offset": 1,
-       "color": [
-        60,
-        150,
-        20
-       ],
-       "opacity": 1
-      }
-     ]
-    },
-    "mix": 0.8
-   }
-  ],
-  [
-   "glow",
-   {
-    "color": 9174818,
-    "radius": 14,
-    "intensity": 1.2
-   }
-  ],
-  [
-   "wave",
-   {
-    "strength": 2,
-    "wavelength": 60
-   }
-  ]
- ],
- "Neon": [
-  [
-   "outline",
-   {
-    "color": {
-     "type": "linear",
-     "angle": 90,
-     "stops": [
-      {
-       "offset": 0,
-       "color": [
-        255,
-        50,
-        150
-       ],
-       "opacity": 1
-      },
-      {
-       "offset": 1,
-       "color": [
-        70,
-        200,
-        255
-       ],
-       "opacity": 1
-      }
-     ]
-    },
-    "width": 3,
-    "only": 1
-   }
-  ],
-  [
-   "glow",
-   {
-    "color": 15352063,
-    "radius": 16,
-    "intensity": 1.2
-   }
-  ]
- ],
- "Golden hour": [
-  [
-   "grade",
-   {
-    "temperature": 0.5,
-    "shadows": 0.15,
-    "highlights": -0.1,
-    "saturation": 0.85
-   }
-  ],
-  [
-   "bloom",
-   {
-    "threshold": 0.7,
-    "intensity": 0.6,
-    "color": {
-     "type": "linear",
-     "angle": 90,
-     "stops": [
-      {
-       "offset": 0,
-       "color": [
-        255,
-        220,
-        150
-       ],
-       "opacity": 1
-      },
-      {
-       "offset": 1,
-       "color": [
-        255,
-        160,
-        100
-       ],
-       "opacity": 1
-      }
-     ]
+ "Hit flash": {
+  "effects": [
+   [
+    "tint",
+    {
+     "color": 16777215,
+     "mix": 1
     }
-   }
+   ],
+   [
+    "glow",
+    {
+     "color": 16777215,
+     "radius": 8,
+     "intensity": 0.9
+    }
+   ]
+  ],
+  "duration": 4,
+  "fadeOut": 3
+ },
+ "Impact": {
+  "effects": [
+   [
+    "tint",
+    {
+     "color": 16777215,
+     "mix": 0.6
+    }
+   ],
+   [
+    "blur",
+    {
+     "mode": 1,
+     "radius": 12,
+     "angle": 15
+    }
+   ],
+   [
+    "rgbSplit",
+    {
+     "amount": 10,
+     "angle": 15
+    }
+   ]
+  ],
+  "duration": 6,
+  "fadeOut": 2,
+  "keys": [
+   [
+    0,
+    "mix",
+    [
+     {
+      "tick": 0,
+      "value": 0.6
+     },
+     {
+      "tick": 3,
+      "value": 0
+     }
+    ]
+   ],
+   [
+    1,
+    "radius",
+    [
+     {
+      "tick": 0,
+      "value": 14,
+      "interpolation": "ease-out"
+     },
+     {
+      "tick": 6,
+      "value": 0
+     }
+    ]
+   ],
+   [
+    2,
+    "amount",
+    [
+     {
+      "tick": 0,
+      "value": 12,
+      "interpolation": "ease-out"
+     },
+     {
+      "tick": 6,
+      "value": 0
+     }
+    ]
+   ]
   ]
- ],
- "Retro screen": [
-  [
-   "grade",
-   {
-    "saturation": 0.65,
-    "temperature": 0.2
-   }
+ },
+ "Damage": {
+  "effects": [
+   [
+    "tint",
+    {
+     "color": 16722474,
+     "mix": 0.85
+    }
+   ]
   ],
-  [
-   "pixelate",
-   {
-    "size": 4
-   }
-  ],
-  [
-   "noise",
-   {
-    "amount": 0.08
-   }
-  ],
-  [
-   "crt",
-   {
-    "amount": 0.2,
-    "curvature": 0.06,
-    "chromatic": 1
-   }
+  "duration": 8,
+  "keys": [
+   [
+    0,
+    "mix",
+    [
+     {
+      "tick": 0,
+      "value": 0.85,
+      "interpolation": "ease-out"
+     },
+     {
+      "tick": 8,
+      "value": 0
+     }
+    ]
+   ]
   ]
- ],
- "Energy": [
-  [
-   "tint",
-   {
-    "color": 5623039,
-    "mix": 0.65
-   }
+ },
+ "Teleport": {
+  "effects": [
+   [
+    "dissolve",
+    {
+     "progress": 0.45,
+     "size": 20,
+     "color": {
+      "type": "linear",
+      "angle": 90,
+      "stops": [
+       {
+        "offset": 0,
+        "color": [
+         30,
+         240,
+         255
+        ],
+        "opacity": 1
+       },
+       {
+        "offset": 1,
+        "color": [
+         100,
+         80,
+         255
+        ],
+        "opacity": 1
+       }
+      ]
+     },
+     "edge": 0.14
+    }
+   ],
+   [
+    "glow",
+    {
+     "color": 4840703,
+     "intensity": 1.4,
+     "radius": 10
+    }
+   ]
   ],
-  [
-   "glow",
-   {
-    "color": 5623039,
-    "radius": 16,
-    "intensity": 1.2
-   }
+  "duration": 16,
+  "keys": [
+   [
+    0,
+    "progress",
+    [
+     {
+      "tick": 0,
+      "value": 0,
+      "interpolation": "ease-in"
+     },
+     {
+      "tick": 16,
+      "value": 1
+     }
+    ]
+   ]
   ]
- ],
- "Hit flash": [
-  [
-   "tint",
-   {
-    "color": 16777215,
-    "mix": 1
-   }
+ },
+ "Power up": {
+  "effects": [
+   [
+    "aura",
+    {
+     "style": 0,
+     "color": 16763196
+    }
+   ],
+   [
+    "glow",
+    {
+     "color": 16765530,
+     "radius": 18,
+     "intensity": 1.2
+    }
+   ]
   ],
-  [
-   "glow",
-   {
-    "color": 16777215,
-    "radius": 6,
-    "intensity": 0.7
-   }
+  "duration": 36,
+  "fadeIn": 3,
+  "fadeOut": 8,
+  "keys": [
+   [
+    1,
+    "intensity",
+    [
+     {
+      "tick": 0,
+      "value": 0.5
+     },
+     {
+      "tick": 4,
+      "value": 1.6
+     },
+     {
+      "tick": 8,
+      "value": 0.5
+     },
+     {
+      "tick": 12,
+      "value": 1.6
+     },
+     {
+      "tick": 16,
+      "value": 0.5
+     },
+     {
+      "tick": 20,
+      "value": 1.6
+     },
+     {
+      "tick": 24,
+      "value": 0.5
+     },
+     {
+      "tick": 28,
+      "value": 1.6
+     },
+     {
+      "tick": 32,
+      "value": 0.5
+     },
+     {
+      "tick": 36,
+      "value": 1.6
+     }
+    ]
+   ]
   ]
- ],
- "Ghost": [
-  [
-   "tint",
-   {
-    "color": 10075135,
-    "mix": 0.75
-   }
+ },
+ "Shockwave": {
+  "effects": [
+   [
+    "shockwave",
+    {
+     "radius": 120,
+     "thickness": 36,
+     "strength": 28,
+     "falloff": 1.2
+    }
+   ]
   ],
-  [
-   "blur",
-   {
-    "radius": 2
-   }
+  "duration": 16,
+  "keys": [
+   [
+    0,
+    "radius",
+    [
+     {
+      "tick": 0,
+      "value": 20,
+      "interpolation": "ease-out"
+     },
+     {
+      "tick": 16,
+      "value": 520
+     }
+    ]
+   ],
+   [
+    0,
+    "strength",
+    [
+     {
+      "tick": 0,
+      "value": 28
+     },
+     {
+      "tick": 16,
+      "value": 0
+     }
+    ]
+   ]
   ]
- ],
- "Retro": [
-  [
-   "grade",
-   {
-    "saturation": 0.65,
-    "temperature": 0.2
-   }
+ },
+ "Glitch": {
+  "effects": [
+   [
+    "rgbSplit",
+    {
+     "amount": 10
+    }
+   ],
+   [
+    "pixelate",
+    {
+     "size": 6
+    }
+   ]
   ],
-  [
-   "pixelate",
-   {
-    "size": 5
-   }
-  ],
-  [
-   "noise",
-   {
-    "amount": 0.12
-   }
+  "duration": 12,
+  "keys": [
+   [
+    0,
+    "amount",
+    [
+     {
+      "tick": 0,
+      "value": 14,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 2,
+      "value": 3,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 3,
+      "value": 18,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 5,
+      "value": 0,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 7,
+      "value": 10,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 9,
+      "value": 2,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 11,
+      "value": 0
+     }
+    ]
+   ],
+   [
+    1,
+    "size",
+    [
+     {
+      "tick": 0,
+      "value": 1,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 2,
+      "value": 10,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 3,
+      "value": 1,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 6,
+      "value": 14,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 7,
+      "value": 1,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 9,
+      "value": 6,
+      "interpolation": "constant"
+     },
+     {
+      "tick": 10,
+      "value": 1
+     }
+    ]
+   ]
   ]
- ]
+ },
+ "Neon": {
+  "effects": [
+   [
+    "outline",
+    {
+     "color": {
+      "type": "linear",
+      "angle": 90,
+      "stops": [
+       {
+        "offset": 0,
+        "color": [
+         255,
+         50,
+         150
+        ],
+        "opacity": 1
+       },
+       {
+        "offset": 1,
+        "color": [
+         70,
+         200,
+         255
+        ],
+        "opacity": 1
+       }
+      ]
+     },
+     "width": 3,
+     "only": 1
+    }
+   ],
+   [
+    "glow",
+    {
+     "color": 15352063,
+     "radius": 16,
+     "intensity": 1.2
+    }
+   ]
+  ]
+ },
+ "Hologram": {
+  "effects": [
+   [
+    "tint",
+    {
+     "color": 3268607,
+     "mix": 0.8
+    }
+   ],
+   [
+    "rgbSplit",
+    {
+     "amount": 2
+    }
+   ],
+   [
+    "noise",
+    {
+     "amount": 0.08,
+     "colored": 1
+    }
+   ],
+   [
+    "glow",
+    {
+     "color": 3002367,
+     "radius": 8,
+     "intensity": 0.8
+    }
+   ]
+  ]
+ },
+ "Ice": {
+  "effects": [
+   [
+    "tint",
+    {
+     "color": {
+      "type": "linear",
+      "angle": 90,
+      "stops": [
+       {
+        "offset": 0,
+        "color": [
+         60,
+         135,
+         255
+        ],
+        "opacity": 1
+       },
+       {
+        "offset": 1,
+        "color": [
+         210,
+         255,
+         255
+        ],
+        "opacity": 1
+       }
+      ]
+     },
+     "mix": 0.8
+    }
+   ],
+   [
+    "outline",
+    {
+     "color": 12252671,
+     "width": 2
+    }
+   ],
+   [
+    "lightSweep",
+    {
+     "intensity": 0.7
+    }
+   ]
+  ]
+ },
+ "Ghost": {
+  "effects": [
+   [
+    "tint",
+    {
+     "color": 10075135,
+     "mix": 0.75
+    }
+   ],
+   [
+    "blur",
+    {
+     "radius": 2
+    }
+   ]
+  ]
+ },
+ "Golden hour": {
+  "effects": [
+   [
+    "grade",
+    {
+     "temperature": 0.5,
+     "shadows": 0.15,
+     "highlights": -0.1,
+     "saturation": 0.85
+    }
+   ],
+   [
+    "bloom",
+    {
+     "threshold": 0.7,
+     "intensity": 0.6,
+     "color": {
+      "type": "linear",
+      "angle": 90,
+      "stops": [
+       {
+        "offset": 0,
+        "color": [
+         255,
+         220,
+         150
+        ],
+        "opacity": 1
+       },
+       {
+        "offset": 1,
+        "color": [
+         255,
+         160,
+         100
+        ],
+        "opacity": 1
+       }
+      ]
+     }
+    }
+   ]
+  ]
+ },
+ "Sunset": {
+  "effects": [
+   [
+    "grade",
+    {
+     "exposure": 0.05,
+     "saturation": 1.2,
+     "temperature": 0.65,
+     "tint": 0.25,
+     "highlights": -0.1
+    }
+   ],
+   [
+    "bloom",
+    {
+     "threshold": 0.6,
+     "intensity": 0.6,
+     "radius": 24,
+     "color": {
+      "type": "linear",
+      "angle": 90,
+      "stops": [
+       {
+        "offset": 0,
+        "color": [
+         255,
+         190,
+         120
+        ],
+        "opacity": 1
+       },
+       {
+        "offset": 1,
+        "color": [
+         255,
+         120,
+         150
+        ],
+        "opacity": 1
+       }
+      ]
+     }
+    }
+   ],
+   [
+    "vignette",
+    {
+     "amount": 0.35,
+     "softness": 0.8,
+     "color": 3803680
+    }
+   ]
+  ]
+ },
+ "Night": {
+  "effects": [
+   [
+    "grade",
+    {
+     "exposure": -0.7,
+     "contrast": 1.1,
+     "saturation": 0.55,
+     "temperature": -0.45,
+     "tint": 0.05,
+     "shadows": -0.1,
+     "highlights": -0.15
+    }
+   ],
+   [
+    "vignette",
+    {
+     "amount": 0.55,
+     "softness": 0.7,
+     "color": 330270
+    }
+   ]
+  ]
+ },
+ "Old film": {
+  "effects": [
+   [
+    "grade",
+    {
+     "saturation": 0.3,
+     "temperature": 0.35,
+     "contrast": 1.2,
+     "gamma": 1.1
+    }
+   ],
+   [
+    "noise",
+    {
+     "amount": 0.16,
+     "contrast": 1.2,
+     "speed": 1
+    }
+   ],
+   [
+    "vignette",
+    {
+     "amount": 0.6,
+     "softness": 0.55,
+     "color": 1313798
+    }
+   ]
+  ]
+ },
+ "Retro screen": {
+  "effects": [
+   [
+    "grade",
+    {
+     "saturation": 0.65,
+     "temperature": 0.2
+    }
+   ],
+   [
+    "pixelate",
+    {
+     "size": 4
+    }
+   ],
+   [
+    "noise",
+    {
+     "amount": 0.08
+    }
+   ],
+   [
+    "crt",
+    {
+     "amount": 0.2,
+     "curvature": 0.06,
+     "chromatic": 1
+    }
+   ]
+  ]
+ },
+ "Rain": {
+  "effects": [
+   [
+    "particles",
+    {
+     "look": 14,
+     "color": 4037600,
+     "shape": 3,
+     "radius": 0,
+     "rate": 6,
+     "life": 90,
+     "size": 2,
+     "speed": 5,
+     "direction": -90,
+     "spread": 60,
+     "gravity": 0.4,
+     "drag": 0.04,
+     "wind": 0.25,
+     "stretch": 2,
+     "endSize": 1,
+     "variation": 0.4,
+     "fadeIn": 0.02,
+     "fade": 0.1
+    }
+   ]
+  ]
+ },
+ "Snow": {
+  "effects": [
+   [
+    "particles",
+    {
+     "look": 13,
+     "color": 15660799,
+     "shape": 3,
+     "radius": 0,
+     "rate": 1,
+     "life": 300,
+     "size": 3.5,
+     "speed": 3,
+     "direction": -90,
+     "spread": 140,
+     "gravity": 0.07,
+     "drag": 0.05,
+     "wind": 0.03,
+     "turbulence": 30,
+     "flow": 10,
+     "spin": 2,
+     "endSize": 1,
+     "variation": 0.6,
+     "fadeIn": 0.05,
+     "fade": 0.1,
+     "outline": 1,
+     "outlineColor": 8362941,
+     "outlineWidth": 0.8
+    }
+   ]
+  ]
+ },
+ "Falling leaves": {
+  "effects": [
+   [
+    "particles",
+    {
+     "look": 12,
+     "color": 14254635,
+     "shape": 3,
+     "radius": 0,
+     "rate": 0.6,
+     "life": 260,
+     "size": 6,
+     "speed": 3,
+     "direction": -90,
+     "spread": 140,
+     "gravity": 0.08,
+     "drag": 0.05,
+     "wind": 0.05,
+     "turbulence": 40,
+     "flow": 10,
+     "spin": 6,
+     "endSize": 1,
+     "variation": 0.5,
+     "fadeIn": 0.05,
+     "fade": 0.15
+    }
+   ]
+  ]
+ },
+ "Embers": {
+  "effects": [
+   [
+    "particles",
+    {
+     "look": 1,
+     "color": 16747050,
+     "shape": 3,
+     "radius": 0,
+     "rate": 4,
+     "life": 110,
+     "size": 5,
+     "speed": 2,
+     "direction": -90,
+     "spread": 40,
+     "gravity": -0.05,
+     "drag": 0.02,
+     "flow": 30,
+     "endSize": 0.3,
+     "variation": 0.6,
+     "fadeIn": 0.1,
+     "fade": 0.4,
+     "twinkle": 0.6,
+     "glow": 0.8
+    }
+   ]
+  ]
+ }
 }

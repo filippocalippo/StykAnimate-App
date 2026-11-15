@@ -16,10 +16,19 @@ export const play = {
     'playback.start': {title: 'Play pressed to first frame', unit: 'ms', better: 'lower', digits: 0},
     'playback.stutters': {title: 'Frames over one and a half periods', unit: '', better: 'lower', digits: 0},
     'playback.buffering': {title: 'Time spent waiting for frames', unit: 'ms', better: 'lower', digits: 0},
+    'playback.processorWork': {title: 'Processor renderer: work of a frame on the engine\'s workers', unit: 'ms', better: 'lower', digits: 1},
   },
   async run(context) {
     await context.evaluate(() => globalThis.styk.actions.play());
-    await context.sleep(SECONDS * 1000);
+    // Without a graphics card the stage's frames are drawn on the engine's workers (the processor renderer): what the
+    // last frame drawn cost in all its bands, sampled while it plays (each frame counted once). Not there on a graphics card.
+    const drawn = new Map(), until = performance.now() + SECONDS * 1000;
+    while (performance.now() < until) {
+      await context.sleep(Math.min(200, Math.max(0, until - performance.now())));
+      const frame = await context.evaluate(() => globalThis.styk.performance().renderer?.engine?.processor ?? null);
+      if (frame?.shown) drawn.set(frame.shown, frame);
+    }
+    const mean = key => drawn.size ? [...drawn.values()].reduce((sum, frame) => sum + frame[key], 0) / drawn.size : NaN;
     // Read while it still plays: stopping ends the measurement the app keeps.
     const shown = await context.evaluate(() => {
       const {styk} = globalThis, presentation = styk.performance().presentation;
@@ -29,7 +38,8 @@ export const play = {
     const intervals = shown?.intervalsMs ?? [], target = shown?.targetFps || 24, total = intervals.reduce((sum, ms) => sum + ms, 0);
     const fps = total > 0 ? intervals.length * 1000 / total : 0;
     return {metrics: {'playback.fps': fps, 'playback.delivered': Math.min(100, fps / target * 100), 'playback.start': shown?.startupMs ?? NaN,
-      'playback.stutters': intervals.filter(ms => ms > 1500 / target).length, 'playback.buffering': shown?.bufferingMs ?? 0}};
+      'playback.stutters': intervals.filter(ms => ms > 1500 / target).length, 'playback.buffering': shown?.bufferingMs ?? 0,
+      'playback.processorWork': mean('workMs')}};
   },
 };
 

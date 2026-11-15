@@ -298,3 +298,95 @@ fn clips_fade_and_contain_like_the_editor() {
     assert_eq!(clip.fade(8.0), 0.0);
     assert_eq!(Clip { duration: None, start: 0.0, offset: 0.0, ..clip }.fade(1.0), 1.0);
 }
+
+/// An effect with a speed runs on its clip's local time (`Clip::time`, smooth between frames) and a per-pose effect on the
+/// scene's tick; its authored values stay as saved. An effect without a speed is shared as it is at every tick: time costs it
+/// nothing.
+#[test]
+fn effects_with_a_speed_run_on_the_clip_time_and_keep_their_authored_values() {
+    use vfx::registry::{Blur, Noise, Params};
+    let moving = Arc::new(Effect { id: "n".into(), enabled: true, params: Params::Noise(Noise { speed: 0.5, ..Default::default() }) });
+    let still = Arc::new(Effect { id: "b".into(), enabled: true, params: Params::Blur(Blur { radius: 4.0, ..Default::default() }) });
+    let clip = Clip {
+        id: "c".into(),
+        target: vfx::Target::Scene,
+        start: 10.0,
+        duration: Some(20.0),
+        offset: 3.0,
+        enabled: true,
+        strength: 1.0,
+        fade_in: 0.0,
+        fade_out: 0.0,
+        include_attached: false,
+        effects: vec![moving.clone(), still.clone()],
+        channels: vec![],
+    };
+    for tick in [10.0, 12.0, 12.5, 17.25] {
+        let sampled = clip.sample(tick, true);
+        assert_eq!(sampled[0].params.time(), clip.time(tick), "at tick {tick} the clock is the clip's local time");
+        let Params::Noise(noise) = &sampled[0].params else { panic!("a noise") };
+        assert_eq!(noise.speed, 0.5, "the authored speed stays");
+        assert!(Arc::ptr_eq(&sampled[1], &still), "an effect without a speed is shared");
+    }
+    assert_eq!(moving.params.time(), 0.0, "the saved effect is not changed");
+    assert_eq!(vfx::at_time(&moving, 7.5).params.time(), 7.5);
+    assert!(Arc::ptr_eq(&vfx::at_time(&still, 7.5), &still));
+    let on_time = vfx::at_time(&moving, 7.5);
+    assert!(Arc::ptr_eq(&vfx::at_time(&on_time, 7.5), &on_time), "an effect already on its clock is shared");
+}
+
+/// The frozen recordings predate the parameters `registry::ADDED` lists (image filters and generated effects): a recording may
+/// lack one of those only where the engine holds its default, the effect's behaviour before it. Any other parameter it lacks, or
+/// a listed one at another value, is a difference, so a renamed or wrongly written parameter is caught. The editor replay and
+/// the JavaScript tape tests take the same list out of a document (`registry::without_added_defaults`).
+#[test]
+fn recordings_may_lack_only_the_parameters_added_since_and_only_at_their_defaults() {
+    use vfx::registry::{self, Kind, Params};
+    for &(effect, param) in registry::ADDED {
+        let kind = Kind::from_name(effect).unwrap_or_else(|| panic!("{effect} is an effect type"));
+        assert!(kind.param(param).is_some(), "{effect}.{param} is a saved parameter");
+    }
+    // An effect as a recording holds it, without the parameters `left_out`.
+    let recording = |effect: &Effect, left_out: &[&str]| -> Value {
+        let kind = effect.kind();
+        let params: Vec<String> = kind
+            .specs()
+            .iter()
+            .enumerate()
+            .filter(|(_, spec)| !left_out.contains(&spec.name))
+            .map(|(i, spec)| match effect.params.get(i) {
+                ParamValue::Num(n) => format!("\"{}\":{}", spec.name, n),
+                ParamValue::Paint(_) => panic!("plain colours here"),
+            })
+            .collect();
+        styk_doc::json::parse(format!("{{\"id\":\"{}\",\"type\":\"{}\",\"params\":{{{}}}}}", effect.id, kind.name(), params.join(",")).as_bytes()).unwrap()
+    };
+    let effect = |kind: Kind, set: &[(&str, f64)]| {
+        let mut params = Params::defaults(kind);
+        for &(name, value) in set {
+            assert!(params.set(kind.param(name).unwrap(), &ParamValue::Num(value)));
+        }
+        Effect { id: "e".into(), enabled: true, params }
+    };
+    let glow = effect(Kind::Glow, &[]);
+    assert_eq!(vfx::parity::effect_diff(&glow, &recording(&glow, &[])), None);
+    assert_eq!(vfx::parity::effect_diff(&glow, &recording(&glow, &["source"])), None, "a filter's added parameter at its default");
+    let aura = effect(Kind::Aura, &[]);
+    assert_eq!(vfx::parity::effect_diff(&aura, &recording(&aura, &["width", "layer", "prefill", "timeScale", "unique"])), None, "a generated effect's");
+    let artwork = effect(Kind::Glow, &[("source", 1.0)]);
+    assert!(vfx::parity::effect_diff(&artwork, &recording(&artwork, &["source"])).is_some(), "an added parameter away from its default differs");
+    assert!(vfx::parity::effect_diff(&glow, &recording(&glow, &["falloff"])).is_some(), "a parameter the recording should hold differs");
+    let wider = effect(Kind::Aura, &[("width", 2.0)]);
+    assert!(vfx::parity::effect_diff(&wider, &recording(&wider, &["width"])).is_some());
+
+    // A document as a recording holds it: the listed parameters at their defaults leave every effect, nested ones too.
+    let mut document = styk_doc::json::parse(
+        br#"{"stack":[{"type":"glow","params":{"source":0,"falloff":1}},{"type":"glow","params":{"source":1}}],"clip":{"effects":[{"type":"aura","params":{"width":1,"unique":1,"height":1}}]}}"#,
+    )
+    .unwrap();
+    registry::without_added_defaults(&mut document);
+    assert_eq!(
+        styk_doc::json::to_string(&document),
+        r#"{"stack":[{"type":"glow","params":{"falloff":1}},{"type":"glow","params":{"source":1}}],"clip":{"effects":[{"type":"aura","params":{"height":1}}]}}"#
+    );
+}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readdirSync, readFileSync} from 'node:fs';
 import {applyDocumentPatch} from '../src/engine/engine-patch.mjs';
 import {engineBuilt, sessionFromDocument} from './support/engine-node.mjs';
+import {asRecorded, recordedCall} from './support/recorded.mjs';
 
 const folder = new URL('../engine/tests/edit/', import.meta.url);
 const documentText = report => JSON.stringify(report, (key, value) => key === 'runtime_segments' ? undefined : value);
@@ -38,12 +39,14 @@ test('engine patches rebuild every recorded document', {skip: !engineBuilt}, asy
     try {
       for (const step of reference.steps.slice(1)) {
         const [method, ...args] = step.call;
-        const answer = JSON.parse(session.call(method.replace(/^@/, ''), JSON.stringify(args), JSON.stringify({...viewOf(view), autoKey: state.autoKey, patch: true, draws: step.draws ?? []})));
+        const answer = JSON.parse(session.call(method.replace(/^@/, ''), JSON.stringify(recordedCall(method, args)), JSON.stringify({...viewOf(view), autoKey: state.autoKey, patch: true, draws: step.draws ?? []})));
         view = answer.state ?? view;
         if (answer.status === 'unported') break;
         if (answer.patch) applyDocumentPatch(report, answer.patch);
         if (step.document) expected = step.document;
-        const actual = documentText(report);
+        let actual = documentText(report);
+        // The effect parameters added since the recordings, at their defaults, are not in them (support/recorded.mjs).
+        if (actual !== expected) actual = asRecorded(actual);
         if (actual !== expected) {
           let at = 0; while (actual[at] === expected[at]) at++;
           assert.fail(`${reference.scenario} step ${step.step} (${method}): at ${at} engine …${actual.slice(at - 80, at + 80)}… editor …${expected.slice(at - 80, at + 80)}… patch ${JSON.stringify(answer.patch).slice(0, 300)}`);

@@ -153,7 +153,8 @@ fn replay_with_worker(reference: &Value, worker: bool, max_source_bytes: usize) 
             result
         } else {
             let measured: Option<Vec<Value>> = step.get("boundsArgs").and_then(Value::elements).map(|e| e.iter().collect());
-            let args = measured.as_deref().unwrap_or(&call[1..]);
+            let recorded = recorded_call(&method, measured.as_deref().unwrap_or(&call[1..]));
+            let args = recorded.as_slice();
             if worker && editor.movieclip_timeline_replay_call(&method, args) {
                 editor.call_movieclip_timeline_worker(&method, args, &mut crate::movieclip_planning::TimelineWorker {
                     max_source_bytes,
@@ -200,9 +201,12 @@ fn replay_with_worker(reference: &Value, worker: bool, max_source_bytes: usize) 
         if let Err(difference) = crate::rebuild_check::rebuilt_whole(&editor) {
             differences.push(difference);
         }
-        let actual = editor.report_json();
+        let mut actual = editor.report_json();
         if actual != expected {
-            differences.push(format!("document differs: {}", first_difference(&actual, &expected)));
+            actual = as_recorded(editor.report());
+            if actual != expected {
+                differences.push(format!("document differs: {}", first_difference(&actual, &expected)));
+            }
         }
         let got = json(&editor.state_value());
         let want = json(step.get("state").unwrap_or(&Value::Null));
@@ -264,6 +268,33 @@ fn json(value: &Value) -> String {
 
 fn short(text: &str) -> String {
     if text.len() <= 400 { text.to_string() } else { format!("{}…", &text[..text.floor_char_boundary(400)]) }
+}
+
+/// The built-in preset catalogue the editor's recordings were made with (`vfx_presets_recorded.json`, frozen with them):
+/// the catalogue has changed since (moments with a length, fades and keys; a new set of looks), so a recorded
+/// `addVfxGroup` or `applyVfxPreset` of a preset by name is replayed with that name's definition from then, and the
+/// recordings still state what the commands do with it. `args` unchanged for any other call.
+pub fn recorded_call(method: &str, args: &[Value]) -> Vec<Value> {
+    static RECORDED: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let mut args = args.to_vec();
+    if matches!(method, "addVfxGroup" | "applyVfxPreset")
+        && let Some(name) = args.get(1).and_then(Value::as_str)
+        && let Some(effects) = RECORDED.get_or_init(|| styk_doc::json::parse(include_bytes!("vfx_presets_recorded.json")).expect("the recorded preset catalogue is valid")).get(name)
+    {
+        let mut definition = styk_doc::Obj::new();
+        definition.set("name", Value::str(name));
+        definition.set("effects", effects.clone());
+        args[1] = Value::object(definition);
+    }
+    args
+}
+
+/// `report` as the editor's recordings hold it: the effect parameters added since they were made (`registry::ADDED`) taken out
+/// of every effect where they are at their defaults. A recording compares with this; any other difference stays one.
+pub fn as_recorded(report: &Value) -> String {
+    let mut report = crate::record::without_runtime(report);
+    styk_eval::vfx::registry::without_added_defaults(&mut report);
+    styk_doc::json::to_string(&report)
 }
 
 fn first_difference(actual: &str, expected: &str) -> String {

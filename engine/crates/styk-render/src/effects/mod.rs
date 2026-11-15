@@ -9,6 +9,7 @@
 
 #[cfg(feature = "gpu")]
 pub mod executor;
+pub mod kernels;
 pub mod plan;
 pub mod recipe;
 

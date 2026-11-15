@@ -37,6 +37,9 @@ fn straight(color: [u32; 3], alpha: u32, n: u32, matte: bool) -> [u8; 4] {
     if matte {
         return [mean(color[0]), mean(color[1]), mean(color[2]), 255];
     }
+    // Light a generated effect gives off over transparency is colour beyond its coverage (styk-draw
+    // `K_PARTICLE` emission): it is kept as a translucent colour as bright as it is.
+    let alpha = alpha.max(color[0]).max(color[1]).max(color[2]);
     if alpha == 0 {
         return [0; 4];
     }
@@ -47,6 +50,17 @@ fn straight(color: [u32; 3], alpha: u32, n: u32, matte: bool) -> [u8; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn light_over_transparency_becomes_a_translucent_colour() {
+        // Premultiplied light without coverage: orange at 200, 100, 0 with no alpha.
+        let mut out = Vec::new();
+        resolve(&[200, 100, 0, 0], 4, [1, 1], 1, false, &mut out);
+        assert_eq!(out, [255, 128, 0, 200]);
+        // Paint is as it was.
+        resolve(&[100, 50, 0, 200], 4, [1, 1], 1, false, &mut out);
+        assert_eq!(out, [128, 64, 0, 200]);
+    }
 
     /// `downsampleExportPixels` (src/export-sampling.mjs) on straight RGBA, for comparison.
     fn javascript_box(straight: &[[u8; 4]; 4]) -> [u8; 4] {

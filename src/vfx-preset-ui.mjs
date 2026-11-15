@@ -53,10 +53,15 @@ export async function savePresetFromClip(host,id,button){
  try{await vfxPresetStore.save(clip,name);}catch(error){host.onError(error);return;}
  if(button?.isConnected)flash(button,interfaceText("vfxPresetUi.savedToMyPresets"));
 }
+/** Says "Saved to My presets" on the button for a moment: in its word, or, on an icon button, in its name and
+ * tooltip with a check in place of its glyph. */
 function flash(button,text){
- const label=button.querySelector('.ui-label');if(!label)return;
- clearTimeout(button._flash);button.dataset.saved='';label.textContent=text;
- button._flash=setTimeout(()=>{delete button.dataset.saved;label.textContent=button.dataset.label??label.textContent;},2200);
+ clearTimeout(button._flash);button.dataset.saved='';
+ const label=button.querySelector('.ui-label');
+ if(label){const was=label.textContent;label.textContent=text;button._flash=setTimeout(()=>{delete button.dataset.saved;label.textContent=button.dataset.label??was;},2200);return;}
+ const name=button.getAttribute('aria-label'),tip=button.getAttribute('data-tooltip'),glyph=button.innerHTML;
+ button.setAttribute('aria-label',text);button.setAttribute('data-tooltip',text);button.innerHTML=icon('check');
+ button._flash=setTimeout(()=>{delete button.dataset.saved;if(name!==null)button.setAttribute('aria-label',name);if(tip!==null)button.setAttribute('data-tooltip',tip);button.innerHTML=glyph;},2200);
 }
 
 /** A My presets card's menu (its ⋯ or a right-click): Rename… and Delete…. */

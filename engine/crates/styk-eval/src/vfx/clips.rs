@@ -116,7 +116,9 @@ impl Clip {
 
     /// `sampleVfxClip`: the effects with their keys sampled at `tick`. With
     /// `envelope`, each effect's strength is multiplied by the clip's strength
-    /// and fades (`effectStrength × strength × fade`). Unkeyed effects are shared.
+    /// and fades (`effectStrength × strength × fade`). An effect with a speed is
+    /// given the clip's local time as its clock (`vfx::at_time`). Unkeyed effects
+    /// without a speed are shared.
     pub fn sample(&self, tick: f64, envelope: bool) -> Vec<Arc<Effect>> {
         let age = self.time(tick);
         let strength = if envelope { self.strength * self.fade(tick - self.start) } else { 1.0 };
@@ -139,7 +141,15 @@ impl Clip {
                     let scaled = result.get_or_insert_with(|| (**effect).clone());
                     scaled.params.set_effect_strength(scaled.params.effect_strength() * strength);
                 }
-                result.map_or_else(|| effect.clone(), Arc::new)
+                match result {
+                    Some(mut sampled) => {
+                        if sampled.params.timed() {
+                            sampled.params.set_time(age);
+                        }
+                        Arc::new(sampled)
+                    }
+                    None => super::at_time(effect, age),
+                }
             })
             .collect()
     }

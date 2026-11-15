@@ -13,7 +13,10 @@
  * switch ([data-switch-field]: the one switch pattern in inspector sections),
  * the stepper field ([data-steps]: "Order ↓ 2 ↑"), the text field
  * ([data-text]), the inline field of header rows ([data-inline]) and the
- * selects (select.css). Rendered by src/inspector-kit.mjs. No key state. */
+ * selects (select.css), and the value field ([data-range]: a bounded number that is its own slider, with its
+ * default, an angle's dial, small buttons at its end and the choice, colour, picker and pair that go with it;
+ * components.md, Value field). Rendered by src/inspector-kit.mjs. The Properties tab shows no key state; an
+ * effect clip's value carries its key in its trailing slot (features/vfx.css). */
 @layer components {
   .ui-field {
     --_h: var(--control-lg);
@@ -93,7 +96,7 @@
 
   /* Field switch: the label inside the field box, the switch at its end, in the same grid as the fields. */
   .ui-field[data-switch-field] { justify-content: space-between; cursor: default; }
-  .ui-field:where([data-switch-field]) > .ui-field-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ui-field:where([data-switch-field]) > .ui-field-label { flex: 0 1 auto; min-inline-size: 0; }
   .ui-field:where([data-switch-field]) > .ui-switch { flex: none; }
 
   /* Stepper field: "Order ↓ 2 ↑". The label and input share a display:contents
@@ -111,6 +114,109 @@
     order: 2; flex: 1 0 auto; inline-size: auto; min-inline-size: 3ch; field-sizing: content; text-align: center;
   }
 
+  /* Value field ([data-range]): a bounded value whose whole field is its slider. A quiet fill from the start shows
+     where the value sits on its travel (--_p, written by the kit and PropertyControls along the field's scale), a
+     2px line at the fill's end where the value is, a small tick at the bottom where its default is (--_d,
+     [data-default]); the label reads from the start and the
+     value with its unit sits at the end. A drag anywhere scrubs (no jump: it moves from where the value is), a tap
+     types, a double tap resets. The fill turns to the accent's soft tint while dragged or typed. The travel stays
+     left to right in every language, as numbers do (docs/LOCALIZATION.md). */
+  .ui-field[data-range] {
+    --_fill: var(--value-fill);
+    --_edge: var(--value-edge);
+    /* From the start, or from zero for a value that runs both ways (--_z: a gravity, an offset, a strength that can pull);
+       the first layer is the end line at the value. */
+    background-image:
+      linear-gradient(to right, transparent calc(var(--_p, 0%) - 1px), var(--_edge) calc(var(--_p, 0%) - 1px) calc(var(--_p, 0%) + 1px), transparent calc(var(--_p, 0%) + 1px)),
+      linear-gradient(to right, transparent 0 min(var(--_z, 0%), var(--_p, 0%)), var(--_fill) min(var(--_z, 0%), var(--_p, 0%)) max(var(--_z, 0%), var(--_p, 0%)), transparent max(var(--_z, 0%), var(--_p, 0%)));
+    cursor: ew-resize; touch-action: none;
+    transition: box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+  }
+  .ui-field[data-range]:where(:hover) { --_fill: var(--value-fill-hover); }
+  .ui-field[data-scrub-anywhere] { cursor: ew-resize; touch-action: none; }
+  .ui-field[data-range]:where(:focus-within, [data-scrubbing]) { --_fill: var(--value-fill-active); --_edge: var(--accent-line); }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; }
+  /* A label that does not fit beside its value (a narrow panel, a longer language) wraps under itself and the field grows;
+     its value and unit never shrink. */
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere], [data-segments], [data-picker], [data-color][data-labelled], [data-switch-field]) { block-size: auto; min-block-size: var(--_h); padding-block: var(--space-1); }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere], [data-segments], [data-picker], [data-color][data-labelled], [data-switch-field]) > .ui-field-label { white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
+  /* The whole field scrubs (its cursor says so), so its label needs no underline of its own. */
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label:where([data-property-scrub]) { text-decoration: none; cursor: inherit; }
+  /* The field's own ring shows its focus; its label never draws a second one. */
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-label:where(:focus-visible) { outline: none; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-input { flex: 0 0 auto; inline-size: auto; field-sizing: content; min-inline-size: 1ch; text-align: end; cursor: inherit; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-input:where(:focus) { cursor: text; }
+  .ui-field:where([data-range], [data-angle], [data-scrub-anywhere]) > .ui-field-suffix { flex: none; color: var(--text-3); cursor: inherit; }
+  .ui-field[data-default]::after {
+    content: ""; position: absolute; inset-block-end: 2px; left: var(--_d, 0%); z-index: 0;
+    inline-size: 2px; block-size: 4px; margin-left: -1px; border-radius: 1px;
+    background: var(--text-3); opacity: 0.55; pointer-events: none;
+  }
+  /* While dragged: no transition lags behind the pointer, and nothing else moves. */
+  .ui-field:where([data-range][data-scrubbing]) { transition: none; }
+
+  /* An angle's dial: a small circle at the field's start whose line points the value's way; drag it to turn. */
+  .ui-field-dial {
+    flex: none; position: relative; inline-size: 16px; block-size: 16px; margin-inline-start: calc(-1 * var(--space-0-5));
+    border-radius: 50%; box-shadow: inset 0 0 0 1.25px var(--text-3); color: var(--text-2);
+    cursor: grab; touch-action: none;
+  }
+  .ui-field-dial::after {
+    content: ""; position: absolute; left: 50%; top: 50%; inline-size: 6.5px; block-size: 1.5px; margin-top: -0.75px;
+    border-radius: 1px; background: currentColor; transform-origin: 0 50%; rotate: var(--_a, 0deg);
+  }
+  .ui-field:where(:hover, [data-scrubbing]) > .ui-field-dial { color: var(--accent-text); box-shadow: inset 0 0 0 1.25px currentColor; }
+  .ui-field-dial:where(:active) { cursor: grabbing; }
+
+  /* Small buttons at a field's end (a value's key, a seed's shuffle): beside the field in the markup, drawn over its
+     end, which keeps room for them; quiet, at full contrast on hover. */
+  .ui-field-wrap { position: relative; display: grid; min-inline-size: 0; }
+  .ui-field-wrap:where([data-trail="1"]) > .ui-field { padding-inline-end: calc(var(--space-1) + var(--control-xs)); }
+  .ui-field-wrap:where([data-trail="2"]) > .ui-field { padding-inline-end: calc(var(--space-1) + 2 * var(--control-xs)); }
+  /* A choice's chevron sits before the trail, never under its key button (shown on hover, and always on touch). The
+     room above wins over every field kind's own end padding, which is written inside :where(). */
+  :where(.ui-field-wrap[data-trail="1"]) > .ui-field > .ui-field-chev { inset-inline-end: calc(2 * var(--space-1) + var(--control-xs)); }
+  :where(.ui-field-wrap[data-trail="2"]) > .ui-field > .ui-field-chev { inset-inline-end: calc(2 * var(--space-1) + 2 * var(--control-xs)); }
+  .ui-field-wrap > .ui-field-trail { position: absolute; inset-block: 0; margin-block: auto; inset-inline-end: var(--space-1); color: var(--text-3); }
+  .ui-field-wrap > .ui-field-trail:where(.ui-field-trail + *) { inset-inline-end: calc(var(--space-1) + var(--control-xs)); }
+  .ui-field-wrap > .ui-field-trail:where(:hover) { color: var(--text-1); }
+
+  /* A visual picker's field (looks and styles): the label, the chosen option's picture and name, a chevron. */
+  /* Its label, picture and value share a line while they fit; otherwise the value with its chevron takes the line under
+     them, and its words wrap there rather than being cut. */
+  .ui-field:where([data-picker]) { flex-wrap: wrap; justify-content: flex-start; column-gap: var(--space-2); padding-inline-end: var(--space-2); text-align: start; }
+  .ui-field:where([data-picker]) > .ui-field-label { flex: 0 1 auto; min-inline-size: 0; }
+  .ui-field-art { display: grid; flex: none; place-items: center; inline-size: 28px; block-size: 20px; overflow: hidden; border-radius: var(--radius-2xs); background: var(--surface-stage); color: var(--text-3); }
+  .ui-field-art > img { display: block; inline-size: 100%; block-size: 100%; object-fit: cover; }
+  .ui-field-art > svg { inline-size: var(--icon-sm); block-size: var(--icon-sm); }
+  .ui-field-choice { display: flex; flex: 1 1 auto; align-items: center; justify-content: flex-end; gap: var(--space-1); min-inline-size: 0; }
+  .ui-field-choice > .ui-field-hex { flex: 0 1 auto; min-inline-size: 0; white-space: normal; overflow-wrap: anywhere; text-align: end; line-height: 1.2; }
+  /* In the flow of the value's line (not at the field's edge like a select's), so it keeps clear of a trail. */
+  .ui-field-choice > .ui-field-chev { position: static; flex: none; inline-size: var(--icon-xs); block-size: var(--icon-xs); translate: none; color: var(--text-3); }
+  /* A picker that opens a menu reads like a select: its value right after the label, the chevron at the end; so does a
+     bare one (no label: its value names its kind). */
+  .ui-field:where([data-picker][data-bare], [data-picker][aria-haspopup="menu"]) > .ui-field-choice { justify-content: space-between; }
+  .ui-field:where([data-picker][data-bare], [data-picker][aria-haspopup="menu"]) .ui-field-hex { text-align: start; }
+
+  /* A choice of two to four in a field ([data-segments]): the label, then the segments in a quiet track. */
+  .ui-field:where([data-segments]) { padding-inline-end: var(--space-0-5); }
+  .ui-field:where([data-segments]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; }
+  .ui-field:where([data-segments]) > .ui-segmented { flex: 0 1 auto; min-inline-size: 0; block-size: calc(100% - 6px); padding: 0; background: transparent; }
+  .ui-field:where([data-segments]) .ui-segmented-item { min-inline-size: 0; padding-inline: var(--space-1-5); font: var(--type-small-strong); }
+
+  /* A colour field that names itself (a value field's colour): the label, then the swatch and the hex at the end. */
+  .ui-field:where([data-color][data-labelled]) > .ui-field-label { flex: 1 1 auto; min-inline-size: 0; }
+  .ui-field:where([data-color][data-labelled]) > .ui-swatch { margin-inline-start: 0; }
+  .ui-field:where([data-color][data-labelled]) > .ui-field-hex { flex: none; }
+  .ui-field:where([data-color]) > .ui-swatch:where([data-gradient]) { --_s: 16px; inline-size: 28px; }
+
+  /* A linked pair: two fields with the link between them; one field spans while linked. */
+  /* Two values stack, each whole (a narrow panel never cuts "Height 12 px"); their link spans both at their side. */
+  .ui-field-pair { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: var(--space-1); min-inline-size: 0; }
+  .ui-field-pair:where(:has(> .ui-field-link)) { grid-template-columns: minmax(0, 1fr) auto; }
+  .ui-field-pair > .ui-field-link { grid-column: 2; grid-row: 1 / span 2; color: var(--text-3); }
+  .ui-field-pair > .ui-field-link:where([aria-pressed="true"]) { color: var(--accent-text); }
+
   /* Inline field (header rows: the tool options' Size, Opacity; the frame rate): 28px, sized to its label and value. */
   .ui-field[data-inline] { --_h: var(--control-md); flex: none; padding-inline: var(--space-2) var(--space-1-5); }
   .ui-field:where([data-inline]) > .ui-field-input { flex: none; inline-size: auto; field-sizing: content; min-inline-size: calc(var(--_vch, 3) * 1ch); padding-inline-end: 1ch; }
@@ -118,5 +224,7 @@
   @media (forced-colors: active) {
     .ui-field { border-color: CanvasText; }
     .ui-field:focus-within { outline: 2px solid Highlight; outline-offset: 1px; }
+    /* The travel as a line along the bottom, in the system's highlight. */
+    .ui-field[data-range] { background-image: linear-gradient(Highlight, Highlight); background-size: var(--_p, 0%) 2px; background-position: left bottom; background-repeat: no-repeat; }
   }
 }

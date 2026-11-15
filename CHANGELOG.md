@@ -6,6 +6,36 @@ What's new in each version of StykAnimate.
 
 ## [Unreleased]
 
+### Added
+
+- A redesigned VFX panel: each effect opens as a card with its most useful controls first and the rest under More settings.
+- New value fields in the VFX panel: drag to scrub, click to type a value, and hold Shift or Alt for fine steps.
+- Angle dials, visual style pickers and a Shuffle button for effects that have a random pattern.
+- Effect moments that play once at the playhead: Hit flash, Impact, Damage, Teleport, Power up, Shockwave and Glitch.
+- New looks (Night, Sunset and Old film) and scene weather presets: Rain, Snow, Falling leaves and Embers.
+- More control over effects: tint blend modes, soft outlines, hue in Grade, a dissolve that sweeps in a direction, and grain, turbulence, waves and light sweeps that move by themselves.
+- More control over particles, auras, beams, smoke and explosions: speed, gravity direction, bounce, fade in, starting already in motion, and drawing behind or in front of the figure.
+
+### Changed
+
+- Particles, auras, energy beams, smoke and explosions are redrawn with new styles. Projects that use them keep their effects and settings, but they look different.
+- Blur, glow, outline and bloom are smoother, and their size now changes evenly as you drag instead of in steps.
+- The VFX panel tells you when an effect is drawn with fewer particles to keep the app responsive.
+
+### Fixed
+
+- Fixed the app freezing for a couple of seconds the first time an effect appeared on some computers.
+- Fixed particles vanishing all at once when the figure they come from disappears.
+
+### Performance
+
+- Effects play much more smoothly on computers without a dedicated graphics card, and a lower playback quality now speeds them up further.
+- Scenes with many effects open faster.
+
+### Removed
+
+- A few near-duplicate effect styles and the Retro, Energy and Poison presets. Projects that already use them open and play as before.
+
 ## [1.3.1]
 
 A steadier canvas

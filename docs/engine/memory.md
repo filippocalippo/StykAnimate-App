@@ -43,11 +43,17 @@ in paired measurements; the tiles remain pipelined. Browser hosts still pipeline
 tiles and frames to hide mapping latency across processes.
 
 Isolation page counts and power-of-two primitive capacities retain their high-water
-marks while the renderer is alive. Unused isolation, MSAA and effect slots remain
+marks while the renderer is alive. Unused isolation and MSAA targets remain
 available to the next frame. Readbacks retain one frame's tile capacity for the
 export. The existing disposal path releases these owners at export end or document
 close; no frame-count timer stands in for stage idle time.
-Exact page/effect dimensions still follow the frame because normalized sampling
+Effect textures are not kept that way: each frame keeps the textures its effect images
+are placed in, sized for what each pass needs (a downsampled pass takes a small one),
+and releases the rest, which are destroyed when the next frame is prepared; a frame
+without effects releases all of them ([vfx.md](vfx.md#memory)). A zoom level or a moment
+with heavy effects does not leave its textures allocated for the session
+(`tests/memory_lifetime.rs`, `effect_textures_are_reused_released_and_freed`).
+Exact page dimensions still follow the frame because normalized sampling
 depends on them; changing those dimensions still replaces the texture. Array
 textures retain D11's two-layer minimum. Stage admission includes retained capacity
 and actual replacement dimensions, including both owners during replacement, without

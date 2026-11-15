@@ -156,10 +156,10 @@ pub struct Renderer {
     pub(crate) material_sampler: wgpu::Sampler,
     /// The masks of lone glyphs (styk-draw `K_GLYPH`) and where each instance is drawn from.
     pub(crate) glyphs: glyphs::GlyphMasks,
-    /// Additive blending (generated effects), created with the first list that has any.
-    pub(crate) pipeline_add: Option<wgpu::RenderPipeline>,
-    /// Ranges of the current list's prims drawn additively; empty when it has none.
-    pub(crate) add_ranges: Vec<(u32, u32)>,
+    /// The generated-effects pipeline, created with the first list that has any.
+    pub(crate) pipeline_generated: Option<wgpu::RenderPipeline>,
+    /// Ranges of the current list's generated-effect prims (drawn with their own pipeline); empty when it has none.
+    pub(crate) generated_ranges: Vec<(u32, u32)>,
     pub(crate) nearest: wgpu::Sampler,
     pub(crate) linear: wgpu::Sampler,
     pub(crate) layers: [LayerAtlas; 2],
@@ -182,6 +182,8 @@ pub struct Renderer {
     pub(crate) exact_sizes: bool,
     /// Effect passes, created with the first frame that filters.
     pub(crate) executor: Option<effects::executor::Executor>,
+    /// Effect images between passes are half floats (`effects::executor`, Precision).
+    pub(crate) float_effects: bool,
     /// Depth runs (docs/engine/spatial.md): the pipelines and multisampled depth
     /// buffers of passes with depth-tested faces, created with the first list that has any.
     pub(crate) depth_pipelines: Option<pipeline::DepthPipelines>,
@@ -216,6 +218,8 @@ pub struct Renderer {
     pub(crate) within: Option<[f64; 4]>,
     /// The pipeline that clears a part of the frame to transparency, by sample count.
     pub(crate) clear_part: Option<(u32, wgpu::RenderPipeline)>,
+    /// The pipelines that clear the camera rectangle before the camera image (`knockout.wgsl`), by sample count, their uniform and bind group.
+    pub(crate) knockout: Option<frame::Knockouts>,
     pub stats: Stats,
 }
 
@@ -226,9 +230,8 @@ impl Renderer {
     pub fn set_drawing_grid(&mut self, grid: DrawingGrid) { self.drawing_grid = grid; }
 
     /// Makes a frame depend on the frame alone, not on the frames drawn before it (an export asks for it; the stage keeps what it
-    /// has, because reallocating and refilling is the cost). It sizes layer-page and effect-slot dimensions by each frame (the effect
-    /// passes address a slot by normalized position, 1 / its size, so one kept from a larger frame moves the last bit of those
-    /// positions and a pixel here and there by one level), brings every particle material row in (the atlas is sampled
+    /// has, because reallocating and refilling is the cost). It sizes layer pages by each frame (effect textures always are:
+    /// `effects::executor`), brings every particle material row in (the atlas is sampled
     /// trilinearly, so a texel at a row's edge read a neighbour that was there only when a list before had named it), and places
     /// the lone glyph masks afresh (a mask is sampled at `(place + position in the mask) / atlas side`, which rounds with the place,
     /// so a glyph drawn after others, which took the first places, differed by a level at its edges). Textures it replaces are
@@ -236,9 +239,27 @@ impl Renderer {
     /// Capacity and unused owners stay until document/export teardown; page count and primitive capacity never shrink per frame.
     pub fn set_exact_sizes(&mut self, exact: bool) {
         self.exact_sizes = exact;
-        if let Some(executor) = &mut self.executor {
-            executor.set_exact(exact);
+    }
+
+    /// Whether effect images between passes are half floats: the default is what the device's backend always allows (WebGPU and
+    /// native, not WebGL2). The hosts turn it on for a WebGL2 context that renders to and filters half floats
+    /// (`effects::executor::float_supported`: `EXT_color_buffer_float`); without it effects use eight bits, dithered.
+    pub fn set_float_effects(&mut self, float: bool) {
+        if self.float_effects != float {
+            self.float_effects = float;
+            self.executor = None;
         }
+    }
+
+    /// Whether effect images between passes are half floats ([`Renderer::set_float_effects`]).
+    pub fn float_effects(&self) -> bool {
+        self.float_effects
+    }
+
+    /// Whether the last frame drew a filtered layer unfiltered because its effect pipelines were still to be created (on WebGL2 a
+    /// frame creates one: `effects::executor`). The host draws again until it is false.
+    pub fn effects_pending(&self) -> bool {
+        self.executor.as_ref().is_some_and(|e| e.pending())
     }
 
     /// Rotates and mirrors the workspace view: `orientation` maps the neutral view's screen pixels
@@ -283,7 +304,7 @@ impl Renderer {
             && since.groups.len() == list.groups.len()
             && ranges.iter().all(|&(start, end)| start <= end && end as usize <= list.prims.len())
         {
-            let structural = |p: &styk_draw::Prim| p.kind & (styk_draw::F_DEPTH | styk_draw::F_ADD) != 0 || p.kind & 255 == styk_draw::K_COMPOSITE;
+            let structural = |p: &styk_draw::Prim| p.kind & styk_draw::F_DEPTH != 0 || matches!(p.kind & 255, styk_draw::K_COMPOSITE | styk_draw::K_PARTICLE | styk_draw::K_BEAM);
             let mut same = since.background_prims == list.background_prims;
             for &(start, end) in &ranges {
                 let (start, end) = (start as usize, end as usize);
@@ -327,7 +348,7 @@ impl Renderer {
         self.derive(list);
     }
 
-    /// What is worked out of a list's primitives when it is set: each group's run, where its composites, faces and additive draws are.
+    /// What is worked out of a list's primitives when it is set: each group's run, where its composites, faces and generated effects are.
     fn derive(&mut self, list: &Arc<DrawList>) {
         self.group_runs.clear();
         self.group_runs.resize(list.groups.len(), (u32::MAX, 0));
@@ -343,27 +364,23 @@ impl Renderer {
         }
         // Generated effects: the materials their sprites sample.
         self.ensure_materials(list.materials);
-        // Where the depth-tested faces are and where generated effects add light: passes
-        // switch pipelines there. (A reset without faces draws nothing, with or without a
-        // depth buffer.)
+        // Where the depth-tested faces and the generated effects are: passes switch pipelines
+        // there. (A reset without faces draws nothing, with or without a depth buffer.)
         self.depth_faces.clear();
-        self.add_ranges.clear();
+        self.generated_ranges.clear();
         let extend = |ranges: &mut Vec<(u32, u32)>, i: u32| match ranges.last_mut() {
             Some(last) if last.1 == i => last.1 = i + 1,
             _ => ranges.push((i, i + 1)),
         };
         for (i, p) in list.prims.iter().enumerate() {
-            if p.kind & (styk_draw::F_DEPTH | styk_draw::F_ADD) == 0 {
-                continue;
-            }
             match p.kind & 255 {
                 styk_draw::K_TRI if p.kind & styk_draw::F_DEPTH != 0 => extend(&mut self.depth_faces, i as u32),
-                styk_draw::K_PARTICLE | styk_draw::K_BEAM if p.kind & styk_draw::F_ADD != 0 => extend(&mut self.add_ranges, i as u32),
+                styk_draw::K_PARTICLE | styk_draw::K_BEAM => extend(&mut self.generated_ranges, i as u32),
                 _ => {}
             }
         }
-        if !self.add_ranges.is_empty() {
-            self.additive_pipeline();
+        if !self.generated_ranges.is_empty() {
+            self.effects_pipeline();
         }
         self.derive_shading(list);
     }

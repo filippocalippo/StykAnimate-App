@@ -1,7 +1,7 @@
 //! Conservative byte admission for a worker-driven stage. This counts concrete
 //! textures/buffers and their replacement overlap, not a multiplier of the input
 //! file. Driver pipeline/command bookkeeping is outside the texture budget.
-use crate::effects::{plan, recipe};
+use crate::effects::plan;
 use crate::{FramePlan, Renderer, UNIFORM_STRIDE};
 
 fn pixels(size: [u32; 2]) -> u64 {
@@ -25,7 +25,7 @@ impl Renderer {
     /// `set_list` or `render` allocates. Only the stage worker calls this. Output
     /// pictures and sprite pixels have separate budgets at their owning lifetime.
     /// Consumes the already recorded placement/round/effect plan, including scaling
-    /// of oversized groups and the executor's 256-pixel size buckets.
+    /// of oversized groups and the textures the effect runs are placed in.
     pub fn working_set_bound(&self, frame: &FramePlan) -> u64 {
         let list = &frame.list;
         let view = &frame.view;
@@ -60,7 +60,6 @@ impl Renderer {
             }
         }
         let records = &frame.records;
-        let effect_size = frame.biggest;
         // Inactive owners are already counted in retained. Active replacements
         // keep their page-count high-water mark, with old/new overlap admitted.
         let mut prospective = pages.iter().enumerate().map(|(parity,&count)| {
@@ -98,10 +97,9 @@ impl Renderer {
             ))
             .saturating_add(power(passes.max(8)).saturating_mul(UNIFORM_STRIDE));
         if !records.is_empty() {
-            let bucket = effect_size.map(|n| n.saturating_add(255) / 256 * 256);
-            let bucket = self.executor.as_ref().map_or(bucket, |e| e.required_size(effect_size));
+            // Retained effect textures are counted above; the frame may create all of its own beside them.
             prospective = prospective
-                .saturating_add(pixels(bucket).saturating_mul(recipe::SLOTS as u64))
+                .saturating_add(frame.effect_bytes)
                 .saturating_add(power((records.len() as u64).max(64)).saturating_mul(768));
         }
         if !list.glyphs.is_empty() {

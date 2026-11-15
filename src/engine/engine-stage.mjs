@@ -192,7 +192,7 @@ async function adapterName(stage, waitMs = ADAPTER_NAME_MS) {
  * The stage over `canvas`, the page's scene canvas: the engine's surface for as long as the stage lives.
  * Rejects with a localized error when the engine or its graphics device cannot start.
  * @param {HTMLCanvasElement} canvas the scene canvas (a canvas keeps one context type: a stage replaced after a lost device gets a new canvas)
- * @param {object} options `onInvalidate()` asks for another frame; `onMonitorPicture()` asks for the camera monitor alone to be painted again (its picture arrived); `onStatus(message)` reports the device being lost; `onError(error)` reports a frame the engine refused
+ * @param {object} options `onInvalidate()` asks for another frame; `onMonitorPicture()` asks for the camera monitor alone to be painted again (its picture arrived); `onStatus(message)` reports the device being lost; `onError(error)` reports a frame the engine refused; `onReducedEffects(clipIds)` says which effect clips a limit drew reduced in the frame on show, when that changes
  * @param {() => Promise<object>} [load] how the engine is loaded (a test stands in its own)
  */
 export async function createStage(canvas, options = {}, load = loadEngine) {
@@ -258,6 +258,14 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     }});
 
   const invalidate = () => options.onInvalidate?.();
+  // The effect clips a limit drew reduced in the frame on show: read from the engine only when its count of changes moves.
+  let reducedRevision = 0;
+  const reportReduced = () => {
+    const revision = stage.reduced_effects_revision?.();
+    if (revision === undefined || revision === reducedRevision) return;
+    reducedRevision = revision;
+    options.onReducedEffects?.(JSON.parse(stage.reduced_effects()));
+  };
   /** Another attempt at a frame the engine could not draw yet, on the next animation frame. */
   const redrawSoon = () => {
     if (redrawQueued) return;
@@ -397,7 +405,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     const drawn = stage.render_edit((view.scale ?? 1) * deviceRatio, (view.x ?? 0) * deviceRatio, (view.y ?? 0) * deviceRatio, request.cameraEnabled !== false,
       request.clipToCanvas !== false, new Uint32Array(hidden), new Float64Array(translations),
       Number.isFinite(request.editorBackgroundColor) ? request.editorBackgroundColor >>> 0 : -1);
-    if (drawn) side.live.presented();
+    if (drawn) { side.live.presented(); reportReduced(); }
     // The person went to this tick: a document whose pictures are kept a few pages at a time loads those around it.
     if (Number.isFinite(request.tick) && request.tick !== side.hintedTick) { side.hintedTick = request.tick; const hinted = performance.now(); stage.hint_tick?.(request.tick); side.stats.hintMs = performance.now() - hinted; }
     Object.assign(side.stats, {frames: side.stats.frames + (drawn ? 1 : 0), lastSendMs: sendMs, lastDrawMs: performance.now() - started - sendMs});
@@ -502,7 +510,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
         stage.set_canvas_drawing(false);
         orient(view);
         const drawn = stage.render_ticket(ticket.generation, ticket.epoch, ticket.tick, (view.scale ?? 1) * deviceRatio, (view.x ?? 0) * deviceRatio, (view.y ?? 0) * deviceRatio, frame.cameraEnabled !== false, true);
-        if (drawn) { engineShown = true; side.stats.frames++; awaitPictures(seen); processor.asked(asked, {tick: ticket.tick, prepared: true}); }
+        if (drawn) { engineShown = true; side.stats.frames++; awaitPictures(seen); processor.asked(asked, {tick: ticket.tick, prepared: true}); reportReduced(); }
         else if (stage.surface_pending()) redrawSoon();
         if (span !== 0) traceEnd(span, tracing ? {tick: ticket.tick, drawn: drawn && processor.on ? 'asked' : drawn} : undefined);
         return drawn;

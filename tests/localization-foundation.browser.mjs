@@ -579,7 +579,7 @@ try {
     window.vfxCaptionAnchor=vfxCaptionRoot.querySelector('[data-vfx-action=add]');vfxCaptionProbe.openPopup(vfxCaptionAnchor,'add');
   });
   check('A non-English initial language preserves the canonical generated-effects catalogue order',await page.evaluate(async()=>{
-    const {categoryMessages}=await import('/src/vfx-localization.mjs');return vfxCaptionProbe.popup.querySelector('.vfx-catalog-results h3').getAttribute('data-i18n')===categoryMessages.Generate;
+    const {catalogueKey}=await import('/src/vfx-presentation.mjs');return vfxCaptionProbe.popup.querySelector('.vfx-catalog-results h3').getAttribute('data-i18n')===catalogueKey('generate');
   }));
   await page.evaluate(()=>{
     window.vfxCaptionSearch=vfxCaptionProbe.popup.querySelector('input');vfxCaptionSearch.value='Unsubmitted search';
@@ -834,7 +834,7 @@ try {
     return vfxClipCaptionInputs.every((input,index)=>input===root.querySelectorAll('input')[index]&&input.getAttribute('aria-label')===t(input.dataset.i18nAriaLabel))
       &&root.querySelector('[data-i18n="vfxClipInspector.start"]').textContent===t('vfxClipInspector.start')
       &&root.querySelector('[data-i18n="vfxClipInspector.duration"]').textContent===t('vfxClipInspector.duration')
-      &&document.activeElement===vfxClipCaptionInputs[0]&&vfxClipCaptionInputs[0].value==='17'&&root.querySelector('input[type=range]').value==='75'
+      &&document.activeElement===vfxClipCaptionInputs[0]&&vfxClipCaptionInputs[0].value==='17'&&root.querySelector('input[data-clip-field="strength"]').value==='75'
       &&JSON.stringify([...vfxClipCaptionHost.bindings])===vfxClipCaptionBindings&&JSON.stringify(vfxClipCaptionRecord)===vfxClipCaptionBytes;
   }));
   await page.evaluate(()=>{vfxClipCaptionRoot.remove();styk.localization.localization.setPseudo(null);styk.localization.setLocale('en');});

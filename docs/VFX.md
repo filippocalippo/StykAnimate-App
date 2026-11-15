@@ -31,17 +31,18 @@ Connected groups support at most 16 nested scopes to bound compositing depth.
 ## Persistent effects and keys
 
 New effects belong to a scene or figure instance (or one of its nodes), independent
-of pose frames. **Always** applies an effect throughout the animation. **Timed**
-adds a start and duration; drag the clip or its edges in the Advanced timeline.
+of pose frames. **Whole animation** applies an effect throughout the animation.
+**Frame range** adds a start, a duration and fades, typed or scrubbed in the
+open effect's Timing, or dragged in the Advanced timeline.
 Moving a clip carries its local keys. Trimming preserves the source phase and keys
 outside the trimmed range, so extending it restores the animation. Extending before
 the original start preserves existing key positions and holds the initial value.
 
-The inspector defaults to **At playhead**. It excludes clips outside their range,
+The inspector defaults to **At this frame**. It excludes clips outside their range,
 disabled clips, and clips whose effects are all keyed off or have zero strength.
-The endpoints of a timed fade remain in its range. **Selected** keeps one clip's
-controls available outside its active range; **All** includes a search. Clicking
-an inactive timeline block switches to **Selected**. Only one clip expands at a time.
+The endpoints of a timed fade remain in its range. **Only selected** keeps one clip's
+controls available outside its active range; **Show all** includes a search. Clicking
+an inactive timeline block switches to **Only selected**. Only one clip expands at a time.
 
 Timeline effects belong only to the primary selected figure, including its node
 effects. Scene effects appear when Scene is the inspector target. Sequential
@@ -60,8 +61,8 @@ key and edits easing. Creating a parameter's key also selects that value. Clicki
 a timeline diamond seeks to its frame; Left/Right nudges a selected key by one
 frame, or ten with Shift. Hidden values are preserved.
 
-The selected timed block has two round fade handles along its top edge. Drag them
-to adjust fade in/out, or focus a handle and use arrows (Shift for ten frames),
+The selected timed block has two round fade handles along its top edge (the same
+fades as the open effect's Fade in and Fade out). Drag them to adjust fade in/out, or focus a handle and use arrows (Shift for ten frames),
 Home or End. The envelope and frame count preview the drag; release commits once
 and Escape cancels. The block edges show a resize cursor and trim or extend the range in either direction, while diamonds along the bottom
 edit keys. Timing fields occupy one compact inspector row.
@@ -73,10 +74,11 @@ playhead. Presets create named groups; **Add to group** adds another effect.
 Groups share timing, strength and fades, with independent parameter keys inside.
 One effect expands at a time. Drag its grip to reorder it, use Alt+Up/Down on the
 grip, or open its actions menu for ordering, enable/disable and removal. Reordering
-preserves keys and the expanded effect. Individual effect strength is under
-**More** in groups; the group's strength remains directly available.
+preserves keys and the expanded effect. Individual effect strength is in its
+**Blend** section in groups; the group's strength leads the open card.
 
-Drag numeric values or their labels, click to type, or use the contextual slider.
+Drag a value anywhere on its field, tap it to type, double-tap it to reset it (the
+shared value field, docs/VFX-DESIGN.md).
 Timing and group strength use the same controls. Each gesture creates one undo
 step; Escape cancels it. Undo/redo use document history even while a VFX numeric
 field has focus, including configured shortcuts and desktop menu actions.
@@ -91,11 +93,11 @@ theme tokens, without transitions that mix light and dark palettes.
 Authored pose drafts invalidate their composed VFX view on mutation. Cached
 Canvas artwork follows the current figure root without rerasterizing translations.
 
-**Copy animation** and **Paste animation** preserve the clip's parameter keys,
+**Copy effect** and **Paste effect** preserve the clip's parameter keys,
 local timing and easing with new identities. Render order is explicit and never
 changes when a clip is moved in time or the inspector is filtered.
 
-Existing pose effects remain in **Pose effects**, following their existing
+Existing pose effects remain under **From an older version**, following their existing
 exposure/key rules and the same activity, selection and search filters. Their
 Copy/Paste preserves effect identities and layer easing,
 including legacy authored scalar channels. Opening a project never converts its

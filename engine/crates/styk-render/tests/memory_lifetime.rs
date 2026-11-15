@@ -74,23 +74,54 @@ fn exact_primitive_capacity_keeps_the_high_water_mark() {
     assert_eq!(bytes(&renderer), held, "empty artwork keeps capacity until close");
 }
 
+/// Effect textures follow the frames that use them: a frame of the same sizes reuses the textures of the frame before, a frame
+/// that needs none (no effect drawn, another zoom level) releases them, and closing frees them all (docs/engine/memory.md).
 #[test]
-fn exact_effect_slots_reuse_after_quiet_frames_and_release_at_close() {
+fn effect_textures_are_reused_released_and_freed() {
+    use styk_eval::vfx::registry::{Blur, Params, Tint};
+    use styk_eval::vfx::{Color, Effect};
+    use styk_render::effects::recipe::{record, Frame};
     let Some(renderer) = make_renderer() else { eprintln!("skipped: no graphics adapter"); return; };
-    let mut effects = styk_render::effects::executor::Executor::new(renderer.device());
-    effects.set_exact(true);
-    effects.prepare(renderer.device(), renderer.queue(), [256, 256]);
-    let slot = effects.slot_texture(renderer.device(), 0).clone();
-    assert_eq!(effects.stats.slot_bytes, 256 * 256 * 4);
-    for _ in 0..241 {
-        effects.begin();
-        effects.prepare(renderer.device(), renderer.queue(), [0,0]);
-        assert_eq!(effects.stats.slot_bytes, 256 * 256 * 4);
+    let (device, queue) = (renderer.device(), renderer.queue());
+    let slots = || {
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        device.generate_allocator_report().unwrap().allocations.iter().filter(|a| a.name == "styk effect slot").map(|a| a.size).sum::<u64>()
+    };
+    let stack = |radius: f64| vec![
+        Arc::new(Effect { id: Arc::from("t"), enabled: true, params: Params::Tint(Tint { color: Color::Rgb(0x0000ff), mix: 0.5, ..Default::default() }) }),
+        Arc::new(Effect { id: Arc::from("b"), enabled: true, params: Params::Blur(Blur { radius, ..Default::default() }) }),
+    ];
+    let frame = |size: [u32; 2], radius: f64| {
+        let mut records = Vec::new();
+        let run = record(&mut records, &stack(radius), Frame { scale: 1.0, origin: [0.0; 2], output_size: size.map(|n| n as f64) }, size);
+        (records, run)
+    };
+    let mut effects = styk_render::effects::executor::Executor::new(device, true);
+    let (records, run) = frame([256, 256], 30.0);
+    effects.prepare(device, queue, records, &[&run]);
+    let held = effects.stats.slot_bytes;
+    assert!(held > 0 && slots() >= held, "the frame's textures exist");
+    for _ in 0..3 {
+        let (records, run) = frame([256, 256], 30.0);
+        effects.prepare(device, queue, records, &[&run]);
+        assert_eq!(effects.stats.slot_bytes, held, "the same frame again creates nothing");
     }
-    effects.begin();
-    effects.prepare(renderer.device(), renderer.queue(), [256,256]);
-    assert_eq!(effects.slot_texture(renderer.device(), 0), &slot);
-    drop((slot,effects));
-    renderer.device().poll(wgpu::PollType::wait_indefinitely()).unwrap();
-    assert!(!renderer.device().generate_allocator_report().unwrap().allocations.iter().any(|a| a.name == "styk effect slot"));
+    // A close-up: larger layers. The smaller textures are released, then destroyed by the frame after.
+    let (records, run) = frame([1024, 1024], 30.0);
+    effects.prepare(device, queue, records, &[&run]);
+    let (records, run) = frame([1024, 1024], 30.0);
+    effects.prepare(device, queue, records, &[&run]);
+    let large = effects.stats.slot_bytes;
+    assert!(large > held);
+    let (records, run) = frame([256, 256], 30.0);
+    effects.prepare(device, queue, records, &[&run]);
+    effects.prepare(device, queue, Vec::new(), &[]);
+    effects.prepare(device, queue, Vec::new(), &[]);
+    assert_eq!(effects.stats.slot_bytes, 0, "frames without effects keep no effect texture");
+    assert_eq!(slots(), 0, "and the GPU holds none");
+    let (records, run) = frame([256, 256], 30.0);
+    effects.prepare(device, queue, records, &[&run]);
+    assert!(slots() > 0);
+    drop(effects);
+    assert_eq!(slots(), 0, "closing frees every effect texture");
 }

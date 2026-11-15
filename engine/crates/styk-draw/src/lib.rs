@@ -79,25 +79,40 @@ pub fn window_depth(z: f32, z_min: f32, range: f32) -> f32 {
 }
 
 /// One particle of a generated effect (docs/engine/vfx.md, Generated effects), in its
-/// draw's local coordinates. `paint` is the offset of the draw's three rows in
+/// draw's local coordinates. `paint` is the offset of the draw's seven rows in
 /// [`DrawList::paints`]: `[m0, m1, m2, m3]` and `[tx, ty, s, shade]`, its transform to the
 /// world (`x' = m0·x + m2·y + tx`, `y' = m1·x + m3·y + ty`, a movieclip's placement for
-/// effects nested in one, `s` = √|det|), then `[softness, stretch, aspect, row]`, the
-/// draw's constants (`row` is a sprite's material row plus one). The particle's shape is
-/// [`particle_shape`] (`P_*`); `a` = (x, y, size, rotation), `b` = (vx, vy, h, 0) (`h`: a
-/// chunk's random proportion), `c` = straight RGBA in floats (the opacity times its colour
-/// stop's), `color` = a sprite's atlas cell, `column | row << 8`. A lightning arc segment
-/// ([`P_ARC`]) has `a` = (x0, y0, x1, y1), `b.x` = its radius. Renderers expand the record
-/// as the editor's vertex shader does (`vfx-generator-gpu.mjs`): its pixel margins are the
-/// target's pixel in local units.
+/// effects nested in one, `s` = √|det|) and how much a material's light shades it, then
+/// `[softness, stretch, aspect, outline width]` (the width in local units, 0 for none),
+/// the outline's straight RGBA, `[erosion edge, rim width, rim amount, white-hot core]`,
+/// `[rim colour, shadow depth]` and `[shadow colour, shadow amount]`: a material's rim where it
+/// erodes; a white-hot middle that whitens discs and crisp shapes toward their centre (0 none,
+/// a spark and a sparkle 0.6 of their own); a crisp shape's cartoon shadow side (where the
+/// shape moved `depth` of its size toward the light, up and a little left in the world, does
+/// not cover it; an amount of 0 is none). The particle's shape is [`particle_shape`] (`P_*`); `a` = (x, y, size,
+/// rotation), `b` = (vx, vy, emission, erosion), `c` = straight RGBA in floats (its colour
+/// and opacity), `color` = a material particle's cell (`material << 4 | variant`) or a
+/// shape's seed. Emission 0 paints; 1 adds light (the record's premultiplied colour keeps
+/// its light and covers `1 − emission` of what is under it): one blend draws both, on any
+/// background. Erosion (0–1) is the density a material particle is cut at.
+///
+/// A trail or arc piece ([`P_SEGMENT`]) has `a` = (x0, y0, x1, y1), `b` = (radius at its
+/// start, at its end, emission, opacity at its end), `c.a` = opacity at its start; bit 24
+/// of its kind rounds its start, bit 25 its end ([`F_CAP_START`], [`F_CAP_END`]), so a
+/// ribbon's pieces meet without overlapping.
+///
+/// Renderers expand a record into a quad around its shape (its size along the shape's own
+/// x, `size · aspect + speed · stretch / 2` along its y, which points along the motion for
+/// shapes that follow it) and shade it in the shape's own units: distances for the crisp
+/// shapes, a material's density field for the eroding ones.
 pub const K_PARTICLE: u32 = 13;
 /// A beam of a generated effect, in local coordinates as [`K_PARTICLE`]: `a` = (origin x,
-/// origin y, tip x, tip y), `b` = (width, wobble, seed, tick), `c` = (opacity, style, 0, 0);
-/// `paint` = the draw's three rows, then its colours at ramp positions 0 and 1 (straight
-/// RGB and the stop's opacity).
+/// origin y, tip x, tip y), `b` = (width, wobble, seed, time), `c` = (opacity, style,
+/// strands, ink width); `paint` = the draw's two transform rows, then its core, body and
+/// glow colours (straight RGB, how much light each emits), `[head swell, ink RGB]` and the
+/// rim colour the body turns to over its outer half (straight RGB, light).
+/// Styles: 0 energy, 1 laser, 2 cartoon.
 pub const K_BEAM: u32 = 14;
-/// Drawn with additive blending: colour and alpha are added to the target's.
-pub const F_ADD: u32 = 1 << 14;
 /// A lone solid glyph drawn from its coverage mask ([`GlyphMask`], docs/engine/rendering.md):
 /// `b.x` = the bits of its index in [`DrawList::glyphs`], `color` = straight RGBA (the text's
 /// colour and opacity). Renderers draw the mask the view calls for
@@ -108,32 +123,71 @@ pub const K_GLYPH: u32 = 15;
 /// A [`K_TRI`] of a [`K_GLYPH`] record's glyph, drawn only where the view allows no mask:
 /// `b.z` = the bits of the record's index in [`DrawList::glyphs`].
 pub const F_GLYPH_VECTOR: u32 = 1 << 15;
-/// Particle shapes, bits 16–18 of a [`K_PARTICLE`]'s kind.
+/// Particle shapes, bits 16–23 of a [`K_PARTICLE`]'s kind. A soft or hard disc (softness:
+/// below 0.15 crisp, above it the exponent of its falloff); a streak along the motion; a
+/// ring; a rock (a seeded polygon); a trail or arc piece; a material (an eroding noise
+/// field of the atlas); then crisp shapes drawn from their distance: square, rhombus (a diamond),
+/// star, sparkle (four thin points), spark (a needle), shard, drop, heart, burst, cartoon
+/// cloud, snowflake, petal, lightning bolt, cartoon flame, splat, bokeh and cartoon star.
 pub const P_DISC: u32 = 0;
 pub const P_STREAK: u32 = 1;
 pub const P_RING: u32 = 2;
-pub const P_CHUNK: u32 = 3;
-pub const P_ARC: u32 = 5;
-pub const P_SPRITE: u32 = 6;
-pub const P_SQUARE: u32 = 7;
+pub const P_ROCK: u32 = 3;
+pub const P_SEGMENT: u32 = 4;
+pub const P_MATERIAL: u32 = 5;
+pub const P_SQUARE: u32 = 6;
+pub const P_RHOMBUS: u32 = 7;
+pub const P_STAR: u32 = 8;
+pub const P_SPARKLE: u32 = 9;
+pub const P_SPARK: u32 = 10;
+pub const P_SHARD: u32 = 11;
+pub const P_DROP: u32 = 12;
+pub const P_HEART: u32 = 13;
+pub const P_BURST: u32 = 14;
+pub const P_CLOUD: u32 = 15;
+pub const P_FLAKE: u32 = 16;
+pub const P_PETAL: u32 = 17;
+pub const P_BOLT: u32 = 18;
+pub const P_FLAME: u32 = 19;
+pub const P_SPLAT: u32 = 20;
+pub const P_BOKEH: u32 = 21;
+pub const P_TOON_STAR: u32 = 22;
+/// How many particle shapes there are.
+pub const P_SHAPES: u32 = 23;
+/// A [`P_SEGMENT`] with a round start, a round end.
+pub const F_CAP_START: u32 = 1 << 24;
+pub const F_CAP_END: u32 = 1 << 25;
 
 /// The shape of a [`K_PARTICLE`] record.
 pub const fn particle_shape(kind: u32) -> u32 {
-    kind >> 16 & 7
+    kind >> 16 & 255
 }
 
 /// The kind of a [`K_PARTICLE`] record of `shape`.
-pub const fn particle_kind(shape: u32, additive: bool) -> u32 {
-    K_PARTICLE | (shape & 7) << 16 | if additive { F_ADD } else { 0 }
+pub const fn particle_kind(shape: u32) -> u32 {
+    K_PARTICLE | (shape & 255) << 16
 }
 
-/// The particle material atlas the renderers sample for [`P_SPRITE`] particles (the
-/// editor's procedural atlas, `styk_eval::vfx::generated::atlas`): `MATERIAL_ROWS` rows of
-/// `MATERIAL_COLUMNS` cells of `MATERIAL_CELL` pixels, two channels (shading × coverage,
-/// coverage), `MATERIAL_LEVELS` box-reduced levels sampled trilinearly.
-pub const MATERIAL_CELL: u32 = 128;
-pub const MATERIAL_COLUMNS: u32 = 8;
-pub const MATERIAL_ROWS: u32 = 17;
+/// A bit of [`DrawList::materials`] beyond every material: a limit thinned or left out
+/// part of the frame's generated effects (docs/engine/vfx.md, "Limits"), which the app can say.
+pub const MATERIALS_REDUCED: u32 = 1 << 31;
+/// A bit of [`DrawList::materials`]: a material was not generated yet and its particles were
+/// drawn as soft discs; the frame should be drawn again once it is.
+pub const MATERIALS_PENDING: u32 = 1 << 30;
+
+/// Whether a list's generated effects were reduced by a limit ([`MATERIALS_REDUCED`]).
+pub fn effects_reduced(list: &DrawList) -> bool {
+    list.materials & MATERIALS_REDUCED != 0
+}
+
+/// The noise material atlas the renderers sample for [`P_MATERIAL`] particles
+/// (`styk_eval::vfx::generated::atlas`): `MATERIAL_ROWS` materials, each a row of
+/// `MATERIAL_COLUMNS` cells of `MATERIAL_CELL` pixels, two channels (density, light),
+/// `MATERIAL_LEVELS` box-reduced levels sampled trilinearly, never across a cell's side.
+/// 1,024 pixels square: within every device's texture limit.
+pub const MATERIAL_CELL: u32 = 256;
+pub const MATERIAL_COLUMNS: u32 = 4;
+pub const MATERIAL_ROWS: u32 = 4;
 pub const MATERIAL_LEVELS: u32 = 4;
 
 /// An image sampled bilinearly (drawings); Pivot sprites sample their nearest texel.
@@ -353,6 +407,10 @@ pub struct DrawList {
     pub layers: Vec<EffectLayer>,
     /// The particle material rows [`P_SPRITE`] particles sample, one bit per row.
     pub materials: u32,
+    /// The effect clips (the top-level document's, by identity, sorted) whose generated effects a limit thinned or left out
+    /// of this frame (docs/engine/vfx.md, "Limits"); [`MATERIALS_REDUCED`] says that any was. The app shows a notice on
+    /// each of them for the frame on show.
+    pub reduced_effects: Vec<std::sync::Arc<str>>,
     /// The glyphs [`K_GLYPH`] records draw, by index.
     pub glyphs: Vec<GlyphInstance>,
 }

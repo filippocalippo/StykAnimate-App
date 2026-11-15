@@ -169,9 +169,9 @@ const K_PARTICLE: u32 = 13u;
 const K_BEAM: u32 = 14u;
 const K_GLYPH: u32 = 15u;
 const F_GLYPH_VECTOR: u32 = 32768u;
-const MATERIAL_CELL: f32 = 128.0;
-const MATERIAL_COLUMNS: f32 = 8.0;
-const MATERIAL_ROWS: f32 = 17.0;
+const MATERIAL_CELL: f32 = 256.0;
+const MATERIAL_COLUMNS: f32 = 4.0;
+const MATERIAL_ROWS: f32 = 4.0;
 const MATERIAL_MAX_LOD: f32 = 3.0;
 const TAU: f32 = 6.28318530718;
 const F_CLOSED: u32 = 1024u;
@@ -248,7 +248,7 @@ fn in_sweep(angle: f32, start: f32, sweep: f32) -> bool {
     return d <= -sweep;
 }
 
-// Hashing and value noise of generated effects, bit-compatible with the editor's.
+// Hashing and value noise of generated effects (the same as styk-raster's and the batch's).
 fn pcg(v: u32) -> u32 {
     let s = v * 747796405u + 2891336453u;
     let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
@@ -279,9 +279,230 @@ struct Shaped {
     prm: vec4<f32>,
 };
 
+// ---------------------------------------------------------------------------------------------
+// Generated effects (docs/engine/vfx.md): particles, trails, beams. styk-raster/src/generators.rs
+// carries out the same arithmetic on the processor. A record's colour is premultiplied with less
+// alpha than colour where it emits light (`lit`): one blend draws paint and light alike.
+// ---------------------------------------------------------------------------------------------
+
+const P_DISC: u32 = 0u;
+const P_STREAK: u32 = 1u;
+const P_RING: u32 = 2u;
+const P_ROCK: u32 = 3u;
+const P_SEGMENT: u32 = 4u;
+const P_MATERIAL: u32 = 5u;
+const P_SQUARE: u32 = 6u;
+const P_RHOMBUS: u32 = 7u;
+const P_STAR: u32 = 8u;
+const P_SPARKLE: u32 = 9u;
+const P_SPARK: u32 = 10u;
+const P_SHARD: u32 = 11u;
+const P_DROP: u32 = 12u;
+const P_HEART: u32 = 13u;
+const P_BURST: u32 = 14u;
+const P_CLOUD: u32 = 15u;
+const P_FLAKE: u32 = 16u;
+const P_PETAL: u32 = 17u;
+const P_BOLT: u32 = 18u;
+const P_FLAME: u32 = 19u;
+const P_SPLAT: u32 = 20u;
+const P_BOKEH: u32 = 21u;
+const P_TOON_STAR: u32 = 22u;
+
+fn particle_shape_of(kind: u32) -> u32 {
+    return (kind >> 16u) & 255u;
+}
+
+// A shape's random number `k` from its seed, 0–1.
+fn shape_hash(seed: u32, k: u32) -> f32 {
+    return f32(pcg(seed * 2654435761u + k * 40503u)) * (1.0 / 4294967296.0);
+}
+
+fn rem_e(x: f32, m: f32) -> f32 {
+    return x - floor(x / m) * m;
+}
+
+fn sd_seg(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let pa = p - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-12), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+fn sd_box2(p: vec2<f32>, b: vec2<f32>) -> f32 {
+    let d = abs(p) - b;
+    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
+}
+
+fn sd_rhombus(p0: vec2<f32>, b: vec2<f32>) -> f32 {
+    let p = abs(p0);
+    let nd = (b.x - 2.0 * p.x) * b.x - (b.y - 2.0 * p.y) * b.y;
+    let h = clamp(nd / dot(b, b), -1.0, 1.0);
+    let q = p - 0.5 * b * vec2<f32>(1.0 - h, 1.0 + h);
+    let s = p.x * b.y + p.y * b.x - b.x * b.y;
+    return length(q) * select(1.0, -1.0, s < 0.0);
+}
+
+fn sd_star(p: vec2<f32>, r: f32, n: f32, m: f32) -> f32 {
+    let an = PI / n;
+    let en = PI / m;
+    let acs = vec2<f32>(cos(an), sin(an));
+    let ecs = vec2<f32>(cos(en), sin(en));
+    let a = atan2(p.x, -p.y);
+    let bn = rem_e(a, 2.0 * an) - an;
+    let l = length(p);
+    var q = vec2<f32>(l * cos(bn), l * abs(sin(bn)));
+    q = q - r * acs;
+    q = q + ecs * clamp(-dot(q, ecs), 0.0, r * acs.y / ecs.y);
+    return length(q) * select(1.0, -1.0, q.x < 0.0);
+}
+
+fn sd_uneven_capsule(p0: vec2<f32>, r1: f32, r2: f32, h: f32) -> f32 {
+    let p = vec2<f32>(abs(p0.x), p0.y);
+    let b = (r1 - r2) / h;
+    let a = sqrt(max(1.0 - b * b, 0.0));
+    let k = -b * p.x + a * p.y;
+    if (k < 0.0) { return length(p) - r1; }
+    if (k > a * h) { return length(p - vec2<f32>(0.0, h)) - r2; }
+    return a * p.x + b * p.y - r1;
+}
+
+fn sd_heart(p0: vec2<f32>) -> f32 {
+    let p = vec2<f32>(abs(p0.x), p0.y);
+    if (p.y + p.x > 1.0) { return length(p - vec2<f32>(0.25, 0.75)) - 0.35355339; }
+    let a = length(p - vec2<f32>(0.0, 1.0));
+    let s = 0.5 * max(p.x + p.y, 0.0);
+    let b = length(p - vec2<f32>(s, s));
+    return min(a, b) * select(1.0, -1.0, p.x - p.y < 0.0);
+}
+
+fn sd_vesica(p0: vec2<f32>, r: f32, d: f32) -> f32 {
+    let p = abs(p0);
+    let b = sqrt(max(r * r - d * d, 0.0));
+    if ((p.y - b) * d > p.x * b) { return length(p - vec2<f32>(0.0, b)); }
+    return length(p + vec2<f32>(d, 0.0)) - r;
+}
+
+fn sd_triangle(p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> f32 {
+    let e0 = p1 - p0;
+    let e1 = p2 - p1;
+    let e2 = p0 - p2;
+    let v0 = p - p0;
+    let v1 = p - p1;
+    let v2 = p - p2;
+    let pq0 = v0 - e0 * clamp(dot(v0, e0) / max(dot(e0, e0), 1e-12), 0.0, 1.0);
+    let pq1 = v1 - e1 * clamp(dot(v1, e1) / max(dot(e1, e1), 1e-12), 0.0, 1.0);
+    let pq2 = v2 - e2 * clamp(dot(v2, e2) / max(dot(e2, e2), 1e-12), 0.0, 1.0);
+    let s = sign(e0.x * e2.y - e0.y * e2.x);
+    let d = min(min(dot(pq0, pq0), dot(pq1, pq1)), dot(pq2, pq2));
+    let sg = min(min(s * (v0.x * e0.y - v0.y * e0.x), s * (v1.x * e1.y - v1.y * e1.x)), s * (v2.x * e2.y - v2.y * e2.x));
+    return -sqrt(d) * sign(sg);
+}
+
+fn rock_radius(a: f32, seed: u32, n: u32, lo: f32) -> f32 {
+    let t = rem_e(a / TAU, 1.0) * f32(n);
+    let i = u32(floor(t)) % n;
+    let f = t - floor(t);
+    return mix(mix(lo, 1.0, shape_hash(seed, i)), mix(lo, 1.0, shape_hash(seed, (i + 1u) % n)), f);
+}
+
+fn smin(a: f32, b: f32, k: f32) -> f32 {
+    let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+fn shape_distance(shape: u32, q: vec2<f32>, seed: u32) -> f32 {
+    if (shape == P_SQUARE) { return sd_box2(q, vec2<f32>(1.0, 1.0)); }
+    if (shape == P_RHOMBUS) { return sd_rhombus(q, vec2<f32>(0.72, 1.0)); }
+    if (shape == P_STAR) { return sd_star(q, 1.0, 5.0, 2.6); }
+    if (shape == P_SPARKLE) { return sd_star(q, 1.0, 4.0, 2.08); }
+    if (shape == P_SPARK) { return sd_rhombus(q, vec2<f32>(0.2, 1.0)); }
+    if (shape == P_SHARD) {
+        let j1 = (shape_hash(seed, 1u) - 0.5) * 0.35;
+        let j2 = (shape_hash(seed, 2u) - 0.5) * 0.35;
+        let j3 = (shape_hash(seed, 3u) - 0.5) * 0.35;
+        let j4 = (shape_hash(seed, 4u) - 0.5) * 0.35;
+        let j5 = (shape_hash(seed, 5u) - 0.5) * 0.35;
+        return sd_triangle(q, vec2<f32>(j1, -1.0), vec2<f32>(0.62 + j2, 0.75 + j3), vec2<f32>(-0.55 + j4, 0.6 + j5));
+    }
+    if (shape == P_ROCK) { return (length(q) - rock_radius(atan2(q.x, q.y), seed, 7u, 0.68)) * 0.9; }
+    if (shape == P_DROP) { return sd_uneven_capsule(vec2<f32>(q.x, q.y + 0.4), 0.58, 0.04, 1.4); }
+    if (shape == P_HEART) { return sd_heart(vec2<f32>(q.x * 0.82, -q.y * 0.82 + 0.6)) / 0.82; }
+    if (shape == P_BURST) {
+        let n = 11.0;
+        let a = atan2(q.x, -q.y) + PI;
+        let k = u32(floor(a / TAU * n));
+        return sd_star(q, mix(0.78, 1.0, shape_hash(seed, k)), n, 2.25);
+    }
+    if (shape == P_CLOUD) {
+        var d = 1e9;
+        d = smin(d, length(q - vec2<f32>(-0.48, 0.18)) - 0.42, 0.12);
+        d = smin(d, length(q - vec2<f32>(-0.05, -0.18)) - 0.55, 0.12);
+        d = smin(d, length(q - vec2<f32>(0.45, 0.08)) - 0.44, 0.12);
+        d = smin(d, length(q - vec2<f32>(-0.2, 0.36)) - 0.38, 0.12);
+        d = smin(d, length(q - vec2<f32>(0.25, 0.38)) - 0.36, 0.12);
+        return max(d, q.y - 0.62);
+    }
+    if (shape == P_FLAKE) {
+        let sector = PI / 3.0;
+        let a = rem_e(atan2(q.x, -q.y), sector) - sector / 2.0;
+        let r = length(q);
+        let f = vec2<f32>(r * abs(sin(a)), r * cos(a));
+        let arm = sd_seg(f, vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.95)) - 0.09;
+        let side = sd_seg(f, vec2<f32>(0.0, 0.5), vec2<f32>(0.3, 0.75)) - 0.06;
+        return min(min(arm, side), length(q) - 0.2);
+    }
+    if (shape == P_PETAL) { return sd_vesica(q, 1.0, 0.62); }
+    if (shape == P_BOLT) {
+        var d = sd_seg(q, vec2<f32>(-0.05, -1.0), vec2<f32>(0.32, -0.18)) - 0.2;
+        d = min(d, sd_seg(q, vec2<f32>(0.32, -0.18), vec2<f32>(-0.12, -0.02)) - 0.14);
+        d = min(d, sd_seg(q, vec2<f32>(-0.12, -0.02), vec2<f32>(0.18, 1.0)) - 0.08);
+        return d;
+    }
+    if (shape == P_FLAME) {
+        let lean = 0.22 * (shape_hash(seed, 1u) - 0.5) * 2.0;
+        let wx = q.x + lean * (1.0 - q.y) * (1.0 - q.y) * 0.25;
+        let body = sd_uneven_capsule(vec2<f32>(wx, -(q.y - 0.42)), 0.55, 0.02, 1.35);
+        let side = sd_uneven_capsule(vec2<f32>(wx + 0.32, -(q.y - 0.35)), 0.24, 0.01, 0.75);
+        return smin(body, side, 0.1);
+    }
+    if (shape == P_SPLAT) {
+        let a = atan2(q.x, q.y);
+        let r = 0.68 + 0.14 * sin(a * 3.0 + shape_hash(seed, 1u) * 6.0) + 0.09 * sin(a * 7.0 + shape_hash(seed, 2u) * 6.0);
+        let k0 = shape_hash(seed, 3u) * TAU;
+        let k1 = shape_hash(seed, 4u) * TAU;
+        let d1 = length(q - 0.9 * vec2<f32>(cos(k0), sin(k0))) - 0.12;
+        let d2 = length(q - 0.85 * vec2<f32>(cos(k1), sin(k1))) - 0.09;
+        return min(min(length(q) - r, d1), d2);
+    }
+    if (shape == P_TOON_STAR) { return sd_star(q, 0.86, 5.0, 3.3) - 0.12; }
+    return length(q) - 1.0;
+}
+
+fn edge_cov(d: f32, soft: f32, px: f32) -> f32 {
+    if (soft <= 0.001) { return clamp(0.5 - d / px, 0.0, 1.0); }
+    return smooth01(px * 0.5, -soft, d);
+}
+
+// Premultiplied colour of a paint layer: `rgb` at coverage `k`, emitting `e` of its light.
+fn lit(rgb: vec3<f32>, k: f32, e: f32) -> vec4<f32> {
+    return vec4<f32>(rgb * k, k * (1.0 - e));
+}
+
+fn over(top: vec4<f32>, under: vec4<f32>) -> vec4<f32> {
+    return top + under * (1.0 - top.a);
+}
+
+// A fill with an ink line `line - k` around it.
+fn with_outline(rgb: vec3<f32>, k: f32, line: f32, e: f32, alpha: f32, ink: vec4<f32>) -> vec4<f32> {
+    let fill = lit(rgb, k * alpha, e);
+    let band = max(line - min(k, 1.0), 0.0) * ink.a * alpha;
+    return vec4<f32>(fill.rgb + ink.rgb * band, fill.a + band);
+}
+
 // One corner `q` (-1..1) of a generated-effect record, in its draw's local units; `px` is the
-// target's pixel in those units, `r2` the draw's constants (softness, stretch, aspect, row).
-fn particle_corner(p: Prim, kind: u32, q: vec2<f32>, px: f32, r2: vec4<f32>) -> Shaped {
+// target's pixel in those units.
+fn particle_corner(p: Prim, kind: u32, q: vec2<f32>, px: f32, shape_row: vec4<f32>) -> Shaped {
     var o: Shaped;
     if (kind == K_BEAM) {
         let a = p.a.xy;
@@ -289,44 +510,40 @@ fn particle_corner(p: Prim, kind: u32, q: vec2<f32>, px: f32, r2: vec4<f32>) -> 
         let len = max(length(d), 1.0);
         let dn = d / len;
         let nn = vec2<f32>(-dn.y, dn.x);
-        let w = p.b.x;
-        let halo = w * 3.5 + 8.0;
+        let halo = p.b.x * 3.0 + 8.0 + px;
         let lx = mix(-halo, len + halo, q.x * 0.5 + 0.5);
         let ly = q.y * halo;
         o.local = a + dn * lx + nn * ly;
         o.uv = vec2<f32>(lx, ly);
-        o.prm = vec4<f32>(len, w, p.b.y, p.b.z);
+        o.prm = vec4<f32>(len, p.b.x, p.b.y, p.b.z);
         return o;
     }
-    let shape = (p.kind >> 16u) & 7u;
-    let softness = r2.x;
-    if (shape == 5u) {
-        // A lightning arc segment: a capsule with a glow margin.
+    let shape = particle_shape_of(p.kind);
+    let softness = shape_row.x;
+    if (shape == P_SEGMENT) {
         let p0 = p.a.xy;
         let p1 = p.a.zw;
-        let r = p.b.x;
         let d = p1 - p0;
         let l = length(d);
         var dn = vec2<f32>(1.0, 0.0);
         if (l > 1e-4) { dn = d / l; }
         let hl = 0.5 * l;
-        let e = r + r * 4.0;
+        let e = max(p.b.x, p.b.y) * (1.0 + softness * 3.0) + px;
         let local = vec2<f32>(q.x * (hl + e), q.y * e);
         o.local = (p0 + p1) * 0.5 + dn * local.x + vec2<f32>(-dn.y, dn.x) * local.y;
         o.uv = local;
-        o.prm = vec4<f32>(hl, r, px, 0.0);
+        o.prm = vec4<f32>(hl, px, 0.0, 0.0);
         return o;
     }
     let centre = p.a.xy;
     let sz = p.a.z;
-    let rot = p.a.w;
+    let cr = vec2<f32>(cos(p.a.w), sin(p.a.w));
     let vel = p.b.xy;
-    let cr = vec2<f32>(cos(rot), sin(rot));
-    if (shape == 1u) {
+    if (shape == P_STREAK) {
         let sp = length(vel);
         var d = vec2<f32>(1.0, 0.0);
         if (sp > 1e-4) { d = vel / sp; }
-        let hl = 0.5 * sp * r2.y;
+        let hl = 0.5 * sp * shape_row.y;
         let rr = max(sz, px * 0.5);
         let local = vec2<f32>(q.x * (hl + rr + px), q.y * (rr + px));
         o.local = centre - d * hl + d * local.x + vec2<f32>(-d.y, d.x) * local.y;
@@ -334,44 +551,224 @@ fn particle_corner(p: Prim, kind: u32, q: vec2<f32>, px: f32, r2: vec4<f32>) -> 
         o.prm = vec4<f32>(hl, rr, softness, px);
         return o;
     }
-    if (shape == 3u) {
-        let e = q * (sz * 1.3 + px);
-        o.local = centre + vec2<f32>(e.x * cr.x - e.y * cr.y, e.x * cr.y + e.y * cr.x);
-        o.uv = q * (1.3 + px / max(sz, 1e-3));
-        o.prm = vec4<f32>(p.b.z, px / max(sz, 1e-3), 0.0, 0.0);
-        return o;
-    }
-    if (shape == 6u) {
-        // A textured sprite: one atlas cell, scaled along its up axis by aspect and speed.
-        let hx = max(sz, px * 0.5);
-        let hy = hx * r2.z + 0.5 * length(vel) * r2.y;
-        let e = vec2<f32>(q.x * hx, q.y * hy);
-        o.local = centre + vec2<f32>(e.x * cr.x - e.y * cr.y, e.x * cr.y + e.y * cr.x);
-        let cell = vec2<f32>(f32(p.color & 255u), f32(p.color >> 8u));
-        o.uv = vec2<f32>((cell.x + q.x * 0.5 + 0.5) / MATERIAL_COLUMNS, (cell.y + q.y * 0.5 + 0.5) / MATERIAL_ROWS);
-        let shade = paint_row(p.paint + 1u).w;
-        // Level of detail from the cell's size on screen.
-        o.prm = vec4<f32>(shade, clamp(log2(MATERIAL_CELL * px / (2.0 * max(hx, hy))), 0.0, MATERIAL_MAX_LOD), 0.0, 0.0);
-        return o;
-    }
-    if (shape == 7u) {
-        let rr = max(sz, px * 0.5);
-        let e = q * (rr + px);
-        o.local = centre + vec2<f32>(e.x * cr.x - e.y * cr.y, e.x * cr.y + e.y * cr.x);
-        o.uv = q * (1.0 + px / rr);
-        o.prm = vec4<f32>(px / rr, 0.0, 0.0, 0.0);
-        return o;
-    }
-    // Discs and rings; soft discs may be flattened into ellipses, such as glows on the ground.
-    var grow = 1.0;
-    if (shape == 2u) { grow = 1.0 + softness * 2.0; }
-    let rr = max(sz, px * 0.5);
-    var squash = 1.0;
-    if (shape == 0u) { squash = r2.z; }
-    o.local = centre + q * (rr * grow + px) * vec2<f32>(1.0, squash);
-    o.uv = q * (grow + px / rr);
-    o.prm = vec4<f32>(softness, px / rr, 0.0, 0.0);
+    let hx = max(sz, px * 0.5);
+    let hy = hx * shape_row.z + 0.5 * length(vel) * shape_row.y;
+    let ow = shape_row.w;
+    var grow = 0.0;
+    if (shape == P_RING) { grow = hx * softness * 2.0; }
+    let pad = px + ow + grow;
+    let e = vec2<f32>(q.x * (hx + pad), q.y * (hy + pad));
+    o.local = centre + vec2<f32>(e.x * cr.x - e.y * cr.y, e.x * cr.y + e.y * cr.x);
+    o.uv = vec2<f32>(e.x / hx, e.y / hy);
+    var lod = 0.0;
+    if (shape == P_MATERIAL) { lod = clamp(log2(MATERIAL_CELL * px / (2.0 * max(hx, hy))), 0.0, MATERIAL_MAX_LOD); }
+    // The record's rotation rides along for the fragment stage (its cartoon shadow), which sees `prm` in place of `a`.
+    o.prm = vec4<f32>(px / min(hx, hy), ow / hx, lod, p.a.w);
     return o;
+}
+
+// A material's density and light at `uv` (0–1 in its cell), trilinearly, never leaving the cell.
+fn material_sample(cell: u32, uv: vec2<f32>, lod: f32) -> vec2<f32> {
+    let m = f32(cell >> 4u);
+    let v = f32(cell & 15u);
+    let l0 = floor(lod);
+    let l1 = min(l0 + 1.0, MATERIAL_MAX_LOD);
+    let s0 = material_level(m, v, uv, l0);
+    let s1 = material_level(m, v, uv, l1);
+    return mix(s0, s1, lod - l0);
+}
+
+fn material_level(m: f32, v: f32, uv: vec2<f32>, level: f32) -> vec2<f32> {
+    // Texel centres of this cell at this level: half a texel in from its sides.
+    let cell = MATERIAL_CELL / exp2(level);
+    let half = 0.5 / cell;
+    let c = clamp(uv, vec2<f32>(half), vec2<f32>(1.0 - half));
+    let at = vec2<f32>((v + c.x) / MATERIAL_COLUMNS, (m + c.y) / MATERIAL_ROWS);
+    return textureSampleLevel(materials, material_sampler, at, level).rg;
+}
+
+// Where the light comes from in the world, for cartoon shadows: above, a little to the left.
+const CEL_LIGHT: vec2<f32> = vec2<f32>(-0.45, -0.893);
+
+// A crisp shape's cartoon shadow side: where the shape moved `rim.w` of its size toward the light no
+// longer covers `uv`, its colour turns to `shadow.rgb`, `shadow.w` strong, with a hard edge.
+fn cel_shadow(p: Prim, uv: vec2<f32>, shape: u32, px: f32, rotation: f32, aspect: f32, rim: vec4<f32>, shadow: vec4<f32>) -> vec3<f32> {
+    let cr = vec2<f32>(cos(rotation), sin(rotation));
+    // The light in the particle's own (turned, stretched) frame.
+    let l = vec2<f32>(CEL_LIGHT.x * cr.x + CEL_LIGHT.y * cr.y, (-CEL_LIGHT.x * cr.y + CEL_LIGHT.y * cr.x) / max(aspect, 0.05)) * rim.w;
+    var d = 0.0;
+    if (shape == P_DISC) { d = length(uv - l) - 1.0; } else { d = shape_distance(shape, uv - l, p.color & 0xffffu); }
+    let s = (1.0 - clamp(0.5 - d / px, 0.0, 1.0)) * shadow.w;
+    return mix(p.c.rgb, shadow.rgb, s);
+}
+
+// A generated-effect particle's premultiplied colour; `rows` are the draw's rows 2 to 6: its shape, its ink, erosion
+// with the white-hot core (`erosion.w`), the rim with the shadow's depth and the cartoon shadow.
+fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, shade_amount: f32, shape_row: vec4<f32>, ink: vec4<f32>, erosion: vec4<f32>, rim: vec4<f32>, shadow: vec4<f32>) -> vec4<f32> {
+    let shape = particle_shape_of(p.kind);
+    var rgb = p.c.rgb;
+    if (shadow.w > 0.0 && shape != P_SEGMENT && shape != P_STREAK && shape != P_MATERIAL && shape != P_RING && shape != P_BOKEH) {
+        rgb = cel_shadow(p, uv, shape, prm.x, prm.w, shape_row.z, rim, shadow);
+    }
+    let alpha = p.c.a;
+    let e = p.b.z;
+    let softness = shape_row.x;
+    var cov = 0.0;
+    // A white-hot middle (row 4's w): discs and crisp shapes whiter toward their centre.
+    var col = rgb;
+    if (shape == P_SEGMENT) {
+        let hl = prm.x;
+        let px = prm.y;
+        let t = clamp((uv.x + hl) / max(2.0 * hl, 1e-4), 0.0, 1.0);
+        let r = max(mix(p.b.x, p.b.y, t), px * 0.35);
+        let caps = p.kind >> 24u;
+        let along = abs(uv.x) - hl;
+        var d = abs(uv.y);
+        var open = true;
+        if (along > 0.0) {
+            let capped = select((caps & 2u) != 0u, (caps & 1u) != 0u, uv.x < 0.0);
+            if (capped) { d = length(vec2<f32>(along, uv.y)); } else { open = false; }
+        }
+        if (!open) { discard; }
+        let core = clamp(0.5 - (d - r) / px, 0.0, 1.0);
+        var glow = 0.0;
+        if (softness > 0.0) { glow = exp(-max(d - r, 0.0) / (r * softness * 1.2 + px)) * 0.6 * (1.0 - smooth01(r + r * softness * 1.8, r + r * softness * 3.0 + px, d)); }
+        let k = max(core, glow) * mix(alpha, p.b.w, t);
+        var ek = e;
+        if (core < glow) { ek = max(e, 0.85); }
+        if (k <= 0.0) { discard; }
+        return lit(rgb, k, ek);
+    }
+    if (shape == P_STREAK) {
+        let hl = prm.x;
+        let t = clamp(uv.x / max(hl, 1e-3) * 0.5 + 0.5, 0.0, 1.0);
+        let w = select(1.0, mix(0.3, 1.0, t), hl > 0.5);
+        let d = length(vec2<f32>(max(abs(uv.x) - hl, 0.0), uv.y / w)) / prm.y;
+        let tail = select(1.0, t * t * (3.0 - 2.0 * t) * 0.9 + 0.1, hl > 0.5);
+        let aa = min(prm.w / prm.y * 1.5, 1.0);
+        cov = pow(max(1.0 - d, 1e-5), max(prm.z, 0.05)) * (1.0 - smooth01(1.0 - aa, 1.0, d)) * tail;
+    } else if (shape == P_MATERIAL) {
+        let tex = material_sample(p.color & 0xffffu, uv * 0.5 + vec2<f32>(0.5), prm.z);
+        let f = tex.x;
+        let th = p.b.w;
+        let w = max(erosion.x, prm.x * 1.2);
+        let k = smooth01(th, th + w, f);
+        var line = k;
+        if (shape_row.w > 0.0) { line = smooth01(th - prm.y * 0.5, th - prm.y * 0.5 + w * 0.5, f); }
+        if (line <= 0.0) { discard; }
+        var col = rgb * mix(1.0, 0.45 + 1.1 * tex.y, shade_amount);
+        if (erosion.z > 0.0) {
+            let r = (1.0 - smooth01(th, th + max(erosion.y, w), f)) * erosion.z;
+            col = mix(col, rim.rgb, r);
+        }
+        return with_outline(col, k, line, e, alpha, ink);
+    } else if (shape == P_DISC || shape == P_RING || shape == P_BOKEH) {
+        let r = length(uv);
+        let px = prm.x;
+        col = mix(rgb, vec3<f32>(1.0), erosion.w * (1.0 - smooth01(0.0, 0.5, r)));
+        if (shape == P_RING) {
+            let hw = max(softness, 0.02);
+            let band = clamp(0.5 - (abs(r - 1.0) - hw) / px, 0.0, 1.0);
+            cov = band * mix(0.55, 1.0, smooth01(1.0 - hw, 1.0, r)) + 0.12 * (1.0 - smooth01(0.0, 1.0, r)) * select(0.0, 1.0, r <= 1.0);
+        } else if (shape == P_BOKEH) {
+            cov = edge_cov(r - 1.0, 0.0, px) * mix(0.5, 1.0, smooth01(0.62, 0.96, r));
+        } else if (softness < 0.15) {
+            cov = edge_cov(r - 1.0, 0.0, px);
+        } else {
+            cov = pow(max(1.0 - r, 0.0), softness) * (1.0 - smooth01(1.0 - px, 1.0, r));
+        }
+        if (shape_row.w > 0.0) {
+            let line = edge_cov(r - 1.0 - prm.y, 0.0, px);
+            let o = with_outline(col, cov, line, e, alpha, ink);
+            if (o.a <= 0.0 && max(o.r, max(o.g, o.b)) <= 0.0) { discard; }
+            return o;
+        }
+    } else {
+        let d = shape_distance(shape, uv, p.color & 0xffffu);
+        let px = prm.x;
+        cov = edge_cov(d, softness, px);
+        col = mix(rgb, vec3<f32>(1.0), erosion.w * (1.0 - smooth01(0.0, 0.5, length(uv))));
+        if (shape_row.w > 0.0) {
+            let line = edge_cov(d - prm.y, 0.0, px);
+            let o = with_outline(col, cov, line, e, alpha, ink);
+            if (o.a <= 0.0 && max(o.r, max(o.g, o.b)) <= 0.0) { discard; }
+            return o;
+        }
+        if (shape == P_SPARK || shape == P_SPARKLE) {
+            let core = (1.0 - smooth01(0.0, 0.45, length(uv))) * select(0.6, erosion.w, erosion.w > 0.0);
+            let k = cov * alpha;
+            if (k <= 0.0) { discard; }
+            return lit(mix(rgb, vec3<f32>(1.0), core), k, e);
+        }
+    }
+    let k = cov * alpha;
+    if (k <= 0.0) { discard; }
+    return lit(col, k, e);
+}
+
+// A beam's premultiplied colour; `aa` is the pixel in local units; rows 2 to 6 of its draw are its
+// core, body and glow colours (each with how much light it emits), [head swell, ink colour] and the
+// rim colour its body turns to toward its edge.
+fn beam_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, aa: f32) -> vec4<f32> {
+    let l = prm.x;
+    let w = prm.y;
+    if (w <= 0.05) { discard; }
+    let t = p.b.w;
+    let x = uv.x;
+    let style = u32(p.c.y);
+    let opacity = p.c.x;
+    let seed = prm.w;
+    let core_c = paint_row(p.paint + 2u);
+    let body_c = paint_row(p.paint + 3u);
+    let glow_c = paint_row(p.paint + 4u);
+    let extra = paint_row(p.paint + 5u);
+    let wob = (vnoise(vec2<f32>(x * 0.018 - t * 0.55, seed)) - 0.5) * 2.0 * prm.z * w * smooth01(0.0, 80.0, x);
+    let y = uv.y - wob;
+    let head = smooth01(l - w * 2.5, l - w * 0.4, x) * extra.x;
+    let ww = w * mix(0.55, 1.0, smooth01(0.0, 60.0, x)) * (1.0 + 0.35 * head);
+    let d = length(vec2<f32>(max(max(-x, x - l), 0.0), abs(y)));
+    if (style == 2u) {
+        let ink = 1.0 - smooth01(ww + p.c.w - aa, ww + p.c.w + aa, d);
+        let body = 1.0 - smooth01(ww - aa, ww + aa, d);
+        let core = 1.0 - smooth01(ww * 0.45 - aa, ww * 0.45 + aa, d);
+        let col = mix(body_c.rgb, core_c.rgb, core);
+        let a = body * opacity;
+        let band = max(ink - body, 0.0) * opacity;
+        let o = vec4<f32>(col * a + extra.yzw * band, a + band);
+        if (o.a <= 0.0) { discard; }
+        return o;
+    }
+    let flow = 0.8 + 0.45 * vnoise(vec2<f32>(x * 0.045 - t * 1.6, y / max(ww, 1.0) * 1.3 + seed));
+    var core_w = 0.2;
+    var body_w = 0.68;
+    var glow_w = 0.9;
+    var bright = flow;
+    if (style == 1u) { core_w = 0.18; body_w = 0.42; glow_w = 0.7; bright = 1.0; }
+    let core = 1.0 - smooth01(ww * core_w - aa, ww * (core_w + 0.1) + aa, d);
+    let body = 1.0 - smooth01(ww * body_w - aa, ww * body_w + aa * 2.0, d);
+    // The glow fades out before the quad's side (w · 3 + 8 from the axis).
+    let halo = w * 3.0 + 8.0;
+    let glow = exp(-max(d - ww * body_w * 0.8, 0.0) / (ww * glow_w + 1.0)) * 0.55 * (1.0 - smooth01(halo * 0.6, halo, d));
+    var out = lit(glow_c.rgb, glow * opacity, glow_c.a);
+    // The body turns to its rim colour over its outer half: a deeper tone of the hue gives a light
+    // beam an edge that reads on a light page.
+    let rim_c = paint_row(p.paint + 6u);
+    let edge = smooth01(ww * body_w * 0.4, ww * body_w, d);
+    out = over(lit(mix(body_c.rgb, rim_c.rgb, edge), body * opacity * min(bright, 1.0), mix(body_c.a, rim_c.a, edge)), out);
+    if (p.c.z > 0.5) {
+        let period = max(24.0, w * 3.2);
+        let inside = step(0.0, x) * step(x, l);
+        for (var s = 0u; s < 2u; s = s + 1u) {
+            let phase = x / period * TAU - t * 0.35 + f32(s) * PI;
+            let sy = sin(phase) * ww * 0.95;
+            let depth = 0.55 + 0.45 * cos(phase);
+            let strand = exp(-abs(y - sy) / (ww * 0.1 + 0.6)) * depth * inside;
+            out = over(lit(core_c.rgb, min(strand * opacity, 1.0), core_c.a), out);
+        }
+    }
+    out = over(lit(min(core_c.rgb * bright, vec3<f32>(1.0)), core * opacity, core_c.a), out);
+    if (out.a <= 0.0 && max(out.r, max(out.g, out.b)) <= 0.0) { discard; }
+    return out;
 }
 
 // What every vertex entry point starts with: the record's attributes for the fragment stage and the placement of its
@@ -614,23 +1011,6 @@ fn vs_main(in: VsIn) -> VsOut {
         // The fragment stage reads the mask's place where other kinds carry `a` and `b`.
         out.a = r2;
         out.b = vec4<f32>(r1.zw, 0.0, 0.0);
-    } else if (kind == K_PARTICLE || kind == K_BEAM) {
-        // Generated effects: expanded in their draw's local units exactly as the editor's
-        // vertex shader does (`vs` in vfx-generator-gpu.mjs), then placed by the draw's transform.
-        let r0 = paint_row(p.paint);
-        let r1 = paint_row(p.paint + 1u);
-        let r2 = paint_row(p.paint + 2u);
-        let px = aa / max(r1.z, 1e-12);
-        let q = c * 2.0 - vec2<f32>(1.0);
-        let shaped = particle_corner(p, kind, q, px, r2);
-        out.uv = shaped.uv;
-        // The fragment stage reads the record's per-instance values (`prm` in
-        // vfx-generator-gpu.mjs) where other kinds carry their `a` field.
-        out.a = shaped.prm;
-        world = affine(r0, r1.xy, shaped.local);
-        out.world = world;
-        out.pos = clip_pos(to_target(world, g, gr));
-        return out;
     } else if (kind == K_COMPOSITE) {
         composite_vertex(&out, p, c);
         return out;
@@ -881,104 +1261,6 @@ fn shade_rgb(c: vec3<f32>, s: f32) -> vec3<f32> {
     return mix(c, vec3<f32>(1.0), (s - 0.5) * 1.4);
 }
 
-// A generated-effect particle's premultiplied colour (`fs` in vfx-generator-gpu.mjs).
-fn particle_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>) -> vec4<f32> {
-    let shape = (p.kind >> 16u) & 7u;
-    var cov = 0.0;
-    if (shape == 0u) {
-        cov = soft(length(uv), prm.x, min(prm.y * 1.5, 1.0));
-    } else if (shape == 1u) {
-        // A tapered streak: full width and brightness at the head, thinning and fading toward the tail.
-        let hl = prm.x;
-        let t = clamp(uv.x / max(hl, 1e-3) * 0.5 + 0.5, 0.0, 1.0);
-        let w = select(1.0, mix(0.3, 1.0, t), hl > 0.5);
-        let d = length(vec2<f32>(max(abs(uv.x) - hl, 0.0), uv.y / w)) / prm.y;
-        let tail = select(1.0, t * t * (3.0 - 2.0 * t) * 0.9 + 0.1, hl > 0.5);
-        cov = soft(d, prm.z, min(prm.w / prm.y * 1.5, 1.0)) * tail;
-    } else if (shape == 2u) {
-        let d = length(uv);
-        let rd = abs(d - 1.0) / max(prm.x, 0.01);
-        cov = pow(max(1.0 - rd, 0.0), 1.6) + 0.18 * (1.0 - smooth01(0.0, 1.0, d)) * step(d, 1.0);
-    } else if (shape == 3u) {
-        let q = abs(uv);
-        let d = max(q.x, q.y * (0.55 + 0.6 * prm.x) + q.x * 0.25);
-        cov = 1.0 - smooth01(1.0 - min(prm.y * 1.5, 1.0), 1.0, d);
-    } else if (shape == 5u) {
-        let d = length(vec2<f32>(max(abs(uv.x) - prm.x, 0.0), uv.y));
-        let r = prm.y;
-        cov = min(clamp(1.0 - (d - r) / prm.z, 0.0, 1.0) + exp(-d / (r * 2.5)) * 0.55, 1.0);
-    } else if (shape == 6u) {
-        let tex = textureSampleLevel(materials, material_sampler, uv, prm.y);
-        if (tex.g <= 0.002) { discard; }
-        let rgb = shade_rgb(p.c.rgb, mix(0.5, clamp(tex.r / tex.g, 0.0, 1.0), prm.x));
-        let k = tex.g * p.c.a;
-        return vec4<f32>(rgb * k, k);
-    } else if (shape == 7u) {
-        let q = max(abs(uv.x), abs(uv.y));
-        let aa = min(prm.x * 1.5, 1.0);
-        cov = 1.0 - smooth01(1.0 - aa, 1.0, q);
-    }
-    let k = cov * p.c.a;
-    if (k <= 0.0) { discard; }
-    return vec4<f32>(p.c.rgb * k, k);
-}
-
-// A beam's premultiplied colour (`beamColor` in vfx-generator-gpu.mjs); `aa` is the pixel in local units.
-fn beam_color(p: Prim, uv: vec2<f32>, prm: vec4<f32>, aa: f32) -> vec4<f32> {
-    let len = prm.x;
-    let w = prm.y;
-    if (w <= 0.05) { discard; }
-    let t = p.b.w;
-    let x = uv.x;
-    let style = u32(p.c.y);
-    let opacity = p.c.x;
-    let c0 = paint_row(p.paint + 3u);
-    let c1 = paint_row(p.paint + 4u);
-    let wob = (vnoise(vec2<f32>(x * 0.018 - t * 0.55, prm.w)) - 0.5) * 2.0 * prm.z * w * smooth01(0.0, 80.0, x);
-    let y = uv.y - wob;
-    let ww = w * mix(0.55, 1.0, smooth01(0.0, 70.0, x));
-    let d = length(vec2<f32>(max(max(-x, x - len), 0.0), abs(y)));
-    if (style == 2u) {
-        // Cartoon: a flat body with a lighter core band and crisp edges.
-        let body = 1.0 - smooth01(ww - aa, ww + aa, d);
-        let core = 1.0 - smooth01(ww * 0.45 - aa, ww * 0.45 + aa, d);
-        let a = body * opacity;
-        return vec4<f32>(mix(c1.rgb, c0.rgb, core) * a, a);
-    }
-    var core: f32;
-    var body: f32;
-    var glow: f32;
-    let pulse = 0.8 + 0.4 * vnoise(vec2<f32>(x * 0.035 - t * 1.7, 3.0 + prm.w));
-    if (style == 1u) {
-        // Laser: a hard, steady core with a tight glow.
-        core = 1.0 - smooth01(ww * 0.2 - aa, ww * 0.2 + aa, d);
-        body = 1.0 - smooth01(ww * 0.5 - aa, ww * 0.5 + aa, d);
-        glow = exp(-d / (ww * 1.1 + 1.0)) * 0.5;
-    } else {
-        core = 1.0 - smooth01(ww * 0.26, ww * 0.42, d);
-        body = 1.0 - smooth01(ww * 0.45, ww, d);
-        glow = exp(-d / (ww * 0.9 + 1.0)) * 0.45;
-    }
-    var rgb = c0.rgb * core + c1.rgb * (body * 0.8 + glow) * select(pulse, 1.0, style == 1u);
-    var a = core + body * 0.7 + glow * 0.5;
-    if (style == 3u) {
-        // Spiral: two strands winding around the beam.
-        let period = max(24.0, w * 3.2);
-        let inside = step(0.0, x) * step(x, len);
-        for (var s = 0u; s < 2u; s = s + 1u) {
-            let phase = x / period * TAU - t * 0.35 + f32(s) * 3.14159265;
-            let sy = sin(phase) * ww * 0.95;
-            let depth = 0.55 + 0.45 * cos(phase);
-            let strand = exp(-abs(y - sy) / (ww * 0.1 + 0.6)) * depth * inside;
-            rgb = rgb + c0.rgb * strand;
-            a = a + strand * 0.8;
-        }
-    }
-    let alpha = clamp(a, 0.0, 1.0) * opacity;
-    if (alpha <= 0.0) { discard; }
-    return vec4<f32>(min(vec3<f32>(1.0), rgb) * alpha, alpha);
-}
-
 // A fragment outside the clip of the group it is drawn in is not drawn.
 fn discard_outside_clip(in: VsOut) {
     let pos = in.pos.xy;
@@ -995,12 +1277,6 @@ fn shade_primitive(in: VsOut) -> vec4<f32> {
     discard_outside_clip(in);
     let p = Prim(in.head.x, in.head.y, in.head.z, in.head.w, in.a, in.b, in.c);
     let kind = p.kind & 255u;
-    if (kind == K_PARTICLE) {
-        return particle_color(p, in.uv, in.a);
-    }
-    if (kind == K_BEAM) {
-        return beam_color(p, in.uv, in.a, in.aa / max(paint_row(p.paint + 1u).z, 1e-12));
-    }
     let w = in.world;
     let aa = in.aa;
     var base = unpack(p.color);
@@ -1284,6 +1560,43 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         if (any(w < bounds.xy) || any(w >= bounds.xy + bounds.zw)) { return vec4<f32>(0.0); }
     }
     return canvas_masked(src, canvas_alpha(in.pos.xy, kind));
+}
+
+// Generated effects (styk-draw `K_PARTICLE`, `K_BEAM`) draw with an entry point pair of their own (`Renderer::generated_pipeline`),
+// compiled only once a list has them: a frame without generated effects never runs or compiles their shading. A record is
+// expanded in its draw's local units, then placed by the draw's transform; the fragment stage reads the record's
+// per-instance values (`particle_corner`'s `prm`) where other kinds carry their `a` field.
+@vertex
+fn vs_particle(in: VsIn) -> VsOut {
+    var out: VsOut;
+    var gr: Group;
+    if (!vertex_start(in, &out, &gr)) { return out; }
+    let p = vertex_prim(in);
+    let r0 = paint_row(p.paint);
+    let r1 = paint_row(p.paint + 1u);
+    let px = out.aa / max(r1.z, 1e-12);
+    let q = corner(in.vertex) * 2.0 - vec2<f32>(1.0);
+    let shaped = particle_corner(p, p.kind & 255u, q, px, paint_row(p.paint + 2u));
+    out.uv = shaped.uv;
+    out.a = shaped.prm;
+    let world = affine(r0, r1.xy, shaped.local);
+    out.world = world;
+    out.pos = clip_pos(to_target(world, p.group, gr));
+    return out;
+}
+
+@fragment
+fn fs_particle(in: VsOut) -> @location(0) vec4<f32> {
+    discard_outside_orient_artboard(in);
+    discard_outside_clip(in);
+    let p = prim_of(in);
+    var src: vec4<f32>;
+    if ((p.kind & 255u) == K_BEAM) {
+        src = beam_color(p, in.uv, in.a, in.aa / max(paint_row(p.paint + 1u).z, 1e-12));
+    } else {
+        src = particle_color(p, in.uv, in.a, paint_row(p.paint + 1u).w, paint_row(p.paint + 2u), paint_row(p.paint + 3u), paint_row(p.paint + 4u), paint_row(p.paint + 5u), paint_row(p.paint + 6u));
+    }
+    return painted(in, src);
 }
 
 // A root paint of the Canvas painter (the camera monitor's) is masked by its clip; everything else is as shaded.

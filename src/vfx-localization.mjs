@@ -33,6 +33,9 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.turbulence.seed.label"
+      },
+      "speed": {
+        "labelKey": "vfxCatalog.parameter.turbulence.speed.label"
       }
     }
   },
@@ -48,6 +51,17 @@ export const effectMessages = Object.freeze({
       },
       "mix": {
         "labelKey": "vfxCatalog.parameter.tint.mix.label"
+      },
+      "blend": {
+        "labelKey": "vfxCatalog.parameter.tint.blend.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.tint.blend.option.normal",
+          "vfxCatalog.parameter.tint.blend.option.multiply",
+          "vfxCatalog.parameter.tint.blend.option.screen",
+          "vfxCatalog.parameter.tint.blend.option.overlay",
+          "vfxCatalog.parameter.tint.blend.option.color",
+          "vfxCatalog.parameter.tint.blend.option.add"
+        ]
       }
     }
   },
@@ -94,6 +108,13 @@ export const effectMessages = Object.freeze({
           "vfxCatalog.parameter.glow.blend.option.add",
           "vfxCatalog.parameter.glow.blend.option.screen"
         ]
+      },
+      "source": {
+        "labelKey": "vfxCatalog.parameter.glow.source.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.glow.source.option.color",
+          "vfxCatalog.parameter.glow.source.option.artwork"
+        ]
       }
     }
   },
@@ -134,6 +155,9 @@ export const effectMessages = Object.freeze({
           "vfxCatalog.parameter.outline.only.option.off",
           "vfxCatalog.parameter.outline.only.option.on"
         ]
+      },
+      "softness": {
+        "labelKey": "vfxCatalog.parameter.outline.softness.label"
       }
     }
   },
@@ -231,6 +255,9 @@ export const effectMessages = Object.freeze({
       },
       "gamma": {
         "labelKey": "vfxCatalog.parameter.grade.gamma.label"
+      },
+      "hue": {
+        "labelKey": "vfxCatalog.parameter.grade.hue.label"
       }
     }
   },
@@ -300,6 +327,9 @@ export const effectMessages = Object.freeze({
       },
       "phase": {
         "labelKey": "vfxCatalog.parameter.noise.phase.label"
+      },
+      "speed": {
+        "labelKey": "vfxCatalog.parameter.noise.speed.label"
       }
     }
   },
@@ -360,6 +390,12 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.dissolve.seed.label"
+      },
+      "directional": {
+        "labelKey": "vfxCatalog.parameter.dissolve.directional.label"
+      },
+      "angle": {
+        "labelKey": "vfxCatalog.parameter.dissolve.angle.label"
       }
     }
   },
@@ -405,6 +441,9 @@ export const effectMessages = Object.freeze({
       },
       "phase": {
         "labelKey": "vfxCatalog.parameter.wave.phase.label"
+      },
+      "speed": {
+        "labelKey": "vfxCatalog.parameter.wave.speed.label"
       }
     }
   },
@@ -483,6 +522,16 @@ export const effectMessages = Object.freeze({
       },
       "color": {
         "labelKey": "vfxCatalog.parameter.lightSweep.color.label"
+      },
+      "speed": {
+        "labelKey": "vfxCatalog.parameter.lightSweep.speed.label"
+      },
+      "loop": {
+        "labelKey": "vfxCatalog.parameter.lightSweep.loop.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.lightSweep.loop.option.off",
+          "vfxCatalog.parameter.lightSweep.loop.option.on"
+        ]
       }
     }
   },
@@ -510,6 +559,9 @@ export const effectMessages = Object.freeze({
       },
       "color": {
         "labelKey": "vfxCatalog.parameter.crt.color.label"
+      },
+      "roll": {
+        "labelKey": "vfxCatalog.parameter.crt.roll.label"
       }
     }
   },
@@ -719,6 +771,33 @@ export const effectMessages = Object.freeze({
       "seed": {
         "labelKey": "vfxCatalog.parameter.particles.seed.label"
       },
+      "gravityAngle": {
+        "labelKey": "vfxCatalog.parameter.particles.gravityAngle.label"
+      },
+      "fadeIn": {
+        "labelKey": "vfxCatalog.parameter.particles.fadeIn.label"
+      },
+      "bounce": {
+        "labelKey": "vfxCatalog.parameter.particles.bounce.label"
+      },
+      "prefill": {
+        "labelKey": "vfxCatalog.parameter.particles.prefill.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.particles.prefill.option.auto",
+          "vfxCatalog.parameter.particles.prefill.option.off",
+          "vfxCatalog.parameter.particles.prefill.option.on"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.particles.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.particles.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.particles.unique.option.off",
+          "vfxCatalog.parameter.particles.unique.option.on"
+        ]
+      },
       "x": {
         "labelKey": "vfxCatalog.parameter.particles.x.label"
       },
@@ -818,6 +897,35 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.aura.seed.label"
+      },
+      "width": {
+        "labelKey": "vfxCatalog.parameter.aura.width.label"
+      },
+      "layer": {
+        "labelKey": "vfxCatalog.parameter.aura.layer.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.aura.layer.option.behindAndInFront",
+          "vfxCatalog.parameter.aura.layer.option.behindTarget",
+          "vfxCatalog.parameter.aura.layer.option.inFrontOfTarget"
+        ]
+      },
+      "prefill": {
+        "labelKey": "vfxCatalog.parameter.aura.prefill.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.aura.prefill.option.auto",
+          "vfxCatalog.parameter.aura.prefill.option.off",
+          "vfxCatalog.parameter.aura.prefill.option.on"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.aura.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.aura.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.aura.unique.option.off",
+          "vfxCatalog.parameter.aura.unique.option.on"
+        ]
       }
     }
   },
@@ -925,6 +1033,31 @@ export const effectMessages = Object.freeze({
       "seed": {
         "labelKey": "vfxCatalog.parameter.beam.seed.label"
       },
+      "strands": {
+        "labelKey": "vfxCatalog.parameter.beam.strands.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.beam.strands.option.off",
+          "vfxCatalog.parameter.beam.strands.option.on"
+        ]
+      },
+      "prefill": {
+        "labelKey": "vfxCatalog.parameter.beam.prefill.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.beam.prefill.option.auto",
+          "vfxCatalog.parameter.beam.prefill.option.off",
+          "vfxCatalog.parameter.beam.prefill.option.on"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.beam.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.beam.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.beam.unique.option.off",
+          "vfxCatalog.parameter.beam.unique.option.on"
+        ]
+      },
       "x": {
         "labelKey": "vfxCatalog.parameter.beam.x.label"
       },
@@ -1017,6 +1150,30 @@ export const effectMessages = Object.freeze({
       },
       "seed": {
         "labelKey": "vfxCatalog.parameter.smoke.seed.label"
+      },
+      "opacity": {
+        "labelKey": "vfxCatalog.parameter.smoke.opacity.label"
+      },
+      "direction": {
+        "labelKey": "vfxCatalog.parameter.smoke.direction.label"
+      },
+      "prefill": {
+        "labelKey": "vfxCatalog.parameter.smoke.prefill.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.smoke.prefill.option.auto",
+          "vfxCatalog.parameter.smoke.prefill.option.off",
+          "vfxCatalog.parameter.smoke.prefill.option.on"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.smoke.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.smoke.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.smoke.unique.option.off",
+          "vfxCatalog.parameter.smoke.unique.option.on"
+        ]
       },
       "x": {
         "labelKey": "vfxCatalog.parameter.smoke.x.label"
@@ -1123,6 +1280,24 @@ export const effectMessages = Object.freeze({
       "seed": {
         "labelKey": "vfxCatalog.parameter.explosion.seed.label"
       },
+      "layer": {
+        "labelKey": "vfxCatalog.parameter.explosion.layer.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.explosion.layer.option.behindAndInFront",
+          "vfxCatalog.parameter.explosion.layer.option.behindTarget",
+          "vfxCatalog.parameter.explosion.layer.option.inFrontOfTarget"
+        ]
+      },
+      "timeScale": {
+        "labelKey": "vfxCatalog.parameter.explosion.timeScale.label"
+      },
+      "unique": {
+        "labelKey": "vfxCatalog.parameter.explosion.unique.label",
+        "optionKeys": [
+          "vfxCatalog.parameter.explosion.unique.option.off",
+          "vfxCatalog.parameter.explosion.unique.option.on"
+        ]
+      },
       "x": {
         "labelKey": "vfxCatalog.parameter.explosion.x.label"
       },
@@ -1133,57 +1308,105 @@ export const effectMessages = Object.freeze({
   }
 });
 export const presetMessages = Object.freeze({
-  "Power up": {
-    "nameKey": "vfxCatalog.preset.powerUp",
-    "categoryKey": "vfxCatalog.category.looks"
-  },
-  "Teleport": {
-    "nameKey": "vfxCatalog.preset.teleport",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Hit flash": {
+    "nameKey": "vfxCatalog.preset.hitFlash",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.hitFlash"
   },
   "Impact": {
     "nameKey": "vfxCatalog.preset.impact",
-    "categoryKey": "vfxCatalog.category.looks"
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.impact"
   },
-  "Hologram": {
-    "nameKey": "vfxCatalog.preset.hologram",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Damage": {
+    "nameKey": "vfxCatalog.preset.damage",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.damage"
   },
-  "Ice": {
-    "nameKey": "vfxCatalog.preset.ice",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Teleport": {
+    "nameKey": "vfxCatalog.preset.teleport",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.teleport"
   },
-  "Poison": {
-    "nameKey": "vfxCatalog.preset.poison",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Power up": {
+    "nameKey": "vfxCatalog.preset.powerUp",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.powerUp"
+  },
+  "Shockwave": {
+    "nameKey": "vfxCatalog.preset.shockwave",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.shockwave"
+  },
+  "Glitch": {
+    "nameKey": "vfxCatalog.preset.glitch",
+    "categoryKey": "vfxCatalog.category.moments",
+    "aboutKey": "vfxPanel.aboutPreset.glitch"
   },
   "Neon": {
     "nameKey": "vfxCatalog.preset.neon",
-    "categoryKey": "vfxCatalog.category.looks"
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.neon"
   },
-  "Golden hour": {
-    "nameKey": "vfxCatalog.preset.goldenHour",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Hologram": {
+    "nameKey": "vfxCatalog.preset.hologram",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.hologram"
   },
-  "Retro screen": {
-    "nameKey": "vfxCatalog.preset.retroScreen",
-    "categoryKey": "vfxCatalog.category.looks"
-  },
-  "Energy": {
-    "nameKey": "vfxCatalog.preset.energy",
-    "categoryKey": "vfxCatalog.category.looks"
-  },
-  "Hit flash": {
-    "nameKey": "vfxCatalog.preset.hitFlash",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Ice": {
+    "nameKey": "vfxCatalog.preset.ice",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.ice"
   },
   "Ghost": {
     "nameKey": "vfxCatalog.preset.ghost",
-    "categoryKey": "vfxCatalog.category.looks"
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.ghost"
   },
-  "Retro": {
-    "nameKey": "vfxCatalog.preset.retro",
-    "categoryKey": "vfxCatalog.category.looks"
+  "Golden hour": {
+    "nameKey": "vfxCatalog.preset.goldenHour",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.goldenHour"
+  },
+  "Sunset": {
+    "nameKey": "vfxCatalog.preset.sunset",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.sunset"
+  },
+  "Night": {
+    "nameKey": "vfxCatalog.preset.night",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.night"
+  },
+  "Old film": {
+    "nameKey": "vfxCatalog.preset.oldFilm",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.oldFilm"
+  },
+  "Retro screen": {
+    "nameKey": "vfxCatalog.preset.retroScreen",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.retroScreen"
+  },
+  "Rain": {
+    "nameKey": "vfxCatalog.preset.rain",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.rain"
+  },
+  "Snow": {
+    "nameKey": "vfxCatalog.preset.snow",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.snow"
+  },
+  "Falling leaves": {
+    "nameKey": "vfxCatalog.preset.fallingLeaves",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.fallingLeaves"
+  },
+  "Embers": {
+    "nameKey": "vfxCatalog.preset.embers",
+    "categoryKey": "vfxCatalog.category.looks",
+    "aboutKey": "vfxPanel.aboutPreset.embers"
   }
 });
 export const categoryMessages = Object.freeze({

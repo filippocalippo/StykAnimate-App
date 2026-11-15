@@ -102,6 +102,83 @@ function effects(document) {
   document._styk.vfxClips = {version: 1, clips};
 }
 
+/**
+ * The stacks the `effects-heavy` workload puts on figures, by figure: each a list of [type, its parameters], the
+ * strength in the parameters. Large radii, a centred outline, glow on both sides, a bloom, three-effect stacks and
+ * effects at half strength: what a project that leans on effects draws, where `effects` is mild.
+ */
+const HEAVY = [
+  [['glow', colour => ({color: rgbInt(colour), radius: 48, intensity: 1.2, mode: 0, spread: 6, falloff: 1, coreColor: 0xffffff, coreMix: .2, blend: 0})]],
+  [['blur', () => ({mode: 0, radius: 30, angle: 0, centerX: .5, centerY: .5})]],
+  [['shadow', () => ({color: 0, radius: 40, offsetX: 14, offsetY: 14, opacity: .6, spread: 0, mode: 0})]],
+  [['outline', () => ({color: 0x111111, width: 12, opacity: 1, mode: 2, rounded: 1, only: 0})]],
+  [['glow', colour => ({color: rgbInt(colour), radius: 20, intensity: 1, mode: 2, spread: 0, falloff: 1, coreColor: 0xffffff, coreMix: 0, blend: 1})]],
+  [['bloom', () => ({threshold: .35, softness: .2, radius: 32, intensity: 1, color: 0xffffff})]],
+  [['shadow', () => ({color: 0x202040, radius: 16, offsetX: 6, offsetY: 10, opacity: .5, spread: 2, mode: 0})],
+    ['outline', () => ({color: 0xffffff, width: 4, opacity: 1, mode: 0, rounded: 1, only: 0})],
+    ['glow', colour => ({effectStrength: .5, color: rgbInt(colour), radius: 24, intensity: 1, mode: 0, spread: 0, falloff: 1.5, coreColor: 0xffffff, coreMix: 0, blend: 0})]],
+  [['tint', colour => ({effectStrength: .5, color: rgbInt(colour.map(value => 255 - value)), mix: .6})],
+    ['blur', () => ({effectStrength: .5, mode: 0, radius: 8, angle: 0, centerX: .5, centerY: .5})],
+    ['glow', colour => ({color: rgbInt(colour), radius: 32, intensity: .9, mode: 0, spread: 4, falloff: 1, coreColor: 0xffffff, coreMix: 0, blend: 2})]],
+];
+
+/**
+ * `effects-heavy`: every figure has a stack from HEAVY for the whole animation, as an effect clip, and the scene has a
+ * clip of its own: a colour grade, a vignette and noise whose evolution is keyed from the first frame to the last, so
+ * the grain changes on every frame. Built with the effect versions every release reads (no parameter added since).
+ */
+function effectsHeavy(document) {
+  const colours = new Map(document.figure_types.map(type => [type.figure_type_id, type.segments[0].color_rgb]));
+  let id = 1;
+  const effect = ([type, params], colour) => {
+    const values = params(colour);
+    return {version: 2, id: uuid(id++), type, enabled: true, params: {effectStrength: 1, ...values}};
+  };
+  const clip = (target, effects, keys = {}) => ({id: uuid(id++), name: '', target, start: 0, duration: null, offset: 0, enabled: true, strength: 1, fadeIn: 0, fadeOut: 0, includeAttached: false, effects, keys});
+  const clips = document.keyframes[0].objects.map((object, index) => {
+    const colour = colours.get(object.figure_type_id);
+    return clip({kind: 'figure', uid: object.unique_id}, HEAVY[index % HEAVY.length].map(entry => effect(entry, colour)));
+  });
+  const scene = [
+    effect(['grade', () => ({exposure: .1, contrast: 1.1, saturation: 1.2, temperature: .1, tint: 0, shadows: 0, highlights: 0, gamma: 1})]),
+    effect(['vignette', () => ({amount: .5, softness: .6, color: 0, centerX: .5, centerY: .5, roundness: 1, aspect: 1, radius: 1})]),
+    effect(['noise', () => ({amount: .08, size: 1, colored: 0, pattern: 0, contrast: 1, softness: 0, seed: 7, phase: 0})]),
+  ];
+  const last = document.keyframes.reduce((ticks, frame) => ticks + frame.duration_raw, 0);
+  const noise = scene[2];
+  clips.push(clip({kind: 'scene'}, scene, {[`vfx1:noise:${noise.id}:phase`]: [{tick: 0, value: 0}, {tick: last, value: last}]}));
+  document._styk.vfxClips = {version: 1, clips};
+}
+
+// --- Generated effects ----------------------------------------------------------------------------------------------
+
+/**
+ * `particles`: generated effects of every type running over the busy scene, as effect clips: an aura on six figures for
+ * the whole animation, two energy beams, two smoke columns, an explosion on another figure every second (24 ticks), and a
+ * scene particle emitter of about 2,000 live particles (50 a frame for 40 frames). Parameters not written take their
+ * defaults when the document opens; those written exist under the same names in every version of the app.
+ */
+function particles(document, spec) {
+  const objects = document.keyframes[0].objects, ticks = (spec.keyframes - 1) * spec.hold + 1;
+  const clip = (number, target, start, duration, type, params) => ({id: uuid(2 * number + 1), name: '', target, start, duration, offset: 0, enabled: true, strength: 1, fadeIn: 0, fadeOut: 0, includeAttached: false,
+    effects: [{version: 2, id: uuid(2 * number + 2), type, enabled: true, params: {effectStrength: 1, seed: 1 + number * 7919 % 65535, ...params}}], keys: {}});
+  const figure = slot => ({kind: 'figure', uid: objects[slot % objects.length].unique_id});
+  const clips = [];
+  // Auras on six figures spread over the grid, styles in turn.
+  for (let index = 0; index < 6; index++) clips.push(clip(clips.length, figure(index * 13 + 2), 0, null, 'aura', {style: index % 4, color: [0xffc93c, 0x6fd8ff, 0x8a4dff, 0xffe7a0][index % 4]}));
+  // Two beams firing across the stage, from two figures, for most of the animation.
+  clips.push(clip(clips.length, figure(20), 4, ticks - 8, 'beam', {style: 0, color: 0x4fd2ff, aimX: .85, aimY: .3}));
+  clips.push(clip(clips.length, figure(45), 10, ticks - 16, 'beam', {style: 0, color: 0xff3148, aimX: .15, aimY: .7}));
+  // Two smoke columns.
+  clips.push(clip(clips.length, figure(33), 0, null, 'smoke', {style: 0, amount: 3}));
+  clips.push(clip(clips.length, figure(58), 0, null, 'smoke', {style: 0, amount: 2, wind: 1}));
+  // An explosion every second, on figures across the scene.
+  for (let start = 0, index = 0; start < ticks; start += 24, index++) clips.push(clip(clips.length, figure(index * 11 + 7), start, 20, 'explosion', {style: 0}));
+  // A scene emitter of about 2,000 live particles.
+  clips.push(clip(clips.length, {kind: 'scene'}, 0, null, 'particles', {emission: 0, rate: 50, life: 40, variation: 0, look: 1, color: 0xffe08a, size: 3, speed: 4, direction: 90, spread: 30, x: .5, y: .1, shape: 3, radius: 1600}));
+  document._styk.vfxClips = {version: 1, clips};
+}
+
 // --- Movieclips -----------------------------------------------------------------------------------------------------
 
 /** A figure type that is a movieclip of `clip`, turning about the clip's middle. */
@@ -221,6 +298,10 @@ export const FEATURES = Object.freeze({
   sprites: {version: 1, apply: sprites,
     measure: spec => ({pictures: spec.pictures, picturePixels: spec.pictures * spec.pictureSize ** 2, picturesPerFrame: spec.figures * 2 * Math.ceil(spec.segments / spec.chain)})},
   effects: {version: 1, apply: effects, measure: spec => ({effects: spec.figures, effectTypes: EFFECTS.map(([type]) => type)})},
+  'effects-heavy': {version: 1, apply: effectsHeavy, measure: spec => ({
+    effects: Array.from({length: spec.figures}, (_, index) => HEAVY[index % HEAVY.length].length).reduce((a, b) => a + b, 0), sceneEffects: 3,
+    effectTypes: [...new Set(HEAVY.flat().map(([type]) => type))].sort()})},
+  particles: {version: 1, apply: particles, measure: spec => ({auras: 6, beams: 2, smoke: 2, explosions: Math.ceil(((spec.keyframes - 1) * spec.hold + 1) / 24), sceneParticles: 2000})},
   movieclips: {version: 1, apply: movieclips, measure: () => ({clips: 2, clipInstances: 8, clipDepth: 2})},
   camera: {version: 1, apply: camera, measure: spec => ({scene: spec.canvas, canvas: spec.shot, cameraKeys: spec.keyframes})},
   text: {version: 1, apply: text, measure: spec => ({labels: spec.figures, glyphsPerFrame: spec.figures * 7})},

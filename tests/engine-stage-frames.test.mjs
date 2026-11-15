@@ -493,3 +493,22 @@ test('the stage names its adapter from the early request\'s description, and ask
     if (original) Object.defineProperty(globalThis, 'navigator', original); else delete globalThis.navigator;
   }
 });
+
+test('the effect clips a limit drew reduced reach the interface when they change, not on every frame', async () => {
+  let revision = 0, reduced = '[]';
+  const heard = [];
+  const {renderer, stage} = await open({}, {onReducedEffects: ids => heard.push(ids)});
+  stage.reduced_effects_revision = () => revision;
+  stage.reduced_effects = () => { stage.calls.push(['reduced_effects']); return reduced; };
+  renderer.render(request());
+  assert.deepEqual(heard, [], 'nothing reduced, nothing said');
+  revision = 1; reduced = '["clip-a"]';
+  renderer.render(request());
+  renderer.render(request());
+  assert.deepEqual(heard, [['clip-a']], 'said once');
+  assert.equal(stage.calls.filter(([name]) => name === 'reduced_effects').length, 1, 'the list is read only when it changed');
+  revision = 2; reduced = '[]';
+  renderer.render(request());
+  assert.deepEqual(heard, [['clip-a'], []], 'and when it clears');
+  renderer.destroy();
+});

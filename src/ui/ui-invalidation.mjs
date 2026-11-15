@@ -24,6 +24,11 @@ import {traceBegin, traceEnd, tracing} from '../trace.mjs';
  *                     every frame) wakes the pass that updates it.
  *   visible           an optional () => boolean; a hidden surface stays
  *                     marked, and show(name) updates it when it shows.
+ *   panel             the id of the dock panel the surface fills (the
+ *                     shell's panel registry). Once followPanels(registry)
+ *                     connects the registry, the surface skips its updates
+ *                     while that panel is hidden (another tab of its dock, a
+ *                     closed sheet) and catches up the moment it shows.
  * afterPass runs after a pass that updated at least one surface (the app
  * repaints then); a pass that only finds surfaces waiting does not call it.
  *
@@ -73,6 +78,10 @@ export function createInvalidator({
     try { surface.update(); } catch (error) { onError(error, surface.name); }
     finally { if (span !== 0) traceEnd(span, tracing ? {surface: surface.name} : undefined); }
   };
+  function show(name) {
+    const surface = byName.get(name);
+    if (surface?.dirty && ready(surface, isPlaying(), now(), false) === true) run(surface, now());
+  }
   function pass({force = false} = {}) {
     scheduled = false;
     const playing = isPlaying(), time = now();
@@ -90,11 +99,11 @@ export function createInvalidator({
 
   return {
     /** Declares a surface; surfaces update in declaration order. */
-    surface(name, {on = [], update, quiet = false, playbackInterval = 0, visible = null}) {
+    surface(name, {on = [], update, quiet = false, playbackInterval = 0, visible = null, panel = null}) {
       if (byName.has(name)) throw messageError(new Error(''), "errors.uiInvalidation.surfaceIsAlreadyDeclared", {name: name});
       if (typeof update !== 'function') throw messageError(new TypeError(''), "errors.uiInvalidation.surfaceNeedsAnUpdateFunction", {name: name});
       for (const reason of on) if (!UI_REASONS.includes(reason)) throw messageError(new TypeError(''), "errors.uiInvalidation.unknownInvalidationReason", {reason: reason});
-      const surface = {name, on: new Set(on), update, quiet, playbackInterval, visible, dirty: false, last: -Infinity, updates: 0};
+      const surface = {name, on: new Set(on), update, quiet, playbackInterval, visible, panel, dirty: false, last: -Infinity, updates: 0};
       surfaces.push(surface);
       byName.set(name, surface);
       return this;
@@ -125,9 +134,18 @@ export function createInvalidator({
     /** Updates every surface now, marked or not, as one full refresh (startup, a restored document). */
     flushAll() { for (const surface of surfaces) surface.dirty = true; return pass({force: true}); },
     /** A surface that became visible updates now if it was marked while hidden. */
-    show(name) {
-      const surface = byName.get(name);
-      if (surface?.dirty && ready(surface, isPlaying(), now(), false) === true) run(surface, now());
+    show,
+    /**
+     * Connects the shell's panel registry (src/shell/panel-registry.mjs): each surface declared with `panel`
+     * updates only while its panel is visible, and updates the moment it shows if it was marked meanwhile.
+     */
+    followPanels(registry, {signal} = {}) {
+      for (const surface of surfaces) {
+        if (!surface.panel) continue;
+        const own = surface.visible;
+        surface.visible = () => registry.isVisible(surface.panel) && (!own || own());
+        registry.onVisibility(surface.panel, shown => { if (shown) show(surface.name); }, {signal});
+      }
     },
     isDirty: name => Boolean(byName.get(name)?.dirty),
     /** How often each surface updated, for tests and diagnostics. */

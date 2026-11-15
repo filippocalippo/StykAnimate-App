@@ -91,7 +91,7 @@ Raw hex lives only here. Brand values come from `StykAnimate-Site/src/css/base.c
 
 | Ramp | Stops |
 |---|---|
-| Mist | `--paper #ffffff` · `--mist-50 #fbfcfd` · `--mist-100 #f5f6f9` (site mist) · `--mist-150 #f1f3f7` · `--mist-200 #eceef3` · `--mist-250 #e7e9ef` · `--mist-300 #e2e5ec` · `--mist-400 #d9dce5` |
+| Mist | `--paper #ffffff` · `--mist-50 #fbfcfd` · `--mist-100 #f5f6f9` (site mist) · `--mist-150 #f1f3f7` · `--mist-200 #eceef3` · `--mist-250 #e7e9ef` · `--mist-275 #dfe2ea` (a value field's travel) · `--mist-300 #e2e5ec` · `--mist-400 #d9dce5` |
 | Slate | `--slate-300 #b4bac7` · `--slate-350 #a9aebb` · `--slate-400 #9aa0ae` · `--slate-450 #8f95a4` · `--slate-500 #80879a` · `--slate-550 #737a8c` · `--slate-600 #676c7a` · `--slate-700 #525868` |
 | Ink | `--ink-400 #5d6272` … `--ink-900 #0c0d12` (site ink) · `--ink-950 #0a0b0f` |
 | Blue | `--blue-50 #eaf5ff` · `--blue-100 #dcefff` · `--blue-400 #45b0ff` · `--blue-500 #0d99ff` (Styk Blue) · `--blue-550 #0a8ae6` · `--blue-600 #006dd1` · `--blue-700 #0059ab` · `--blue-850`, `--blue-900` |

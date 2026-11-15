@@ -51,6 +51,18 @@ impl Effect {
 /// An ordered effect stack: the first effect filters first.
 pub type Stack = Vec<Arc<Effect>>;
 
+/// `effect` on its clock `clock` (frames: the clip's local time, or the scene's tick for a per-pose stack): an effect that changes
+/// by itself (`Params::timed`) is a copy carrying the clock; every other effect is shared as it is, so time costs nothing to the
+/// effects that do not use it. The authored parameters are never changed: the renderer adds the speeds times the clock.
+pub fn at_time(effect: &Arc<Effect>, clock: f64) -> Arc<Effect> {
+    if !effect.params.timed() || effect.params.time() == clock {
+        return effect.clone();
+    }
+    let mut timed = (**effect).clone();
+    timed.params.set_time(clock);
+    Arc::new(timed)
+}
+
 /// Whether `activeVfx` keeps an effect: enabled, a filter, and not neutral.
 pub fn is_active(effect: &Effect) -> bool {
     effect.enabled && !effect.kind().is_generator() && !effect.params.neutral()

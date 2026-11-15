@@ -15,6 +15,7 @@ import {MotionTrails} from '../src/motion-path.mjs';
 import {snapshotPoseFrame} from './support/pose-snapshot.mjs';
 import {engineBuilt} from './support/engine-node.mjs';
 import {ownedEditor} from './support/owned-editor.mjs';
+import {asRecorded, recordedCall} from './support/recorded.mjs';
 import {CLOCKS, canonical, ownerReferences} from './support/owner-references.mjs';
 import {recordedBounds} from './support/edit-bounds-callbacks.mjs';
 
@@ -101,7 +102,7 @@ const run = (editor, [name, ...args]) => {
     return editor.movieclipBatch(args[0], () => { for (const step of args[1]) last = run(editor, step); return last; });
   }
   if (Object.hasOwn(probes, name)) return probes[name](editor, ...args.map(decode));
-  return editor[name.replace(/^@/, '')](...args.map(decode));
+  return editor[name.replace(/^@/, '')](...recordedCall(name, args).map(decode));
 };
 const supported = scenario => scenario.steps.every(call => Array.isArray(call) && (!call[0].startsWith('@') || ['@seek', '@select', '@batch', ...Object.keys(probes)].includes(call[0])));
 const sha = text => createHash('sha256').update(text).digest('hex');
@@ -159,7 +160,9 @@ for (const {legacy} of variants) test(`the engine owning the document gives what
       // A pose with the legacy cache is edited by materializing what it holds (lengths, bends): another
       // document than the recording's, whose poses have none. The engine's own is checked against the read view.
       if (legacy) return;
-      const text = json(owned.report);
+      let text = json(owned.report);
+      // The effect parameters added since the recordings, at their defaults, are not in them (support/recorded.mjs).
+      if (sha(text) !== wanted.documentSha) text = asRecorded(text);
       if (sha(text) !== wanted.documentSha) sameText(text, recorded, `${where}: document`);
       same({...state(owned), layerRevision: owned.layerRevision, nextFrameIdentity: owned._nextFrameIdentity, nextUid: owned._nextUid,
         ...Object.fromEntries(Object.entries(owned._selectionState()).filter(([key]) => ['polygonSelection', 'segmentIds', 'branch'].includes(key)))}, wanted.state, `${where}: state`);

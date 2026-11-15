@@ -118,6 +118,30 @@ test('hidden surfaces stay marked and update when shown', () => {
   assert.deepEqual(log, ['vfx'], 'nothing to do once clean');
 });
 
+test('a surface that fills a panel skips its updates while the panel is hidden and is current the moment it shows', async () => {
+  const {createPanelRegistry} = await import('../src/shell/panel-registry.mjs');
+  const {ui, log, frame, surface} = harness();
+  surface('vfx', {on: ['revision'], panel: 'vfx'});
+  surface('inspector', {on: ['revision'], panel: 'properties'});
+  ui.invalidate('revision');
+  frame();
+  assert.deepEqual(log, ['vfx', 'inspector', 'render'], 'before the shell exists every surface updates');
+  const registry = createPanelRegistry();
+  ui.followPanels(registry);
+  // Properties and VFX share a dock: VFX shows, Properties is a hidden tab. An effect preview revises the document.
+  registry.setVisibility({vfx: true, properties: false});
+  log.length = 0;
+  for (let i = 0; i < 3; i++) { ui.invalidate('revision'); frame(); }
+  assert.deepEqual(log, ['vfx', 'render', 'vfx', 'render', 'vfx', 'render'], 'the hidden Properties panel is not rebuilt');
+  assert.equal(ui.isDirty('inspector'), true, 'it stays marked');
+  registry.setVisibility({vfx: false, properties: true});
+  assert.deepEqual(log.slice(6), ['inspector'], 'showing Properties brings it up to date at once, before the next frame');
+  assert.equal(ui.isDirty('inspector'), false);
+  registry.setVisibility({properties: false});
+  registry.setVisibility({properties: true});
+  assert.deepEqual(log.slice(7), [], 'a panel shown with nothing marked does no work');
+});
+
 test('a full refresh updates every surface, quiet ones included', () => {
   const {ui, log, clock, surface} = harness();
   surface('title', {on: ['document']});

@@ -26,8 +26,8 @@ Paint records live in `DrawList::paints`; `sample_paint` is the reference
 evaluation every renderer reproduces. Generated effects are `K_PARTICLE` records
 (one per particle, in the shape bits of its kind, in its draw's local units) and
 `K_BEAM` records; each points at its draw's rows in `paints` (its transform to the
-world and its constants), `F_ADD` marks those blended additively, and
-`DrawList::materials` names the particle material rows sprites sample
+world and its constants) and says how much of it is light (it blends premultiplied,
+with less alpha than colour), and `DrawList::materials` names the noise materials it samples
 ([vfx.md](vfx.md#generated-effects-on-screen)). An object that is one solid glyph
 is a `K_GLYPH` record drawn from a mask of the glyph, followed by the glyph's own
 triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
@@ -45,8 +45,8 @@ triangles flagged `F_GLYPH_VECTOR`; `DrawList::glyphs` holds each record's
 | `resources.rs` | GPU record layouts, lookup tables in float textures, buffers, and `warm_texture` ([Uploads](#uploads)) |
 | `present.rs` | copy into the host's surface, read-back |
 | `view.rs` | world → output transform, artboard |
-| `effects/` | effect layers ([vfx.md](vfx.md#rendering)): `plan.rs` places each group for the view (density, crop, composite), `mod.rs` writes its group record, `executor.rs` and `passes.wgsl` run effect stacks on pooled slots |
-| `materials.rs` | the particle material atlas of generated effects: a placeholder texel until a list names a row, then the editor's procedural rows with their reduced levels (5.9 MB), sampled trilinearly |
+| `effects/` | effect layers ([vfx.md](vfx.md#rendering)): `plan.rs` places each group for the view (density, crop, composite), `mod.rs` writes its group record, `recipe.rs` records an effect stack as passes over images, `executor.rs` runs them on pooled textures with a pipeline per operation, made from its family's small shader (`shaders/`) the first time a frame needs it |
+| `materials.rs` | the noise materials of generated effects: a placeholder texel until a list names one, then one two-channel texture (density, light) of 1,024 texels square with its reduced levels (2.7 MB), filled as the engine's workers finish them, sampled trilinearly |
 | `glyphs.rs`, `glyph.wgsl` | the masks of lone glyphs ([Text](#text)): each glyph filled once per mask size into an atlas of one-channel pages kept across frames (at most 64 MiB), and the per-frame table that tells each `K_GLYPH` record where its mask is |
 
 Drawing cels: every display level's tiles are in the list; the vertex shader
@@ -154,11 +154,15 @@ and two variants of the one shader's pipeline (painter order writing depth; face
 tested `less-equal`), switched where faces begin and end; the vertex shader maps a
 corner's depth to its window depth with the editor's expression.
 
-Generated effects: the vertex shader expands each `K_PARTICLE` or `K_BEAM` record
-exactly as the editor's generator shader does, in its draw's local units with the
-target's pixel in those units, then places it by the draw's transform; the fragment
-shader shades it as the editor's does. Runs of `F_ADD` records draw with an additive
-pipeline variant (colour and alpha added), created with the first list that has one.
+Generated effects: runs of `K_PARTICLE` and `K_BEAM` records draw with their own
+entry points (`vs_particle`, `fs_particle`) and pipeline, which the stage creates when
+it is made (`Renderer::prepare_effects`: its compile would otherwise hold the first
+frame with a particle for up to a second on Direct3D) and other renderers with their
+first list that has one. The vertex shader
+expands a record in its draw's local units and places it by the draw's transform; the
+fragment shader measures its shape as a distance or samples its material, erodes it,
+and outputs premultiplied colour with alpha reduced by its share of light
+([vfx.md](vfx.md#generated-effects)).
 
 Lone glyphs: before the passes, `GlyphMasks::prepare` lays out each `K_GLYPH`
 record's mask for the view's raster density and writes the glyph table (three
@@ -171,11 +175,11 @@ mask bilinearly, clamped to its own texels, times the record's colour and opacit
 
 Invariants: no per-frame allocation in steady state; the no-effect path draws
 one pass per depth and round and creates no effect resource; a list without 3D
-faces creates no depth buffer and a list without additive records no additive
+faces creates no depth buffer and a list without generated effects no generated-effects
 pipeline, and either draws one instanced draw per pass (on a software rasterizer, one per run
 of primitives a simpler fragment shader holds, at most 64 runs besides the background's:
 [Without a graphics card](#without-a-graphics-card)); the material atlas is a
-placeholder texel until a list names a row, and the glyph atlas until a list has a
+placeholder texel until a list names a material, and the glyph atlas until a list has a
 lone glyph; glyph masks are filled only when first needed; WebGL2 limits (no storage buffers, one sampler
 per texture, array textures of at least two layers, [D11](decisions/0011-array-textures-two-layers.md)).
 
@@ -275,7 +279,7 @@ Measured 2026-11-13 in the desktop app without a graphics card (`--disable-gpu`,
 other work, so read the ratios), playing three seconds in one launch with `stage.shadingRuns` 0 and then the device's
 choice, frame time seen: the small scene (240 segments) 109 → 24 ms, the busy one (3,200) 165 → 48 ms, with a moving
 camera 139 → 39 ms, translucent filled shapes 241 → 71 ms, labels 294 → 124 ms, pictures on the limbs 173 → 107 ms; the
-effects scene stays over a second (its filter passes, `passes.wgsl`, are the cost). The stage's picture was the same
+effects scene stays over a second (its filter passes were the cost; the filters have been rebuilt since: [vfx.md](vfx.md#the-filter-core)). The stage's picture was the same
 with the runs on and off in all 28 views compared (seven scenes, four views, device pixels of the composited page). What
 was measured on the way: on the busy scene the segments' draw was 40 of 71 ms, of which a constant-colour fragment shader
 saved 10 and sending every vertex off screen showed the vertex shader at about a third of the frame; turning
@@ -503,7 +507,7 @@ faces before compositing it.
 | `target.rs` | a target with the GPU's samples: four RGBA8 samples a pixel (one for crisp edges), blended one by one, averaged when resolved |
 | `coverage.rs` | the GPU's rasterization rules: vertices snapped to 1/256 pixel, the standard four sample positions, the top-left rule |
 | `shade.rs` | `prim.wgsl`'s fragment arithmetic: coverage by distance, the strokes' distance functions, texture sampling |
-| `effects.rs` | effect recipes run pass by pass with the arithmetic of `passes.wgsl` |
+| `effects.rs` | effect recipes run pass by pass with the arithmetic of the effect shaders (`styk-render/src/effects/shaders/`) |
 | `glyphs.rs` | masks of lone glyphs, kept across frames |
 | `generators.rs` | generated effects: the GPU's quads, its fragment arithmetic |
 
@@ -512,8 +516,8 @@ faces before compositing it.
 drawn for a view (`effects::plan`: a translucent figure on its parent's grid, a raster entry
 or filtered artwork on the editor's raster grid at its density, the camera image through the
 scene camera) and its group record (`effects::record`, here with every layer at the origin
-of a target of its own), and effect recipes (`effects::recipe`: the passes `VfxWebGPU.run`
-records, with their parameters). The GPU's atlas, rounds and pooled slots are resource
+of a target of its own), and effect recipes (`effects::recipe`: the passes of each effect,
+with their parameters). The GPU's atlas, rounds and pooled slots are resource
 management and have no CPU counterpart: a layer is drawn at full resolution into a target of
 its size.
 
@@ -521,7 +525,7 @@ its size.
 
 - Samples: a target keeps one colour per pixel until a write covers only some of its
   samples, then four; a write that leaves them equal folds them back. Blending is the
-  pipeline's (`One, OneMinusSrcAlpha`; `One, One` for `F_ADD`), each result rounded to 8
+  pipeline's (`One, OneMinusSrcAlpha`, generated effects too), each result rounded to 8
   bits as an `Rgba8Unorm` target stores it; resolving averages the samples.
 - Strokes, arcs, polylines, discs and rings are covered by distance at each pixel's centre
   (`clamp(0.5 − d / aa, 0, 1)`, hairlines faded to a one-pixel footprint; crisp: in or out),
@@ -557,8 +561,8 @@ resolves round in the last level.
 
 **Memory.** A frame holds the view-sized target, then one target per isolation group on the
 path being drawn (a layer's size: its rectangle on its grid), each four bytes a pixel plus
-sixteen per pixel whose samples differ; a filtered layer adds its working slots (at most
-eight of its size). Glyph masks stay within 64 MiB. Images are the decoded images the
+sixteen per pixel whose samples differ; a filtered layer adds the working images of its
+effects that are alive at once (`Run::peak_pixels`). Glyph masks stay within 64 MiB. Images are the decoded images the
 engine holds, not copied (`Images::add_shared`). Nothing is pooled between frames; exports
 bound a frame by drawing it in tiles.
 

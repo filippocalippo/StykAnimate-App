@@ -136,7 +136,8 @@ impl Previews {
             color_space: Default::default(),
         };
         surface.configure(&device, &config);
-        let renderer = Renderer::new(&device, &queue, format);
+        let mut renderer = Renderer::new(&device, &queue, format);
+        renderer.set_float_effects(styk_render::effects::executor::float_supported(&adapter));
         Ok(Previews::with(Some(Gpu { device, queue, surface, config, renderer, atlas: None, uploaded: Uploads::default() }), format!("{:?} · {}", info.backend, info.name)))
     }
 

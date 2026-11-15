@@ -38,6 +38,21 @@ and after), and emit change events the interface listens to.
   and their references are frozen: nothing re-records them from the JavaScript
   ([README](README.md#fixtures)), and a new or changed command gets a Rust test that
   states its expected result.
+  One allowance: effects gained parameters after the recordings were made (image filters
+  and generated effects, 2026-11). The registry lists them (`registry::ADDED` in
+  `styk-eval/src/vfx/registry.rs`), and a document that differs from its recording is
+  compared again with those parameters taken out of every effect where they hold their
+  defaults (`replay::as_recorded`; the JavaScript tape tests read the same list through
+  `tests/support/recorded.mjs`). A parameter that is not listed, or one at another value,
+  still differs, so a renamed or wrongly written parameter fails the replay. A parameter
+  added later is listed in `ADDED` in the same change.
+  A second allowance: the built-in preset catalogue changed after the recordings (2026-11:
+  moments with a length, fades and keys, and a new set). The catalogue they were made with
+  is kept beside the current one (`styk-edit/src/vfx_presets_recorded.json`), and a recorded
+  `addVfxGroup` or `applyVfxPreset` of a preset by name is replayed with that name's
+  definition from it (`replay::recorded_call`; the JavaScript tape tests use
+  `recordedCall` in `tests/support/recorded.mjs`): both commands take a preset's name or its
+  definition. What the command does with a preset is stated by tests/vfx.test.mjs.
 - Order: what the app runs. The app constructs the editor with `propertyChannels` and
   `layerTimeline` (`src/app.mjs`), and `load` gives every document a layer sheet
   (`initializeLayerSheet`). Every gesture in the app therefore takes the authored path
@@ -966,7 +981,7 @@ authoring, canonical worker readiness and document-class adoption remain separat
 prerequisites.
 
 Remaining effect commands use the existing stack/clip/history owners. Twelve recorded
-scenarios / 392 exact steps cover all 13 built-in presets, saved-preset key identities
+scenarios / 392 exact steps cover all 13 built-in presets of then (the recorded catalogue), saved-preset key identities
 and timing, attached-scope depth 16 and refused depth 17, strict raw paint validation
 and interpolated solid/gradient layouts. The facade shadows `applyVfxPreset`,
 `setVfxScope`, `addVfxGroup` and `addVfxUserPreset`, handing over the editor's identity

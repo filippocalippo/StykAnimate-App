@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use super::{active, is_active, Clip, Clips, Effect, Stack, StackKey, Target};
+use super::{active, at_time, is_active, Clip, Clips, Effect, Stack, StackKey, Target};
 use crate::doc::Document;
 use crate::eval::Frame;
 
@@ -100,16 +100,21 @@ fn applied(clip: &Clip, tick: f64, figure_type: Option<u32>) -> Option<Vec<Arc<E
     Some(clip.sample(tick, true).into_iter().filter(|effect| !effect.kind().is_generator()).collect())
 }
 
-fn extend_active(stack: &mut Stack, effects: &[Arc<Effect>]) {
-    stack.extend(active(effects).cloned());
+/// The active effects of `effects` appended to `stack`; per-pose effects (`clock`: the frame's tick) are put on that clock, clip
+/// effects (`None`) were put on their clip's when sampled.
+fn extend_active(stack: &mut Stack, effects: &[Arc<Effect>], clock: Option<f64>) {
+    match clock {
+        Some(clock) => stack.extend(active(effects).map(|effect| at_time(effect, clock))),
+        None => stack.extend(active(effects).cloned()),
+    }
 }
 
-fn add_segment(segments: &mut Vec<(u32, Stack)>, handle: u32, effects: &[Arc<Effect>]) {
+fn add_segment(segments: &mut Vec<(u32, Stack)>, handle: u32, effects: &[Arc<Effect>], clock: Option<f64>) {
     match segments.iter_mut().find(|(h, _)| *h == handle) {
-        Some((_, stack)) => extend_active(stack, effects),
+        Some((_, stack)) => extend_active(stack, effects, clock),
         None => {
             let mut stack = Vec::new();
-            extend_active(&mut stack, effects);
+            extend_active(&mut stack, effects, clock);
             segments.push((handle, stack));
         }
     }
@@ -156,11 +161,11 @@ fn evaluate_with(doc: &Document, frame: &Frame, include_generators: bool, export
     let clips = doc.vfx_clips.as_deref();
     let mut out = FrameVfx::default();
     if let Some(pose) = &frame.pose_vfx {
-        extend_active(&mut out.scene, pose.figure());
+        extend_active(&mut out.scene, pose.figure(), Some(tick));
     }
     for clip in clips.into_iter().flat_map(Clips::of_scene) {
         if let Some(effects) = applied(clip, tick, None) {
-            extend_active(&mut out.scene, &effects);
+            extend_active(&mut out.scene, &effects, None);
         }
     }
     let mut owners: Vec<Option<Owner>> = frame.objects.iter().map(|object| owner(doc, clips, object, tick, export.is_some())).collect();
@@ -199,7 +204,7 @@ pub fn composed(doc: &Document, frame: &Frame) -> Option<Arc<FrameVfx>> {
     }
     let mut out = FrameVfx::default();
     if let Some(pose) = &frame.pose_vfx {
-        extend_active(&mut out.scene, pose.figure());
+        extend_active(&mut out.scene, pose.figure(), Some(frame.tick));
     }
     let mut owners: Vec<Option<Owner>> = frame
         .objects
@@ -208,9 +213,9 @@ pub fn composed(doc: &Document, frame: &Frame) -> Option<Arc<FrameVfx>> {
             let mut owner = owner(doc, None, object, frame.tick, false)?;
             // `connectedStack`: the composed group stack, or the figure's own.
             if let Some(connected) = &object.vfx_connected {
-                owner.connected = connected.to_vec();
+                owner.connected = connected.iter().map(|effect| at_time(effect, frame.tick)).collect();
             } else {
-                owner.connected = object.vfx.as_deref().map_or(&[][..], |p| p.figure()).to_vec();
+                owner.connected = object.vfx.as_deref().map_or(&[][..], |p| p.figure()).iter().map(|effect| at_time(effect, frame.tick)).collect();
             }
             Some(owner)
         })
@@ -251,7 +256,7 @@ fn owner(doc: &Document, clips: Option<&Clips>, object: &crate::doc::Object, tic
     {
         vfx.figure.extend(scene.scene.iter().cloned());
     }
-    extend_active(&mut vfx.figure, pose_figure);
+    extend_active(&mut vfx.figure, pose_figure, Some(tick));
     export_active |= capture_export && !vfx.figure.is_empty();
     if container.is_none()
         && let Some(pose) = &object.vfx
@@ -260,25 +265,25 @@ fn owner(doc: &Document, clips: Option<&Clips>, object: &crate::doc::Object, tic
             if let StackKey::Segment { figure_type: Some(scope), handle } = *key
                 && scope == object.figure
             {
-                add_segment(&mut vfx.segments, handle, stack);
+                add_segment(&mut vfx.segments, handle, stack, Some(tick));
             }
         }
     }
     let mut scope = object.vfx_scope;
-    let mut connected: Vec<Arc<Effect>> = if object.vfx_scope { pose_figure.to_vec() } else { Vec::new() };
+    let mut connected: Vec<Arc<Effect>> = if object.vfx_scope { pose_figure.iter().map(|effect| at_time(effect, tick)).collect() } else { Vec::new() };
     for clip in own_clips.into_iter().flat_map(|c| c.of(object.uid)) {
         let Some(effects) = applied(clip, tick, Some(object.figure)) else { continue };
         export_active |= capture_export && (container.is_none() || matches!(clip.target, Target::Figure { .. })) && effects.iter().any(|effect| is_active(effect));
         match clip.target {
             Target::Figure { .. } => {
-                extend_active(&mut vfx.figure, &effects);
+                extend_active(&mut vfx.figure, &effects, None);
                 if clip.include_attached {
                     connected.extend(effects);
                     scope = true;
                 }
             }
             // A container's nodes are not drawn: its clip's own artwork is.
-            Target::Segment { figure_type: Some(_), handle, .. } if container.is_none() => add_segment(&mut vfx.segments, handle, &effects),
+            Target::Segment { figure_type: Some(_), handle, .. } if container.is_none() => add_segment(&mut vfx.segments, handle, &effects, None),
             // Unscoped node effects are saved under `*/handle`, which no renderer reads.
             _ => {}
         }
