@@ -155,12 +155,17 @@ pub fn payload(list: &DrawList) -> Vec<u8> {
         background_prims,
         layers,
         materials,
+        reduced_effects,
         glyphs,
     } = list;
     let mut bytes = Bytes::default();
     bytes.flag(*composited_export);
     bytes.word(*background_prims);
     bytes.word(*materials);
+    bytes.count(reduced_effects.len());
+    for id in reduced_effects {
+        bytes.text(id);
+    }
     bytes.count(prims.len());
     for Prim {
         kind,

@@ -407,6 +407,10 @@ pub struct DrawList {
     pub layers: Vec<EffectLayer>,
     /// The particle material rows [`P_SPRITE`] particles sample, one bit per row.
     pub materials: u32,
+    /// The effect clips (the top-level document's, by identity, sorted) whose generated effects a limit thinned or left out
+    /// of this frame (docs/engine/vfx.md, "Limits"); [`MATERIALS_REDUCED`] says that any was. The app shows a notice on
+    /// each of them for the frame on show.
+    pub reduced_effects: Vec<std::sync::Arc<str>>,
     /// The glyphs [`K_GLYPH`] records draw, by index.
     pub glyphs: Vec<GlyphInstance>,
 }

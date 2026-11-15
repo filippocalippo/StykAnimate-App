@@ -1815,6 +1815,7 @@ struct Assembled {
     composited_export: bool,
     background_prims: u32,
     materials: u32,
+    reduced_effects: Vec<Arc<str>>,
 }
 
 impl Assembled {
@@ -1856,7 +1857,7 @@ impl Assembled {
     }
 
     fn list(self, prims: Vec<Prim>) -> DrawList {
-        DrawList { composited_export: self.composited_export, prims, paints: self.paints, points: self.points, groups: self.groups, passes: self.passes, background_prims: self.background_prims, layers: self.layers, materials: self.materials, glyphs: self.glyphs }
+        DrawList { composited_export: self.composited_export, prims, paints: self.paints, points: self.points, groups: self.groups, passes: self.passes, background_prims: self.background_prims, layers: self.layers, materials: self.materials, reduced_effects: self.reduced_effects, glyphs: self.glyphs }
     }
 }
 
@@ -1896,7 +1897,7 @@ fn assemble_composed(doc: &Document, assets: &Assets, scene: &Scene, overrides: 
             )
         })
     };
-    let (generator_outs, materials) = batch.map(generators::encode).unwrap_or_default();
+    let (generator_outs, materials, reduced_effects) = batch.map(generators::encode).unwrap_or_default();
     let hidden_uids: std::collections::HashSet<u32> = match batch {
         Some(_) => overrides.hidden.iter().enumerate().filter(|&(_, &h)| h).filter_map(|(slot, _)| scene.objects.get(slot).map(|o| o.uid)).collect(),
         None => Default::default(),
@@ -1976,7 +1977,7 @@ fn assemble_composed(doc: &Document, assets: &Assets, scene: &Scene, overrides: 
         }
         close_ghost(&mut b, &mut open, ghosts);
     }
-    Assembled { composited_export, background_prims, materials, ..b.finish() }
+    Assembled { composited_export, background_prims, materials, reduced_effects, ..b.finish() }
 }
 
 /// The ghosts encoded, each as the last frame encoded it when it is the same scene under the same settings. A live cel is drawn in
@@ -2298,7 +2299,7 @@ impl Builder {
             }
             passes.push(Pass { depth, start, end: total as u32 });
         }
-        Assembled { pieces, total, paints: self.paints, points: self.points, groups: self.groups, passes, layers: self.layers, glyphs: self.glyphs, composited_export: false, background_prims: 0, materials: 0 }
+        Assembled { pieces, total, paints: self.paints, points: self.points, groups: self.groups, passes, layers: self.layers, glyphs: self.glyphs, composited_export: false, background_prims: 0, materials: 0, reduced_effects: Vec::new() }
     }
 }
 

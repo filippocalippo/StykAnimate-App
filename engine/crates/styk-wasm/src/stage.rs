@@ -102,6 +102,10 @@ pub struct Stage {
     pictures: u32,
     /// Bytes of pictures the last frame uploaded to the atlas.
     upload_bytes: usize,
+    /// The effect clips whose generated effects a limit reduced in the frame on show (`DrawList::reduced_effects`), and how
+    /// many times that set changed: the interface reads the set when the count moves (`Stage::reduced_effects`).
+    reduced_effects: Vec<Arc<str>>,
+    reduced_revision: u32,
     pub(crate) edit: EditScene,
     /// What a click on artwork draws with ([`Stage::pick_artwork`]).
     picker: styk_export::pick::Picker,
@@ -239,6 +243,8 @@ impl Stage {
             ready_ms: 0.0,
             pictures: PICTURES_COMPLETE,
             upload_bytes: 0,
+            reduced_effects: Vec::new(),
+            reduced_revision: 0,
             edit: EditScene::default(),
             picker: Default::default(),
             pick_prep: None,
@@ -491,6 +497,19 @@ impl Stage {
         if self.skins.take().is_some() {
             self.edits += 1;
         }
+    }
+
+    /// How many times the set of effect clips reduced in the frame on show has changed: the interface reads
+    /// [`Stage::reduced_effects`] when this moves.
+    pub fn reduced_effects_revision(&self) -> u32 {
+        self.reduced_revision
+    }
+
+    /// The identities of the effect clips whose generated effects a limit thinned or left out of the frame on show (a JSON
+    /// array; docs/engine/vfx.md, "Limits"): read when [`Stage::reduced_effects_revision`] moves, not every frame.
+    pub fn reduced_effects(&self) -> String {
+        let ids: Vec<styk_doc::Value> = self.reduced_effects.iter().map(|id| styk_doc::Value::str(id)).collect();
+        styk_doc::json::to_string(&styk_doc::Value::array(ids))
     }
 
     /// Whether the last edit frame's generated effects still lack some of their targets'
@@ -917,6 +936,7 @@ impl Stage {
             self.processor_list = (list.prims.len(), list.groups.len());
             processor.request(styk_engine::stage_raster::Request { generation: generation.clone(), list: list.clone(), view, orientation, size: [self.config.width, self.config.height], grid });
             self.pictures = self.pictures_after(list);
+            self.note_reduced(list);
             self.soft_frames += u64::from(self.loading.placeholders() > 0);
             self.pictures_shown(pages);
             // The live slots written since the device's kept frame say where its next frame differs; it keeps none meanwhile.
@@ -967,9 +987,18 @@ impl Stage {
         self.live_writes.clear();
         self.part_frames += u64::from(self.renderer.drew_part());
         self.pictures = self.pictures_after(list);
+        self.note_reduced(list);
         self.soft_frames += u64::from(self.loading.placeholders() > 0);
         self.pictures_shown(pages);
         Ok(true)
+    }
+
+    /// The frame on show is `list`: its reduced effect clips become the stage's, counted when they change.
+    fn note_reduced(&mut self, list: &styk_eval::drawlist::DrawList) {
+        if self.reduced_effects != list.reduced_effects {
+            self.reduced_effects.clone_from(&list.reduced_effects);
+            self.reduced_revision = self.reduced_revision.wrapping_add(1);
+        }
     }
 
     /// Replaces tiles of the drawing cel `id` the interface holds live, so edit frames draw its

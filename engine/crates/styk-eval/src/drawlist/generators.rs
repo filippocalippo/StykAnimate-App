@@ -23,10 +23,10 @@ use styk_draw::{particle_kind, F_CAP_END, F_CAP_START, K_BEAM, MATERIALS_PENDING
 /// The area a frame's particles may cover, in canvases: beyond it they are thinned evenly.
 pub const FILL_LIMIT: f64 = 48.0;
 
-/// Every draw of a batch as records, each in its own `Out` (rows included), and the material
-/// rows they sample (with [`MATERIALS_REDUCED`] when a limit reduced the picture and
-/// [`MATERIALS_PENDING`] when a material was not ready).
-pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
+/// Every draw of a batch as records, each in its own `Out` (rows included), the material rows they sample (with
+/// [`MATERIALS_REDUCED`] when a limit reduced the picture and [`MATERIALS_PENDING`] when a material was not ready), and
+/// the clips a limit reduced (the batch's, and every clip drawing particles when the area limit thinned them).
+pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32, Vec<std::sync::Arc<str>>) {
     let mut materials = if batch.reduced { MATERIALS_REDUCED } else { 0 };
     // Every live particle once, so the frame's coverage is known before anything is drawn: the
     // area each covers on the canvas and half a canvas around it (what can be on screen to draw).
@@ -53,8 +53,12 @@ pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
     }
     let canvas = batch.draws.first().map_or(1.0, |d| (d.canvas[0] * d.canvas[1]).max(1.0));
     let fill = if area > FILL_LIMIT * canvas { FILL_LIMIT * canvas / area } else { 1.0 };
+    let mut reduced = batch.reduced_clips.clone();
     if fill < 1.0 {
         materials |= MATERIALS_REDUCED;
+        reduced.extend(batch.particle_clips.iter().cloned());
+        reduced.sort();
+        reduced.dedup();
     }
     let outs = batch
         .draws
@@ -66,7 +70,7 @@ pub(super) fn encode(batch: &Batch) -> (Vec<Out>, u32) {
             out
         })
         .collect();
-    (outs, materials)
+    (outs, materials, reduced)
 }
 
 /// A draw's seven rows: transform, scale and shading, the shape's constants, the outline, erosion

@@ -6736,7 +6736,7 @@ const messages = {
   "vfxPanel.olderEffects": "From an older version",
   "vfxPanel.olderEffectsTip": "Effects saved on poses by an older StykAnimate. They still work and keep their keys on the timeline.",
   "vfxPanel.moreLabel": "More settings",
-  "vfxPanel.notice.reduced": "Shown at reduced quality to fit the graphics memory.",
+  "vfxPanel.notice.reduced": "Drawn with fewer particles here, to keep the frame within its limits.",
   "vfxPanel.notice.aimMissing": "Its target is not in this frame, so it aims at a point on the stage.",
   "vfxPanel.notice.connectedDepth": "Effects apply to this part only: joined figures nest more than {count} deep.",
   "vfxPanel.notice.ownerMissing": "Effects apply to this part only: the figure they belong to is missing.",

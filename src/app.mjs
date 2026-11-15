@@ -6224,7 +6224,7 @@ function rendererOptions() {
   return {
     // A frame drawn on the engine's workers is presented when its picture is shown, not when it was asked for.
     onInvalidate: requestRender, onPicture: (prepared, at, frame) => { if (!prepared) presentedEditing(frame.tick, frame.revision, at); else if (state.playing) playbackMetrics.present(at); },
-    onMonitorPicture: requestMonitorRender,
+    onMonitorPicture: requestMonitorRender, onReducedEffects: clipIds => vfxInspector?.setReducedEffects(clipIds),
     // A frame the engine refused: the previous picture stays and the document's next revision is tried again.
     onError: error => { stats.problem(error); status(error, true); },
     onStatus: (message) => {

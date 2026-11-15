@@ -40,7 +40,7 @@ A built-in preset (`src/vfx-presets.mjs`, the engine's copy `engine/crates/styk-
 
 A short, quiet notice shows at the top of an effect's open card, with a small dot on its row while it is closed:
 
-- the engine drew it at reduced quality: `VfxInspector.setEffectNotice(clipId, {kind: 'reduced', effect?})` sets it (one effect of a group with `effect`), `setEffectNotice(clipId, null)` clears it, and a new document clears all. **The engine task wires it** from the frame's report of which clips it drew at reduced resolution or dropped (today it lowers effect resolution silently under its raster budget, its texture limit and its layer cap, docs/engine/vfx.md); the panel needs only the clip ids, per frame on show, and calls the function when the set changes;
+- a limit drew it with fewer particles: the frame on show names the effect clips whose generated effects a limit thinned or left out (`DrawList::reduced_effects`, docs/engine/vfx.md, "Limits"); the stage counts the changes of that set, and `engine-stage.mjs` reads it only when the count moves and hands it to `VfxInspector.setReducedEffects(clipIds)`, which gives those clips the notice and takes it from the others (`setEffectNotice(clipId, {kind: 'reduced', effect?})` and `setEffectNotice(clipId, null)` set and clear one; a new document clears all). Filters whose effect layer the renderer draws at a lower resolution to fit its raster budget or the texture limit (`effects/plan.rs`) do not raise it yet;
 - a beam locked onto a figure that is not in this frame aims at its stage point (the panel checks this itself);
 - connected effects that cannot reach the whole figure (more than 16 nested groups, or a missing owner) say so in the person's language under the head.
 

@@ -147,6 +147,11 @@ pub struct Batch {
     pub incomplete: bool,
     /// A limit thinned or left out part of what was asked for: the picture is reduced.
     pub reduced: bool,
+    /// The effect clips of the top-level document a limit of the batch thinned or left out (their identities, sorted):
+    /// the interface shows a notice on each (`DrawList::reduced_effects`).
+    pub reduced_clips: Vec<Arc<str>>,
+    /// The top-level document's clips that draw particles (not only beams): the draw list's area limit thins exactly these.
+    pub particle_clips: Vec<Arc<str>>,
 }
 
 impl Batch {
@@ -467,6 +472,8 @@ struct Layer<'a> {
     seed: u32,
     uid: Option<u32>,
     scene: bool,
+    /// Its clip is the top-level document's (not a movieclip's inside it).
+    top: bool,
     /// The target now (or when it was last there), and which effect it belongs to.
     current: Option<(usize, Arc<Anchor>)>,
     /// The tick the target was last there (the tick itself when it is there now).
@@ -501,11 +508,23 @@ const IDENTITY: [f64; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 struct State {
     incomplete: bool,
     reduced: bool,
+    /// The top-level document's clips a limit thinned or left out.
+    reduced_clips: Vec<Arc<str>>,
     /// Effects whose current anchor was read, for shared outlines.
     effects: usize,
 }
 
 /// A sample, or the nearest known one while it is pending.
+impl State {
+    /// A limit reduced `clip`'s effects (counted for the top-level document's clips only: `top`).
+    fn reduce(&mut self, clip: &Clip, top: bool) {
+        self.reduced = true;
+        if top && !self.reduced_clips.iter().any(|id| *id == clip.id) {
+            self.reduced_clips.push(clip.id.clone());
+        }
+    }
+}
+
 fn sample_or_nearest(sampler: &dyn Sampler, prepared: &Prepared, target: Target, tick: f64, attached: bool, state: &mut State) -> Option<Arc<Anchor>> {
     match sampler.sample(prepared, target, tick, attached) {
         Sample::Ready(a) => a,
@@ -535,7 +554,10 @@ fn collect<'a>(prepared: &'a Prepared, frame: &Frame, scene: &Scene, tick: Optio
     if let (Some(tick), Some(clips)) = (tick, doc.vfx_clips.as_deref()) {
         for clip in &clips.clips {
             if layers.len() >= BATCH_LAYERS {
-                state.reduced = true;
+                // No room for more layers: every clip still to come that would draw generated effects is left out.
+                for later in clips.clips.iter().filter(|c| c.enabled && c.strength > 0.0 && c.has_generators() && tick >= c.start) {
+                    state.reduce(later, nest.depth == 0);
+                }
                 break;
             }
             if !clip.enabled || clip.strength == 0.0 || !clip.has_generators() || tick < clip.start {
@@ -673,6 +695,7 @@ fn collect<'a>(prepared: &'a Prepared, frame: &Frame, scene: &Scene, tick: Optio
                         seed: seed_base.wrapping_add((li as u32 + 1).wrapping_mul(97531)) & 0xffffff,
                         uid: nest.container.or(if scene_target { None } else { clip.target.uid() }),
                         scene: nest.container.is_none() && scene_target,
+                        top: nest.depth == 0,
                         current: current.clone().map(|c| (effect_id, c)),
                         last_present,
                         point: if scene_target { stage_point } else { current.as_ref().unwrap().point },
@@ -799,7 +822,7 @@ pub fn build_within(prepared: &Prepared, frame: &Frame, scene: &Scene, tick: Opt
 
 fn build_limited(prepared: &Prepared, frame: &Frame, scene: &Scene, tick: Option<f64>, sampler: Option<&dyn Sampler>, density: f64, drawn: f64) -> Option<Batch> {
     let mut layers = Vec::new();
-    let mut state = State { incomplete: false, reduced: false, effects: 0 };
+    let mut state = State { incomplete: false, reduced: false, reduced_clips: Vec::new(), effects: 0 };
     collect(prepared, frame, scene, tick, sampler, &Nest { matrix: IDENTITY, container: None, opacity: 1.0, depth: 0, outer: None }, &mut state, &mut layers);
     if layers.is_empty() {
         return None;
@@ -807,6 +830,8 @@ fn build_limited(prepared: &Prepared, frame: &Frame, scene: &Scene, tick: Option
     let mut batch = pack(&layers, sampler, density, drawn, &mut state)?;
     batch.incomplete = state.incomplete;
     batch.reduced |= state.reduced;
+    state.reduced_clips.sort();
+    batch.reduced_clips = state.reduced_clips;
     Some(batch)
 }
 
@@ -897,7 +922,7 @@ fn pack(layers: &[Layer<'_>], sampler: Option<&dyn Sampler>, density: f64, budge
                     // still lives its life), rather than cut the oldest.
                     rate *= (LAYER_PARTICLES - 2.0) / (count - 2.0);
                     count = LAYER_PARTICLES;
-                    state.reduced = true;
+                    state.reduce(l.clip, l.top);
                 }
             }
         }
@@ -906,7 +931,7 @@ fn pack(layers: &[Layer<'_>], sampler: Option<&dyn Sampler>, density: f64, budge
             continue;
         }
         if instances + count > BATCH_INSTANCES {
-            state.reduced = true;
+            state.reduce(l.clip, l.top);
             continue;
         }
         let now = local(te);
@@ -958,7 +983,10 @@ fn pack(layers: &[Layer<'_>], sampler: Option<&dyn Sampler>, density: f64, budge
     // One share for every layer: thinning is even across the frame.
     let keep = clamp(density, 0.0, 1.0).min(if drawn > budget { budget / drawn } else { 1.0 });
     if keep < 1.0 {
-        state.reduced = true;
+        // Thinned evenly across the frame: every clip with something to draw.
+        for plan in &plans {
+            state.reduce(layers[plan.layer].clip, layers[plan.layer].top);
+        }
     }
     let mut floats = row_count as usize * ROW;
     for (_, block) in blocks.iter_mut() {
@@ -1145,7 +1173,10 @@ fn pack(layers: &[Layer<'_>], sampler: Option<&dyn Sampler>, density: f64, budge
         });
     }
     let particles = plans.iter().map(|p| p.count as u32).sum();
-    Some(Batch { tick: layers[plans[0].layer].tick, specs, table, draws, particles, incomplete: false, reduced: state.reduced })
+    let mut particle_clips: Vec<Arc<str>> = plans.iter().filter(|p| !p.beam && layers[p.layer].top).map(|p| layers[p.layer].clip.id.clone()).collect();
+    particle_clips.sort();
+    particle_clips.dedup();
+    Some(Batch { tick: layers[plans[0].layer].tick, specs, table, draws, particles, incomplete: false, reduced: state.reduced, reduced_clips: Vec::new(), particle_clips })
 }
 
 /// An outline resampled to `count` segments, each with the outline's length to its end.

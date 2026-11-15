@@ -73,8 +73,8 @@ export class VfxInspector {
  }
  /**
   * A short notice on an effect clip, or none: what the engine says about how it drew it. `notice` is
-  * {kind: 'reduced'} (drawn at reduced quality to fit the graphics memory), optionally with `effect` (one effect of a
-  * group), or null to clear. The engine's signal is wired by a later task (docs/VFX-DESIGN.md, "Notices").
+  * {kind: 'reduced'} (a limit drew it with fewer particles: setReducedEffects), optionally with `effect` (one effect
+  * of a group), or null to clear.
   */
  setEffectNotice(clipId,notice){
   const kind=notice&&NOTICE_KINDS[notice.kind];
@@ -82,6 +82,13 @@ export class VfxInspector {
   const before=JSON.stringify(this.effectNotices.get(clipId)??null);
   if(kind)this.effectNotices.set(clipId,[{...kind,effect:notice.effect??null}]);else this.effectNotices.delete(clipId);
   if(JSON.stringify(this.effectNotices.get(clipId)??null)!==before&&this.visible)this.sync();
+ }
+ /** The engine's word on the frame on show (engine-stage.mjs, onReducedEffects): the effect clips a limit drew reduced
+  get the notice, every other clip loses it. */
+ setReducedEffects(clipIds){
+  const reduced=new Set(clipIds),key=NOTICE_KINDS.reduced.key;
+  for(const [id,notices] of [...this.effectNotices])if(!reduced.has(id)&&notices.some(notice=>notice.key===key))this.setEffectNotice(id,null);
+  for(const id of reduced)this.setEffectNotice(id,{kind:'reduced'});
  }
  bindingEffects(b){return b.clip?this.editor.sampleVfxClip(b.clip):this.editor.vfxEffects(b.target);}
  readBinding(b){if(b.clipField)return (this.editor.getVfxClips().find(c=>c.id===b.clip)[b.clipField]+b.offset)*b.factor;const p=resolvedVfx(this.bindingEffects(b).find(e=>e.id===b.id)).params;return b.derived?derivedValue(b.derived,p):p[b.param]*b.factor;}

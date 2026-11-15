@@ -314,19 +314,28 @@ fn copies_of_an_effect_play_their_own_patterns() {
 fn limits_thin_evenly_and_say_so() {
     // A scene emitter asking for far more than a frame draws: 200 a frame for up to 300 frames, with a glow and a trail.
     let clip = Clip::new(None, "particles").set("rate", "200").set("life", "300").set("variation", "1").set("glow", "1").set("trail", "6").set("speed", "1").set("spread", "360");
-    let prepared = Stage::new(400.0).clip(clip).prepare();
+    // A second clip, over by then: it draws nothing at the tick, so nothing of it is reduced.
+    let over = Clip::new(Some(1), "aura").timed(0.0, Some(10.0));
+    let prepared = Stage::new(400.0).clip(clip).clip(over).prepare();
+    let ids: Vec<std::sync::Arc<str>> = prepared.doc.vfx_clips.as_ref().unwrap().clips.iter().map(|c| c.id.clone()).collect();
     let tick = 350.0;
     let frame = prepared.evaluate(tick);
     let scene = styk_eval::geometry::build(&prepared.doc, &frame);
     let full = generated::build(&prepared, &frame, &scene, Some(tick), Some(&Evaluate), 1.0).unwrap();
     assert!(full.reduced, "the frame says it was reduced");
+    assert_eq!(full.reduced_clips, vec![ids[0].clone()], "and which clip: the one it thinned");
     let assets = styk_eval::assets::Assets::build(&prepared.doc);
+    let list_of = |batch: &Batch| styk_eval::drawlist::encode_with(&prepared.doc, &assets, &scene, &styk_eval::drawlist::Overrides { generators: Some(batch), ..Default::default() });
     let drawn = |batch: &Batch| {
-        let list = styk_eval::drawlist::encode_with(&prepared.doc, &assets, &scene, &styk_eval::drawlist::Overrides { generators: Some(batch), ..Default::default() });
+        let list = list_of(batch);
         (list.prims.iter().filter(|p| p.kind & 255 == styk_draw::K_PARTICLE).count(), styk_draw::effects_reduced(&list))
     };
     let (n, reduced) = drawn(&full);
     assert!(n as f64 <= generated::MAX_DRAWN * 1.05 && reduced, "{n} records drawn");
+    assert_eq!(list_of(&full).reduced_effects, vec![ids[0].clone()], "the draw list names it for the panel's notice");
+    // A frame within its limits names none.
+    let calm = batch_at(&Stage::new(40.0).clip(Clip::new(Some(1), "particles")).prepare(), 20.0).unwrap();
+    assert!(!calm.reduced && calm.reduced_clips.is_empty(), "a light effect is not reduced");
     // An edit frame on the interface thread: far fewer, the same particles among them.
     let light = generated::build_within(&prepared, &frame, &scene, Some(tick), Some(&Evaluate), generated::EDIT_DRAWN).unwrap();
     let (m, _) = drawn(&light);
@@ -353,6 +362,10 @@ fn huge_soft_particles_are_limited_by_the_area_they_cover() {
     let drawn = list.prims.iter().filter(|p| p.kind & 255 == styk_draw::K_PARTICLE).count();
     assert!(styk_draw::effects_reduced(&list), "the list says the picture was reduced");
     assert!(drawn < live(&batch).len(), "{drawn} of {} drawn", live(&batch).len());
+    // The batch itself was within its limits; the area limit thinned the clip that draws these particles.
+    let id = prepared.doc.vfx_clips.as_ref().unwrap().clips[0].id.clone();
+    assert!(batch.reduced_clips.is_empty());
+    assert_eq!(list.reduced_effects, vec![id], "the draw list names the clip the area limit thinned");
 }
 
 #[test]
