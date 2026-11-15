@@ -86,7 +86,9 @@ impl ExportDevice {
             let memory = matches!(error, wgpu::Error::OutOfMemory { .. });
             errors.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert((memory, error.to_string()));
         }));
-        let renderer = Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, Edges::Smooth);
+        let mut renderer = Renderer::with_edges(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, Edges::Smooth);
+        // Half-float effect images where a WebGL2 context renders to and filters them, as the stage draws them.
+        renderer.set_float_effects(styk_render::effects::executor::float_supported(&adapter));
         let polled = info.backend == wgpu::Backend::Gl;
         Ok(ExportDevice { device, queue, surface, backend: format!("{:?} · {}", info.backend, info.name), failure, renderer: Some(renderer), start_ms: [adapted - started, deviced - adapted, clock() - deviced], polled })
     }

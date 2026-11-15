@@ -207,6 +207,9 @@ impl Stage {
             }
         }));
         let mut renderer = Renderer::new(&device, &queue, format);
+        // Effect images between passes in half floats wherever the device renders to and filters them (on WebGL2: with
+        // `EXT_color_buffer_float`), as on WebGPU; else eight bits, dithered.
+        renderer.set_float_effects(styk_render::effects::executor::float_supported(&adapter));
         // A stroke changes a part of the frame: the stage keeps each frame, so the next is drawn again in that part alone.
         renderer.set_keep_frames(true);
         // Generated effects' shading compiles now, with the app's start, not on the first frame that draws one.
@@ -1080,7 +1083,7 @@ impl Stage {
     /// Primitive, isolation group and pass counts of the last frame, its effect layers and
     /// passes, the GPU memory of the effect slots, isolation atlases and depth buffers, and the
     /// glyph masks kept, filled by the last frame and their memory, the picture bytes the last frame
-    /// uploaded, the pictures held and whether edges are multisampled, as JSON.
+    /// uploaded, the pictures held, whether edges are multisampled and whether effect images are half floats, as JSON.
     pub fn stats(&self) -> String {
         let s = &self.renderer.stats;
         let (mut prims, mut groups, mut passes) = (s.prims, s.groups, s.passes);
@@ -1096,10 +1099,10 @@ impl Stage {
         let (sprite_pages, sprite_bytes) = self.renderer.sprite_memory();
         let (resident, loads, evictions) = self.residency_stats();
         format!(
-            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"shadingRuns\":{},\"partFrames\":{},\"processor\":{}}}",
+            "{{\"prims\":{},\"groups\":{},\"passes\":{},\"downscaled\":{},\"rounds\":{},\"effectLayers\":{},\"effectPasses\":{},\"effectBytes\":{},\"layerBytes\":{},\"depthBytes\":{},\"materialBytes\":{},\"glyphMasks\":{},\"glyphMasksFilled\":{},\"glyphBytes\":{},\"spritePages\":{},\"spriteBytes\":{},\"targetBytes\":{},\"uploadBytes\":{},\"pictures\":{},\"multisampled\":{},\"layoutPages\":{},\"residentPages\":{},\"pageLoads\":{},\"pageEvictions\":{},\"shownPages\":{},\"softFrames\":{},\"softBytes\":{},\"syncMs\":{:.3},\"readyMs\":{:.3},\"shadingRuns\":{},\"partFrames\":{},\"floatEffects\":{},\"processor\":{}}}",
             prims, groups, passes, s.downscaled, s.rounds, s.effect_layers, s.effect_passes, s.effect_bytes, s.layer_bytes, s.depth_bytes, s.material_bytes, s.glyph_masks, s.glyph_masks_filled, s.glyph_bytes,
             sprite_pages, sprite_bytes, self.renderer.target_bytes(), self.upload_bytes, self.uploaded.len(), self.renderer.multisampled(),
-            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms, self.renderer.shading_runs(), self.part_frames, processor
+            self.atlas_of.map_or(0, |(_, pages)| pages), resident, loads, evictions, self.shown_pages.len(), self.soft_frames, self.renderer.soft_memory(), self.sync_ms, self.ready_ms, self.renderer.shading_runs(), self.part_frames, self.renderer.float_effects(), processor
         )
     }
 }

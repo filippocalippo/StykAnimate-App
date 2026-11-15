@@ -114,9 +114,20 @@ pub struct Stats {
 }
 
 /// Whether a device renders to and filters half-float colour: WebGPU and the native backends always do; WebGL2 only with
-/// `EXT_color_buffer_float`, which the renderer cannot ask its device about (the host's adapter can: `Renderer::set_float_effects`).
+/// `EXT_color_buffer_float`, which the renderer cannot ask its device about (the host's adapter can: [`float_supported`]).
 pub fn float_by_default(device: &wgpu::Device) -> bool {
     device.adapter_info().backend != wgpu::Backend::Gl
+}
+
+/// Whether `adapter`'s devices render to, sample and filter half-float colour, as the working images need: always on WebGPU and
+/// the native backends; on WebGL2 where the context has `EXT_color_buffer_float` (or the half-float one), which wgpu reports as
+/// `Rgba16Float`'s features. Every host that draws effects on such a device passes it to `Renderer::set_float_effects`.
+pub fn float_supported(adapter: &wgpu::Adapter) -> bool {
+    if adapter.get_info().backend != wgpu::Backend::Gl {
+        return true;
+    }
+    let features = adapter.get_texture_format_features(HALF);
+    features.allowed_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING) && features.flags.contains(wgpu::TextureFormatFeatureFlags::FILTERABLE)
 }
 
 /// Bytes of a Work texel on a device whose working images are (`float`) half floats.

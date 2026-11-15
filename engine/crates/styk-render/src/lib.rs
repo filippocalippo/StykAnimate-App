@@ -242,14 +242,18 @@ impl Renderer {
     }
 
     /// Whether effect images between passes are half floats: the default is what the device's backend always allows (WebGPU and
-    /// native, not WebGL2). A host whose WebGL2 context renders to and filters half floats (`EXT_color_buffer_float`, what
-    /// `Adapter::get_texture_format_features` reports for `Rgba16Float`) may turn it on; without it effects use eight bits,
-    /// dithered.
+    /// native, not WebGL2). The hosts turn it on for a WebGL2 context that renders to and filters half floats
+    /// (`effects::executor::float_supported`: `EXT_color_buffer_float`); without it effects use eight bits, dithered.
     pub fn set_float_effects(&mut self, float: bool) {
         if self.float_effects != float {
             self.float_effects = float;
             self.executor = None;
         }
+    }
+
+    /// Whether effect images between passes are half floats ([`Renderer::set_float_effects`]).
+    pub fn float_effects(&self) -> bool {
+        self.float_effects
     }
 
     /// Whether the last frame drew a filtered layer unfiltered because its effect pipelines were still to be created (on WebGL2 a
