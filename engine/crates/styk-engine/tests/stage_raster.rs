@@ -1,7 +1,8 @@
 //! The stage drawn by the processor renderer on the engine's workers (`styk_engine::stage_raster`, docs/engine/rendering.md
 //! "The stage on the processor"), with real worker threads: a frame drawn in bands on the workers is the frame the
 //! processor renderer draws whole; a newer request replaces the one waiting and the buffers stay bounded; a frame let
-//! go of is never shown; pictures the stage hands over and the live drawing cels' slots are what the frames sample.
+//! go of is never shown; pictures the stage hands over and the live drawing cels' slots are what the frames sample, a soft copy
+//! never in a picture's place.
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -185,5 +186,32 @@ fn the_live_cels_slots_are_drawn_from_what_the_stage_hands_over() {
         settle(&mut stage);
         let shot = stage.ready().unwrap();
         assert_eq!(shot.pixels()[(30 * 128 + 30) * 4..][..4].to_vec(), [255, 255, 255, 255]);
+    });
+}
+
+#[test]
+fn a_soft_copy_never_takes_the_place_of_its_picture() {
+    with_workers(2, |engine| {
+        let bytes = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/eval/sticknodes-sprites.json")).unwrap();
+        engine.open(&bytes, "json", "sprites").unwrap();
+        let snapshot = engine.prepared_frame_now_at(0.0).expect("a frame");
+        let generation = snapshot.generation.clone();
+        let (doc, assets) = (&generation.prepared.doc, &generation.assets);
+        assert!(!styk_raster::Images::places(&snapshot.frame.list).is_empty(), "the frame draws pictures");
+        let size = [320, 2 * BAND_ROWS];
+        let view = view(doc, snapshot.frame.camera.as_ref(), size);
+        let mut stage = StageRaster::new(engine);
+        // A document kept a few pages at a time decodes each picture's soft copy for the device's soft atlas, and the picture when a
+        // frame needs it; the engine hands the newest over first, so the stage may take a soft copy after its picture.
+        for index in 0..doc.images.len() {
+            stage.add_image(assets, Arc::new(styk_eval::assets::decode_image(doc, assets, index).expect("a picture")));
+            stage.add_image(assets, Arc::new(styk_eval::assets::soften_image(doc, assets, index).expect("its soft copy")));
+        }
+        stage.request(Request { generation: generation.clone(), list: snapshot.frame.list.clone(), view, orientation: None, size, grid: DrawingGrid::World });
+        settle(&mut stage);
+        let shot = stage.ready().expect("drawn");
+        let whole = Raster::new(Edges::Smooth).render(&snapshot.frame.list, &styk_raster::decode_all(doc, assets), &view, size).straight();
+        let worst = whole.iter().zip(shot.pixels()).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+        assert!(worst <= 2, "a pixel differs by {worst} levels: a soft copy was drawn as the picture");
     });
 }

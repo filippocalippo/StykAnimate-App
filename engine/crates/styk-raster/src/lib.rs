@@ -119,13 +119,19 @@ impl Images {
         self.add_shared(assets, Arc::new(DecodedImage { index: image.index, drawing: image.drawing, soft: image.soft, width: image.width, height: image.height, rgba: image.rgba.clone(), placement: image.placement }));
     }
 
-    /// Adds a decoded image the engine already holds. Over the budget, the least recently used are dropped.
+    /// Adds a decoded image the engine already holds (not a soft copy: see [`Images::insert`]). Over the budget, the least recently
+    /// used are dropped.
     pub fn add_shared(&mut self, assets: &Assets, image: Arc<DecodedImage>) {
         self.insert(assets, image);
         self.trim(&HashSet::new());
     }
 
     fn insert(&mut self, assets: &Assets, image: Arc<DecodedImage>) {
+        // A soft copy (`DecodedImage::soft`) is an eighth of the picture for a GPU's soft atlas, which the CPU has none of: at the
+        // picture's place it would be sampled as the picture. A frame that samples the place decodes the picture ([`Images::ensure`]).
+        if image.soft {
+            return;
+        }
         let entry = if image.drawing { assets.drawing.get(image.index as usize) } else { assets.atlas.get(image.index as usize) };
         let Some(e) = entry.filter(|e| e.valid) else { return };
         if image.rgba.len() < image.width as usize * image.height as usize * 4 || image.width == 0 || image.height == 0 {

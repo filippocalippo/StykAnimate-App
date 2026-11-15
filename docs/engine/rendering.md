@@ -290,8 +290,9 @@ threads, the stage's frames are drawn by the CPU rasterizer on the engine's work
   frame instead of drawing it on the device, and returns true (asked). A frame the stage cannot draw yet is a condition of
   the frame as before ([Every document](#every-document)), never an empty picture.
 - **The frame is drawn in bands on the workers** (`styk_engine::stage_raster`): a job readies what the frame needs (the
-  decoded pictures the stage took from the engine for its atlas, shared, not copied; any picture the frame samples that is
-  not held, decoded there from the document; the live cels' slots; the lone glyphs' masks, `Raster::bands`), then queues a
+  decoded pictures the stage took from the engine for its atlas, shared, not copied, but not their soft copies, which are
+  the device's placeholders and have no place on the CPU; any picture the frame samples that is not held, decoded there from
+  the document; the live cels' slots; the lone glyphs' masks, `Raster::bands`), then queues a
   task per band of 64 rows. Each band is the same view moved up by its first row (`styk_raster::Bands::render`, as an
   export's tiles are drawn), each layer cropped to the band, and writes its rows, straight RGBA, into the frame's buffer.
 - **The page shows the newest finished frame** (`src/engine/engine-stage-processor.mjs`): it copies the frame out of the
