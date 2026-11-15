@@ -210,7 +210,8 @@ The words these use (`FORMATS`, `FILE_STAGES` and `FILE_REASONS` in schema.mjs),
 | reason `service-unavailable` | that file service answered with an error of its own (status 500 or above), or an export's request to it got no answer |
 
 **Problems** (`src/stats/problems.mjs`). Uncaught errors and rejections, errors the app shows (`fail`), engine
-refusals of a frame (`renderer` errors), a lost graphics device and its return, failed saves, opens and
+refusals of a frame (`renderer` errors), a lost graphics device and its return (its message carries the browser's
+reason, such as the driver reset or the device out of memory, so lost devices group by cause), failed saves, opens and
 exports (also `file` reports), engine panics on any thread, and from the main process the window's process
 lost (`window-gone`, with Electron's reason word) and the window not responding (`frozen`). A person's cancel
 and an action refused with a message to them are not problems. The same problem in the same session is one

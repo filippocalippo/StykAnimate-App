@@ -395,11 +395,14 @@ impl Stage {
     /// Lays the sprite texture out for `generation`'s document when its layout has more pages than the texture keeps
     /// ([`styk_engine::on_demand`]): the drawing cels' pages and the live drawing slots are given layers for good, and
     /// every other page is given one when a picture on it is needed. Without such a document the texture is the
-    /// layout's size.
+    /// layout's size. Whatever the change of the layout, a page a cel was placed on since is given a layer for good
+    /// ([`Stage::pin_drawing_pages`]): its tiles are decoded once, and a page without a layer would draw another page's pixels.
     pub(super) fn sync_atlas_resident(&mut self, generation: &Arc<Generation>, live_pages: u32) {
         let layout = (generation.lineage, generation.assets.pages);
         let pages = generation.assets.pages;
         if self.atlas_of == Some(layout) && self.residency.is_some() && live_pages <= self.live_pages {
+            // The same pages: a cel may still have been placed on one that held only pictures (a strip beside one, the last shelf).
+            self.pin_drawing_pages(generation);
             return;
         }
         let grew = self.residency.is_some() && self.atlas_of.is_some_and(|(lineage, before)| lineage == layout.0 && before <= pages) && live_pages == 0 && self.live_pages == 0;
@@ -409,6 +412,7 @@ impl Stage {
                 residency.extend(pages);
             }
             self.atlas_of = Some(layout);
+            self.pin_drawing_pages(generation);
             return;
         }
         let appended = self.residency.is_some() && self.atlas_of.is_some_and(|(lineage, before)| lineage == layout.0 && before < pages) && live_pages >= self.live_pages && self.live_pages > 0;
@@ -418,8 +422,7 @@ impl Stage {
             let before = self.atlas_of.map_or(0, |(_, before)| before);
             let held = self.live_pages;
             self.uploaded.move_pages(before, pages, held);
-            let pinned: Vec<u32> = { let mut pinned: Vec<u32> = styk_engine::drawing_pages(&generation.assets).into_iter().collect(); pinned.sort_unstable(); pinned };
-            let pins = self.residency.as_mut().map(|residency| residency.append_pages(before, pages, held, live_pages, &pinned)).unwrap_or_default();
+            let gained = self.residency.as_mut().map(|residency| residency.append_pages(before, pages, held, live_pages)).unwrap_or_default();
             for k in 0..held {
                 if let Some(layer) = self.residency.as_ref().and_then(|residency| residency.layer_of(pages + k)) {
                     self.renderer.map_sprite_page(pages + k, Some(layer));
@@ -434,7 +437,9 @@ impl Stage {
             self.live_pages = live_pages;
             self.atlas_of = Some(layout);
             self.atlas_serial += 1;
-            for page in pins {
+            // The drawing cels' pages, asked once the live pages moved (the pages they left are document pages now), then the live pages gained.
+            self.pin_drawing_pages(generation);
+            for page in gained {
                 self.pin_page(generation, page);
             }
             return;
@@ -448,11 +453,12 @@ impl Stage {
                 self.pin_page(generation, page);
             }
             self.live_pages = live_pages;
+            self.pin_drawing_pages(generation);
             return;
         }
-        // Another project, or a layout that moved the live pages: the texture is allocated again.
-        let pinned = styk_engine::drawing_pages(&generation.assets);
-        let residency = Residency::new(pages + live_pages, self.engine.atlas_pages() + pinned.len() as u32 + live_pages);
+        // Another project, or a layout that moved the live pages: the texture is allocated again, with a layer for each page a cel is on.
+        let pinned = styk_engine::drawing_pages(&generation.assets).len() as u32;
+        let residency = Residency::new(pages + live_pages, self.engine.atlas_pages() + pinned + live_pages);
         self.renderer.prepare_sprites_resident(&generation.assets, live_pages, residency.layers());
         self.residency = Some(residency);
         self.shown_pages.clear();
@@ -464,14 +470,22 @@ impl Stage {
             self.engine.redecode_images();
         }
         self.atlas_of = Some(layout);
-        let mut pinned: Vec<u32> = pinned.into_iter().collect();
-        pinned.sort_unstable();
-        for page in pinned.into_iter().chain(pages..pages + live_pages) {
+        self.pin_drawing_pages(generation);
+        for page in pages..pages + live_pages {
             self.pin_page(generation, page);
         }
         // The live slots lived in the texture that was replaced.
         self.live.rewrite_all();
         self.flush_live();
+    }
+
+    /// Gives a layer for good to every page of `generation`'s layout that holds a drawing cel's slots and is not kept for good yet
+    /// ([`Residency::drawing_pins`]: looked through once per assets).
+    fn pin_drawing_pages(&mut self, generation: &Generation) {
+        let pins = self.residency.as_mut().map(|residency| residency.drawing_pins(&generation.assets)).unwrap_or_default();
+        for page in pins {
+            self.pin_page(generation, page);
+        }
     }
 
     /// Gives `page` a layer for good.

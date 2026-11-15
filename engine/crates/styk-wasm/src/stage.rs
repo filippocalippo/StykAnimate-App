@@ -27,6 +27,15 @@ const FIRST_LEVELS: styk_eval::live::Levels = 0b11;
 /// Device errors kept for the interface between two reads; later ones are dropped.
 const MAX_REPORTED_ERRORS: usize = 8;
 
+/// Whether the stage keeps each frame to draw the next in a part of it (`Renderer::set_keep_frames`, docs/engine/rendering.md
+/// "A frame drawn in a part of the one before it"): only on a software rasterizer, which shades every pixel it is given. A graphics
+/// card draws every frame whole: keeping one stores its multisampled samples after the resolve and loads them in the next frame,
+/// which every redraw of an unchanged frame did (a hover, a selection), and which costs an integrated GPU's memory bandwidth on every
+/// frame. The editor that drew with the graphics card before 1.3.0 never carried samples from one frame to the next.
+fn keeps_frames(device: &wgpu::Device) -> bool {
+    device.adapter_info().device_type == wgpu::DeviceType::Cpu
+}
+
 /// [`Stage::pictures_pending`]: the last frame drawn has all its pictures (or none it
 /// lacks can still come), lacks some that are decoded and wait for upload (draw again
 /// on the next frame), or lacks some still being decoded (draw again once the engine's
@@ -210,8 +219,9 @@ impl Stage {
         // Effect images between passes in half floats wherever the device renders to and filters them (on WebGL2: with
         // `EXT_color_buffer_float`), as on WebGPU; else eight bits, dithered.
         renderer.set_float_effects(styk_render::effects::executor::float_supported(&adapter));
-        // A stroke changes a part of the frame: the stage keeps each frame, so the next is drawn again in that part alone.
-        renderer.set_keep_frames(true);
+        // A stroke changes a part of the frame: on a software rasterizer the stage keeps each frame, so the next is drawn again in
+        // that part alone (`keeps_frames`).
+        renderer.set_keep_frames(keeps_frames(&device));
         // Generated effects' shading compiles now, with the app's start, not on the first frame that draws one.
         renderer.prepare_effects();
         // A stage over a document that is already open (the canvas was replaced after a lost device):
@@ -278,7 +288,7 @@ impl Stage {
             // The processor's pictures start empty: the live cels' slots are written to it again with the next frame.
             self.processor_live_base = None;
             // The device keeps no frame to draw a stroke's part over while it draws nothing (its next frame is drawn whole).
-            self.renderer.set_keep_frames(!on);
+            self.renderer.set_keep_frames(!on && keeps_frames(&self.device));
             self.live_writes.clear();
         }
     }

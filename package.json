@@ -1,7 +1,7 @@
 {
   "name": "stykanimate-webapp",
   "productName": "StykAnimate",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "A WebGPU desktop workspace for Pivot animation and stick figures.",
   "license": "GPL-3.0-or-later",
   "homepage": "https://stykanimate.com",
@@ -41,6 +41,7 @@
     "test:hotkeys:ui": "node tests/hotkeys-timeline.browser.mjs",
     "test:hotkeys:desktop": "node scripts/smoke-hotkeys.mjs",
     "test:drawing:desktop": "node scripts/smoke-drawing.mjs",
+    "test:gpu-crash:desktop": "node scripts/smoke-gpu-crash.mjs",
     "test:browser": "node scripts/run-browser-tests.mjs",
     "test:ui": "node tests/app.browser.mjs",
     "test:timeline": "node tests/timeline.browser.mjs",

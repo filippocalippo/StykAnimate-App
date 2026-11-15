@@ -90,13 +90,12 @@ impl PictureState {
             }
             capacity = capacity.checked_mul(2).ok_or(u64::MAX)?;
         };
-        let (table, table_view) = Table::allocate(device, "styk pictures", wgpu::TextureFormat::Rgba32Uint, (capacity / TABLE_WIDTH as usize) as u32);
+        let (table, table_view) = Table::allocate(device, queue, "styk pictures", wgpu::TextureFormat::Rgba32Uint, (capacity / TABLE_WIDTH as usize) as u32);
         let (soft, soft_view) = if soft_pages == 0 {
             array_texture(device, "styk soft sprites", [1, 1], 1, false)
         } else {
             array_texture(device, "styk soft sprites", [SOFT_LAYER, SOFT_LAYER], soft_pages.min(crate::MAX_PAGES).div_ceil(SOFT_PER_LAYER), false)
         };
-        crate::resources::warm_texture(queue, &table);
         crate::resources::warm_texture(queue, &soft);
         let mut state = PictureState { soft, soft_view, table, table_view, entries, slots, dirty: true, whole, known: assets.atlas.len() };
         state.flush(queue);

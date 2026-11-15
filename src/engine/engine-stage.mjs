@@ -253,7 +253,7 @@ export async function createStage(canvas, options = {}, load = loadEngine) {
     onPicture: (prepared, at, frame) => options.onPicture?.(prepared, at, frame),
     onFailed: () => {
       processorFailed = true; processorWanted = null;
-      console.warn('The stage could not draw a frame on the engine\'s threads (a picture did not fit in memory); it draws with the graphics device.');
+      console.warn('The stage could not draw a frame on the engine\'s threads (a picture did not fit in memory, or a thread stopped); it draws with the graphics device.');
       invalidate();
     }});
 

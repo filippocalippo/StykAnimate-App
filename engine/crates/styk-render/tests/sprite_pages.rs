@@ -410,3 +410,60 @@ fn live_pages_of_a_whole_layout_draw_whether_or_not_the_texture_had_room() {
     assert!(close(frame[((8 * SIZE[0] + 8) * 4) as usize..][..4].try_into().unwrap(), [220, 60, 30, 255]), "the first live page draws");
     assert!(close(frame[((40 * SIZE[0] + 40) * 4) as usize..][..4].try_into().unwrap(), [60, 220, 30, 255]), "the second live page draws");
 }
+
+/// A drawing tile on a page the texture has no layer for draws nothing, and a parent tile on such a page is not blended in, as
+/// styk-raster does with a tile or parent it does not hold; never the texels of layer 0. Layer 0 holds an opaque tile at the very
+/// place both name, so a backend that clamps the out-of-range layer (`textureLoad` with -1 is implementation-defined in WGSL;
+/// Chromium on Direct3D 12 clamps it) would draw it. On Vulkan and Direct3D 12, wherever an adapter of either exists.
+#[test]
+fn a_drawing_tile_or_parent_on_a_page_without_a_layer_draws_nothing() {
+    use styk_draw::{F_DRAWING, NO_PAINT};
+    let (tile, border) = (styk_eval::drawing::TILE, styk_eval::drawing::BORDER);
+    let (red, green) = ([200, 30, 30, 255], [30, 200, 60, 255]);
+    let mut assets = Assets::default();
+    assets.pages = PAGES;
+    // Two slots on page 0 (in layer 0): a tile, and the parent tile drawing records name.
+    assets.drawing = vec![entry(0, border, border, tile), entry(0, border + styk_eval::live::CELL, border, tile)];
+    assets.drawing.iter_mut().for_each(|slot| slot.valid = true);
+    let cell = |index: u32, color: [u8; 4]| DecodedImage { index, drawing: true, soft: false, width: tile + 2 * border, height: tile + 2 * border, rgba: color.iter().copied().cycle().take(((tile + 2 * border).pow(2) * 4) as usize).collect(), placement: 0 };
+    // A tile drawn 40 pixels wide at the root of a Canvas painter: it blends in its parent (prim.wgsl `image_vertex`).
+    let drawn = |page: u32, slot: usize, paint: u32, side: f32| Prim { kind: K_IMAGE | F_DRAWING, group: 0, color: 0xffff_ffff, paint, a: [4.0, 4.0, side, 0.0], b: [0.0, side, page as f32, 0.0], c: assets.drawing[slot].uv() };
+    let parent_on = |page: u32| [page as f32, assets.drawing[1].x as f32, assets.drawing[1].y as f32, 0.0];
+    let with_paints = |prims: Vec<Prim>, paints: Vec<[f32; 4]>| Arc::new(DrawList { paints, ..Arc::unwrap_or_clone(list(prims)) });
+    let mut checked = 0;
+    for backends in [wgpu::Backends::VULKAN, wgpu::Backends::DX12] {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = backends;
+        let instance = wgpu::Instance::new(descriptor);
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {
+            eprintln!("skipped {backends:?}: no adapter");
+            continue;
+        };
+        let info = adapter.get_info();
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
+        let mut kept = renderer(&device, &queue);
+        kept.prepare_sprites_resident(&assets, 0, 2);
+        kept.map_sprite_page(0, Some(0));
+        kept.flush_sprite_map();
+        kept.upload_images(&assets, &[cell(0, red), cell(1, green)]);
+        // Page 2 has no layer: its tile at the place of page 0's draws nothing.
+        let frame = draw(&mut kept, &device, &queue, &list(vec![drawn(2, 0, NO_PAINT, tile as f32)]));
+        let shown = centre(&frame, 4 + tile / 2 - PICTURE / 2);
+        eprintln!("{:?} {}: a tile on a page with no layer draws {shown:?}", info.backend, info.name);
+        assert!(frame.iter().all(|&byte| byte == 0), "{:?}: a tile on a page with no layer drew {shown:?}", info.backend);
+        assert!(close(centre(&draw(&mut kept, &device, &queue, &list(vec![drawn(0, 0, NO_PAINT, tile as f32)])), 4 + tile / 2 - PICTURE / 2), red), "{:?}: the same tile on page 0 draws", info.backend);
+        // The Canvas painter blends a tile drawn smaller with its parent: a parent on a page with no layer is not blended in.
+        kept.set_paint_context(styk_render::paint::PaintContext::CanvasDirect { background_bounds: [0.0, 0.0, SIZE[0] as f64, SIZE[1] as f64] });
+        let alone = draw(&mut kept, &device, &queue, &list(vec![drawn(0, 0, NO_PAINT, 40.0)]));
+        let blended = draw(&mut kept, &device, &queue, &with_paints(vec![drawn(0, 0, 0, 40.0)], vec![parent_on(0)]));
+        let without = draw(&mut kept, &device, &queue, &with_paints(vec![drawn(0, 0, 0, 40.0)], vec![parent_on(2)]));
+        let at = |frame: &[u8]| -> [u8; 4] { frame[((24 * SIZE[0] + 24) * 4) as usize..][..4].try_into().unwrap() };
+        eprintln!("{:?}: alone {:?}, parent on page 0 {:?}, parent on a page with no layer {:?}", info.backend, at(&alone), at(&blended), at(&without));
+        assert!(!close(at(&blended), at(&alone)), "{:?}: the parent on page 0 is blended in (the case is one that blends)", info.backend);
+        assert!(alone.iter().zip(&without).all(|(a, b)| a.abs_diff(*b) <= 2), "{:?}: a parent on a page with no layer changed the tile: {:?} for {:?}", info.backend, at(&without), at(&alone));
+        checked += 1;
+    }
+    if checked == 0 {
+        eprintln!("skipped: no Vulkan or Direct3D 12 adapter");
+    }
+}

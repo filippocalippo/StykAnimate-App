@@ -95,6 +95,10 @@ let pendingFiles = process.argv.slice(app.isPackaged ? 1 : 2).filter((arg) => /\
 // Windows and macOS use Chromium's normal driver allowlist. Linux needs the
 // Vulkan WebGPU opt-in to reach the GPU; see gpu-switches.cjs.
 applyGpuSwitches(app.commandLine);
+// After the GPU process crashes twice (a driver reset, a hung GPU), Chromium refuses WebGPU and WebGL to the page for
+// the rest of the run, so the stage could not start again and the canvas stayed dead until a restart. The editor
+// reconnects its canvas itself (app.mjs `scheduleGpuRecovery`): it needs those APIs back once the GPU process is up.
+app.disableDomainBlockingFor3DAPIs();
 registerAppScheme(protocol);
 
 // STYK_BACKGROUND_WINDOW=1 (scripts and agents driving the app, packaged smoke tests too) opens the

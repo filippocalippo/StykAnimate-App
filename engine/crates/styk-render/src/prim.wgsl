@@ -1402,32 +1402,44 @@ fn shade_image(in: VsOut, p: Prim, base: vec4<f32>) -> vec4<f32> {
     let texel = 1.0 / size;
     let raw = mix(rect.xy, rect.zw, in.uv);
     var tex: vec4<f32>;
-    if ((p.kind & F_DRAWING) != 0u && crisp()) {
-        // Crisp edges: the nearest texel of the tile, unfiltered.
-        let nearest = vec2<i32>(round(rect.xy * size)) + vec2<i32>(clamp(floor(in.uv * 64.0), vec2<f32>(0.0), vec2<f32>(63.0)));
-        tex = premul(textureLoad(sprites, nearest, sprite_layer(p.b.z), 0));
-    } else if ((p.kind & F_DRAWING) != 0u) {
-        // Premultiply each straight-alpha texel before filtering. Canvas enlargement
-        // uses Mitchell; other sampling is bilinear, optionally blended with a parent.
-        let t = in.uv * 64.0 - vec2<f32>(0.5);
-        let cell = floor(t);
-        let f = t - cell;
-        let start = vec2<i32>(round(rect.xy * size));
-        let origin = start + vec2<i32>(cell);
+    if ((p.kind & F_DRAWING) != 0u) {
+        // A tile on a page the sprite texture has no layer for draws nothing, as styk-raster draws nothing for a tile it does not
+        // hold. `textureLoad` with layer -1 is out of bounds, which WGSL leaves to the implementation: one that clamps the index
+        // (Chromium on Direct3D 12) would draw the texels of layer 0, another page's tiles and pictures, in the tile's place.
         let layer = sprite_layer(p.b.z);
-        if (in.sampling < 0.0) {
-            tex = tile_mitchell(start, layer, t);
-        } else {
-            tex = tile_bilinear(origin, layer, f);
+        if (layer < 0) {
+            return vec4<f32>(0.0);
         }
-        if (in.sampling > 0.0) {
-            // The parent tile: this tile is the quarter `q` of it, at half its texel density.
-            let parent = paint_row(p.paint);
-            let q = u32(parent.w);
-            let tp = in.uv * 32.0 + vec2<f32>(f32(q & 1u), f32(q >> 1u)) * 32.0 - vec2<f32>(0.5);
-            let cp = floor(tp);
-            let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), sprite_layer(parent.x), tp - cp);
-            tex = mix(tex, up, in.sampling);
+        if (crisp()) {
+            // Crisp edges: the nearest texel of the tile, unfiltered.
+            let nearest = vec2<i32>(round(rect.xy * size)) + vec2<i32>(clamp(floor(in.uv * 64.0), vec2<f32>(0.0), vec2<f32>(63.0)));
+            tex = premul(textureLoad(sprites, nearest, layer, 0));
+        } else {
+            // Premultiply each straight-alpha texel before filtering. Canvas enlargement
+            // uses Mitchell; other sampling is bilinear, optionally blended with a parent.
+            let t = in.uv * 64.0 - vec2<f32>(0.5);
+            let cell = floor(t);
+            let f = t - cell;
+            let start = vec2<i32>(round(rect.xy * size));
+            let origin = start + vec2<i32>(cell);
+            if (in.sampling < 0.0) {
+                tex = tile_mitchell(start, layer, t);
+            } else {
+                tex = tile_bilinear(origin, layer, f);
+            }
+            if (in.sampling > 0.0) {
+                // The parent tile: this tile is the quarter `q` of it, at half its texel density. A parent on a page with no layer
+                // is not blended in, as styk-raster blends in no parent it does not hold.
+                let parent = paint_row(p.paint);
+                let parent_layer = sprite_layer(parent.x);
+                if (parent_layer >= 0) {
+                    let q = u32(parent.w);
+                    let tp = in.uv * 32.0 + vec2<f32>(f32(q & 1u), f32(q >> 1u)) * 32.0 - vec2<f32>(0.5);
+                    let cp = floor(tp);
+                    let up = tile_bilinear(vec2<i32>(parent.yz) + vec2<i32>(cp), parent_layer, tp - cp);
+                    tex = mix(tex, up, in.sampling);
+                }
+            }
         }
     } else {
         // A picture of the document: from the sprite texture, or its soft copy while that is not in.

@@ -150,8 +150,8 @@ impl Renderer {
         let (sprites, sprite_view) = array_texture(&device, "styk sprites", [1, 1], 1, false);
         let materials = crate::materials::Materials::placeholder(&device);
         let material_sampler = crate::materials::sampler(&device);
-        let glyphs = crate::glyphs::GlyphMasks::new(&device);
-        let sprite_map = crate::images::SpriteMap::new(&device);
+        let glyphs = crate::glyphs::GlyphMasks::new(&device, &queue);
+        let sprite_map = crate::images::SpriteMap::new(&device, &queue);
         let pictures = crate::pictures::PictureState::new(&device, &queue, &styk_eval::assets::Assets::default(), 0, false, |_| None);
         let sprite_bind = Self::sprite_bind(&device, &layout1, &sprite_view, &linear, &materials.view, &material_sampler, &glyphs.view, &sprite_map.view, &pictures);
         let make_layers = |label: &str| {
@@ -164,9 +164,9 @@ impl Renderer {
             uniforms: buffer(&device, "styk views", UNIFORM_STRIDE * 8, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST),
             uniform_slots: 8,
             prims: buffer(&device, "styk prims", 64 * 1024, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST),
-            paints: Table::new(&device, "styk paints", wgpu::TextureFormat::Rgba32Float, 16),
-            groups: Table::new(&device, "styk groups", wgpu::TextureFormat::Rgba32Float, 16),
-            points: Table::new(&device, "styk polyline points", wgpu::TextureFormat::Rg32Float, 8),
+            paints: Table::new(&device, &queue, "styk paints", wgpu::TextureFormat::Rgba32Float, 16),
+            groups: Table::new(&device, &queue, "styk groups", wgpu::TextureFormat::Rgba32Float, 16),
+            points: Table::new(&device, &queue, "styk polyline points", wgpu::TextureFormat::Rg32Float, 8),
             bind0: None,
             depth_pipelines: None,
             depth_main: None,
