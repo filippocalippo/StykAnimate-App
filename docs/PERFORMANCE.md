@@ -257,6 +257,10 @@ sizes its threads and caches by, and live parameters such as `engine.workers` an
 `low-end` run the software rasterizer at this machine's processor speed: a real computer without a graphics card is
 slower still. Read their numbers as a floor for that computer. With no WebGL at all the app cannot start
 ([ARCHITECTURE.md](ARCHITECTURE.md#the-stage-and-playback)); a run in such an environment ends with that message.
+There the stage's frames are drawn on the engine's workers by the processor renderer, so a playback can deliver every
+frame while each costs a lot of processor time: `playback.play` also reports `playback.processorWork`, the work of a
+frame in all its bands (sampled while it plays). It is how a playback quality level is seen to lower what a frame costs:
+`--experiment` a script that sets `window.styk.state.settings.playbackQuality` (`normal`, `medium`, `low`, `draft`).
 
 ## Workloads
 
