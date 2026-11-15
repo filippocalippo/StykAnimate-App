@@ -274,8 +274,11 @@ pictures arrive. Not done.
   1,160 × 540 device pixels, the stage of a 1,248 × 800 window at 125%), as straight RGBA; a newer request replaces the one waiting, so a gesture never piles up
   frames. The pictures its frames sample are the decoded images the stage takes from the engine (shared with the GPU
   upload, not copied) in a `styk_raster::Images` under its budget (a sixteenth of the memory), the least recently used
-  dropped and decoded again from the document on a worker when a frame needs them; the live cels' slots are tiles in the
-  same set. All of it goes with the stage or when the processor is switched off, on a worker. The page holds one
+  dropped and decoded again from the document on a worker when a frame needs them. The live cels' slots are tiles in the
+  same set, but the document cannot give them again, so they are never dropped for the budget: they count against it (the
+  other pictures give way to them, and are held to the budget less what the slots take) and are let go of only when the live
+  pages move (`Images::drop_tiles_from`; the stage writes them again) or with the processor. They are bounded by the live
+  cels the editor keeps, a few cels' tiles. All of it goes with the stage or when the processor is switched off, on a worker. The page holds one
   `ImageData` of the canvas's size besides the canvas's own backing.
 - **The frame cache** stays under a sixteenth of the memory (120 MiB of 2 GiB), whatever
   `navigator.deviceMemory` says. It keeps the frames just ahead of the playhead, so a cap only changes how far ahead

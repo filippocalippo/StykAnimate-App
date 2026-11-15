@@ -12,10 +12,16 @@
 //! gesture never piles up frames), one finished frame waits to be shown, and one buffer is kept for the next frame: at
 //! most three frame buffers of the canvas's size. The pictures are the decoded images the stage takes from the engine
 //! (shared, not copied), within [`Images`]' budget; everything is let go of with the stage, on a worker.
+//!
+//! A worker thread that traps (WebAssembly aborts on a panic) never ends the job or band it was running, and leaves any
+//! lock it held locked, not poisoned: nothing unwinds. So one job at a time uses the painter, a frame's or one that takes
+//! pictures in without a frame, and none waits for its lock. Once the page reports a worker lost
+//! ([`Engine::note_worker_lost`]) the stage gives the frame being drawn up and says it failed: the page draws with the
+//! graphics device from then on, as when a picture cannot be held.
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
 use styk_eval::assets::{Assets, DecodedImage};
 use styk_eval::drawlist::DrawList;
@@ -52,7 +58,8 @@ pub struct Shot {
     /// The frame's job and its bands not ended yet.
     left: AtomicUsize,
     cancelled: AtomicBool,
-    /// A picture it samples could not be held (the memory is full): it is not shown.
+    /// A picture it samples could not be held (the memory is full), or the painter is held by a job that will never end: it
+    /// is not shown.
     failed: AtomicBool,
     /// When it was asked for, and microseconds of work its job and bands took in all.
     asked_ms: f64,
@@ -126,7 +133,9 @@ pub struct StageRaster {
     engine: Engine,
     serial: u64,
     drawing: Option<Arc<Shot>>,
-    /// The request waiting for the frame being drawn, and its number.
+    /// A job taking pictures in without a frame ([`StageRaster::hand_over`]) that has not ended: true once it has.
+    handing: Option<Arc<AtomicBool>>,
+    /// The request waiting for the job using the painter, and its number.
     queued: Option<(Request, u64)>,
     ready: Option<Arc<Shot>>,
     spare: Option<Vec<u8>>,
@@ -134,6 +143,8 @@ pub struct StageRaster {
     changes: Vec<Change>,
     change_bytes: usize,
     picture_bytes: Arc<AtomicUsize>,
+    /// Worker threads the engine had lost when the stage started ([`Engine::workers_lost`]).
+    lost: u32,
     failed: bool,
     stats: Stats,
 }
@@ -141,22 +152,31 @@ pub struct StageRaster {
 impl StageRaster {
     pub fn new(engine: &Engine) -> StageRaster {
         let painter = Painter { raster: Raster::new(Edges::Smooth), images: Arc::new(Images::default()), lineage: 0 };
-        StageRaster { engine: engine.clone(), serial: 0, drawing: None, queued: None, ready: None, spare: None, painter: Arc::new(Mutex::new(painter)), changes: Vec::new(),
-            change_bytes: 0, picture_bytes: Arc::default(), failed: false, stats: Stats::default() }
+        StageRaster { engine: engine.clone(), serial: 0, drawing: None, handing: None, queued: None, ready: None, spare: None, painter: Arc::new(Mutex::new(painter)),
+            changes: Vec::new(), change_bytes: 0, picture_bytes: Arc::default(), lost: engine.workers_lost(), failed: false, stats: Stats::default() }
     }
 
-    /// Asks for a frame: drawn now when no other is being drawn, else once it is (replacing any other waiting).
+    /// Asks for a frame: drawn now when no job uses the painter, else once it has ended (replacing any other waiting).
+    /// Nothing once the stage failed: the page draws with the device.
     pub fn request(&mut self, request: Request) {
         // A frame that ended meanwhile is taken first, and the one waiting for it starts under its own number.
-        self.poll();
+        self.take_ended();
         self.serial += 1;
-        if self.drawing.is_some() {
+        if self.failed {
+            return;
+        }
+        if self.busy() {
             if self.queued.replace((request, self.serial)).is_some() {
                 self.stats.replaced += 1;
             }
         } else {
             self.start(request, self.serial);
         }
+    }
+
+    /// Whether a job uses the painter: a frame's, or one taking pictures in. One at a time, so none waits for its lock.
+    fn busy(&self) -> bool {
+        self.drawing.is_some() || self.handing.is_some()
     }
 
     /// The number of the last frame asked for: a frame shown carries the number of its request.
@@ -183,12 +203,32 @@ impl StageRaster {
     }
 
     /// A frame whose job and bands have all ended becomes the one to show (an older one not shown is dropped), and the
-    /// frame asked for meanwhile starts. True while a frame is being drawn.
+    /// frame asked for meanwhile starts (else pictures that piled up meanwhile are taken in). True while a frame is being
+    /// drawn or waits to be.
     pub fn poll(&mut self) -> bool {
+        self.settle();
+        self.drawing.is_some() || self.queued.is_some()
+    }
+
+    /// The jobs that ended are taken, then the pictures that piled up are taken in if no job uses the painter.
+    fn settle(&mut self) {
+        self.take_ended();
+        self.hand_over();
+    }
+
+    /// The jobs that ended are taken: a finished frame becomes the one to show, and the frame asked for meanwhile starts.
+    fn take_ended(&mut self) {
+        // A thread that stopped may have been running a job or a band of this stage, which then never ends.
+        if self.engine.workers_lost() != self.lost {
+            self.give_up();
+        }
+        if self.handing.as_ref().is_some_and(|ended| ended.load(Ordering::Acquire)) {
+            self.handing = None;
+        }
         if self.drawing.as_ref().is_some_and(|shot| shot.ended()) {
             let shot = self.drawing.take().expect("checked");
             if shot.failed.load(Ordering::Relaxed) {
-                self.failed = true;
+                self.give_up();
                 self.recycle(shot);
             } else if shot.cancelled.load(Ordering::Relaxed) {
                 self.recycle(shot);
@@ -200,11 +240,23 @@ impl StageRaster {
                     self.recycle(old);
                 }
             }
-            if let Some((request, serial)) = self.queued.take() {
-                self.start(request, serial);
-            }
         }
-        self.drawing.is_some()
+        if !self.busy() && !self.failed
+            && let Some((request, serial)) = self.queued.take()
+        {
+            self.start(request, serial);
+        }
+    }
+
+    /// The stage draws with its graphics device from now on: the frame being drawn is let go of (its bands that still run end
+    /// early) and nothing more is started on the workers. A finished frame not shown yet may still be shown.
+    fn give_up(&mut self) {
+        self.failed = true;
+        if let Some(shot) = self.drawing.take() {
+            shot.cancelled.store(true, Ordering::Relaxed);
+        }
+        self.handing = None;
+        self.queued = None;
     }
 
     /// The newest frame drawn and not shown yet.
@@ -221,8 +273,8 @@ impl StageRaster {
         }
     }
 
-    /// Whether a frame could not be drawn because a picture it samples could not be held: the stage draws with its
-    /// graphics device instead.
+    /// Whether the frames cannot be drawn here: a picture a frame samples could not be held, or a worker thread was lost
+    /// (a frame it was drawing would never end). The stage draws with its graphics device instead.
     pub fn failed(&self) -> bool {
         self.failed
     }
@@ -237,7 +289,7 @@ impl StageRaster {
     pub fn add_image(&mut self, assets: &Arc<Assets>, image: Arc<DecodedImage>) {
         self.change_bytes += image.rgba.len();
         self.changes.push(Change::Image(assets.clone(), image));
-        self.hand_over();
+        self.settle();
     }
 
     /// Slots of the live drawing cels (`styk_eval::live::LiveCels::take_runs`, the cels' first page at atlas layer `base`):
@@ -258,7 +310,7 @@ impl StageRaster {
                 self.changes.push(Change::Tile((base + run.page, run.x + border + cell * CELL, run.y + border), Arc::new(image)));
             }
         }
-        self.hand_over();
+        self.settle();
     }
 
     /// The live cels' pages moved to another atlas layer: their tiles are let go of (the stage writes them again).
@@ -266,19 +318,25 @@ impl StageRaster {
         self.changes.push(Change::DropTilesFrom(layer));
     }
 
-    /// Pictures pile up while no frame is asked for (the stage taking in a document's pictures while idle): a job takes them.
+    /// Pictures pile up while no frame is asked for (the stage taking in a document's pictures while idle): a job takes them,
+    /// when no other job uses the painter (else the next job takes them, a frame's or this one once that has ended: the stage
+    /// looks with every picture it is given, so an idle stage that the page does not poll does not pile them up either).
     fn hand_over(&mut self) {
-        if self.change_bytes < PENDING_BYTES {
+        if self.change_bytes < PENDING_BYTES || self.busy() || self.failed {
             return;
         }
         let changes = std::mem::take(&mut self.changes);
         self.change_bytes = 0;
-        let (painter, sizes) = (self.painter.clone(), self.picture_bytes.clone());
+        let ended = Arc::new(AtomicBool::new(false));
+        let (painter, sizes, done) = (self.painter.clone(), self.picture_bytes.clone(), ended.clone());
         self.engine.spawn(move |_| {
-            let mut painter = painter.lock().unwrap_or_else(|e| e.into_inner());
-            apply(&mut painter, changes, None);
-            sizes.store(painter.images.bytes(), Ordering::Relaxed);
+            if let Some(mut painter) = painter_of(&painter) {
+                apply(&mut painter, changes, None);
+                sizes.store(painter.images.bytes(), Ordering::Relaxed);
+            }
+            done.store(true, Ordering::Release);
         });
+        self.handing = Some(ended);
     }
 
     pub fn stats(&self) -> Stats {
@@ -291,6 +349,8 @@ impl StageRaster {
         if let Some(shot) = self.drawing.take() {
             shot.cancelled.store(true, Ordering::Relaxed);
         }
+        // A job still taking pictures in has the painter let go of below; the next ones use a painter of their own.
+        self.handing = None;
         self.queued = None;
         self.ready = None;
         self.spare = None;
@@ -308,12 +368,12 @@ impl Drop for StageRaster {
 }
 
 /// Applies `changes` to the pictures the frames sample, for the document `lineage` when one is given (the pictures of
-/// another are let go of).
+/// another are let go of; the live cels' slots are the stage's, and stay until their pages move).
 fn apply(painter: &mut Painter, changes: Vec<Change>, lineage: Option<u64>) {
     if let Some(lineage) = lineage
         && lineage != painter.lineage
     {
-        painter.images = Arc::new(Images::default());
+        Arc::make_mut(&mut painter.images).forget_pictures();
         painter.raster.release();
         painter.lineage = lineage;
     }
@@ -331,12 +391,26 @@ fn apply(painter: &mut Painter, changes: Vec<Change>, lineage: Option<u64>) {
     }
 }
 
+/// The painter, for the one job that uses it ([`StageRaster::busy`]). Held, it is held by a job whose thread trapped inside it, which
+/// nothing will release (a trap unwinds nothing, so the lock is not poisoned either): `None`, never a wait.
+fn painter_of(painter: &Mutex<Painter>) -> Option<MutexGuard<'_, Painter>> {
+    match painter.try_lock() {
+        Ok(painter) => Some(painter),
+        // Poisoned where panics unwind (a native host): used as it is, as before.
+        Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+        Err(TryLockError::WouldBlock) => None,
+    }
+}
+
 /// The frame's job: the pictures and glyph masks it needs, then a task for each band.
 fn frame_job(engine: &Engine, painter: &Mutex<Painter>, changes: Vec<Change>, request: Arc<Request>, shot: Arc<Shot>, sizes: &AtomicUsize) {
     let started = engine.now();
     let cancelled = || shot.cancelled.load(Ordering::Relaxed);
-    let prepared = {
-        let mut painter = painter.lock().unwrap_or_else(|e| e.into_inner());
+    let prepared = 'prepared: {
+        let Some(mut painter) = painter_of(painter) else {
+            shot.failed.store(true, Ordering::Relaxed);
+            break 'prepared None;
+        };
         apply(&mut painter, changes, Some(request.generation.lineage));
         let held = if cancelled() { Ok(()) } else { Arc::make_mut(&mut painter.images).ensure_cancellable(&request.list, &request.generation.prepared.doc, &request.generation.assets, &cancelled) };
         sizes.store(painter.images.bytes(), Ordering::Relaxed);
@@ -395,5 +469,70 @@ pub fn straighten(premultiplied: &[u8], out: &mut [u8]) {
                 [c(p[0]), c(p[1]), c(p[2]), p[3]]
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn clock() -> f64 {
+        static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
+    }
+
+    /// Runs the engine's queued work on another thread; false when it has not ended in a few seconds (a task waits for good).
+    fn drained(engine: &Engine) -> bool {
+        let worker = { let engine = engine.clone(); std::thread::spawn(move || while engine.step() {}) };
+        let started = Instant::now();
+        while !worker.is_finished() {
+            if started.elapsed() > Duration::from_secs(10) {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        true
+    }
+
+    #[test]
+    fn a_painter_a_trapped_job_left_locked_holds_up_no_later_job() {
+        let engine = Engine::new(clock, crate::Budgets::for_device(None));
+        let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../styk-eval/tests/fixtures/generators/explosions.json")).unwrap();
+        engine.open(&bytes, "json", "fixture").unwrap();
+        let snapshot = engine.prepared_frame_now_at(0.0).expect("a frame");
+        let mut stage = StageRaster::new(&engine);
+        // What a thread that traps inside a job leaves: the lock held for good. Nothing unwinds in WebAssembly, so it is not poisoned.
+        std::mem::forget(stage.painter.lock().unwrap());
+        // Live slots beyond what waits for a frame: a job takes them in without one.
+        let cells = (PENDING_BYTES / (styk_eval::live::CELL * styk_eval::live::CELL * 4) as usize) as u32 + 1;
+        let rgba = vec![255; (cells * styk_eval::live::CELL * styk_eval::live::CELL * 4) as usize];
+        stage.add_live(4, &[styk_eval::live::Run { page: 0, x: 0, y: 0, cells, rgba }]);
+        assert!(drained(&engine), "a job waits for good on the painter");
+        // A frame cannot be drawn with it: the stage says so (the page draws with the device), and its job ends.
+        let view = ViewParams { matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], artboard: [0.0, 0.0, 64.0, 64.0], clip_to_artboard: true, clear: [0.0; 4], zoom: 1.0, pan: [0.0; 2],
+            stretch: 1.0, camera_view: false, camera_limit: 2048.0 };
+        stage.request(Request { generation: snapshot.generation.clone(), list: snapshot.frame.list.clone(), view, orientation: None, size: [64, 64], grid: styk_raster::DrawingGrid::World });
+        for _ in 0..4 {
+            assert!(drained(&engine), "a frame's job waits for good on the painter");
+            stage.poll();
+        }
+        assert!(!stage.poll() && stage.failed());
+        assert!(stage.ready().is_none());
+    }
+
+    #[test]
+    fn pictures_given_to_an_idle_stage_never_pile_up_behind_a_job_that_ended() {
+        let engine = Engine::new(clock, crate::Budgets::for_device(None));
+        let mut stage = StageRaster::new(&engine);
+        let cells = (PENDING_BYTES / (styk_eval::live::CELL * styk_eval::live::CELL * 4) as usize) as u32 + 1;
+        let run = || styk_eval::live::Run { page: 0, x: 0, y: 0, cells, rgba: vec![255; (cells * styk_eval::live::CELL * styk_eval::live::CELL * 4) as usize] };
+        // Nothing polls the stage meanwhile (no frame is asked for): each batch is taken in once the job before has ended.
+        for _ in 0..3 {
+            stage.add_live(4, &[run()]);
+            assert_eq!(stage.change_bytes, 0, "the pictures wait behind a job that ended");
+            assert!(drained(&engine));
+        }
+        assert!(!stage.poll() && !stage.failed());
     }
 }

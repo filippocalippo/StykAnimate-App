@@ -296,8 +296,9 @@ threads, the stage's frames are drawn by the CPU rasterizer on the engine's work
   frame instead of drawing it on the device, and returns true (asked). A frame the stage cannot draw yet is a condition of
   the frame as before ([Every document](#every-document)), never an empty picture.
 - **The frame is drawn in bands on the workers** (`styk_engine::stage_raster`): a job readies what the frame needs (the
-  decoded pictures the stage took from the engine for its atlas, shared, not copied; any picture the frame samples that is
-  not held, decoded there from the document; the live cels' slots; the lone glyphs' masks, `Raster::bands`), then queues a
+  decoded pictures the stage took from the engine for its atlas, shared, not copied, but not their soft copies, which are
+  the device's placeholders and have no place on the CPU; any picture the frame samples that is not held, decoded there from
+  the document; the live cels' slots; the lone glyphs' masks, `Raster::bands`), then queues a
   task per band of 64 rows. Each band is the same view moved up by its first row (`styk_raster::Bands::render`, as an
   export's tiles are drawn), each layer cropped to the band, and writes its rows, straight RGBA, into the frame's buffer.
 - **The page shows the newest finished frame** (`src/engine/engine-stage-processor.mjs`): it copies the frame out of the
@@ -319,15 +320,19 @@ threads, the stage's frames are drawn by the CPU rasterizer on the engine's work
   processor always draws four samples a pixel.
 - **The fallback is the device.** Without engine threads (a page that is not cross-origin isolated) the processor is not
   used, because its tasks would run on the interface thread; when a frame's job cannot hold a picture it samples (the
-  memory is full) the stage switches to the device for good (`Stage::processor_failed`) and says so in the console. The
+  memory is full), or the page reports an engine thread lost (a trap: a job or band it was running never ends, and a lock it
+  held stays held), the stage switches to the device for good (`Stage::processor_failed`) and says so in the console. For
+  the same reason one job at a time uses the pictures and the CPU renderer, a frame's or one taking pictures in without a
+  frame, and none waits for their lock ([threading.md](threading.md#when-an-engine-thread-traps)). The
   live parameter `stage.processor` (developer tools: 1 on, 0 off, -1 the device's choice) switches between the two so they
   can be compared in the app; the stage's stats report the processor's frame (`engine.processor`: its time from request to
   last band, its work, its bands and buffers).
 
 Bounded: at most three frame buffers of the canvas's size (the one being drawn, one finished and not yet shown, one kept
 for the next frame), the page's one `ImageData` and the canvas's own backing; the pictures the job holds stay within
-`styk_raster::Images`' budget (a sixteenth of the memory), least recently used first out; all of it is let go of with the
-stage, on a worker ([memory.md](memory.md#what-is-bounded-now)).
+`styk_raster::Images`' budget (a sixteenth of the memory), least recently used first out, except the live cels' slots,
+which nothing could decode again: they count against the budget and go only when the live pages move; all of it is let
+go of with the stage, on a worker ([memory.md](memory.md#what-is-bounded-now)).
 
 The pictures are the CPU rasterizer's ([CPU](#cpu-styk-raster)), held to the GPU renderer's by D13 for exports already.
 The stage adds paint contexts of its own; each is covered: the canvas background drawn directly and the view's fill
