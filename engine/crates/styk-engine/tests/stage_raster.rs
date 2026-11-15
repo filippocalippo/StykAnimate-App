@@ -124,7 +124,9 @@ fn a_frame_shown_carries_the_number_of_its_own_request() {
         // The first is drawn, the second waits for it; the first ends before the third is asked for, without anybody looking.
         stage.request(request());
         stage.request(request());
-        std::thread::sleep(Duration::from_millis(300));
+        // Long enough for the first to have ended: the fixture's explosions take about a quarter of a second on two workers in
+        // a debug build, more while other tests run beside it.
+        std::thread::sleep(Duration::from_millis(2000));
         stage.request(request());
         assert_eq!(stage.ready().map(|shot| shot.serial), Some(1), "the first, taken when the third was asked for");
         // The second started then, under its own number; the third waits for it.
