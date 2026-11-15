@@ -111,8 +111,19 @@ const RASTER_BUDGET: f64 = 128.0 * 1024.0 * 1024.0;
 
 /// `rasterResolution`: the physical scale rounded up to a quarter octave, at least 0.5.
 pub fn raster_resolution(scale: f64) -> f64 {
+    quarter_octave(scale).max(0.5)
+}
+
+/// The density of a layer with effects: the physical scale rounded up to a quarter octave, at least a sixteenth. Below
+/// the editor's half a pixel per unit (a lower playback quality, a view zoomed far out) it follows the view, so effects
+/// cost what the picture shows; a layer is never coarser than the view, so the composite never upscales it.
+pub fn effect_resolution(scale: f64) -> f64 {
+    quarter_octave(scale).max(1.0 / 16.0)
+}
+
+fn quarter_octave(scale: f64) -> f64 {
     let scale = if scale == 0.0 || !scale.is_finite() { 1.0 } else { scale };
-    2f64.powf(((scale.log2() * 4.0) - 1e-9).ceil() / 4.0).max(0.5)
+    2f64.powf(((scale.log2() * 4.0) - 1e-9).ceil() / 4.0)
 }
 
 /// `rasterBounds`: a crop of `bounds` around `visible` on
@@ -159,7 +170,7 @@ pub fn raster_bounds(bounds: [f64; 4], visible: Option<[f64; 4]>, resolution: f6
 /// (`vfxRasterScale`). `None` when it is entirely off screen at a cropping density.
 pub fn entry_raster(bounds: [f64; 4], padding: f64, physical: f64, visible: [f64; 4], max_texture: u32, filtered: bool) -> Option<([f64; 2], f64, [u32; 2])> {
     let max = 8192f64.min(max_texture as f64);
-    let desired = raster_resolution(physical);
+    let desired = if filtered { effect_resolution(physical) } else { raster_resolution(physical) };
     let mut resolution = desired;
     let mut rect = bounds;
     let detail = desired > 8.0 || bounds[2] * desired > max || bounds[3] * desired > max;
@@ -417,6 +428,21 @@ mod tests {
         let (_, ps, size) = entry_raster([0.0, 0.0, 3000.0, 100.0], 400.0, 2.0, [0.0, 0.0, 3000.0, 100.0], 8192, true).unwrap();
         assert!((ps - 3968.0 / 3800.0).abs() < 1e-12);
         assert_eq!(size[0], (3000.0 * ps).ceil() as u32);
+    }
+
+    /// A lower playback quality (or a view zoomed far out) shows the picture at fewer pixels: an effect layer follows it
+    /// below half a pixel per unit, so its effects cost what the picture shows, never upscaled (a quarter octave at or
+    /// above the view's density). Artwork entries without effects keep the editor's floor.
+    #[test]
+    fn an_effect_layer_follows_a_low_preview_density() {
+        let at = |physical: f64, filtered: bool| entry_raster([0.0, 0.0, 1920.0, 1080.0], 0.0, physical, [0.0, 0.0, 1920.0, 1080.0], 8192, filtered).unwrap().1;
+        // The draft preview of a fitted 1920×1080 canvas: 0.47 × 1.25 × 0.25 pixels per unit.
+        let draft = 0.47 * 1.25 * 0.25;
+        let ps = at(draft, true);
+        assert!(ps >= draft && ps < draft * 2f64.powf(0.25) + 1e-12, "the layer is the view's quarter octave: {ps} for {draft}");
+        assert!((at(0.6, true) - at(0.6, false)).abs() < 1e-12, "above half a pixel per unit nothing changes");
+        assert_eq!(at(draft, false), 0.5, "artwork without effects keeps the floor");
+        assert_eq!(at(0.001, true), 1.0 / 16.0, "and an effect layer stops at a sixteenth");
     }
 
     #[test]

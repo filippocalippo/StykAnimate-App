@@ -177,7 +177,7 @@ Edit frames take their stacks from the pose the editor sends (see the Contract):
 Each frame, every group is placed in a *space* (world units to layer pixels) for the view:
 
 - the frame and plain isolation groups: their parent's space (the screen at the top);
-- an entry: a world-aligned grid anchored at its bounds, at `rasterResolution` of the view's pixels per world unit (the scale rounded up to a quarter octave, at least 0.5), lowered by the editor's raster budget (128 MiB), the texture limit and `vfxRasterScale` (3,968 pixels over the bounds plus twice the largest padding); above 8× or past the texture limit it is the editor's `rasterBounds` crop of the complete grid;
+- an entry: a world-aligned grid anchored at its bounds, at the view's pixels per world unit rounded up to a quarter octave (`effect_resolution`: at least a sixteenth; the editor's `rasterResolution` floor of 0.5 stays for artwork without effects, so that below it, at a lower playback quality or zoomed far out, an effect layer follows the picture's size and its effects cost what the picture shows), lowered by the editor's raster budget (128 MiB), the texture limit and `vfxRasterScale` (3,968 pixels over the bounds plus twice the largest padding); above 8× or past the texture limit it is the editor's `rasterBounds` crop of the complete grid;
 - a nested layer: its entry's grid, on its bounds grown by its effects' padding plus two pixels (`withVfx`);
 - the camera image: the scene camera at the camera preview's density (the workspace zoom, times the camera's scale in the neutral workspace, at most 2,048 pixels on the longest side and within the effect surface), with the effects' padding plus two pixels around it.
 
