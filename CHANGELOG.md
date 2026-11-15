@@ -9,6 +9,8 @@ What's new in each version of StykAnimate.
 ### Fixed
 
 - The canvas comes back by itself after the graphics driver resets, instead of staying blank until you restart StykAnimate.
+- Drawings in large projects no longer show squares of other drawings in the wrong places.
+- On computers without a usable graphics card, the canvas no longer freezes, painted squares no longer go missing, and pictures in large projects stay sharp.
 
 ## [1.3.0]
 
