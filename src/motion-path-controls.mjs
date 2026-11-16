@@ -19,7 +19,7 @@ export class MotionPathControls {
     trigger.setAttribute('aria-controls', 'path-popover');
     trigger.setAttribute('aria-expanded', 'false');
     const tool = document.createElement('div');
-    tool.className = 'motion-path-tool ui-split';
+    tool.className = 'motion-path-tool ui-split'; tool.dataset.size = 'sm';
     tool.setAttribute('role', 'group');
     localizedAttribute(tool, 'aria-label', "motionPathControls.motionPaths", {});
     button.before(tool);

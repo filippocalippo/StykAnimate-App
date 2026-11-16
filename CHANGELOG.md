@@ -26,6 +26,7 @@ What's new in each version of StykAnimate.
 
 - Fixed the app freezing for a couple of seconds the first time an effect appeared on some computers.
 - Fixed particles vanishing all at once when the figure they come from disappears.
+- Fixed the file name field in the Export window showing a partly hidden blue outline when the window was opened with the mouse.
 
 ### Performance
 

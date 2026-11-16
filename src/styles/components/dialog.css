@@ -66,8 +66,12 @@
   }
   :where(.ui-form-row) > .ui-field-input:focus-visible { outline: none; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--accent-line), 0 0 0 3px var(--focus-halo); }
   :where(.ui-form-row) > .ui-field-input[aria-invalid="true"] { box-shadow: inset 0 0 0 1.5px var(--danger-text); }
-  /* Opened by a pointer: the caret shows where typing goes; the ring waits for the first key. */
-  :where(.ui-dialog[data-pointer-open]) .ui-field-input:focus-visible { background: var(--surface-sunken); box-shadow: inset 0 0 0 1px transparent; }
+  /* Opened by a pointer: the caret shows where typing goes; the ring waits for the first key. The bare input of a
+   * prompt is its own box; a field's transparent input is not (field.css gives the field the rest look). */
+  :where(.ui-dialog[data-pointer-open]) :where(.ui-form-row) > .ui-field-input:focus-visible {
+    background: var(--surface-sunken);
+    box-shadow: inset 0 0 0 1px transparent;
+  }
 
   /* choose(): one full-width action per option, with an optional description */
   .ui-dialog-choices { display: grid; gap: var(--space-1-5); }

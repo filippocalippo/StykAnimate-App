@@ -38,6 +38,9 @@
     background: var(--surface);
     box-shadow: inset 0 0 0 1.5px var(--accent-line), 0 0 0 3px var(--focus-halo);
   }
+  /* A dialog opened by a pointer keeps the ring off until the first key (dialog.css, data-pointer-open): the field
+   * takes its rest look, and its input stays transparent so no painted box covers the ring once it shows. */
+  :where(.ui-dialog[data-pointer-open]) .ui-field:focus-within { background: var(--surface-sunken); box-shadow: inset 0 0 0 1px transparent; }
   .ui-field:has([aria-invalid="true"]) { box-shadow: inset 0 0 0 1.5px var(--danger-text), 0 0 0 3px var(--danger-soft); }
   .ui-field:where([aria-disabled="true"], :has(input:disabled, select:disabled), :disabled) { opacity: 0.5; }
   .ui-field[data-size="sm"] { --_h: var(--control-md); }

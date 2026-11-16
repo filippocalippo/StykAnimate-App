@@ -4818,19 +4818,19 @@
     "locations": [
       "index.html:184"
     ],
-    "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
+    "context": "<div class=\"ui-split\" role=\"group\" data-size=\"sm\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-butto"
   },
   "chrome.gridAndGuides": {
     "locations": [
       "index.html:184"
     ],
-    "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
+    "context": "<div class=\"ui-split\" role=\"group\" data-size=\"sm\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-butto"
   },
   "chrome.gridAndGuidesSettings": {
     "locations": [
       "index.html:184"
     ],
-    "context": "<div class=\"ui-split\" role=\"group\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-button stage-toggle\""
+    "context": "<div class=\"ui-split\" role=\"group\" data-size=\"sm\" aria-label=\"Grid and guides\" data-i18n-aria-label=\"chrome.gridAndGuides\"><button type=\"button\" class=\"ui-butto"
   },
   "chrome.handles": {
     "locations": [

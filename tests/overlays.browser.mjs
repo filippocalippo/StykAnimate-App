@@ -626,6 +626,21 @@ try {
     await page.click('.titlebar [data-action="export"]');
     await page.locator('#export-dialog[open] #export-start').waitFor();
     await settle(300);   // the capability refresh settles the formats
+    // A pointer-opened dialog keeps the focused field's ring off until the first key. The field draws that ring, so
+    // its transparent input must not paint a box of its own over it (the bug: a sunken box over half the ring).
+    const nameField = () => page.evaluate(() => {
+      const field = document.querySelector('#export-dialog .ui-field:has(#export-name)');
+      const input = document.getElementById('export-name');
+      for (const animation of field.getAnimations()) animation.finish();
+      return [field.matches(':focus-within'), getComputedStyle(field).boxShadow, getComputedStyle(input).backgroundColor];
+    });
+    const [focused, ringAfterPointer, inputBackground] = await nameField();
+    assert.equal(focused, true, 'the name field takes focus');
+    assert.ok(!ringAfterPointer.includes('1.5px inset'), `a pointer open keeps the field ring off (${ringAfterPointer})`);
+    assert.equal(inputBackground, 'rgba(0, 0, 0, 0)', 'the focused input stays transparent, not a box over the field ring');
+    await page.keyboard.press('ArrowLeft');
+    const [, ringAfterKey] = await nameField();
+    assert.ok(ringAfterKey.includes('1.5px inset'), `the first key shows the field ring (${ringAfterKey})`);
     const chosen = await page.evaluate(() => {
       // Record the export commands the dialog runs instead of exporting.
       window.exportRuns = [];
